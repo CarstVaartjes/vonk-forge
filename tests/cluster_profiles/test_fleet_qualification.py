@@ -11,6 +11,8 @@ from typing import Any, Self
 import pytest
 
 from cluster_profiles.fleet_qualification import (
+    _CurrentRecipe,
+    _parse_library_detail,
     EvidenceLedger,
     OperationMonitor,
     QualificationError,
@@ -1719,7 +1721,7 @@ def test_model_documents_supply_territorial_license_metadata() -> None:
         .read_text(encoding="utf-8")
     )
     model["license"]["territorial_restrictions"] = {
-        "denied_jurisdictions": ["EU", "GB", "KR"],
+        "denied_jurisdictions": ["USA", "EUR", "GB"],
         "notice": "Not licensed in the denied territories.",
     }
     recipe = _recipe("restricted")
@@ -1730,6 +1732,57 @@ def test_model_documents_supply_territorial_license_metadata() -> None:
     assert legal_blockers(definition, None, model_documents=(document,)) == []
     assert legal_blockers(definition, "NL", model_documents=(document,)) == []
     assert legal_blockers(definition, "US", model_documents=(document,)) == []
+
+
+def _current_recipe_fixture(slug: str = "tiny") -> _CurrentRecipe:
+    envelope = _library_detail(_recipe(slug))
+    detail, definition, models = _parse_library_detail(envelope["detail"])
+    return _CurrentRecipe(
+        recipe_id=detail.recipe.recipe_id,
+        recipe_revision_id=detail.recipe.recipe_revision_id,
+        publisher=detail.recipe.publisher,
+        slug=detail.recipe.slug,
+        content_sha256=detail.recipe.content_sha256,
+        definition=definition,
+        model_documents=models,
+    )
+
+
+def test_artifact_projection_uses_selected_recipe_files_only() -> None:
+    from cluster_profiles.generated_control.models.model_file import ModelFile
+
+    current = _current_recipe_fixture()
+    current.model_documents[0].files.append(  # type: ignore[union-attr]
+        ModelFile.from_dict(
+            {
+                "id": "unselected",
+                "path": "unused.safetensors",
+                "roles": ["weights"],
+                "sha256": "e" * 64,
+                "size_bytes": 999_999_999,
+            }
+        )
+    )
+
+    assert len(current.artifact_identities) == 1
+    assert current.artifact_download_bytes == 1024
+
+
+def test_artifact_projection_deduplicates_repeated_physical_selection() -> None:
+    current = _current_recipe_fixture()
+    current.definition.models.append(current.definition.models[0])
+    current = _CurrentRecipe(
+        recipe_id=current.recipe_id,
+        recipe_revision_id=current.recipe_revision_id,
+        publisher=current.publisher,
+        slug=current.slug,
+        content_sha256=current.content_sha256,
+        definition=current.definition,
+        model_documents=(current.model_documents[0], current.model_documents[0]),
+    )
+
+    assert len(current.artifact_identities) == 1
+    assert current.artifact_download_bytes == 1024
 
 
 def test_plan_reads_current_library_detail_for_revision_and_license() -> None:

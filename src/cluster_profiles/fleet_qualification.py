@@ -106,29 +106,49 @@ class _CurrentRecipe:
 
     @property
     def artifact_identities(self) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for model in self.model_documents:
+        rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
+        for selection, model in zip(
+            self.definition.models, self.model_documents, strict=True
+        ):
             model_key = f"{model.identity.publisher}/{model.identity.slug}"
-            for file in model.files:
-                identity = {
-                    "model": model_key,
-                    "path": file.path,
-                    "sha256": file.sha256,
-                }
-                rows.append(
-                    {
+            files_by_id = {file.id: file for file in model.files}
+            for selected_file in selection.files:
+                file = files_by_id.get(selected_file.file_id) or files_by_id.get(
+                    selected_file.id
+                )
+                if file is None:
+                    raise QualificationError(
+                        f"recipe model selection references missing file: {model_key}:{selected_file.file_id}"
+                    )
+                physical_key = (model_key, file.path, file.sha256)
+                row = rows_by_physical_file.get(physical_key)
+                if row is None:
+                    identity = {
+                        "model": model_key,
+                        "path": file.path,
+                        "sha256": file.sha256,
+                    }
+                    row = {
                         "artifact_id": f"{model_key}:{file.id}",
                         "identity_sha256": _digest(identity),
                         "download_bytes": file.size_bytes,
                         "installed_bytes": file.size_bytes,
-                        "roles": sorted(file.roles),
+                        "roles": [],
                     }
+                    rows_by_physical_file[physical_key] = row
+                row["roles"] = sorted(
+                    set(row["roles"]) | set(selected_file.roles)
                 )
-        return sorted(rows, key=lambda item: str(item["identity_sha256"]))
+        return sorted(
+            rows_by_physical_file.values(),
+            key=lambda item: str(item["identity_sha256"]),
+        )
 
     @property
     def artifact_download_bytes(self) -> int:
-        return sum(file.size_bytes for model in self.model_documents for file in model.files)
+        return sum(
+            int(item["download_bytes"]) for item in self.artifact_identities
+        )
 
     @property
     def maximum_installed_bytes_per_node(self) -> int:
@@ -421,7 +441,9 @@ def legal_blockers(
             not isinstance(denied, list)
             or not denied
             or any(
-                not isinstance(item, str) or len(item) != 2 or item != item.upper()
+                not isinstance(item, str)
+                or not 2 <= len(item) <= 3
+                or item != item.upper()
                 for item in denied
             )
         ):
