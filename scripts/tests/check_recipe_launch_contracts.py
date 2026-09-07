@@ -1,19 +1,20 @@
-"""Measure production schema-2 launch projections over a recipe checkout.
+"""Compile every catalog role and validate its canonical launch contract.
 
-Run with the platform control and recipe contract sources on PYTHONPATH. The
-receipt sequence is deduplicated by the same canonical model/file identity used
-by the Controller model-cache producer.
+Uses real model/recipe definitions and the production runtime compiler with
+synthetic cache receipts. This proves structure, not downloaded bytes or
+hardware execution. Run inside the Controller environment with the matching
+recipe checkout as the positional argument.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
-import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import canonical_message, validate_compiled_execution_plan
 from vonk_control.compiled_execution_plan import compile_verified_execution_plan
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
@@ -21,9 +22,10 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 
 def _package(recipe: RecipeDefinition) -> dict[str, object]:
-    build = recipe.execution.build
-    paths = [build.context.path, build.dockerfile]
-    paths.extend(patch.path for patch in build.patches)
+    build = getattr(recipe.execution, "build", None)
+    paths = [build.context.path, build.dockerfile] if build is not None else []
+    if build is not None:
+        paths.extend(patch.path for patch in build.patches)
     for check in recipe.validation.serving.checks:
         request = check.request
         fixture = getattr(request, "fixture", None)
@@ -87,15 +89,19 @@ def _image() -> dict[str, object]:
     }
 
 
-def _sizes(root: Path) -> list[tuple[str, int, int, int]]:
+def check_catalog(root: Path) -> dict[str, object]:
     models_by_digest: dict[str, ModelDefinition] = {}
     for path in (root / "models").glob("*.json"):
         model = ModelDefinition.model_validate(json.loads(path.read_text()))
         models_by_digest[content_sha256(model)] = model
     rows = []
+    errors = []
     for path in sorted((root / "recipes").glob("*.json")):
         recipe = RecipeDefinition.model_validate(json.loads(path.read_text()))
-        models = [models_by_digest[selection.model.content_sha256] for selection in recipe.models]
+        models = [
+            models_by_digest[selection.model.content_sha256]
+            for selection in recipe.models
+        ]
         model_revisions = [
             SimpleNamespace(
                 document=model.model_dump(mode="json"),
@@ -135,12 +141,6 @@ def _sizes(root: Path) -> list[tuple[str, int, int, int]]:
                         runtime_image=_image(),
                     )
                 except Exception as error:
-                    if path.stem.startswith("ltx-2-5-22b"):
-                        keys = [
-                            (artifact.get("selection_id"), artifact.get("file_id"), artifact.get("path"))
-                            for artifact in runtime["artifacts"]
-                        ]
-                        print(path.stem, [key for key in keys if key[1] == "filtered-snapshot"], file=sys.stderr)
                     raise RuntimeError(f"{path.stem}: {error}") from error
                 topology = runtime["topology"]
                 world_size = topology["world_size"]
@@ -151,31 +151,51 @@ def _sizes(root: Path) -> list[tuple[str, int, int, int]]:
                         "rank": rank,
                         "role": role_entry.name,
                         "world_size": world_size,
-                        "local_address": f"100.100.20.{rank + 2}",
-                        "master_address": "100.100.20.2",
-                        "master_port": 29500,
+                        "local_address": f"100.100.20.{rank + 2}"
+                        if world_size > 1
+                        else None,
+                        "master_address": "100.100.20.2" if world_size > 1 else None,
+                        "master_port": 29500 if world_size > 1 else None,
                         "port": 8000,
                         "reserved_memory_bytes": 1024,
                     },
                 )
-                rows.append((path.stem, len(receipts), len(canonical_message(payload)), 0))
-    return rows
-
-
-def main() -> None:
-    root = Path(sys.argv[1])
-    rows = _sizes(root)
+                try:
+                    validate_compiled_execution_plan(payload)
+                except ValueError as error:
+                    detail = error
+                    while detail.__cause__ is not None:
+                        detail = detail.__cause__
+                    errors.append(
+                        {"recipe": path.stem, "rank": rank, "error": str(detail)}
+                    )
+                rows.append(
+                    (path.stem, len(receipts), len(canonical_message(payload)), rank)
+                )
+    if not rows:
+        raise ValueError("recipe catalog has no runtime projections")
     values = sorted(row[2] for row in rows)
-    print(json.dumps({
+    return {
+        "recipes": len({row[0] for row in rows}),
+        "models": len(models_by_digest),
         "projections": len(rows),
-        "artifacts": max(row[1] for row in rows),
-        "p50": statistics.quantiles(values, n=100, method="inclusive")[49],
-        "p90": statistics.quantiles(values, n=10, method="inclusive")[8],
-        "p95": statistics.quantiles(values, n=20, method="inclusive")[18],
-        "max": max(values),
+        "validated_projections": len(rows) - len(errors),
+        "max_model_files": max(row[1] for row in rows),
+        "median_payload_bytes": statistics.median(values),
+        "max_payload_bytes": max(values),
         "largest": sorted(rows, key=lambda row: row[2], reverse=True)[:10],
-    }, indent=2))
+        "errors": errors,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("library_root", type=Path)
+    args = parser.parse_args()
+    result = check_catalog(args.library_root.resolve())
+    print(json.dumps(result, indent=2))
+    return 1 if result["errors"] else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

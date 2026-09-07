@@ -252,6 +252,10 @@ jobs:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: "false"
+      - name: Validate every canonical recipe launch projection
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen --with-editable .
