@@ -120,7 +120,7 @@ def install_model_cache_routes(
         return HTTPException(status_code=503, detail=unavailable)
 
     def operation_response(operation: Any) -> ModelCacheOperationResponse:
-        result = None if operation.result is None else dict(operation.result)
+        result = operation.result
         failure = None
         raw_failure = getattr(operation, "failure", None)
         if isinstance(raw_failure, Mapping):
@@ -620,7 +620,7 @@ class ModelCacheOperationProvider:
     def _summary(self, operation: Any) -> dict[str, object]:
         progress = dict(operation.progress)
         result = (
-            None if operation.result is None else dict(operation.result)
+            None if operation.result is None else operation.result.model_dump(mode="json")
         )
         retryable = operation.state == "failed" and operation.retryable
         if operation.state == "failed" and result is None:

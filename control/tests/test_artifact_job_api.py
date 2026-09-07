@@ -22,7 +22,42 @@ class _ArtifactJobView:
     interface: str = "image-job"
     contract_sha256: str = "a" * 64
     compiled_contract: dict[str, object] = field(
-        default_factory=lambda: {"engine": {"future_argument": {"enabled": True}}}
+        default_factory=lambda: {
+            "schema_version": 1,
+            "interface": "image-job",
+            "input": {
+                "required": False,
+                "media_types": [],
+                "max_bytes": 0,
+                "slots": [],
+            },
+            "parameters": [],
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 1024,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Image",
+                        "description": "Generated image",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 0,
+                        "max_files": 1,
+                        "max_file_bytes": 1024,
+                        "max_total_bytes": 1024,
+                    }
+                ],
+            },
+            "output_limits": {
+                "max_files": 1,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 1024,
+                "allowed_media_types": ["image/png"],
+            },
+            "max_timeout_seconds": 3600,
+            "engine": {"future_argument": {"enabled": True}},
+        }
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
@@ -43,7 +78,6 @@ class _ArtifactJobView:
     timeout_seconds: int = 60
     created_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
     updated_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
-
 
 
 class _TransferService:
@@ -88,6 +122,22 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
     client, _service = _client(tmp_path)
     paths = client.get("/openapi.json").json()["paths"]
     components = client.get("/openapi.json").json()["components"]["schemas"]
+
+    compiled = components["CompiledArtifactContract"]
+    assert compiled["additionalProperties"] is False
+    assert compiled["properties"]["input"] == {
+        "$ref": "#/components/schemas/ArtifactInputContract"
+    }
+    assert compiled["properties"]["output"] == {
+        "$ref": "#/components/schemas/ArtifactOutputContract"
+    }
+    assert compiled["properties"]["output_limits"] == {
+        "$ref": "#/components/schemas/ArtifactOutputLimits"
+    }
+    assert compiled["properties"]["parameters"]["items"] == {
+        "$ref": "#/components/schemas/ParameterDefinition"
+    }
+    assert "oneOf" in components["ParameterDefinition"]
 
     status = paths["/api/v1/artifact-jobs/{job_id}"]["get"]
     assert status["responses"]["200"]["content"]["application/json"]["schema"] == {
@@ -147,6 +197,8 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     assert upload_document["state"] == "draft"
     assert upload_document["interface"] == "image-job"
     assert upload_document["output_limits"]["allowed_media_types"] == ["image/png"]
+    assert upload_document["compiled_contract"]["input"]["slots"] == []
+    assert upload_document["compiled_contract"]["output"]["slots"][0]["id"] == "image"
     assert upload_document["compiled_contract"]["engine"]["future_argument"] == {
         "enabled": True
     }

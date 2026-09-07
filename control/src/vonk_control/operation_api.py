@@ -152,6 +152,18 @@ class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
 
 
+class RequestValidationIssue(StrictModel):
+    """A structural input error without the submitted input or validator context."""
+
+    type: str
+    loc: list[str | int]
+    msg: str
+
+
+class RequestValidationProblem(BoundedErrorResponse):
+    issues: list[RequestValidationIssue]
+
+
 class HealthzResponse(StrictModel):
     status: Literal["ok"]
 
@@ -228,7 +240,10 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     """Describe stable JSON errors for generated clients."""
 
     return {
-        status_code: {"model": BoundedErrorResponse} for status_code in status_codes
+        status_code: {
+            "model": RequestValidationProblem if status_code == 422 else BoundedErrorResponse
+        }
+        for status_code in status_codes
     }
 
 

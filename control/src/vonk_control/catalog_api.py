@@ -144,13 +144,14 @@ class SourceBundleResponse(StrictModel):
 def _catalog_problem(
     request: Request, *, status_code: int, code: str, detail: str
 ) -> JSONResponse:
+    problem = CatalogProblem(
+        code=code[:128],
+        detail=detail[:256],
+        request_id=request.state.request_id,
+    )
     return JSONResponse(
         status_code=status_code,
-        content={
-            "code": code[:128],
-            "detail": detail[:256],
-            "request_id": request.state.request_id,
-        },
+        content=problem.model_dump(mode="json"),
     )
 
 

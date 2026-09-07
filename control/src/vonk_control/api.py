@@ -30,7 +30,6 @@ from fastapi import (
 from fastapi import (
     Path as ApiPath,
 )
-from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
@@ -64,7 +63,7 @@ from .auth import (
     TrustedProxyAgentIdentityMiddleware,
 )
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
-from .catalog_api import install_catalog_routes
+from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogError, CatalogService
 from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
@@ -94,6 +93,7 @@ from .operation_api import (
     AuditEventResponse,
     AuditResponse,
     AuthorityResponse,
+    BoundedErrorResponse,
     ChangeResponse,
     EndpointResponse,
     HealthzResponse,
@@ -109,6 +109,8 @@ from .operation_api import (
     OperationsResponse,
     ProposalPreviewResponse,
     ReadyzResponse,
+    RequestValidationIssue,
+    RequestValidationProblem,
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,
@@ -142,6 +144,49 @@ _ARTIFACT_INPUT_UPLOAD = re.compile(
 _ARTIFACT_OUTPUT_UPLOAD = re.compile(
     r"/agent/v1/recipe-jobs/[0-9a-f-]{36}/outputs/[0-9a-f]{64}\Z"
 )
+
+
+_CATALOG_HTTP_ERROR_CODES = {
+    400: "catalog.invalid_request",
+    401: "catalog.authentication_required",
+    403: "catalog.insufficient_role",
+    404: "catalog.not_found",
+    409: "catalog.conflict",
+    422: "catalog.invalid_request",
+    503: "catalog.unavailable",
+}
+
+
+def _bounded_error_content(detail: object, *, validation: bool = False) -> bytes:
+    """Serialize the documented non-agent HTTP error contract."""
+
+    if not isinstance(detail, str):
+        detail = "request failed"
+    response = (
+        RequestValidationProblem(detail=detail[:256], issues=[])
+        if validation else BoundedErrorResponse(detail=detail[:256])
+    )
+    return canonical_message(response.model_dump(mode="json"))
+
+
+def _invalid_login_content() -> bytes:
+    from .auth_api import LoginRequestInvalid
+
+    return canonical_message(
+        LoginRequestInvalid(detail="login request is invalid").model_dump(mode="json")
+    )
+
+
+def _catalog_error_content(request: Request, error: StarletteHTTPException) -> bytes:
+    """Serialize catalog HTTP errors through the route's public model."""
+
+    detail = error.detail if isinstance(error.detail, str) else "catalog request failed"
+    response = CatalogProblem(
+        code=_CATALOG_HTTP_ERROR_CODES.get(error.status_code, "catalog.request_failed"),
+        detail=detail[:256],
+        request_id=request.state.request_id,
+    )
+    return canonical_message(response.model_dump(mode="json"))
 
 
 class _DuplicateJsonKey(ValueError):
@@ -478,7 +523,8 @@ def create_app(
     recipe_image_availability: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
-        title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None
+        title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None,
+        responses={422: {"model": RequestValidationProblem}},
     )
     cursor_codec = tokens.cursor_codec()
 
@@ -486,10 +532,24 @@ def create_app(
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
+        if request.url.path.startswith("/api/v1/catalog/"):
+            return Response(
+                content=_catalog_error_content(request, error),
+                status_code=error.status_code,
+                headers=error.headers,
+                media_type="application/json",
+            )
         if not request.url.path.startswith("/agent/v1/"):
+            if request.url.path.startswith("/api/v1/"):
+                return Response(
+                    content=_bounded_error_content(error.detail, validation=error.status_code == 422),
+                    status_code=error.status_code,
+                    headers=error.headers,
+                    media_type="application/json",
+                )
             return await http_exception_handler(request, error)
         return Response(
-            content=canonical_message({"detail": jsonable_encoder(error.detail)}),
+            content=_bounded_error_content(error.detail, validation=error.status_code == 422),
             status_code=error.status_code,
             headers=error.headers,
             media_type="application/json",
@@ -501,26 +561,38 @@ def create_app(
     ) -> Response:
         if request.url.path == _LOGIN_PATH:
             return Response(
-                content=canonical_message({"detail": "login request is invalid"}),
+                content=_invalid_login_content(),
                 status_code=422,
                 media_type="application/json",
             )
         if request.url.path.startswith("/api/v1/catalog/"):
+            response = CatalogProblem(
+                code="catalog.invalid_request",
+                detail="catalog request is invalid",
+                request_id=request.state.request_id,
+            )
             return Response(
-                content=canonical_message(
-                    {
-                        "code": "catalog.invalid_request",
-                        "detail": "catalog request is invalid",
-                        "request_id": request.state.request_id,
-                    }
-                ),
+                content=canonical_message(response.model_dump(mode="json")),
                 status_code=422,
                 media_type="application/json",
             )
-        if not request.url.path.startswith("/agent/v1/"):
+        if not request.url.path.startswith(("/agent/v1/", "/api/v1/")):
             return await request_validation_exception_handler(request, error)
+        from .logging import redact_text
+
+        response = RequestValidationProblem(
+            detail="request is invalid",
+            issues=[
+                RequestValidationIssue(
+                    type=item["type"],
+                    loc=list(item["loc"]),
+                    msg=redact_text(item["msg"]),
+                )
+                for item in error.errors()
+            ],
+        )
         return Response(
-            content=canonical_message({"detail": jsonable_encoder(error.errors())}),
+            content=canonical_message(response.model_dump(mode="json")),
             status_code=422,
             media_type="application/json",
         )
@@ -538,7 +610,7 @@ def create_app(
             return Response(status_code=413)
         except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
             return Response(
-                content=canonical_message({"detail": "telemetry request is invalid"}),
+                content=_bounded_error_content("telemetry request is invalid", validation=True),
                 status_code=422,
                 media_type="application/json",
             )
@@ -616,7 +688,7 @@ def create_app(
                 response = Response(status_code=413)
             elif invalid_login_document:
                 response = Response(
-                    content=canonical_message({"detail": "login request is invalid"}),
+                    content=_invalid_login_content(),
                     status_code=422,
                     media_type="application/json",
                 )
