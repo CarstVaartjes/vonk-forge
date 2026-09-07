@@ -167,6 +167,17 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     assert failed.failure["retryable"] is True
     assert failed.failure["log_excerpt"] == "Step 4: compiler failed"
     assert failed.supported_actions == ("retry",)
+    response = _view_document(failed)
+    assert response.failure.code == "recipe_image.build_failed"
+    with sessions.begin() as session:
+        row = session.get(Job, queued.id)
+        row.payload = {key: value for key, value in row.payload.items() if key != "failure"}
+    restarted = RecipeImageAvailabilityService(
+        sessions, storage=FilesystemRuntimeImageStorage(tmp_path), authority=authority,
+        builder=builder, clock=lambda: datetime.now(UTC), automatic_attempt_limit=1,
+    )
+    with pytest.raises(ValueError, match="requires failure evidence"):
+        restarted.get(queued.id)
 
 
 def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
@@ -917,6 +928,11 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
             },
         },
     }
+    if model_state == "failed":
+        payload["failure"] = {
+            "code": "recipe_image.model_cache_failed", "detail": "model download failed",
+            "retryable": True, "recovery_actions": ["retry"],
+        }
     operation = Job(
         id="availability-progress",
         request_id="p" * 36,

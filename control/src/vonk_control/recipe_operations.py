@@ -71,7 +71,10 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
-from .recipe_lifecycle_contract import parse_recipe_lifecycle_result
+from .recipe_lifecycle_contract import (
+    parse_recipe_lifecycle_result,
+    validate_recipe_lifecycle_terminal,
+)
 from .recipe_routes import RecipeRouteService, route_publication_transaction
 from .recipe_runtime_specs import recipe_topology
 from .recipe_start_payloads import (
@@ -3253,6 +3256,7 @@ class RecipeOperationService:
         return job
 
     def _view(self, job: Job) -> RecipeOperationView:
+        validate_recipe_lifecycle_terminal(job.kind, job.state, job.result)
         return RecipeOperationView(
             id=job.id,
             kind=job.kind,

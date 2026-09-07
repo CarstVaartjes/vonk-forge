@@ -540,6 +540,13 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
     completed = service.result_metadata(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256((output,))
+    from vonk_control.artifact_job_api import _view
+    response = _view(completed)
+    assert response.result_evidence is not None
+    from pydantic import ValidationError
+    from vonk_control.artifact_jobs import ArtifactJobResponse
+    with pytest.raises(ValidationError, match="requires output manifest"):
+        ArtifactJobResponse.model_validate(response.model_dump() | {"output_manifest_sha256": None})
     output_path, output_media_type, output_name, output_size = service.result_blob(
         job.id, output_digest
     )
@@ -551,6 +558,11 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
     )
     with sessions() as session:
         assert session.get(RecipeRun, run_id).state == "running"
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, job.id)
+        row.output_manifest_sha256 = None
+    with pytest.raises(ValidationError, match="requires output manifest"):
+        service.result_metadata(job.id)
 
 
 def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
