@@ -4,6 +4,12 @@ The rule is **strict structure, extensible content**. Each shared document has
 one authoritative definition. Consumers must preserve its meaning, not just
 accept a similar-looking dictionary.
 
+This is a greenfield contract. Do not retain old field aliases, alternate
+document parsers, old-response fallbacks, positional compatibility constructors,
+or default values that conceal malformed input. Fix the producer and consumer
+together. Transport retries and partial progress updates remain supported by
+their current contracts; neither requires accepting an older document format.
+
 ## Ownership
 
 | Document | Authoritative definition | Consumers |
@@ -31,6 +37,12 @@ that model at egress. API response validation matters as much as request
 validation. Do not recreate a subset of Model or Recipe in a route, worker,
 validator, or CLI.
 
+Required fields, scalar types, nesting, discriminators, patterns, and numeric
+bounds belong in the Pydantic field definitions so the generated JSON Schema
+exposes them. Use model validators for relationships between fields and
+execution/security rules. Wrapping a handwritten parser in a mostly untyped
+Pydantic class does not create an authoritative structural contract.
+
 Ordinary internal records and database tables can use dataclasses and ORM
 models. A JSON contract document loaded from a database must still be parsed
 with its canonical model before use. A database row is not proof that the
@@ -41,8 +53,11 @@ document satisfies the contract.
 Rust uses `serde` structs and enums, with explicit semantic validation where
 types alone are insufficient. The current Rust protocol definitions are
 handwritten; they are not generated from Pydantic. Python protocol code also
-contains dataclass contracts. Those facts must remain visible until the
-implementations are consolidated; adding Pydantic elsewhere does not fix drift.
+still contains dataclass contracts in the remaining helper/job audit. Those
+facts must remain visible until the implementations are consolidated; adding
+Pydantic elsewhere does not fix drift. Distribution, enrollment, and certificate
+rotation already use shared Pydantic wire models. Enrollment returns the issued
+certificate directly; there is no pending-approval response or polling fallback.
 
 `scripts/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing
@@ -61,12 +76,15 @@ recipe revision, runtime compiler, or harness configuration changes.
   role with the production compiler, and validates the final launch document
   through the shared `CompiledExecutionPlan`. Cache receipts are synthetic;
   model files and images are not downloaded by this structural check.
-- `scripts/tests/run_install_start_wire_bridge.py` builds the Rust probe from
-  the checked-out source. The test queues requests through the actual Controller,
+- `scripts/tests/run_agent_wire_contracts.py` builds the Rust probes from
+  the checked-out source and runs every `test_*_wire_bridge.py` in the required
+  Linux lane. The tests queue requests through the actual Controller,
   parses them through the real Rust claim and launch validators, produces results
   through the agent's shared result builders, and consumes those results back
   into persisted Controller state. It covers single-node starts and distributed
-  rank-launch/collective-readiness starts.
+  rank-launch/collective-readiness starts, distribution manifests, heartbeat
+  directives, enrollment, and certificate renewal. No old heartbeat response
+  shape is accepted.
   The same required job runs the complete `agent_protocol/tests` suite,
   including schema-derived required-field, type, nullable, unknown-field and
   vocabulary checks through the Rust parser. These cover the declared fields

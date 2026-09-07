@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import TelemetryReport
+from vonk_agent_protocol import TelemetryRequest
 from vonk_control.models import NodeTelemetrySample
 
 from .test_agent_api import NODE_A, agent_headers
@@ -119,7 +119,7 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
         capture_output=True,
         check=True,
     )
-    report = TelemetryReport.parse(json.loads(produced.stdout))
+    report = TelemetryRequest.parse(json.loads(produced.stdout))
     assert report.samples[0].metrics.series[0].value == 25.0
 
     response = client.post(

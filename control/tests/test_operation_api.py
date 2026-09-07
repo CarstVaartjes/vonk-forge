@@ -277,6 +277,35 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert detail.json() == listed.json()["operations"][0]
 
 
+def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:
+    projected = operation_api._progress_projection(
+        {
+            "phase": "download",
+            "kind": "oci-layer",
+            "object_sha256": "a" * 64,
+            "completed_bytes": 128,
+            "total_bytes": 256,
+            "total_bytes_known": True,
+        }
+    )
+    assert projected is not None
+    assert projected.model_dump(mode="json") == {
+        "phase": "download",
+        "kind": "oci-layer",
+        "object_sha256": "a" * 64,
+        "completed_bytes": 128,
+        "total_bytes": 256,
+        "total_bytes_known": True,
+    }
+    assert operation_api._progress_projection({"phase": "verify"}).model_dump(
+        mode="json"
+    ) == {"phase": "verify"}
+    for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
+        assert operation_api._progress_projection(
+            {"phase": "download", retired: 1}
+        ) is None
+
+
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
@@ -299,7 +328,11 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
             "kind": "cache-download",
             "state": "running",
             "attempt": 1,
-            "progress": {"phase": "download", "total_unknown": True},
+            "progress": {
+                "phase": "download",
+                "total_bytes": None,
+                "total_bytes_known": False,
+            },
             "updated_at": "2026-08-15T12:01:00Z",
             "created_at": "2026-08-15T12:01:00Z",
             "supported_actions": [],
@@ -1254,7 +1287,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                 "retry_queued": False,
             }
         ],
-        "legacy_generic_ambiguous": True,
+        "failure_details_unavailable": True,
         "next_action": (
             "Keep the rollout paused and inspect the Spark package-helper and dpkg "
             "recovery state before resuming. When ready, Resume queues the retry "
@@ -1347,7 +1380,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
-    assert specific["legacy_generic_ambiguous"] is False
+    assert specific["failure_details_unavailable"] is False
     assert specific["next_action"] is not None
     assert (
         "Resume queues the retry behind a new safety delay" in specific["next_action"]

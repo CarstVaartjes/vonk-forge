@@ -5,6 +5,7 @@ from vonk_agent_protocol.telemetry import TelemetryMetrics, TelemetryProvenance
 
 def telemetry_metrics() -> TelemetryMetrics:
     return TelemetryMetrics(
+        schema_version=2,
         series=[],
         capabilities=[],
         runtimes=[],

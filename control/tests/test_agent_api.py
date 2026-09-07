@@ -240,7 +240,7 @@ class Authority(CertificateAuthority):
             b"certificate",
             b"chain",
             "issued-serial",
-            "issued-fingerprint",
+            "e" * 64,
             now,
             now + timedelta(days=1),
         )
@@ -487,7 +487,7 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
     agent_system,
     series_count: int,
 ) -> None:
-    from vonk_agent_protocol import TelemetryReport
+    from vonk_agent_protocol import TelemetryRequest
     from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
     client, services, _, clock = agent_system
@@ -526,7 +526,7 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
     encoded = canonical_message(payload)
     assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
     assert (
-        len(TelemetryReport.parse(payload).samples[0].metrics.series)
+        len(TelemetryRequest.parse(payload).samples[0].metrics.series)
         == series_count
     )
     response = client.post(

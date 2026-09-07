@@ -383,9 +383,6 @@ class TelemetryRequest(TelemetryWireModel):
         return json.loads(canonical_message(self.model_dump(mode="json")))
 
 
-TelemetryReport = TelemetryRequest
-
-
 __all__ = [
     "MAX_TELEMETRY_CAPACITY_BYTES",
     "MAX_TELEMETRY_RATE",
@@ -399,7 +396,6 @@ __all__ = [
     "TelemetryMeasurementKind",
     "TelemetryMetrics",
     "TelemetryProvenance",
-    "TelemetryReport",
     "TelemetryRequest",
     "TelemetryRuntime",
     "TelemetrySample",

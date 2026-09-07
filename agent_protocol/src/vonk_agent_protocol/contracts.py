@@ -1308,9 +1308,9 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-directive.schema.json": AgentDirective.parse,
     }
     if schema_name == "telemetry-report.schema.json":
-        from .telemetry import TelemetryReport
+        from .telemetry import TelemetryRequest
 
-        parsers[schema_name] = TelemetryReport.parse
+        parsers[schema_name] = TelemetryRequest.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 

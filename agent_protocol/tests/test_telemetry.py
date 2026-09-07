@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from vonk_agent_protocol import (
     AgentProtocolError,
-    TelemetryReport,
+    TelemetryRequest,
     canonical_message,
     schema_validator,
     validate_schema_message,
@@ -100,13 +100,13 @@ def test_rich_report_is_schema_validated_and_canonically_copied() -> None:
     raw = report(sample_count=2)
     parsed = validate_schema_message("telemetry-report.schema.json", raw)
 
-    assert isinstance(parsed, TelemetryReport)
+    assert isinstance(parsed, TelemetryRequest)
     assert parsed.schema_version == 1
     assert parsed.samples[0].metrics.schema_version == 2
     assert parsed.document()["schema_version"] == 1
     assert len(parsed.document()["samples"]) == 2
     assert canonical_message(parsed.document()) == canonical_message(
-        TelemetryReport.parse(parsed.document()).document()
+        TelemetryRequest.parse(parsed.document()).document()
     )
 
     raw["samples"][0]["sequence"] = 99  # type: ignore[index]
@@ -123,24 +123,24 @@ def test_report_rejects_duplicate_or_out_of_order_samples() -> None:
     duplicate = report(sample_count=2)
     duplicate["samples"][1]["sequence"] = 0  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="duplicated|ordered"):
-        TelemetryReport.parse(duplicate)
+        TelemetryRequest.parse(duplicate)
 
     out_of_order = report(sample_count=2)
     out_of_order["samples"][1]["observed_at"] = "2026-09-05T11:59:59+00:00"  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="ordered"):
-        TelemetryReport.parse(out_of_order)
+        TelemetryRequest.parse(out_of_order)
 
 
 def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
     bad_version = report()
     bad_version["samples"][0]["metrics"]["schema_version"] = 1  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
-        TelemetryReport.parse(bad_version)
+        TelemetryRequest.parse(bad_version)
 
     unknown = report()
     unknown["samples"][0]["metrics"]["unexpected"] = True  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
-        TelemetryReport.parse(unknown)
+        TelemetryRequest.parse(unknown)
 
 
 @pytest.mark.parametrize("value", [None, True, 2.0], ids=["missing", "bool", "float"])
@@ -151,7 +151,7 @@ def test_metrics_schema_version_requires_exact_integer_two(value: object) -> Non
     else:
         invalid["samples"][0]["metrics"]["schema_version"] = value  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
-        TelemetryReport.parse(invalid)
+        TelemetryRequest.parse(invalid)
 
 
 @pytest.mark.parametrize("path", [("samples",), ("samples", 0, "metrics", "series")])
@@ -163,4 +163,4 @@ def test_report_rejects_malformed_collection_shapes(path: tuple[object, ...]) ->
     target[path[-1]] = "invalid"  # type: ignore[index]
 
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
-        TelemetryReport.parse(malformed)
+        TelemetryRequest.parse(malformed)

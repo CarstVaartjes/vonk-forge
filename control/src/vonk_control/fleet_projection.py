@@ -561,6 +561,7 @@ def _filter_metrics(
     if all(item is None for item in (key, device_id, interface_name, run_id)):
         return value
     return TelemetryMetrics(
+        schema_version=2,
         series=[
             item
             for item in value.series
@@ -1144,6 +1145,7 @@ class FleetProjection:
                 if len(workloads) >= _MAX_TELEMETRY_WORKLOADS:
                     break
         return TelemetryMetrics(
+            schema_version=2,
             series=list(metrics.series),
             capabilities=capabilities[:128],
             runtimes=runtimes,

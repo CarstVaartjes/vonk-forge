@@ -329,9 +329,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let directive = parse_strict::<AgentDirective>(&body)
-            .or_else(|_| parse_strict::<AgentProgress>(&body).map(AgentDirective::from_progress))
-            .map_err(|_| ClientError::Protocol)?;
+        let directive = parse_strict::<AgentDirective>(&body).map_err(|_| ClientError::Protocol)?;
         directive.validate().map_err(|_| ClientError::Protocol)?;
         if directive.schema_version != progress.schema_version
             || directive.job_id != progress.job_id
@@ -2614,6 +2612,23 @@ mod tests {
             serde_json::from_slice::<AgentProgress>(body).unwrap(),
             progress
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_rejects_legacy_progress_response_shape() {
+        let progress = progress();
+        let (client, server) = request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            canonical_json(&progress).unwrap(),
+            None,
+        );
+
+        assert!(matches!(
+            client.heartbeat(&progress).await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
     }
 
     #[tokio::test]
