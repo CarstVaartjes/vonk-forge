@@ -1261,7 +1261,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                 "retry_queued": False,
             }
         ],
-        "legacy_generic_ambiguous": True,
+        "failure_details_unavailable": True,
         "next_action": (
             "Keep the rollout paused and inspect the Spark package-helper and dpkg "
             "recovery state before resuming. When ready, Resume queues the retry "
@@ -1354,7 +1354,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
-    assert specific["legacy_generic_ambiguous"] is False
+    assert specific["failure_details_unavailable"] is False
     assert specific["next_action"] is not None
     assert (
         "Resume queues the retry behind a new safety delay" in specific["next_action"]
