@@ -1,0 +1,18 @@
+.deployment-provenance { min-width: 0; margin-block: 1.5rem; }
+.provenance-heading { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.provenance-heading h2, .provenance-heading h4 { margin-block: .5rem; }
+.provenance-boundaries { margin-block: 1rem 1.5rem; }
+.provenance-boundaries > div { display: grid; grid-template-columns: 13rem minmax(0, 1fr); padding-block: .65rem; border-bottom: 1px solid var(--border); gap: .75rem; }
+.provenance-boundaries dt { font-weight: 600; }
+.provenance-boundaries dd { margin: 0; display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+.provenance-evidence { display: block; width: 100%; overflow-wrap: anywhere; }
+.provenance-agents, .provenance-ranks { list-style: none; padding: 0; margin-block: .5rem 1.5rem; }
+.provenance-agents li, .provenance-ranks li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding-block: .75rem; border-bottom: 1px solid var(--border); }
+.provenance-workload { padding-block: 1rem; border-top: 1px solid var(--border); }
+.provenance-workload p, .provenance-workload h4 { overflow-wrap: anywhere; }
+.provenance-acceptance { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-block: 1rem; }
+.provenance-identities { overflow-wrap: anywhere; }
+.provenance-identities dt { font-weight: 600; margin-top: .75rem; }
+.provenance-identities dd { margin-left: 0; }
+.provenance-json { overflow: auto; max-height: 28rem; font-size: .8rem; }
+@media (max-width: 640px) { .provenance-boundaries > div { grid-template-columns: minmax(0, 1fr); gap: .4rem; } .provenance-heading { align-items: flex-start; } }
