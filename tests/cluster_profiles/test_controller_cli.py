@@ -13,6 +13,14 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import ControlForbidden
 
 
+class _Model:
+    def __init__(self, value: dict[str, object]) -> None:
+        self.value = value
+
+    def to_dict(self) -> dict[str, object]:
+        return self.value
+
+
 class _Client:
     def __init__(
         self,
@@ -29,6 +37,15 @@ class _Client:
         self.uploads: list[tuple[str, Path, str, str, int]] = []
         self.downloads: list[tuple[str, Path, str, str, int, bool]] = []
         self.extra_headers: list[dict[str, str] | None] = []
+
+    def fleet(self) -> _Model:
+        response = self.responses.get(("GET", "/api/v1/fleet"), {"nodes": []})
+        if isinstance(response, list):
+            assert response, "No fake responses remain for GET /api/v1/fleet"
+            response = response.pop(0)
+        self.calls.append(("GET", "/api/v1/fleet", None, None))
+        self.extra_headers.append(None)
+        return _Model(response)
 
     def request(
         self,

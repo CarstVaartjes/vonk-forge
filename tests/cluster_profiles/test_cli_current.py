@@ -18,8 +18,16 @@ class _Model:
 
 
 class _Client:
-    def nodes(self) -> _Model:
-        return _Model({"nodes": [], "commit": "a" * 40})
+    def fleet(self) -> _Model:
+        return _Model(
+            {
+                "authority_revision": "a" * 64,
+                "event_cursor": 0,
+                "generated_at": "2026-09-07T00:00:00Z",
+                "nodes": [],
+                "schema_version": 1,
+            }
+        )
 
     def endpoint(self, alias: str) -> _Model:
         return _Model({"alias": alias, "state": "withdrawn"})
@@ -38,7 +46,16 @@ def _invoke(*argv: str) -> tuple[int, dict[str, object]]:
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (("--json", "nodes", "status"), {"nodes": [], "commit": "a" * 40}),
+        (
+            ("--json", "fleet", "current"),
+            {
+                "authority_revision": "a" * 64,
+                "event_cursor": 0,
+                "generated_at": "2026-09-07T00:00:00Z",
+                "nodes": [],
+                "schema_version": 1,
+            },
+        ),
         (
             ("--json", "endpoint", "hermes-agent"),
             {"alias": "hermes-agent", "state": "withdrawn"},
@@ -57,6 +74,13 @@ def test_current_cli_returns_server_models_without_profile_fallback(
 @pytest.mark.parametrize("command", ["validate", "prepare", "switch", "restore-default"])
 def test_current_cli_has_no_retired_profile_commands(command: str) -> None:
     result, payload = _invoke("--json", command)
+
+    assert result == 2
+    assert payload["error_type"] == "arguments"
+
+
+def test_current_cli_has_no_retired_nodes_status_command() -> None:
+    result, payload = _invoke("--json", "nodes", "status")
 
     assert result == 2
     assert payload["error_type"] == "arguments"

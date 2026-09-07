@@ -136,7 +136,13 @@ _OPERATION_ACTIVITY_STATES = {
 }
 
 
+class _FleetSnapshot(Protocol):
+    def to_dict(self) -> dict[str, object]: ...
+
+
 class ControllerClient(Protocol):
+    def fleet(self) -> _FleetSnapshot: ...
+
     def request(
         self,
         method: str,
@@ -1560,10 +1566,16 @@ def _load_recipe_list(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    def fleet_snapshot() -> dict[str, object]:
+        payload = client.fleet().to_dict()
+        if not isinstance(payload, dict):
+            raise ControlClientError("control API response must be an object")
+        return payload
+
     if command in {"current", "state"}:
         # FleetSnapshot is the canonical source for both workload placement
         # and node capacity.  The retired split endpoints no longer exist.
-        result = client.request("GET", "/api/v1/fleet")
+        result = fleet_snapshot()
         query = args.search.strip().casefold()
         if not query or not isinstance(result.get("nodes"), list):
             return result
@@ -1576,7 +1588,7 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             ],
         }
     if command in {"list", "show"}:
-        payload = client.request("GET", "/api/v1/fleet")
+        payload = fleet_snapshot()
         if command == "list":
             return _filter_fleet(payload, args)
         nodes = payload.get("nodes")
