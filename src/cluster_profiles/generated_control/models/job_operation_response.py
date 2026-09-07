@@ -14,7 +14,7 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.operation_evidence_download import OperationEvidenceDownload
-  from ..models.job_operation_progress import JobOperationProgress
+  from ..models.operation_progress import OperationProgress
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_recovery import OperationRecovery
 
@@ -37,8 +37,7 @@ class JobOperationResponse:
             state (str):
             evidence_download (Union['OperationEvidenceDownload', None, Unset]):
             failure (Union['OperationFailureEvidence', None, Unset]):
-            graph_operation_id (Union[None, Unset, str]):
-            progress (Union['JobOperationProgress', None, Unset]):
+            progress (Union['OperationProgress', None, Unset]):
             provenance (Union['OperationEvidenceProvenance', None, Unset]):
             recovery (Union['OperationRecovery', None, Unset]):
             updated_at (Union[None, Unset, str]):
@@ -51,8 +50,7 @@ class JobOperationResponse:
     state: str
     evidence_download: Union['OperationEvidenceDownload', None, Unset] = UNSET
     failure: Union['OperationFailureEvidence', None, Unset] = UNSET
-    graph_operation_id: Union[None, Unset, str] = UNSET
-    progress: Union['JobOperationProgress', None, Unset] = UNSET
+    progress: Union['OperationProgress', None, Unset] = UNSET
     provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
     recovery: Union['OperationRecovery', None, Unset] = UNSET
     updated_at: Union[None, Unset, str] = UNSET
@@ -64,7 +62,7 @@ class JobOperationResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.job_operation_progress import JobOperationProgress
+        from ..models.operation_progress import OperationProgress
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         attempt = self.attempt
@@ -93,16 +91,10 @@ class JobOperationResponse:
         else:
             failure = self.failure
 
-        graph_operation_id: Union[None, Unset, str]
-        if isinstance(self.graph_operation_id, Unset):
-            graph_operation_id = UNSET
-        else:
-            graph_operation_id = self.graph_operation_id
-
         progress: Union[None, Unset, dict[str, Any]]
         if isinstance(self.progress, Unset):
             progress = UNSET
-        elif isinstance(self.progress, JobOperationProgress):
+        elif isinstance(self.progress, OperationProgress):
             progress = self.progress.to_dict()
         else:
             progress = self.progress
@@ -143,8 +135,6 @@ class JobOperationResponse:
             field_dict["evidence_download"] = evidence_download
         if failure is not UNSET:
             field_dict["failure"] = failure
-        if graph_operation_id is not UNSET:
-            field_dict["graph_operation_id"] = graph_operation_id
         if progress is not UNSET:
             field_dict["progress"] = progress
         if provenance is not UNSET:
@@ -162,7 +152,7 @@ class JobOperationResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.job_operation_progress import JobOperationProgress
+        from ..models.operation_progress import OperationProgress
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         d = dict(src_dict)
@@ -216,17 +206,7 @@ class JobOperationResponse:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        def _parse_graph_operation_id(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        graph_operation_id = _parse_graph_operation_id(d.pop("graph_operation_id", UNSET))
-
-
-        def _parse_progress(data: object) -> Union['JobOperationProgress', None, Unset]:
+        def _parse_progress(data: object) -> Union['OperationProgress', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -234,14 +214,14 @@ class JobOperationResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                progress_type_0 = JobOperationProgress.from_dict(data)
+                progress_type_0 = OperationProgress.from_dict(data)
 
 
 
                 return progress_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['JobOperationProgress', None, Unset], data)
+            return cast(Union['OperationProgress', None, Unset], data)
 
         progress = _parse_progress(d.pop("progress", UNSET))
 
@@ -304,7 +284,6 @@ class JobOperationResponse:
             state=state,
             evidence_download=evidence_download,
             failure=failure,
-            graph_operation_id=graph_operation_id,
             progress=progress,
             provenance=provenance,
             recovery=recovery,

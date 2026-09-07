@@ -24,8 +24,7 @@ T = TypeVar("T", bound="TelemetryRuntime")
 
 @_attrs_define
 class TelemetryRuntime:
-    """ Controller-owned runtime identity and adapter support summary.
-
+    """
         Attributes:
             adapter (str):
             adapter_supported (bool):

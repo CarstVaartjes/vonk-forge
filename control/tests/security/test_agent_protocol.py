@@ -146,7 +146,7 @@ def test_revoked_certificate_cannot_publish_result(service) -> None:
 
 
 def test_secret_bearing_payload_is_rejected(service) -> None:
-    jobs, sessions, clock = service
+    _jobs, sessions, clock = service
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",

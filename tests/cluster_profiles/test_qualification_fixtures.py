@@ -11,6 +11,7 @@ from importlib import resources
 from pathlib import Path
 
 import pytest
+from library_route_fixtures import _library_detail
 
 from cluster_profiles.fleet_qualification import (
     ArtifactJobSmokeAdapter,
@@ -30,7 +31,6 @@ from cluster_profiles.qualification_fixtures import (
     _validate_synchronized_media_receipt,
     validate_outputs,
 )
-from library_route_fixtures import _library_detail
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAYElEQVR4nO3PwQkAIBDAMAX3H/lwCB9BaCZo96y/HR3wqgGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQHtAgK6AfwYG1VIAAAAAElFTkSuQmCC"

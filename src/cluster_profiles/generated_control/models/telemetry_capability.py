@@ -26,8 +26,7 @@ T = TypeVar("T", bound="TelemetryCapability")
 
 @_attrs_define
 class TelemetryCapability:
-    """ Capability inventory, including explicitly unsupported sensors.
-
+    """
         Attributes:
             freshness_threshold_seconds (float):
             key (str):

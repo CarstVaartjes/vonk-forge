@@ -1191,7 +1191,6 @@ def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
 
     constrain_extension_objects(document)
 
-    definitions = document.get("$defs", {})
     properties = document.get("properties", {})
     for name in ("payload", "result"):
         value = properties.get(name)

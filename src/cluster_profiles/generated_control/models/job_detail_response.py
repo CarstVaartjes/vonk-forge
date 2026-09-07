@@ -40,7 +40,6 @@ class JobDetailResponse:
             targets (list[str]):
             agent_upgrade_diagnostics (Union['AgentUpgradeDiagnosticsResponse', None, Unset]):
             operation_next_cursor (Union[None, Unset, str]):
-            reconciliation_id (Union[None, Unset, str]):
             status_reason (Union[None, Unset, str]):
             target_next_cursor (Union[None, Unset, str]):
      """
@@ -57,7 +56,6 @@ class JobDetailResponse:
     targets: list[str]
     agent_upgrade_diagnostics: Union['AgentUpgradeDiagnosticsResponse', None, Unset] = UNSET
     operation_next_cursor: Union[None, Unset, str] = UNSET
-    reconciliation_id: Union[None, Unset, str] = UNSET
     status_reason: Union[None, Unset, str] = UNSET
     target_next_cursor: Union[None, Unset, str] = UNSET
 
@@ -110,12 +108,6 @@ class JobDetailResponse:
         else:
             operation_next_cursor = self.operation_next_cursor
 
-        reconciliation_id: Union[None, Unset, str]
-        if isinstance(self.reconciliation_id, Unset):
-            reconciliation_id = UNSET
-        else:
-            reconciliation_id = self.reconciliation_id
-
         status_reason: Union[None, Unset, str]
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
@@ -147,8 +139,6 @@ class JobDetailResponse:
             field_dict["agent_upgrade_diagnostics"] = agent_upgrade_diagnostics
         if operation_next_cursor is not UNSET:
             field_dict["operation_next_cursor"] = operation_next_cursor
-        if reconciliation_id is not UNSET:
-            field_dict["reconciliation_id"] = reconciliation_id
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
         if target_next_cursor is not UNSET:
@@ -226,16 +216,6 @@ class JobDetailResponse:
         operation_next_cursor = _parse_operation_next_cursor(d.pop("operation_next_cursor", UNSET))
 
 
-        def _parse_reconciliation_id(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        reconciliation_id = _parse_reconciliation_id(d.pop("reconciliation_id", UNSET))
-
-
         def _parse_status_reason(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -269,7 +249,6 @@ class JobDetailResponse:
             targets=targets,
             agent_upgrade_diagnostics=agent_upgrade_diagnostics,
             operation_next_cursor=operation_next_cursor,
-            reconciliation_id=reconciliation_id,
             status_reason=status_reason,
             target_next_cursor=target_next_cursor,
         )

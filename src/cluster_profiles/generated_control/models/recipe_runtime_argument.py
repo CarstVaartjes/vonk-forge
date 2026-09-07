@@ -7,12 +7,9 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast
 from typing import cast, Union
 from typing import Union
 
-if TYPE_CHECKING:
-  from ..models.runtime_argument_value import RuntimeArgumentValue
 
 
 
@@ -28,20 +25,18 @@ class RecipeRuntimeArgument:
         Attributes:
             name (str):
             setting (Union[None, Unset, str]):
-            value (Union['RuntimeArgumentValue', None, Unset]): A literal process value; null is reserved for the setting-
-                bound placeholder.
+            value (Union[Any, None, Unset]): A literal process value; null is reserved for the setting-bound placeholder.
      """
 
     name: str
     setting: Union[None, Unset, str] = UNSET
-    value: Union['RuntimeArgumentValue', None, Unset] = UNSET
+    value: Union[Any, None, Unset] = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.runtime_argument_value import RuntimeArgumentValue
         name = self.name
 
         setting: Union[None, Unset, str]
@@ -50,11 +45,9 @@ class RecipeRuntimeArgument:
         else:
             setting = self.setting
 
-        value: Union[None, Unset, dict[str, Any]]
+        value: Union[Any, None, Unset]
         if isinstance(self.value, Unset):
             value = UNSET
-        elif isinstance(self.value, RuntimeArgumentValue):
-            value = self.value.to_dict()
         else:
             value = self.value
 
@@ -75,7 +68,6 @@ class RecipeRuntimeArgument:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.runtime_argument_value import RuntimeArgumentValue
         d = dict(src_dict)
         name = d.pop("name")
 
@@ -89,22 +81,12 @@ class RecipeRuntimeArgument:
         setting = _parse_setting(d.pop("setting", UNSET))
 
 
-        def _parse_value(data: object) -> Union['RuntimeArgumentValue', None, Unset]:
+        def _parse_value(data: object) -> Union[Any, None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                value_type_0 = RuntimeArgumentValue.from_dict(data)
-
-
-
-                return value_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['RuntimeArgumentValue', None, Unset], data)
+            return cast(Union[Any, None, Unset], data)
 
         value = _parse_value(d.pop("value", UNSET))
 

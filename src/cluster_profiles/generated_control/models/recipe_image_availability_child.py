@@ -35,7 +35,7 @@ class RecipeImageAvailabilityChild:
             id (str):
             kind (RecipeImageAvailabilityChildKind):
             model_content_digests (list[str]):
-            progress (OperationProgress): Canonical progress payload persisted on the current operation attempt.
+            progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
             state (RecipeImageAvailabilityChildState):
             artifact_set_sha256 (Union[None, Unset, str]):
             artifacts (Union[Unset, list['RecipeImageAvailabilityArtifact']]):

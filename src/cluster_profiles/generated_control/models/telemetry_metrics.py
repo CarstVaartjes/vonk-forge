@@ -6,9 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.telemetry_provenance import TelemetryProvenance
@@ -27,23 +26,22 @@ T = TypeVar("T", bound="TelemetryMetrics")
 
 @_attrs_define
 class TelemetryMetrics:
-    """ Rich per-sample metrics kept alongside legacy scalar columns.
-
+    """
         Attributes:
             capabilities (list['TelemetryCapability']):
             provenance (TelemetryProvenance):
             runtimes (list['TelemetryRuntime']):
+            schema_version (Literal[2]):
             series (list['TelemetrySeries']):
             workloads (list['TelemetryWorkload']):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     capabilities: list['TelemetryCapability']
     provenance: 'TelemetryProvenance'
     runtimes: list['TelemetryRuntime']
+    schema_version: Literal[2]
     series: list['TelemetrySeries']
     workloads: list['TelemetryWorkload']
-    schema_version: Union[Literal[2], Unset] = 2
 
 
 
@@ -71,6 +69,8 @@ class TelemetryMetrics:
 
 
 
+        schema_version = self.schema_version
+
         series = []
         for series_item_data in self.series:
             series_item = series_item_data.to_dict()
@@ -85,8 +85,6 @@ class TelemetryMetrics:
 
 
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -94,11 +92,10 @@ class TelemetryMetrics:
             "capabilities": capabilities,
             "provenance": provenance,
             "runtimes": runtimes,
+            "schema_version": schema_version,
             "series": series,
             "workloads": workloads,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -137,6 +134,10 @@ class TelemetryMetrics:
             runtimes.append(runtimes_item)
 
 
+        schema_version = cast(Literal[2] , d.pop("schema_version"))
+        if schema_version != 2:
+            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
+
         series = []
         _series = d.pop("series")
         for series_item_data in (_series):
@@ -157,17 +158,13 @@ class TelemetryMetrics:
             workloads.append(workloads_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         telemetry_metrics = cls(
             capabilities=capabilities,
             provenance=provenance,
             runtimes=runtimes,
+            schema_version=schema_version,
             series=series,
             workloads=workloads,
-            schema_version=schema_version,
         )
 
         return telemetry_metrics
