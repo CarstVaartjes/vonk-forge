@@ -240,7 +240,7 @@ def _plain_json(value: object) -> object:
 
     if isinstance(value, Mapping):
         return {key: _plain_json(item) for key, item in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_plain_json(item) for item in value]
     return value
 
