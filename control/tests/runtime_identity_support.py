@@ -11,6 +11,7 @@ PACKAGED_RUNTIME_IDENTITY = {
     "build_digest": "sha256:" + "b" * 64,
     "semantic_version": "1.2.3",
     "self_test_passed": True,
+    "observation_receipt_public_key": "d" * 64,
 }
 _DEFAULT_IDENTITY = object()
 

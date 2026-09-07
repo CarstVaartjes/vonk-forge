@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -22,6 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
     validate_result_for_operation,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
@@ -129,16 +131,16 @@ def _failure_result(
 ) -> dict[str, object]:
     """Build a typed failure result through the redaction boundary."""
 
-    return sanitize_failure_evidence(
-        {
-            "status": "waiting-for-operator" if uncertain else "failed",
-            "error_code": error_code,
-            "summary": reason,
-            "reason": reason,
-            "uncertain": uncertain,
-            "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
-        }
-    )
+    evidence: dict[str, object] = {
+        "error_code": error_code,
+        "summary": reason,
+        "reason": reason,
+        "uncertain": uncertain,
+        "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
+    }
+    if not uncertain:
+        evidence["status"] = "failed"
+    return sanitize_failure_evidence(evidence)
 
 
 def _aware(value: datetime) -> datetime:
@@ -391,7 +393,7 @@ class AgentJobService:
         lease_seconds: int,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: dict[str, object],
+        runtime_identity: AgentRuntimeIdentity,
         hostname: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
@@ -584,7 +586,7 @@ class AgentJobService:
         certificate_serial: str,
         now: datetime,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity,
     ) -> None:
         if (
             capabilities is None
@@ -605,19 +607,19 @@ class AgentJobService:
             .limit(1)
         )
         if operation is None or (
-            runtime_identity.get("build_digest")
+            runtime_identity.build_digest
             != operation.payload.get("target_build_digest")
-            or runtime_identity.get("binary_digest")
+            or runtime_identity.binary_digest
             != operation.payload.get("target_binary_digest")
-            or runtime_identity.get("architecture")
+            or runtime_identity.architecture
             != operation.payload.get("architecture")
-            or runtime_identity.get("self_test_passed") is not True
+            or runtime_identity.self_test_passed is not True
         ):
             return
         evidence = {
-            "architecture": runtime_identity["architecture"],
-            "binary_digest": runtime_identity["binary_digest"],
-            "build_digest": runtime_identity["build_digest"],
+            "architecture": runtime_identity.architecture,
+            "binary_digest": runtime_identity.binary_digest,
+            "build_digest": runtime_identity.build_digest,
             "package_sha256": operation.payload["package_sha256"],
             "package_version": operation.payload["package_version"],
             "self_test_passed": True,
@@ -679,7 +681,7 @@ class AgentJobService:
     def _recipe_build_runtime_matches(
         session: Session,
         operation: StoredOperation,
-        runtime_identity: Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity,
     ) -> bool:
         build_id = operation.payload.get("build_id")
         build = (
@@ -690,9 +692,8 @@ class AgentJobService:
             build is not None
             and build.builder_node_id == operation.node_id
             and isinstance(report, dict)
-            and runtime_identity is not None
             and report.get("builder_binary_digest")
-            == runtime_identity.get("binary_digest")
+            == runtime_identity.binary_digest
             and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
         )
 
@@ -1277,7 +1278,7 @@ class AgentJobService:
     def _validate_agent_contract(
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: Mapping[str, object] | None,
+        runtime_identity: AgentRuntimeIdentity,
     ) -> None:
         if (
             protocol_version is None
@@ -1286,7 +1287,7 @@ class AgentJobService:
             or "agent.runtime.rust.v1" not in capabilities
         ):
             raise ValueError("Rust agent capability negotiation is incomplete")
-        receipt_key = runtime_identity.get("observation_receipt_public_key")
+        receipt_key = runtime_identity.observation_receipt_public_key
         receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
         if receipt_capable and not (
             isinstance(receipt_key, str) and len(receipt_key) == 64
@@ -1301,7 +1302,7 @@ class AgentJobService:
         now: datetime,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: dict[str, object] | None,
+        runtime_identity: AgentRuntimeIdentity | None,
         hostname: str | None,
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
@@ -1321,7 +1322,7 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
-            receipt_key = runtime_identity.get("observation_receipt_public_key")
+            receipt_key = runtime_identity.observation_receipt_public_key
             if (
                 receipt_key is not None
                 and node.observation_receipt_public_key is not None
@@ -1332,16 +1333,14 @@ class AgentJobService:
                 isinstance(receipt_key, str)
                 and node.observation_receipt_public_key is None
             ):
-                # Nodes enrolled before signed run observations existed acquire
-                # their immutable receipt identity on the first authenticated
-                # contact from a capable upgraded agent.  Subsequent contacts
-                # remain change-protected by the check above.
+                # The first authenticated contact binds the immutable receipt
+                # identity; subsequent contacts remain change-protected above.
                 node.observation_receipt_public_key = receipt_key
-            node.architecture = str(runtime_identity["architecture"])
-            node.semantic_version = str(runtime_identity["semantic_version"])
-            node.build_digest = str(runtime_identity["build_digest"])
-            node.binary_digest = str(runtime_identity["binary_digest"])
-            node.self_test_passed = bool(runtime_identity["self_test_passed"])
+            node.architecture = runtime_identity.architecture
+            node.semantic_version = runtime_identity.semantic_version
+            node.build_digest = runtime_identity.build_digest
+            node.binary_digest = runtime_identity.binary_digest
+            node.self_test_passed = runtime_identity.self_test_passed
             node.contact_certificate_serial = certificate.serial
             node.contact_observation_digest = hashlib.sha256(
                 canonical_message(
@@ -1358,68 +1357,14 @@ class AgentJobService:
 
     @staticmethod
     def _runtime_identity(
-        value: Mapping[str, object] | None,
-    ) -> dict[str, object]:
+        value: AgentRuntimeIdentity | Mapping[str, object] | None,
+    ) -> AgentRuntimeIdentity:
         if value is None:
             raise ValueError("agent runtime identity is required")
-        if not isinstance(value, Mapping):
-            raise TypeError("agent runtime identity is invalid")
-        document = dict(value)
-        if {
-            "active_slot",
-            "agent_sha256",
-            "platform_version",
-            "supervisor_generation",
-            "supervisor_ready_generation",
-            "activation_deadline",
-        } & document.keys():
-            raise ValueError("retired runtime identity fields are not supported")
-        required = {
-            "architecture",
-            "binary_digest",
-            "build_digest",
-            "semantic_version",
-            "self_test_passed",
-        }
-        # Keep the identity envelope forward-compatible.  Only the stable
-        # fields are persisted/validated; newer agents may attach additional
-        # evidence without making an otherwise compatible claim unusable.
-        if (
-            not required <= document.keys()
-            or document["architecture"] not in {"linux-amd64", "linux-arm64"}
-            or not isinstance(document["architecture"], str)
-            or not isinstance(document["binary_digest"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", document["binary_digest"]) is None
-            or not isinstance(document["build_digest"], str)
-            or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
-            or not isinstance(document["semantic_version"], str)
-            or re.fullmatch(
-                r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-                document["semantic_version"],
-            )
-            is None
-            or document["self_test_passed"] is not True
-            or (
-                document.get("observation_receipt_public_key") is not None
-                and (
-                    not isinstance(document["observation_receipt_public_key"], str)
-                    or re.fullmatch(
-                        r"[0-9a-f]{64}",
-                        document["observation_receipt_public_key"],
-                    )
-                    is None
-                )
-            )
-        ):
-            raise ValueError("agent runtime identity is invalid")
-        return {
-            key: document[key]
-            for key in (
-                *sorted(required),
-                "observation_receipt_public_key",
-            )
-            if key in document
-        }
+        try:
+            return AgentRuntimeIdentity.model_validate(value)
+        except (TypeError, ValidationError) as error:
+            raise ValueError("agent runtime identity is invalid") from error
 
     def _consume_contact(
         self,
