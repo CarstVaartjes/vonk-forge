@@ -811,12 +811,6 @@ def compile_verified_execution_plan(
             "runtime model artifact-set digest does not match the cache authority"
         )
     identity = _mapping(spec.get("identity"), "runtime identity")
-    if {
-        "model_version_sha256",
-        "runtime_distribution_sha256",
-        "patch_bundle_sha256",
-    } & set(identity):
-        raise CompiledExecutionPlanError("runtime identity contains retired authority")
     recipe_revision_sha256 = _digest(
         identity.get("recipe_revision_sha256"), "recipe revision digest"
     )
