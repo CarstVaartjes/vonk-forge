@@ -15,9 +15,12 @@ function errorMessage(value: unknown): string {
   return (value instanceof Error ? value.message : "Unable to read operation authority.").slice(0, 256);
 }
 
-function jobId(operation: LibraryOperation): string | undefined {
-  const value = operation.result?.job_id;
-  return typeof value === "string" ? value : undefined;
+export function operationJobId(operation: LibraryOperation): string | undefined {
+  const result = operation.result;
+  if (typeof result !== "object" || result === null || !("job_id" in result)) {
+    return undefined;
+  }
+  return typeof result.job_id === "string" ? result.job_id : undefined;
 }
 
 export function LibraryOperationProgress({api, name, onChange, onRefresh, operation}: {
@@ -52,7 +55,7 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
         const next = await api.libraryOperation(operation.id, controller.signal);
         if (controller.signal.aborted) return;
         setError("");
-        const authoritativeJobId = jobId(next);
+        const authoritativeJobId = operationJobId(next);
         if (authoritativeJobId) {
           try {
             const progress = await api.libraryJobProgress(authoritativeJobId, controller.signal);

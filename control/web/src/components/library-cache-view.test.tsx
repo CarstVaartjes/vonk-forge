@@ -45,8 +45,8 @@ function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): M
 
 test("retries a transient cache operation in place with retained progress", async () => {
   const model = librarySnapshot.models[0]!;
-  const failed = cacheOperation({result: {retryable: true}});
-  const replacement = cacheOperation({id: "cache-operation-2", state: "running", result: {retryable: false}, attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10}});
+  const failed = cacheOperation();
+  const replacement = cacheOperation({id: "cache-operation-2", state: "running", attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10}});
   const previewModelCacheDownload = vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []}));
   const downloadModelCache = vi.fn(async () => failed);
   const retryModelCacheOperation = vi.fn(async () => replacement);
