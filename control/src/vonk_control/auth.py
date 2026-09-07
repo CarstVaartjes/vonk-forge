@@ -26,7 +26,6 @@ MUTATION_ROLES = {
     ("PATCH", "/api/v1/nodes/{node_id}/profile"): frozenset(
         {"operator", "administrator"}
     ),
-    ("POST", "/api/v1/jobs"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/proposals"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/changes"): frozenset({"administrator"}),
     ("POST", "/api/v1/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),

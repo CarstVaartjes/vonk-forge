@@ -13,7 +13,13 @@ from textwrap import dedent
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentOperation, AgentProtocolError
+from vonk_agent_protocol import (
+    AgentClaim,
+    AgentOperation,
+    AgentProtocolError,
+    AgentResult,
+    canonical_message,
+)
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentCertificate, AgentNode, Base, Job
 
@@ -23,18 +29,12 @@ ROOT = Path(__file__).resolve().parents[3]
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
-PROBE_RESULT = {
-    "status": "ok",
-    "evidence": {
-        "vonk_forge": {
-            "schema_version": 1,
-            "memory": {"available_bytes": 1_000},
-            "storage": {"available_bytes": 2_000},
-            "accelerator": {"available": True},
-        },
-        "nvidia": {"tools": {}},
-    },
+STOP_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": COMMIT,
 }
+STOP_RESULT = {"stopped": True}
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
@@ -91,7 +91,37 @@ def enqueue(service: AgentJobService, sessions, clock) -> None:
     )
     with sessions.begin() as session:
         session.add(parent)
-    service.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {})
+    service.enqueue(parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+
+def raw_stop_claim(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "job_id": "00000000-0000-4000-8000-000000000001",
+        "operation_id": "00000000-0000-4000-8000-000000000002",
+        "attempt": 1,
+        "fence": "00000000-0000-4000-8000-000000000003",
+        "node_id": NODE_A,
+        "operation": "recipe.stop",
+        "authority_revision": COMMIT,
+        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
+        "payload": payload,
+        "deadline": "2026-08-03T12:00:00+00:00",
+    }
+
+
+def raw_result(result: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "job_id": "00000000-0000-4000-8000-000000000001",
+        "operation_id": "00000000-0000-4000-8000-000000000002",
+        "attempt": 1,
+        "fence": "00000000-0000-4000-8000-000000000003",
+        "node_id": NODE_A,
+        "deadline": "2026-08-03T12:00:00+00:00",
+        "state": "succeeded",
+        "result": result,
+    }
 
 
 def test_cross_node_claim_is_denied(service) -> None:
@@ -112,11 +142,11 @@ def test_revoked_certificate_cannot_publish_result(service) -> None:
         certificate.revoked_at = clock.now
 
     with pytest.raises(StaleAgentAttempt):
-        jobs.succeed(claim, PROBE_RESULT)
+        jobs.succeed(claim, STOP_RESULT)
 
 
 def test_secret_bearing_payload_is_rejected(service) -> None:
-    jobs, sessions, clock = service
+    _jobs, sessions, clock = service
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -134,7 +164,7 @@ def test_secret_bearing_payload_is_rejected(service) -> None:
         session.add(parent)
 
     with pytest.raises(AgentProtocolError, match="unsafe"):
-        jobs.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {"private_key": "unsafe"})
+        AgentClaim.parse(raw_stop_claim(STOP_PAYLOAD | {"private_key": "unsafe"}))
 
 
 def test_payload_and_result_documents_are_size_limited(service) -> None:
@@ -156,13 +186,13 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
         session.add(parent)
 
     with pytest.raises(AgentProtocolError, match="large"):
-        jobs.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {"value": "x" * 65_536})
+        AgentClaim.parse(raw_stop_claim(STOP_PAYLOAD | {"value": "x" * 65_536}))
 
-    jobs.enqueue(parent.id, NODE_A, "node.probe", COMMIT, {})
+    jobs.enqueue(parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
     with pytest.raises(AgentProtocolError, match="large"):
-        jobs.succeed(claim, {"value": "x" * 65_536})
+        AgentResult.parse(raw_result({"value": "x" * 65_536}))
 
 
 def test_stale_fence_cannot_publish_success(service) -> None:
@@ -171,10 +201,10 @@ def test_stale_fence_cannot_publish_success(service) -> None:
     first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
     clock.advance(31)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
 
     with pytest.raises(StaleAgentAttempt):
-        jobs.succeed(first, PROBE_RESULT)
+        jobs.succeed(first, STOP_RESULT)
 
 
 def test_protocol_has_no_arbitrary_operation_member() -> None:

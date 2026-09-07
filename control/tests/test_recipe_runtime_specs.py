@@ -34,7 +34,7 @@ def _recipe(
 ) -> RecipeDefinition:
     raw = _example(name)
     raw["runtime"]["engine"] = engine  # type: ignore[index]
-    raw["runtime"]["entrypoint"] = entrypoint or ["vllm", "serve", "/models"]  # type: ignore[index]
+    raw["runtime"]["entrypoint"] = entrypoint or ["/opt/vonk/bin/vllm", "serve", "/models"]  # type: ignore[index]
     return RecipeDefinition.model_validate(raw)
 
 
@@ -96,7 +96,7 @@ def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
             "mount": {"target": "/models/draft", "read_only": True},
         }
     )
-    raw["runtime"]["entrypoint"] = ["vllm", "serve", "/models/target"]  # type: ignore[index]
+    raw["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models/target"]  # type: ignore[index]
     raw["runtime"]["arguments"].append(  # type: ignore[index]
         {
             "name": "speculative-config",
@@ -230,7 +230,7 @@ def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
 
 
 def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
-    recipe = _recipe("recipe-job.json", engine="diffusers", entrypoint=["diffusers-job"])
+    recipe = _recipe("recipe-job.json", engine="diffusers", entrypoint=["/opt/vonk/bin/diffusers-job"])
     spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
 
     assert "endpoint" not in spec

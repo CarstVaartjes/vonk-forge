@@ -45,8 +45,6 @@ class _GeneratedModel(Protocol):
 
 
 class _RoutineControlClient(Protocol):
-    def nodes(self) -> _GeneratedModel: ...
-
     def endpoint(self, alias: str) -> _GeneratedModel: ...
 
 
@@ -72,12 +70,6 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(
         dest="command", required=True, parser_class=_CliParser
     )
-
-    nodes = commands.add_parser("nodes")
-    node_commands = nodes.add_subparsers(
-        dest="nodes_command", required=True, parser_class=_CliParser
-    )
-    _add_json(node_commands.add_parser("status"))
 
     endpoint = commands.add_parser("endpoint")
     endpoint.add_argument("name")
@@ -408,12 +400,6 @@ def _model_payload(result: _GeneratedModel) -> dict[str, object]:
     return payload
 
 
-def _admin_payload(result: object) -> dict[str, object]:
-    if isinstance(result, Mapping):
-        return dict(result)
-    return _model_payload(result)  # type: ignore[arg-type]
-
-
 def _control_error(
     error: BaseException, args: argparse.Namespace | None = None
 ) -> dict[str, object]:
@@ -487,8 +473,6 @@ def _routine(
     client: _RoutineControlClient,
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
-    if args.command == "nodes":
-        return _model_payload(client.nodes())
     if args.command == "endpoint":
         return _model_payload(client.endpoint(args.name))
     raise ControlClientError("unsupported routine command")

@@ -234,6 +234,7 @@ def install_catalog_routes(
 
     @app.get(
         "/api/v1/catalog/source-bundles/{sha256}",
+        response_class=Response,
         responses={
             200: {
                 "content": {
@@ -246,6 +247,7 @@ def install_catalog_routes(
             404: {"model": CatalogProblem},
             422: {"model": CatalogProblem},
         },
+        openapi_extra={"x-vonk-streaming-transport": True},
         operation_id="downloadRecipeSourceBundle",
     )
     def download_source_bundle(

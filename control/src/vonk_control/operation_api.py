@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -32,8 +32,7 @@ from .models import (
     AgentOperation,
     AgentOperationAttempt,
     Job,
-    Reconciliation,
-    ReconciliationOperation,
+    RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
 )
@@ -270,7 +269,6 @@ JobOperationProgress = OperationProgress
 
 class JobOperationResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
-    graph_operation_id: str | None = Field(default=None, max_length=128)
     node_id: str = Field(pattern=NODE_PATTERN)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
@@ -365,7 +363,6 @@ class JobDetailResponse(StrictModel):
     target_total: int = Field(ge=0)
     current_attempt: int = Field(ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
-    reconciliation_id: str | None = Field(default=None, max_length=128)
     operations: list[JobOperationResponse] = Field(max_length=100)
     operation_next_cursor: str | None = Field(default=None, max_length=512)
     operation_total: int = Field(ge=0)
@@ -599,7 +596,6 @@ def job_response(
     projected = [
         JobOperationResponse(
             id=item["id"],
-            graph_operation_id=item.get("graph_operation_id"),
             node_id=item["node_id"],
             kind=item["kind"],
             state=item["state"],
@@ -654,7 +650,6 @@ def job_response(
             )
             else job.status_reason
         ),
-        reconciliation_id=job.reconciliation_id,
         operations=projected,
         operation_next_cursor=operation_page.next_cursor,
         operation_total=operation_page.progress.total,
@@ -815,9 +810,7 @@ def operation_detail_response(
         attempt=item["attempt"],
         progress=_progress_projection(item.get("progress")),
         created_at=str(item["created_at"]),
-        updated_at=(
-            None if item.get("updated_at") is None else item["updated_at"]
-        ),
+        updated_at=(None if item.get("updated_at") is None else item["updated_at"]),
         failure=_failure_projection(item.get("result")),
         provenance=_provenance_projection(item.get("result")),
         evidence_download=_evidence_download_projection(item.get("result")),
@@ -995,21 +988,19 @@ class _DurableOperationProjection:
             owner = session.get(RoutePublicationOwner, 1)
             publication = (
                 None
-                if owner is None or owner.reconciliation_id is None
-                else session.get(RoutePublication, owner.reconciliation_id)
+                if owner is None or owner.authority_id is None
+                else session.get(RoutePublication, owner.authority_id)
             )
-            reconciliation = (
+            authority = (
                 None
-                if owner is None or owner.reconciliation_id is None
-                else session.get(Reconciliation, owner.reconciliation_id)
+                if owner is None or owner.authority_id is None
+                else session.get(RecipeRouteAuthority, owner.authority_id)
             )
             if (
                 owner is None
                 or publication is None
-                or reconciliation is None
+                or authority is None
                 or publication.state not in _ACTIVE_PUBLICATION_STATES
-                or reconciliation.status != "succeeded"
-                or reconciliation.current_phase != "completed"
                 or publication.generation != owner.owner_generation
                 or publication.activation_marker is None
                 or publication.activation_marker_digest is None
@@ -1026,7 +1017,7 @@ class _DurableOperationProjection:
             bundle_digest = publication.bundle_digest
             lease_issued_at = publication.lease_issued_at
             lease_expires_at = publication.lease_expires_at
-            owner_reconciliation_id = owner.reconciliation_id
+            owner_authority_id = owner.authority_id
             owner_generation = owner.owner_generation
             publication_generation = publication.generation
             publication_plan_digest = publication.plan_digest
@@ -1037,10 +1028,10 @@ class _DurableOperationProjection:
         )
         active_marker = bundle.marker
         if (
-            asdict(active_marker) != marker
+            active_marker.model_dump() != marker
             or active_marker.digest != marker_digest
             or active_marker.state != "published"
-            or active_marker.reconciliation_id != owner_reconciliation_id
+            or active_marker.authority_id != owner_authority_id
             or active_marker.plan_digest != publication_plan_digest
             or active_marker.generation != publication_generation
             or active_marker.generation != owner_generation
@@ -1212,17 +1203,6 @@ class _DurableOperationProjection:
                     .group_by(AgentOperation.state)
                 )
             }
-            graph_ids = {
-                row.agent_operation_id: row.graph_operation_id
-                for row in session.scalars(
-                    select(ReconciliationOperation).where(
-                        ReconciliationOperation.agent_operation_id.in_(
-                            [operation.id for operation in operations]
-                        )
-                    )
-                )
-                if row.agent_operation_id is not None
-            }
             attempts = {
                 attempt.operation_id: attempt
                 for attempt in session.scalars(
@@ -1241,7 +1221,6 @@ class _DurableOperationProjection:
         items = [
             {
                 "attempt": operation.current_attempt,
-                "graph_operation_id": graph_ids.get(operation.id),
                 "id": operation.id,
                 "kind": operation.kind,
                 "node_id": operation.node_id,

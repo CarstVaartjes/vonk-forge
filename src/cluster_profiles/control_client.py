@@ -24,15 +24,15 @@ from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError
 
 from .generated_control.api.default import (
+    get_fleet_status,
     get_job,
-    get_node_statuses,
     get_published_endpoint,
     list_agents,
 )
 from .generated_control.client import AuthenticatedClient
 from .generated_control.models.agents_response import AgentsResponse
 from .generated_control.models.endpoint_response import EndpointResponse
-from .generated_control.models.fleet_status_response import FleetStatusResponse
+from .generated_control.models.fleet_snapshot import FleetSnapshot
 from .generated_control.models.job_detail_response import JobDetailResponse
 from .generated_control.types import Response as GeneratedResponse
 
@@ -1180,8 +1180,8 @@ class ControlClient:
     def submit_change(self, digest: str) -> dict[str, object]:
         return self.request("POST", "/api/v1/changes", {"proposal_digest": digest})
 
-    def nodes(self) -> FleetStatusResponse:
-        return self._call_generated(get_node_statuses.sync_detailed)  # type: ignore[return-value]
+    def fleet(self) -> FleetSnapshot:
+        return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]
 
     def job(self, job_id: str) -> JobDetailResponse:
         return self._call_generated(get_job.sync_detailed, job_id)  # type: ignore[return-value]

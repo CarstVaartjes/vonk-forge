@@ -228,8 +228,6 @@ def build_agent_services(
         operations = AgentJobService(
             sessions,
             clock=clock,
-            revision_eligible=revision_eligible,
-            current_revision=current_revision,
         )
         policy = ManagementAddressPolicy.parse(
             settings.management_cidrs or "127.0.0.1/32",
@@ -310,8 +308,6 @@ def build_agent_services(
     operations = AgentJobService(
         sessions,
         clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
     )
     operations.set_contact_consumer(presence.observe_in_session)
     helper_authority = None
@@ -1393,6 +1389,7 @@ def create_app(
     @app.get(
         "/api/v1/jobs/{job_id}/logs/{digest}",
         responses=bounded_error_responses(401, 403, 404, 503),
+        openapi_extra={"x-vonk-streaming-transport": True},
     )
     def job_log_content(
         job_id: str, digest: str, authenticated: Actor = authenticated_actor
@@ -1635,10 +1632,6 @@ def production_app() -> FastAPI:
 
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
-        management_policy=ManagementAddressPolicy.parse(
-            settings.management_cidrs,
-            forbidden_cidrs=settings.direct_fabric_cidrs,
-        ),
         clock=clock,
         maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(

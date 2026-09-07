@@ -65,7 +65,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
         "progress"
     ]
     assert any(
-        option.get("$ref") == "#/components/schemas/JobOperationProgress"
+        option.get("$ref") == "#/components/schemas/OperationProgress"
         for option in progress["anyOf"]
     )
 
@@ -242,6 +242,18 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
+    source_bundle = operations["downloadRecipeSourceBundle"]
+    assert source_bundle["x-vonk-streaming-transport"] is True
+    assert source_bundle["responses"]["200"]["content"] == {
+        "application/vnd.vonk-forge.source-bundle.v1+tar": {
+            "schema": {"format": "binary", "type": "string"}
+        }
+    }
+    assert "downloadRecipeSourceBundle" not in typescript
+    assert not (
+        PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py"
+    ).exists()
+
 
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
@@ -299,7 +311,6 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getNodeStatuses",
         "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
@@ -319,22 +330,6 @@ def test_admin_schema_is_secret_free() -> None:
     assert by_id["getFleetStatus"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert by_id["getNodeStatuses"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    assert "health_probe_stale" in node_status["required"]
-    assert (
-        "not aggregate node readiness"
-        in node_status["properties"]["health_probe_stale"]["description"]
-    )
-    assert "stale" not in node_status["properties"]
-    assert "profile" not in node_status["properties"]
-    python_node_status = (PYTHON_CLIENT / "models/node_status.py").read_text()
-    assert "health_probe_stale: bool" in python_node_status
-    assert 'health_probe_stale = d.pop("health_probe_stale")' in python_node_status
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "health_probe_stale: boolean;" in typescript
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (

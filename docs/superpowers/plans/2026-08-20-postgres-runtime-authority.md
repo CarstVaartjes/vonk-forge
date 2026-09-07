@@ -42,14 +42,12 @@
 - Modify: `control/src/vonk_control/fleet_projection.py`
 - Modify: `control/src/vonk_control/reconcile.py`
 - Modify: `control/src/vonk_control/settings.py`
-- Modify: `control/src/vonk_control/worker_authority.py`
 - Test: `control/tests/test_generation_readiness.py`
 - Test: `control/tests/test_admin_api.py`
-- Test: `control/tests/test_worker_authority.py`
 
 - [ ] Add failing startup/API tests proving no repository path or Git key is required.
 - [ ] Replace Git repository/proposal/policy construction with the database authority and database change service.
-- [ ] Bind dashboard, fleet, update topology, reconciliation, and worker authority to the database revision provider.
+- [ ] Bind dashboard, fleet, update topology, and reconciliation to the database revision provider.
 - [ ] Remove Git-only settings validation and production requirements.
 - [ ] Run focused API and authority tests.
 

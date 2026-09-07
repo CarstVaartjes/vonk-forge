@@ -48,6 +48,7 @@ from .models import (
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
+from .operation_api import OperationListPage, OperationQuery
 from .preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
@@ -4376,15 +4377,6 @@ class RunSwitchOperationService:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ActivityOperationListPage:
-    """Fallback page value used before the global Activity seam is imported."""
-
-    items: tuple[Mapping[str, object], ...]
-    next_cursor: str | None
-    total: int
-
-
 class RunSwitchOperationProvider:
     """Project high-level jobs into the global Activity provider contract."""
 
@@ -4393,7 +4385,7 @@ class RunSwitchOperationProvider:
     def __init__(self, service: RunSwitchOperationService) -> None:
         self._service = service
 
-    def list_operations(self, query: object) -> object:
+    def list_operations(self, query: OperationQuery) -> OperationListPage:
         limit = getattr(query, "limit", None)
         if type(limit) is not int or not 1 <= limit <= 101:
             raise ValueError("operation provider page limit is invalid")
@@ -4431,7 +4423,7 @@ class RunSwitchOperationProvider:
                 if (_aware(job.created_at), str(job.id)) < boundary
             ]
         items = tuple(self._item(job) for job in jobs[:limit])
-        return _activity_page(items, None, total)
+        return OperationListPage(items, None, total)
 
     def get_operation(self, operation_id: str) -> Mapping[str, object]:
         with self._service._sessions() as session:
@@ -4542,20 +4534,6 @@ def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
             }
         )
     return result or None
-
-
-def _activity_page(
-    items: tuple[Mapping[str, object], ...],
-    next_cursor: str | None,
-    total: int,
-) -> object:
-    """Construct whichever shared page DTO is available in the host branch."""
-
-    try:
-        from .operation_api import OperationListPage
-    except ImportError:
-        return ActivityOperationListPage(items, next_cursor, total)
-    return OperationListPage(items, next_cursor, total)
 
 
 def _planned_transfer_bytes(
@@ -5408,7 +5386,6 @@ def _load_plan(value: object) -> RunSwitchPlan:
 
 
 __all__ = [
-    "ActivityOperationListPage",
     "ArtifactInspection",
     "DatabaseRunSwitchArtifactInspector",
     "PhaseExecution",

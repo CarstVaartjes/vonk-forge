@@ -462,7 +462,6 @@ if __name__ == "__main__":
     route_root = Path("/routes")
     publisher = AtomicRouteBundlePublisher(
         route_root,
-        management_policy=address_policy,
         clock=clock,
         maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(

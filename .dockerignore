@@ -1,5 +1,9 @@
 *
 !pyproject.toml
+!agent_protocol/
+!agent_protocol/src/
+!agent_protocol/src/vonk_agent_protocol/
+!agent_protocol/src/vonk_agent_protocol/route_activation.py
 !src/
 src/*
 !src/cluster_profiles/

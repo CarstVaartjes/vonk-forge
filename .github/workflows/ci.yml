@@ -370,7 +370,10 @@ jobs:
           set -euo pipefail
           scripts/generate-control-clients --schema-only
           run_full=false
-          if ! git diff --quiet -- control/openapi.json; then
+          if ! git diff --quiet -- \
+            control/openapi.json \
+            src/cluster_profiles/schemas/control-openapi.json \
+            schemas/control-openapi.json; then
             run_full=true
           elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             run_full=true
@@ -379,7 +382,9 @@ jobs:
             control/openapi-python-client.yaml \
             tools/openapi-client \
             src/cluster_profiles/generated_control \
-            control/web/src/api/generated.d.ts; then
+            control/web/src/api/generated.d.ts \
+            src/cluster_profiles/schemas/control-openapi.json \
+            schemas/control-openapi.json; then
             run_full=true
           fi
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
@@ -397,9 +402,17 @@ jobs:
         if: steps.generation.outputs.run_full == 'true'
         run: scripts/generate-control-clients
       - name: Verify generated client behavior
-        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -q
+        run: >-
+          uv run --project control --frozen --with-editable . pytest
+          tests/control/test_openapi_clients.py
+          tests/scripts/test_generate_control_clients.py -q
       - name: Reject generated drift
-        run: git diff --exit-code -- control/openapi.json src/cluster_profiles/generated_control control/web/src/api/generated.d.ts
+        run: >-
+          git diff --exit-code -- control/openapi.json
+          src/cluster_profiles/schemas/control-openapi.json
+          schemas/control-openapi.json
+          src/cluster_profiles/generated_control
+          control/web/src/api/generated.d.ts
 
   compose-integration:
     name: Compose integration

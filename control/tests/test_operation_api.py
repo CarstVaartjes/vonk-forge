@@ -32,7 +32,7 @@ from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
     Job,
-    Reconciliation,
+    RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
 )
@@ -64,7 +64,6 @@ class EnqueuedJob:
     targets: tuple[str, ...] = (NODE_ID,)
     current_attempt: int = 1
     status_reason: str | None = None
-    reconciliation_id: str | None = "22222222-2222-4222-8222-222222222222"
     created_at: datetime = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
 
 
@@ -300,9 +299,10 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         mode="json"
     ) == {"phase": "verify"}
     for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
-        assert operation_api._progress_projection(
-            {"phase": "download", retired: 1}
-        ) is None
+        assert (
+            operation_api._progress_projection({"phase": "download", retired: 1})
+            is None
+        )
 
 
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
@@ -354,9 +354,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         def list_rows(query: OperationQuery) -> OperationListPage:
             selected = [rows[row_id] for row_id in ids]
             if query.node_id is not None:
-                selected = [
-                    row for row in selected if query.node_id in row["node_ids"]
-                ]
+                selected = [row for row in selected if query.node_id in row["node_ids"]]
             total = len(selected)
             if query.after is not None:
                 selected = [
@@ -473,7 +471,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                     profile_digest="9" * 64,
                     plan_digest=plan_digest,
                     state="running",
-                    plan={"scope": {"node_ids": node_ids}, "steps": [{"kind": "start"}]},
+                    plan={
+                        "scope": {"node_ids": node_ids},
+                        "steps": [{"kind": "start"}],
+                    },
                     current_step=0,
                     current_operation_id=None,
                     progress={"operation_kind": "fleet-profile.apply"},
@@ -495,9 +496,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get(
-        "/api/v1/operations", headers=operator, params={"limit": 1}
-    )
+    first = client.get("/api/v1/operations", headers=operator, params={"limit": 1})
     detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
     second = client.get(
         "/api/v1/operations",
@@ -722,7 +721,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
         "operation_next_cursor": None,
         "operation_total": 0,
         "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
-        "reconciliation_id": "22222222-2222-4222-8222-222222222222",
         "state": "queued",
         "status_reason": None,
         "targets": [NODE_ID],
@@ -740,7 +738,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     projection_factory = getattr(operation_api, "durable_operation_services", None)
     assert callable(projection_factory)
     now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    reconciliation_id = "22222222-2222-4222-8222-222222222222"
+    authority_id = "22222222-2222-4222-8222-222222222222"
     route_document = {
         "generation": 7,
         "routes": {
@@ -749,14 +747,14 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
                 "evidence_digest": "e" * 64,
                 "node_id": NODE_ID,
                 "observed_at": now.isoformat(),
-                "operation_id": f"model-a:{NODE_ID}:workload.verify",
+                "operation_id": "recipe-run:22222222-2222-4222-8222-222222222222",
                 "path": "/v1",
                 "port": 8000,
                 "scheme": "http",
                 "verify_evidence_digest": "v" * 64,
             }
         },
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "published",
     }
     route_bytes = _encoded(route_document)
@@ -764,10 +762,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     issued_at = now.isoformat()
     expires_at = (now + timedelta(minutes=5)).isoformat()
     manifest_document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": 7,
         "state": "published",
-        "reconciliation_id": reconciliation_id,
+        "authority_id": authority_id,
         "plan_digest": DIGEST,
         "evidence_set_digest": "e" * 64,
         "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
@@ -778,10 +776,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     manifest_bytes = _encoded(manifest_document)
     manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
     marker = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": 7,
         "state": "published",
-        "reconciliation_id": reconciliation_id,
+        "authority_id": authority_id,
         "plan_digest": DIGEST,
         "evidence_set_digest": "e" * 64,
         "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
@@ -804,27 +802,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(
-            Reconciliation(
-                id=reconciliation_id,
-                authority_revision=COMMIT,
-                status="succeeded",
-                summary={},
-                graph={
-                    "authority_revision": COMMIT,
-                    "nodes": [],
-                    "schema_version": 1,
-                    "targets": [NODE_ID],
-                },
-                graph_digest="3" * 64,
-                plan_digest=DIGEST,
-                current_phase="completed",
-                created_at=now,
-            )
-        )
+        session.add(RecipeRouteAuthority(authority_id=authority_id, created_at=now))
         session.add(
             RoutePublication(
-                reconciliation_id=reconciliation_id,
+                authority_id=authority_id,
                 state="completed",
                 generation=7,
                 plan_digest=DIGEST,
@@ -841,7 +822,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
         session.add(
             RoutePublicationOwner(
                 singleton_id=1,
-                reconciliation_id=reconciliation_id,
+                authority_id=authority_id,
                 owner_generation=7,
                 updated_at=now,
             )
@@ -932,12 +913,12 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     (generation / "litellm.json").write_bytes(litellm_bytes)
 
     with sessions.begin() as session:
-        session.get(RoutePublication, reconciliation_id).state = "publication-pending"
+        session.get(RoutePublication, authority_id).state = "publication-pending"
     with pytest.raises(RuntimeError, match="active publication"):
         services.endpoint("model-a")
 
     with sessions.begin() as session:
-        session.get(RoutePublication, reconciliation_id).state = "completed"
+        session.get(RoutePublication, authority_id).state = "completed"
     (route_root / "activation.json").write_text("{}")
     with pytest.raises(RuntimeError, match="activation marker"):
         services.endpoint("model-a")
@@ -1502,9 +1483,7 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         )
 
 
-def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> (
-    None
-):
+def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> None:
     client, _operator, _reconciler, _audits = _client()
 
     schema = operation_api.admin_openapi_schema(client.app)

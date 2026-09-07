@@ -93,7 +93,7 @@
 
 - [x] Write failing settings and Compose tests proving UID, socket, network, secret, mount, and cache separation.
 - [x] Run the focused settings/Compose tests and confirm worker still owns secrets.
-- [x] Add signer service/settings, safe active-generation projection, and replace direct worker authority with the Unix client.
+- [x] Add signer service/settings, safe active-generation projection, and replace direct worker operation with the Unix client.
 - [x] Run production-worker, settings, networking, and documentation contract tests.
 
 ### Task 5: Focused integration verification

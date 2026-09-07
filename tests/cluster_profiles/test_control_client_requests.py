@@ -412,8 +412,10 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
 ) -> None:
     valid = {
         "authority_revision": "a" * 64,
-        "evidence_digest": "b" * 64,
+        "event_cursor": 0,
+        "generated_at": "2026-09-07T00:00:00+00:00",
         "nodes": [],
+        "schema_version": 1,
     }
     client = ControlClient(
         "https://forge.example.test",
@@ -421,7 +423,7 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
         opener=lambda *_args, **_kwargs: _Response(200, valid),
     )
 
-    result = client.nodes()
+    result = client.fleet()
 
     assert result.to_dict() == valid
 
@@ -429,10 +431,16 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
 @pytest.mark.parametrize(
     "payload",
     [
-        {"authority_revision": 7, "evidence_digest": "b" * 64, "nodes": []},
+        {
+            "authority_revision": 7,
+            "event_cursor": 0,
+            "generated_at": "2026-09-07T00:00:00Z",
+            "nodes": [],
+        },
         {
             "authority_revision": "a" * 64,
-            "evidence_digest": "b" * 64,
+            "event_cursor": 0,
+            "generated_at": "2026-09-07T00:00:00Z",
             "nodes": [],
             "unexpected": True,
         },
@@ -448,7 +456,7 @@ def test_generated_transport_rejects_malformed_raw_response(
     )
 
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
-        client.nodes()
+        client.fleet()
 
 
 def test_generated_transport_rejects_malformed_request_before_network() -> None:
@@ -486,7 +494,7 @@ def test_generated_transport_rejects_malformed_typed_error(tmp_path: Path) -> No
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/nodes/status",
+            "https://forge.example.test/api/v1/fleet",
             401,
             "Unauthorized",
             headers,
@@ -498,7 +506,7 @@ def test_generated_transport_rejects_malformed_typed_error(tmp_path: Path) -> No
     )
 
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
-        client.nodes()
+        client.fleet()
 
 
 def test_openapi_validation_is_safe_for_concurrent_requests(
