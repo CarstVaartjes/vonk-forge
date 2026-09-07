@@ -7,7 +7,6 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from pydantic import (
     BeforeValidator,
@@ -36,9 +35,9 @@ _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
 _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
-_ROLE = r"^[a-z][a-z0-9_-]{0,63}$"
-_INTERFACES = frozenset(
-    {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
+_UUID = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{12}$"
 )
 _UNSAFE_PARAMETER_KEY = re.compile(
     r"^(?:apikey|passwordhash)$|"
@@ -53,6 +52,11 @@ _UNSAFE_PARAMETER_KEY = re.compile(
 
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST)]
 ImageDigest = Annotated[str, StringConstraints(pattern=_OCI_DIGEST)]
+CanonicalUUID = Annotated[str, StringConstraints(pattern=_UUID)]
+ArtifactName = Annotated[str, StringConstraints(pattern=_NAME)]
+ArtifactSlot = Annotated[str, StringConstraints(pattern=_SLOT)]
+ArtifactExtension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
+MediaType = Annotated[str, StringConstraints(pattern=_MEDIA_TYPE)]
 
 
 def _as_tuple(value: object) -> object:
@@ -81,8 +85,10 @@ def _parse_model[ModelT: _RecipeJobModel](
         return cls.model_validate(_thaw(raw))
     except ValidationError as error:
         first = error.errors()[0]
+        location = ".".join(str(item) for item in first.get("loc", ()))
+        message = str(first.get("msg", f"{label} is invalid"))
         raise AgentProtocolError(
-            str(first.get("msg", f"{label} is invalid"))
+            f"{location}: {message}" if location else message
         ) from error
 
 
@@ -123,21 +129,16 @@ def _validate_parameters(value: object, *, depth: int = 0) -> object:
 
 
 class RecipeJobFile(_RecipeJobModel):
-    name: str = Field(min_length=1, max_length=128)
-    media_type: str = Field(pattern=_MEDIA_TYPE, max_length=128)
+    name: ArtifactName
+    media_type: MediaType
     size_bytes: int = Field(ge=0, le=MAX_OUTPUT_FILE_BYTES)
     sha256: Digest
 
-    @field_validator("name", mode="before")
-    @classmethod
-    def name_is_safe(cls, value: str) -> str:
-        if (
-            not isinstance(value, str)
-            or re.fullmatch(_NAME, value) is None
-            or value in {".", "..", "manifest.json"}
-        ):
+    @model_validator(mode="after")
+    def name_is_safe(self) -> RecipeJobFile:
+        if self.name == "manifest.json":
             raise ValueError("artifact name is invalid")
-        return value
+        return self
 
     @classmethod
     def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobFile:
@@ -148,22 +149,17 @@ class RecipeJobFile(_RecipeJobModel):
 
 
 class RecipeJobInputFile(_RecipeJobModel):
-    slot: str = Field(pattern=_SLOT, max_length=32)
-    name: str = Field(min_length=1, max_length=128)
-    media_type: str = Field(pattern=_MEDIA_TYPE, max_length=128)
+    slot: ArtifactSlot
+    name: ArtifactName
+    media_type: MediaType
     size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
     sha256: Digest
 
-    @field_validator("name", mode="before")
-    @classmethod
-    def name_is_safe(cls, value: str) -> str:
-        if (
-            not isinstance(value, str)
-            or re.fullmatch(_NAME, value) is None
-            or value in {".", "..", "manifest.json"}
-        ):
+    @model_validator(mode="after")
+    def name_is_safe(self) -> RecipeJobInputFile:
+        if self.name == "manifest.json":
             raise ValueError("artifact name is invalid")
-        return value
+        return self
 
     @classmethod
     def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobInputFile:
@@ -209,8 +205,6 @@ class RecipeJobOutputLimits(_RecipeJobModel):
     @field_validator("allowed_media_types")
     @classmethod
     def media_types_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(re.fullmatch(_MEDIA_TYPE, item) is None for item in value):
-            raise ValueError("artifact media type is invalid")
         if len(set(value)) != len(value) or list(value) != sorted(value):
             raise ValueError("allowed output media types are not canonical")
         return value
@@ -227,17 +221,15 @@ class RecipeJobOutputLimits(_RecipeJobModel):
 
 
 class RecipeJobOutputMapping(_RecipeJobModel):
-    slot: str = Field(pattern=_SLOT, max_length=32)
-    media_type: str = Field(pattern=_MEDIA_TYPE, max_length=128)
-    extensions: Annotated[tuple[str, ...], BeforeValidator(_as_tuple)] = Field(
-        min_length=1, max_length=16
+    slot: ArtifactSlot
+    media_type: MediaType
+    extensions: Annotated[tuple[ArtifactExtension, ...], BeforeValidator(_as_tuple)] = (
+        Field(min_length=1, max_length=16)
     )
 
     @field_validator("extensions")
     @classmethod
     def extensions_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(re.fullmatch(_EXTENSION, item) is None for item in value):
-            raise ValueError("artifact output extensions are invalid")
         if len(set(value)) != len(value) or list(value) != sorted(value):
             raise ValueError("artifact output extensions are not canonical")
         return value
@@ -285,16 +277,18 @@ class RecipeJobEvidence(_RecipeJobModel):
 
 class RecipeJobRunRequest(_RecipeJobModel):
     schema_version: Literal[1]
-    job_id: str
-    run_id: str
-    installation_id: str
-    recipe_revision_id: str
+    job_id: CanonicalUUID
+    run_id: CanonicalUUID
+    installation_id: CanonicalUUID
+    recipe_revision_id: CanonicalUUID
     recipe_content_sha256: Digest
     image_digest: ImageDigest
     plan_digest: Digest
-    interface: str
-    rank: int = Field(ge=0, le=2**32 - 1)
-    role: str = Field(pattern=_ROLE, max_length=64)
+    interface: Literal[
+        "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
+    ]
+    rank: Literal[0]
+    role: Literal["entrypoint"]
     reserved_memory_bytes: int = Field(ge=1, le=16 * 1024**4)
     contract_sha256: Digest
     input_manifest_sha256: Digest
@@ -312,17 +306,6 @@ class RecipeJobRunRequest(_RecipeJobModel):
     def arrays_are_immutable(cls, value: object) -> object:
         return _as_tuple(value)
 
-    @field_validator("job_id", "run_id", "installation_id", "recipe_revision_id")
-    @classmethod
-    def ids_are_canonical(cls, value: str, info: Any) -> str:
-        try:
-            parsed = UUID(value)
-        except (TypeError, ValueError) as error:
-            raise ValueError(f"{info.field_name} must be a canonical UUID") from error
-        if str(parsed) != value:
-            raise ValueError(f"{info.field_name} must be a canonical UUID")
-        return value
-
     @field_validator("parameters", mode="before")
     @classmethod
     def parameters_are_safe(cls, value: object) -> object:
@@ -336,10 +319,6 @@ class RecipeJobRunRequest(_RecipeJobModel):
 
     @model_validator(mode="after")
     def request_is_canonical(self) -> RecipeJobRunRequest:
-        if self.interface not in _INTERFACES:
-            raise ValueError("recipe job interface is invalid")
-        if self.rank != 0 or self.role != "entrypoint":
-            raise ValueError("recipe job placement is invalid")
         names = [item.name for item in self.inputs]
         if names != sorted(names, key=lambda value: value.encode("utf-8")):
             raise ValueError("artifact manifest is not canonically sorted")
@@ -368,25 +347,14 @@ class RecipeJobRunRequest(_RecipeJobModel):
 
 class RecipeJobRunResult(_RecipeJobModel):
     schema_version: Literal[1]
-    job_id: str
-    run_id: str
+    job_id: CanonicalUUID
+    run_id: CanonicalUUID
     exit_code: int = Field(ge=0, le=255)
     output_manifest: RecipeJobOutputManifest
     evidence: RecipeJobEvidence
     # Rust uses skip_serializing_if for this optional nullable field. Both an
     # omitted field and explicit JSON null are accepted on input.
     reason: str | None = Field(default=None, min_length=1, max_length=512)
-
-    @field_validator("job_id", "run_id")
-    @classmethod
-    def ids_are_canonical(cls, value: str, info: Any) -> str:
-        try:
-            parsed = UUID(value)
-        except (TypeError, ValueError) as error:
-            raise ValueError(f"{info.field_name} must be a canonical UUID") from error
-        if str(parsed) != value:
-            raise ValueError(f"{info.field_name} must be a canonical UUID") from None
-        return value
 
     @field_validator("reason")
     @classmethod

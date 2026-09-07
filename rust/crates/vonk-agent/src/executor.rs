@@ -30,8 +30,9 @@ use crate::{
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
     HostRuntimeAction, ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
-    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
-    RecipeStartPhase, RecipeStartRequest, canonical_json, hex_sha256,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeModelCleanupResult,
+    RecipeOperationRequest, RecipeStartPhase, RecipeStartRequest, RecipeStopResult,
+    RecipeUninstallResult, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -449,21 +450,32 @@ pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
     json!({"installed_bytes": installed_bytes})
 }
 
+pub fn recipe_stop_success_body() -> Value {
+    let result = RecipeStopResult { stopped: true };
+    result.validate().expect("valid stop result");
+    serde_json::to_value(result).expect("serializable stop result")
+}
+
 pub fn recipe_uninstall_success_body(removed_model_bytes: u64) -> Value {
-    json!({
-        "uninstalled": true,
-        "removed_model_bytes": removed_model_bytes,
-    })
+    let result = RecipeUninstallResult {
+        uninstalled: true,
+        removed_model_bytes,
+    };
+    result.validate().expect("valid uninstall result");
+    serde_json::to_value(result).expect("serializable uninstall result")
 }
 
 pub fn recipe_model_cleanup_success_body(
     uninstalled_installations: usize,
     removed_model_bytes: u64,
 ) -> Value {
-    json!({
-        "uninstalled_installations": uninstalled_installations,
-        "removed_model_bytes": removed_model_bytes,
-    })
+    let result = RecipeModelCleanupResult {
+        uninstalled_installations: u16::try_from(uninstalled_installations)
+            .expect("bounded model cleanup count"),
+        removed_model_bytes,
+    };
+    result.validate().expect("valid model cleanup result");
+    serde_json::to_value(result).expect("serializable model cleanup result")
 }
 
 pub fn recipe_start_success_body(
@@ -1770,7 +1782,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     ExecutionResult {
                         state: "succeeded",
-                        body: json!({"stopped": true}),
+                        body: recipe_stop_success_body(),
                     }
                 }
             }
@@ -1780,7 +1792,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(None) => {
                         return ExecutionResult {
                             state: "succeeded",
-                            body: json!({"uninstalled": true, "already_absent": true}),
+                            body: recipe_uninstall_success_body(0),
                         };
                     }
                     Ok(Some(recipe_digest)) if recipe_digest == request.recipe_content_sha256 => {}
