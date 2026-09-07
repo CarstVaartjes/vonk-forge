@@ -5,7 +5,8 @@
 //! Each input line is a Controller AgentClaim.  The probe validates the claim,
 //! invokes the production RecipeOperationRequest parser, projects the typed
 //! compiled plan through the production OCI argument builder, and emits the
-//! exact success body used by the production executor.
+//! exact success body used by the production executor. Uninstall operations
+//! are structural wire probes: they do not mutate the probe filesystem.
 
 use std::{
     io::{self, BufRead, Write},
@@ -15,8 +16,9 @@ use std::{
 use vonk_agent::{
     compiled_oci::CompiledOciPaths,
     executor::{
-        parse_compiled_execution_plan, recipe_install_success_body, recipe_start_success_body,
-        runtime_arguments_for_plan,
+        parse_compiled_execution_plan, recipe_install_success_body,
+        recipe_model_cleanup_success_body, recipe_start_success_body,
+        recipe_uninstall_success_body, runtime_arguments_for_plan,
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
 };
@@ -99,7 +101,16 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
             )
             .map_err(|_| "readiness evidence is unavailable".to_owned())?
         }
-        _ => return Err("probe only accepts recipe.install and recipe.start".to_owned()),
+        RecipeOperationRequest::Uninstall(_request) => recipe_uninstall_success_body(0),
+        RecipeOperationRequest::ModelCleanup(request) => {
+            recipe_model_cleanup_success_body(request.installations.len(), 0)
+        }
+        _ => {
+            return Err(
+                "probe only accepts recipe.install, recipe.start, recipe.uninstall, and recipe.model-uninstall.v1"
+                    .to_owned(),
+            )
+        }
     };
     let message = AgentResult {
         attempt: claim.attempt,
