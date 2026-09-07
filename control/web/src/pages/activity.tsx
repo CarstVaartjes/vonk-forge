@@ -529,7 +529,7 @@ function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
   }, [active, refresh]);
   const placement = detail.kind === "library.placement";
   const supported = placement || detail.kind.startsWith("fleet-profile.");
-  const retryable = supported && detail.recovery?.actions.includes("retry");
+  const retryable = supported && detail.recovery?.actions?.includes("retry");
   async function retry(): Promise<void> {
     if (!retryable || inFlight.current || retryRequests.get(detail.id)?.accepted) return;
     inFlight.current = true;
@@ -790,7 +790,8 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     {events && events.length > 0 && <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length}/>}
 
     {events && <section className="library-pagination" aria-label="Activity history coverage">
-      <p role="status">{auditAvailable ? `Loaded ${auditCount} audit ${auditCount === 1 ? "record" : "records"} from the latest-100 API window` : "Audit history is unavailable"} and {jobsAvailable ? `${loadedJobCount} of ${jobTotal} jobs` : "jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records; older audit history is not available from this API.</p>
+      <p role="status">Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.{(jobCursor || canonicalCursor) ? " Load older activity below." : ""}</p>
+      <details className="activity-technical"><summary>History coverage</summary><p>{auditAvailable ? `Loaded ${auditCount} audit ${auditCount === 1 ? "record" : "records"} from the latest-100 API window` : "Audit history is unavailable"} and {jobsAvailable ? `${loadedJobCount} of ${jobTotal} jobs` : "jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records; older audit history is not available from this API.</p></details>
       {(jobCursor || canonicalCursor) && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
       {jobsAvailable && !jobCursor && loadedJobCount < jobTotal && <p role="status">The jobs API reports additional records but did not provide a continuation cursor.</p>}
       {canonicalAvailable && !canonicalCursor && canonicalCount < canonicalTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}

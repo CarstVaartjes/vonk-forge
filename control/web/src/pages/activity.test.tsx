@@ -445,7 +445,13 @@ test("discloses bounded API windows and loads older operations when a cursor is 
   const user = userEvent.setup();
   render(<ActivityPage api={api(vi.fn().mockResolvedValue({events: []}), loadJobs)} now={NOW}/>);
 
-  expect(await screen.findByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 0 audit records from the latest-100 API window and 1 of 2 jobs, plus 0 of 0 operations");
+  const coverage = await screen.findByRole("region", {name: "Activity history coverage"});
+  expect(within(coverage).getByRole("status")).toHaveTextContent("Showing 1 loaded event. Load older activity below.");
+  const counts = within(coverage).getByText(/Loaded 0 audit records from the latest-100 API window/);
+  expect(counts).not.toBeVisible();
+  await user.click(within(coverage).getByText("History coverage"));
+  expect(counts).toBeVisible();
+  expect(coverage).toHaveTextContent("Loaded 0 audit records from the latest-100 API window and 1 of 2 jobs, plus 0 of 0 operations");
   await user.click(screen.getByRole("button", {name: "Load older operations"}));
 
   expect(await screen.findByRole("heading", {name: "Recipe Stop · Completed"})).toBeVisible();
@@ -459,7 +465,7 @@ function canonicalOperation(overrides: Partial<OperationDetail> = {}): Operation
     schema_version: 2, id: "profile-attempt-1", parent_id: null,
     kind: "fleet-profile.apply", state: "failed", attempt: 1,
     node_ids: [TARGET_ID], created_at: "2026-08-15T12:00:00Z",
-    progress: {phase: "prepare"},
+    progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false},
     failure: {error_code: "child_operation_failed", summary: "Profile installation failed", detail: "Image verification failed on Mia Lab Spark.", retryable: true, uncertain: true},
     recovery: {uncertain: true, actions: ["inspect", "retry"], explanation: "Inspect the installed state before retrying."},
     ...overrides,
@@ -512,7 +518,7 @@ test.each(["fleet-profile.apply", "library.placement"])("retries %s with a stabl
 test("canonical operations poll current detail while active", async () => {
   const first = canonicalOperation({state: "running", failure: null, recovery: {actions: ["inspect"], uncertain: false}});
   const client = canonicalApi([first]);
-  vi.mocked(client.operation).mockResolvedValue({...first, state: "succeeded", progress: {phase: "final_verify"}});
+  vi.mocked(client.operation).mockResolvedValue({...first, state: "succeeded", progress: {phase: "final_verify", completed_bytes: 0, total_bytes_known: false}});
   vi.useFakeTimers();
   render(<ActivityPage api={client} now={NOW}/>);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -553,7 +559,7 @@ test("paginates jobs and canonical operations independently after a partial page
     .mockResolvedValueOnce({schema_version: 2, operations: [first, second], next_cursor: null, total: 2});
   vi.mocked(client.jobs)
     .mockResolvedValueOnce({jobs: [], next_cursor: "jobs-next", total: 1})
-    .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running"}], next_cursor: null, total: 1});
+    .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running", created_at: "2026-08-15T12:00:00Z"}], next_cursor: null, total: 1});
   render(<ActivityPage api={client} now={NOW}/>);
   await user.click(await screen.findByRole("button", {name: "Load older operations"}));
   expect(await screen.findByRole("heading", {name: "Agent Upgrade · Running"})).toBeVisible();
