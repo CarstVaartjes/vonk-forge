@@ -651,7 +651,7 @@ it("previews and applies one digest-bound fleet-wide model deletion", async () =
     installations: [{installation_id: "installation-chat", installed_bytes: 120 * 1024 ** 3, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
     model_title: "Qwen 3 BF16", model_content_sha256: modelDigest,
     nodes: [{installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-alpha", recipe_ids: ["recipe-chat"]}, {installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-beta", recipe_ids: ["recipe-chat"]}],
-    plan_digest: "model-delete-plan", shared_cache_policy: "Unrelated immutable caches remain installed.", warnings: [],
+    plan_digest: "model-delete-plan", shared_cache_policy: "retain-shared-download-cache", warnings: [],
   };
   const operation = {id: "operation-model-delete", kind: "model-delete", owner_id: modelDigest, state: "queued", plan_digest: plan.plan_digest, nodes: ["node-alpha", "node-beta"], result: null};
   const captured: Request[] = [];
