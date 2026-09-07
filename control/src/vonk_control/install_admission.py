@@ -12,7 +12,6 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .artifact_sizes import ArtifactSizeResolver
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
@@ -113,16 +112,11 @@ class InstallAdmissionService:
         self,
         sessions: sessionmaker[Session],
         *,
-        sizes: ArtifactSizeResolver | None = None,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     ) -> None:
         self._sessions = sessions
-        # Canonical model bytes come from the receipt-bound compiled plan.
-        # Keep the constructor slot while callers converge on that single
-        # authority; this service never reads recipe-level artifact metadata.
-        del sizes
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
