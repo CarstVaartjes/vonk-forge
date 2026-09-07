@@ -1963,7 +1963,7 @@ class NodeTelemetrySample(Base):
     # this bounded JSON document carries per-device, per-interface and
     # per-run series plus capability/provenance metadata.
     metrics: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict, server_default="{}"
+        JSON, nullable=False
     )
 
 
@@ -2107,7 +2107,7 @@ class NodeTelemetryRollupMetric(Base):
         String(32), nullable=False, default="unknown", server_default="unknown"
     )
     source: Mapped[str] = mapped_column(
-        String(128), nullable=False, default="legacy", server_default="legacy"
+        String(128), nullable=False, default="controller-derived", server_default="controller-derived"
     )
     measurement_kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default="measured", server_default="measured"

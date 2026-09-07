@@ -20,7 +20,7 @@ from .models import (
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
 )
-from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
+from .telemetry_contract import TelemetryMetrics
 from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -133,7 +133,7 @@ class TelemetrySampleInput:
     network_transmit_bytes_per_second: float | None
     gap_samples: int
     details: TelemetryDetailsInput
-    metrics: TelemetryMetrics = field(default_factory=empty_telemetry_metrics)
+    metrics: TelemetryMetrics
 
     def __post_init__(self) -> None:
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
@@ -239,7 +239,7 @@ class TelemetrySampleView:
     network_transmit_bytes_per_second: float | None
     gap_samples: int
     details: TelemetryDetailsInput
-    metrics: TelemetryMetrics = field(default_factory=empty_telemetry_metrics)
+    metrics: TelemetryMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +258,7 @@ class TelemetryMetricView:
     interface_name: str | None = None
     run_id: str | None = None
     unit: str = "unknown"
-    source: str = "legacy"
+    source: str = "controller-derived"
     measurement_kind: str = "measured"
     aggregation: str = "mean"
 
@@ -364,7 +364,7 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     details = dict(row.details)
-    metrics = TelemetryMetrics.model_validate(row.metrics or empty_telemetry_metrics())
+    metrics = TelemetryMetrics.model_validate(row.metrics)
     return TelemetrySampleView(
         id=row.id,
         node_id=row.node_id,

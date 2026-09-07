@@ -210,24 +210,6 @@ pub struct TelemetryMetrics {
     pub provenance: TelemetryProvenance,
 }
 
-impl Default for TelemetryMetrics {
-    fn default() -> Self {
-        Self {
-            schema_version: 2,
-            series: Vec::new(),
-            capabilities: Vec::new(),
-            runtimes: Vec::new(),
-            workloads: Vec::new(),
-            provenance: TelemetryProvenance {
-                collector: "legacy".to_owned(),
-                collector_version: "1".to_owned(),
-                host_uptime_seconds: None,
-                source_observed_at: None,
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TelemetrySample {
     pub boot_id: Uuid,
@@ -248,22 +230,11 @@ pub struct TelemetrySample {
     pub network_transmit_bytes_per_second: Option<f64>,
     pub gap_samples: i64,
     pub details: TelemetryDetails,
-    #[serde(default, skip_serializing_if = "TelemetryMetrics::is_empty")]
     pub metrics: TelemetryMetrics,
     #[serde(skip)]
     cpu_counters: Option<CpuCounters>,
     #[serde(skip)]
     network_counters: Option<NetworkCounters>,
-}
-
-impl TelemetryMetrics {
-    fn is_empty(value: &Self) -> bool {
-        value.series.is_empty()
-            && value.capabilities.is_empty()
-            && value.runtimes.is_empty()
-            && value.workloads.is_empty()
-            && value.provenance.collector == "legacy"
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

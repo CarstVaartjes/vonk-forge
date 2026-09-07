@@ -733,7 +733,8 @@
         "network_receive_bytes_per_second",
         "network_transmit_bytes_per_second",
         "gap_samples",
-        "details"
+        "details",
+        "metrics"
       ],
       "title": "TelemetrySample",
       "type": "object"

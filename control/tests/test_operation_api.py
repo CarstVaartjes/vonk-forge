@@ -125,6 +125,19 @@ class ProjectedFleet:
             resolution=resolution,
             maximum_points=maximum_points,
             points=[],
+            metadata={
+                "requested_start": start,
+                "requested_end": end,
+                "actual_start": None,
+                "actual_end": None,
+                "requested_resolution": resolution,
+                "actual_resolution": resolution,
+                "timezone": "UTC",
+                "point_count": 0,
+                "coverage_seconds": 0,
+                "gap_samples": 0,
+                "downsampled": resolution != "raw",
+            },
         )
 
     def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
@@ -528,6 +541,19 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         "resolution": "raw",
         "maximum_points": 1500,
         "points": [],
+        "metadata": {
+            "requested_start": "2026-08-15T11:00:00Z",
+            "requested_end": "2026-08-15T12:00:00Z",
+            "actual_start": None,
+            "actual_end": None,
+            "requested_resolution": "raw",
+            "actual_resolution": "raw",
+            "timezone": "UTC",
+            "point_count": 0,
+            "coverage_seconds": 0.0,
+            "gap_samples": 0,
+            "downsampled": False,
+        },
     }
     assert projection.history_calls == [
         (

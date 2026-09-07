@@ -22,6 +22,7 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
+from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 from vonk_control.telemetry_maintenance import TelemetryMaintenance, bucket_start
 
 NODE_A = "spk_" + "a" * 32
@@ -61,6 +62,7 @@ def _sample(
         network_transmit_bytes_per_second=None,
         gap_samples=0,
         details=TelemetryDetailsInput(),
+        metrics=telemetry_metrics(),
     )
 
 
@@ -171,6 +173,7 @@ def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
                 network_transmit_bytes_per_second=None,
                 gap_samples=0,
                 details={},
+                metrics=telemetry_metrics_document(),
             )
         )
     repository.record_batch(

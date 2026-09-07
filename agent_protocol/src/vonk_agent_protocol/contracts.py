@@ -1279,16 +1279,24 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
-    try:
-        document = json.loads(
-            (
-                importlib.resources.files("vonk_agent_protocol")
-                / "schemas"
-                / schema_name
-            ).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as error:
-        raise AgentProtocolError("packaged protocol schema is invalid") from error
+    if schema_name == "telemetry-report.schema.json":
+        # Telemetry is registered from the same Pydantic model used by the
+        # parser. The packaged JSON schema is an export artifact; runtime
+        # validation must use this deterministic model registry entry.
+        from .telemetry import TelemetryRequest
+
+        document = TelemetryRequest.model_json_schema()
+    else:
+        try:
+            document = json.loads(
+                (
+                    importlib.resources.files("vonk_agent_protocol")
+                    / "schemas"
+                    / schema_name
+                ).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            raise AgentProtocolError("packaged protocol schema is invalid") from error
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
 
 
@@ -1302,10 +1310,7 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
     if schema_name == "telemetry-report.schema.json":
         from .telemetry import TelemetryReport
 
-        # Telemetry's Pydantic graph is authoritative. The packaged JSON
-        # Schema is a derived interoperability artifact and must not be a
-        # second parser that can drift from the Rust/Controller contract.
-        return TelemetryReport.parse(raw)
+        parsers[schema_name] = TelemetryReport.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 

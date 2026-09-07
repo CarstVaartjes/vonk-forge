@@ -40,6 +40,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from telemetry_fixtures import telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -229,6 +230,7 @@ def _telemetry(
             "accelerator_name": "NVIDIA GB10",
             "accelerator_performance_state": "P0",
         },
+        metrics=telemetry_metrics_document(),
     )
 
 
@@ -525,6 +527,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                             "accelerator_name": "NVIDIA GB10",
                             "accelerator_performance_state": "P0",
                         },
+                        "metrics": telemetry_metrics_document(),
                     },
                 },
                 "installed": [],
@@ -760,6 +763,7 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         "received_at": NOW,
         "gap_samples": 0,
         "details": TelemetryDetails(),
+        "metrics": telemetry_metrics_document(),
     }
     with pytest.raises(ValidationError, match="memory_total_bytes"):
         TelemetryPoint(**{**point, "memory_total_bytes": 16 * 1024**4 + 1})
@@ -791,6 +795,7 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
             received_at=NOW,
             gap_samples=0,
             details=TelemetryDetails(),
+            metrics=telemetry_metrics_document(),
         )
 
 
@@ -1583,6 +1588,19 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
         "end": "2026-08-15T12:00:00Z",
         "resolution": "raw",
         "maximum_points": 2,
+        "metadata": {
+            "requested_start": "2026-08-15T11:00:00Z",
+            "requested_end": "2026-08-15T12:00:00Z",
+            "actual_start": "2026-08-15T11:40:00Z",
+            "actual_end": "2026-08-15T11:50:00Z",
+            "requested_resolution": "raw",
+            "actual_resolution": "raw",
+            "timezone": "UTC",
+            "point_count": 2,
+            "coverage_seconds": 600.0,
+            "gap_samples": 4,
+            "downsampled": False,
+        },
     }
     assert [
         (

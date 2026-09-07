@@ -21,9 +21,7 @@ def upgrade() -> None:
             server_default=sa.text("'{}'"),
         ),
     )
-    # Existing rollup rows predate the rich contract.  Keep them readable with
-    # explicit legacy provenance while every newly written row carries the
-    # complete series identity below.
+    # Every rollup row carries the current series identity and provenance.
     for name, column in (
         ("key", sa.Column("key", sa.String(length=96), nullable=True)),
         ("scope", sa.Column("scope", sa.String(length=16), nullable=True)),
@@ -41,7 +39,10 @@ def upgrade() -> None:
         (
             "source",
             sa.Column(
-                "source", sa.String(length=128), nullable=False, server_default="legacy"
+                "source",
+                sa.String(length=128),
+                nullable=False,
+                server_default="controller-derived",
             ),
         ),
         (

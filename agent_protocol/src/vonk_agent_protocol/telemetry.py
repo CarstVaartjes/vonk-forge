@@ -327,7 +327,7 @@ class TelemetrySample(TelemetryWireModel):
     network_transmit_bytes_per_second: float | None = Field(ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False)
     gap_samples: int = Field(ge=0, le=MAX_TELEMETRY_SCALAR_INTEGER)
     details: TelemetryDetails
-    metrics: TelemetryMetrics = Field(default_factory=lambda: empty_telemetry_metrics())
+    metrics: TelemetryMetrics
     _parse_observed_at = field_validator("observed_at", mode="before")(_rfc3339_datetime)
 
     @field_validator("boot_id")
@@ -387,10 +387,6 @@ class TelemetryRequest(TelemetryWireModel):
 TelemetryReport = TelemetryRequest
 
 
-def empty_telemetry_metrics() -> TelemetryMetrics:
-    return TelemetryMetrics(series=[], capabilities=[], runtimes=[], workloads=[], provenance=TelemetryProvenance(collector="legacy", collector_version="1"))
-
-
 __all__ = [
     "MAX_TELEMETRY_CAPACITY_BYTES",
     "MAX_TELEMETRY_RATE",
@@ -413,6 +409,5 @@ __all__ = [
     "TelemetrySupport",
     "TelemetryWorkload",
     "TelemetryWorkloadState",
-    "empty_telemetry_metrics",
     "validate_telemetry_scalar",
 ]

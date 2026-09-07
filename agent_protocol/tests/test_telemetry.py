@@ -7,8 +7,10 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     TelemetryReport,
     canonical_message,
+    schema_validator,
     validate_schema_message,
 )
+from vonk_agent_protocol.telemetry import TelemetryRequest
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 BOOT_ID = "00000000-0000-4000-8000-000000000001"
@@ -109,6 +111,12 @@ def test_rich_report_is_schema_validated_and_canonically_copied() -> None:
 
     raw["samples"][0]["sequence"] = 99  # type: ignore[index]
     assert parsed.samples[0].sequence == 0
+
+
+def test_telemetry_schema_validator_uses_the_registered_pydantic_model() -> None:
+    assert schema_validator("telemetry-report.schema.json").schema == (
+        TelemetryRequest.model_json_schema()
+    )
 
 
 def test_report_rejects_duplicate_or_out_of_order_samples() -> None:

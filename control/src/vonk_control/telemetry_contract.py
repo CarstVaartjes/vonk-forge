@@ -24,7 +24,6 @@ from vonk_agent_protocol.telemetry import (
     TelemetrySupport,
     TelemetryWorkload,
     TelemetryWorkloadState,
-    empty_telemetry_metrics,
 )
 from vonk_agent_protocol.wire_model import WireModel
 
@@ -49,5 +48,4 @@ __all__ = [
     "TelemetrySupport",
     "TelemetryWorkload",
     "TelemetryWorkloadState",
-    "empty_telemetry_metrics",
 ]

@@ -401,6 +401,17 @@ def telemetry_payload(
                     "accelerator_name": "NVIDIA GB10",
                     "accelerator_performance_state": "P0",
                 },
+                "metrics": {
+                    "schema_version": 2,
+                    "series": [],
+                    "capabilities": [],
+                    "runtimes": [],
+                    "workloads": [],
+                    "provenance": {
+                        "collector": "test",
+                        "collector_version": "1",
+                    },
+                },
             }
         ],
     }

@@ -40,6 +40,7 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleView,
 )
+from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a"  * 64
@@ -226,6 +227,7 @@ def _sample() -> TelemetrySampleView:
             accelerator_name="NVIDIA GB10",
             accelerator_performance_state="P0",
         ),
+        metrics=telemetry_metrics(),
     )
 
 
@@ -359,6 +361,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
             "received_at": "2026-08-15T11:59:59Z",
             "sequence": 3,
             "temperature_c": None,
+            "metrics": telemetry_metrics_document(),
         },
         "schema_version": 1,
     }
@@ -686,6 +689,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                 network_transmit_bytes_per_second=None,
                 gap_samples=0,
                 details={},
+                metrics=telemetry_metrics_document(),
             )
             for sequence, sample_id in enumerate(sample_ids)
         )
