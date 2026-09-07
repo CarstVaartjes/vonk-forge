@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
+from vonk_forge_contracts.model import ModelReference
 
 from .operation_contract import AvailabilityOperationFailure, OperationMemberProgress
 from .strict_json import StrictJSONModel
@@ -184,6 +185,30 @@ class ModelCacheOperationProgress(StrictModel):
         return self
 
 
+class ModelCacheDownloadResult(StrictModel):
+    schema_version: Literal[2]
+    artifact_set_sha256: Digest
+    coverage: Literal["complete"]
+
+
+class ModelCacheEvictionResult(StrictModel):
+    schema_version: Literal[2]
+    removed_entries: list[Digest]
+    reclaimed_bytes: int = Field(ge=0)
+
+
+ModelCacheOperationResult = ModelCacheDownloadResult | ModelCacheEvictionResult
+
+
+def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationResult:
+    """Validate the current result against the operation that produced it."""
+    if kind in {"download", "repair"}:
+        return ModelCacheDownloadResult.model_validate(value)
+    if kind == "evict":
+        return ModelCacheEvictionResult.model_validate(value)
+    raise ValueError(f"unknown model cache operation kind: {kind}")
+
+
 class ModelCacheOperationResponse(StrictModel):
     schema_version: Literal[2] = 2
     id: str = Field(pattern=UUID_PATTERN)
@@ -194,11 +219,17 @@ class ModelCacheOperationResponse(StrictModel):
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
     progress: ModelCacheOperationProgress
-    result: dict[str, object] | None = None
+    result: ModelCacheOperationResult | None = None
     failure: AvailabilityOperationFailure | None = None
     created_at: str
     updated_at: str
     completed_at: str | None
+
+    @model_validator(mode="after")
+    def result_matches_operation(self) -> ModelCacheOperationResponse:
+        if self.result is not None:
+            parse_model_cache_result(self.kind, self.result)
+        return self
 
 
 class ModelCacheOperationsResponse(StrictModel):
@@ -261,10 +292,10 @@ class ModelCacheUpdateResponse(StrictModel):
     artifact_set_sha256: Digest
     model_content_sha256: Digest | None
     latest_model_content_sha256: Digest | None
-    model_update_from: dict[str, object] | None = None
-    model_update_to: dict[str, object] | None = None
+    model_update_from: ModelReference | None = None
+    model_update_to: ModelReference | None = None
     model_update_ambiguous: bool = False
-    model_update_candidates: list[dict[str, object]] = Field(default_factory=list, max_length=16)
+    model_update_candidates: list[ModelReference] = Field(default_factory=list, max_length=16)
     recipe_revision_sha256: Digest | None
     latest_recipe_revision_sha256: Digest | None
     model_update_available: bool
