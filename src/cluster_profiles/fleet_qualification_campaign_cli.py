@@ -570,13 +570,9 @@ def _prepare_lanes(
         ledger = EvidenceLedger(lane.ledger)
         plan = build_plan(client, options, policy, fixtures)
         catalog = _object(plan.get("catalog"), f"lane {lane.name} plan catalog")
-        if (
-            catalog.get("repository") != manifest.authority.repository
-            or catalog.get("commit") != manifest.authority.commit
-        ):
+        if catalog.get("source") != "controller-library":
             raise QualificationError(
-                f"lane {lane.name} public catalog drifted from reviewed authority "
-                f"{manifest.authority.authority_id}"
+                f"lane {lane.name} plan did not come from the current Controller Library"
             )
         planned_keys = {
             str(item.get("key"))

@@ -627,11 +627,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if request.validate().is_err() || request.plan_digest != claim.authority_revision {
                 return failed("artifact distribution plan identity is invalid");
             }
-            let destination = self
-                .runtime
-                .data_root
-                .join("distribution")
-                .join(&request.plan_digest);
+            let destination = self.runtime.data_root.join("distribution");
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
             let progress_client = self.client.clone();
@@ -1341,16 +1337,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("local disk capacity changed after install admission");
                 }
-                if self
-                    .runtime
-                    .install(
-                        &spec,
-                        &request.installation_id.to_string(),
-                        &spec.identity.recipe_revision_sha256,
-                    )
-                    .is_err()
-                {
-                    return failed("recipe artifacts or container image could not be installed");
+                match self.runtime.install(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &spec.identity.recipe_revision_sha256,
+                ) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        let (stage, category) = error.safe_install_context();
+                        return failed_owned(format!(
+                            "recipe artifacts or container image could not be installed (stage={stage}; category={category})"
+                        ));
+                    }
                 }
                 let installed_bytes = self
                     .runtime
@@ -1774,13 +1772,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                if request.cleanup_model_version_sha256.is_some() {
-                    return failed("legacy model cleanup authority is not accepted");
-                }
-                let removed_model_bytes = self
-                    .runtime
-                    .uninstall(&installation_id, &request.recipe_content_sha256)
-                    .map(|()| 0);
+                let removed_model_bytes = match request.cleanup_model_content_sha256 {
+                    Some(model_content_sha256) => self.runtime.uninstall_with_model_cleanup(
+                        &installation_id,
+                        &request.recipe_content_sha256,
+                        &model_content_sha256,
+                    ),
+                    None => self
+                        .runtime
+                        .uninstall(&installation_id, &request.recipe_content_sha256)
+                        .map(|()| 0),
+                };
                 if removed_model_bytes.is_err() {
                     failed("installed recipe could not be safely removed")
                 } else {
@@ -1793,15 +1795,43 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                 }
             }
-            RecipeOperationRequest::ModelUninstall(request) => {
-                let _ = request;
-                failed("legacy model uninstall authority is not accepted")
+            RecipeOperationRequest::ModelCleanup(request) => {
+                let installations = request
+                    .installations
+                    .into_iter()
+                    .map(|installation| {
+                        (
+                            installation.installation_id.to_string(),
+                            installation.recipe_content_sha256,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                match self
+                    .runtime
+                    .uninstall_model(&installations, &request.model_content_sha256)
+                {
+                    Ok(removed_model_bytes) => ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "uninstalled_installations": installations.len(),
+                            "removed_model_bytes": removed_model_bytes,
+                        }),
+                    },
+                    Err(_) => failed("model dependencies could not be safely removed"),
+                }
             }
         }
     }
 }
 
 fn failed(reason: &'static str) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({"reason": reason}),
+    }
+}
+
+fn failed_owned(reason: String) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
         body: json!({"reason": reason}),
@@ -2576,6 +2606,112 @@ mod tests {
         );
         assert_eq!(result.body["error_code"], "artifact_distribution_failed");
         assert_eq!(result.body["status"], "failed");
+    }
+
+    #[tokio::test]
+    async fn controller_model_cleanup_payload_is_parsed_and_executed() {
+        let data = tempdir().unwrap();
+        let runtime_root = tempdir().unwrap();
+        let installation_id = "00000000-0000-4000-8000-000000000001";
+        let plan: Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        let model_content_sha256 = plan["artifacts"][0]["model"]["content_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let installation = data.path().join("installations").join(installation_id);
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        let recipe_content_sha256 = plan["identity"]["recipe_revision_sha256"].as_str().unwrap();
+        fs::write(
+            installation.join("recipe-content.sha256"),
+            recipe_content_sha256,
+        )
+        .unwrap();
+
+        let payload = json!({
+            "schema_version": 1,
+            "model_content_sha256": model_content_sha256,
+            "plan_digest": "b".repeat(64),
+            "installations": [{
+                "installation_id": installation_id,
+                "recipe_content_sha256": recipe_content_sha256,
+            }],
+        });
+        let claim = AgentClaim {
+            attempt: 1,
+            authority_revision: "b".repeat(64),
+            deadline: (Utc::now() + ChronoDuration::seconds(20))
+                .with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: NODE_ID.to_owned(),
+            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        };
+        let client = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
+        let runner = NoProcess;
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime_root.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+
+        let result = executor.execute(&claim, lease_deadline, cancellation).await;
+
+        assert_eq!(result.state, "succeeded");
+        assert_eq!(result.body["uninstalled_installations"], 1);
+        assert_eq!(result.body["removed_model_bytes"], 0);
+        assert!(!installation.exists());
+
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            installation.join("recipe-content.sha256"),
+            recipe_content_sha256,
+        )
+        .unwrap();
+        let uninstall_payload = json!({
+            "schema_version": 1,
+            "installation_id": installation_id,
+            "recipe_content_sha256": recipe_content_sha256,
+            "cleanup_model_content_sha256": model_content_sha256,
+            "plan_digest": "b".repeat(64),
+        });
+        let mut uninstall_claim = claim.clone();
+        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        uninstall_claim.payload_digest = hex_sha256(&canonical_json(&uninstall_payload).unwrap());
+        uninstall_claim.payload = uninstall_payload;
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(uninstall_claim.deadline);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+
+        let result = executor
+            .execute(&uninstall_claim, lease_deadline, cancellation)
+            .await;
+
+        assert_eq!(result.state, "succeeded");
+        assert_eq!(result.body["uninstalled"], true);
+        assert!(!installation.exists());
     }
 
     #[test]
