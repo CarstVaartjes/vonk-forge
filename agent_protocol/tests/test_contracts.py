@@ -767,3 +767,30 @@ def test_known_operation_result_uses_its_typed_result_model() -> None:
             {"stopped": "true"},
             state="succeeded",
         )
+
+
+def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
+    complete = {
+        "assignment_id": "00000000-0000-4000-8000-000000000004",
+        "model_artifact_set_sha256": "a" * 64,
+        "verified": True,
+        "verified_digests": ["b" * 64],
+        "verified_image_digest": "sha256:" + "c" * 64,
+        "imported_image_digest": "sha256:" + "c" * 64,
+        "verified_oci_layout_sha256": "d" * 64,
+        "oci_image_digest": "sha256:" + "c" * 64,
+        "downloaded_bytes": 1024,
+        "evidence_digest": "e" * 64,
+    }
+    parsed = validate_result_for_operation(
+        AgentOperation.ARTIFACT_DISTRIBUTION,
+        complete,
+        state="succeeded",
+    )
+    assert parsed is not None
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.ARTIFACT_DISTRIBUTION,
+            complete | {"downloaded_bytes": "1024"},
+            state="succeeded",
+        )

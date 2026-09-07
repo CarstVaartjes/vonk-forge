@@ -933,6 +933,7 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
+    AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
 }
 
 
@@ -1312,7 +1313,7 @@ def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
         )
         result_extensions["not"] = {"anyOf": result_shapes}
 
-    # Empty legacy Controller payload models are exact empty objects.
+    # Current empty payload operation models are exact empty objects.
     for name in (
         "ReleaseInstallPayload",
         "WorkloadPreparePayload",
