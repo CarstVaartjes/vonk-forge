@@ -112,6 +112,7 @@ DigestText = Annotated[
 
 
 class AgentOperation(StrEnum):
+    RUNTIME_PREFLIGHT = "runtime.preflight.v1"
     AGENT_UPGRADE = "agent.upgrade.v1"
     ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     RECIPE_BUILD = "recipe.build.v1"
@@ -796,8 +797,11 @@ from .recipe_operations import (
     RecipeUninstallPayload,
     RecipeUninstallResult,
 )
+from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
 
 AgentPayload = (
+    RuntimePreflightRequest
+    |
     AgentUpgradePayload
     | ArtifactDistributionPayload
     | RecipeBuildRequest
@@ -810,6 +814,8 @@ AgentPayload = (
     | RecipeModelCleanupPayload
 )
 AgentResultPayload = (
+    RuntimePreflightResult
+    |
     AgentInstallResult
     | RecipeStartResult
     | RecipeStopResult
@@ -823,6 +829,7 @@ AgentResultPayload = (
     | AgentUpgradeResult
 )
 PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.RUNTIME_PREFLIGHT: RuntimePreflightRequest,
     AgentOperation.AGENT_UPGRADE: AgentUpgradePayload,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
     AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
@@ -840,6 +847,7 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
 # payload registry so Controller ingress can resolve the stored operation and
 # validate the exact result graph before accepting it.
 RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.RUNTIME_PREFLIGHT: RuntimePreflightResult,
     AgentOperation.AGENT_UPGRADE: AgentUpgradeResult,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
     AgentOperation.RECIPE_INSTALL: AgentInstallResult,

@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
 BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
 EGRESS_BINARY = "vonk-build-egress"
+RUNTIME_PROBE_BINARY = "vonk-runtime-probe"
 ORAS_VERSION = "1.3.2"
 ARCHITECTURES = {
     "linux-arm64": {
@@ -987,6 +988,11 @@ def build(
             machine=int(spec["machine"]),
             require_static=True,
         )
+        binaries[RUNTIME_PROBE_BINARY] = read_release_binary(
+            binary_root / RUNTIME_PROBE_BINARY,
+            machine=int(spec["machine"]),
+            require_static=True,
+        )
     package_name = f"{PACKAGE}_{version}_{debian_architecture}.deb"
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-") as temporary:
@@ -1011,6 +1017,8 @@ def build(
                 binaries[EGRESS_BINARY],
                 0o555,
             )
+        if RUNTIME_PROBE_BINARY in binaries:
+            install_file(stage, "usr/lib/vonk-forge/vonk-runtime-probe", binaries[RUNTIME_PROBE_BINARY], 0o555)
         install_file(stage, "usr/lib/vonk-forge/oras", binaries["oras"], 0o555)
         install_file(
             stage,
