@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import RecipeOperationRequest
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
     AgentCertificate,
@@ -883,14 +885,14 @@ def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
 def test_claim_persists_authenticated_running_release_identity(service) -> None:
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    runtime_identity = {
-        "architecture": "linux-arm64",
-        "binary_digest": "c" * 64,
-        "build_digest": "sha256:" + "c" * 64,
-        "semantic_version": "1.2.3",
-        "self_test_passed": True,
-        "observation_receipt_public_key": "d" * 64,
-    }
+    runtime_identity = AgentRuntimeIdentity(
+        architecture="linux-arm64",
+        binary_digest="c" * 64,
+        build_digest="sha256:" + "c" * 64,
+        semantic_version="1.2.3",
+        self_test_passed=True,
+        observation_receipt_public_key="d" * 64,
+    )
 
     assert (
         claim_agent(
@@ -914,7 +916,9 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
             "observation_receipt_public_key": node.observation_receipt_public_key,
-        } == runtime_identity
+        } == runtime_identity.model_dump()
+        assert node.contact_observation_digest is not None
+        assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
 
 
 @pytest.mark.parametrize("architecture", ("linux-riscv64", True, 7))

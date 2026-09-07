@@ -393,7 +393,7 @@ class AgentJobService:
         lease_seconds: int,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity,
         hostname: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
@@ -586,7 +586,7 @@ class AgentJobService:
         certificate_serial: str,
         now: datetime,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity,
     ) -> None:
         if (
             capabilities is None
@@ -607,19 +607,19 @@ class AgentJobService:
             .limit(1)
         )
         if operation is None or (
-            runtime_identity.get("build_digest")
+            runtime_identity.build_digest
             != operation.payload.get("target_build_digest")
-            or runtime_identity.get("binary_digest")
+            or runtime_identity.binary_digest
             != operation.payload.get("target_binary_digest")
-            or runtime_identity.get("architecture")
+            or runtime_identity.architecture
             != operation.payload.get("architecture")
-            or runtime_identity.get("self_test_passed") is not True
+            or runtime_identity.self_test_passed is not True
         ):
             return
         evidence = {
-            "architecture": runtime_identity["architecture"],
-            "binary_digest": runtime_identity["binary_digest"],
-            "build_digest": runtime_identity["build_digest"],
+            "architecture": runtime_identity.architecture,
+            "binary_digest": runtime_identity.binary_digest,
+            "build_digest": runtime_identity.build_digest,
             "package_sha256": operation.payload["package_sha256"],
             "package_version": operation.payload["package_version"],
             "self_test_passed": True,
@@ -681,7 +681,7 @@ class AgentJobService:
     def _recipe_build_runtime_matches(
         session: Session,
         operation: StoredOperation,
-        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity,
     ) -> bool:
         build_id = operation.payload.get("build_id")
         build = (
@@ -692,9 +692,8 @@ class AgentJobService:
             build is not None
             and build.builder_node_id == operation.node_id
             and isinstance(report, dict)
-            and runtime_identity is not None
             and report.get("builder_binary_digest")
-            == runtime_identity.get("binary_digest")
+            == runtime_identity.binary_digest
             and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
         )
 
@@ -1279,7 +1278,7 @@ class AgentJobService:
     def _validate_agent_contract(
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: Mapping[str, object] | None,
+        runtime_identity: AgentRuntimeIdentity,
     ) -> None:
         if (
             protocol_version is None
@@ -1288,7 +1287,7 @@ class AgentJobService:
             or "agent.runtime.rust.v1" not in capabilities
         ):
             raise ValueError("Rust agent capability negotiation is incomplete")
-        receipt_key = runtime_identity.get("observation_receipt_public_key")
+        receipt_key = runtime_identity.observation_receipt_public_key
         receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
         if receipt_capable and not (
             isinstance(receipt_key, str) and len(receipt_key) == 64
@@ -1303,7 +1302,7 @@ class AgentJobService:
         now: datetime,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: AgentRuntimeIdentity | Mapping[str, object] | None,
+        runtime_identity: AgentRuntimeIdentity | None,
         hostname: str | None,
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
@@ -1323,7 +1322,7 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
-            receipt_key = runtime_identity.get("observation_receipt_public_key")
+            receipt_key = runtime_identity.observation_receipt_public_key
             if (
                 receipt_key is not None
                 and node.observation_receipt_public_key is not None
@@ -1334,16 +1333,14 @@ class AgentJobService:
                 isinstance(receipt_key, str)
                 and node.observation_receipt_public_key is None
             ):
-                # Nodes enrolled before signed run observations existed acquire
-                # their immutable receipt identity on the first authenticated
-                # contact from a capable upgraded agent.  Subsequent contacts
-                # remain change-protected by the check above.
+                # The first authenticated contact binds the immutable receipt
+                # identity; subsequent contacts remain change-protected above.
                 node.observation_receipt_public_key = receipt_key
-            node.architecture = str(runtime_identity["architecture"])
-            node.semantic_version = str(runtime_identity["semantic_version"])
-            node.build_digest = str(runtime_identity["build_digest"])
-            node.binary_digest = str(runtime_identity["binary_digest"])
-            node.self_test_passed = bool(runtime_identity["self_test_passed"])
+            node.architecture = runtime_identity.architecture
+            node.semantic_version = runtime_identity.semantic_version
+            node.build_digest = runtime_identity.build_digest
+            node.binary_digest = runtime_identity.binary_digest
+            node.self_test_passed = runtime_identity.self_test_passed
             node.contact_certificate_serial = certificate.serial
             node.contact_observation_digest = hashlib.sha256(
                 canonical_message(
