@@ -17,11 +17,12 @@ from vonk_agent_protocol import (
 from vonk_control.models import AgentOperation, Job, NodeArtifact, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import (
+    RecipeOperationService,
     _record_build_evidence,
     _record_image_import_evidence,
 )
 
-from .test_recipe_builds import setup
+from .test_recipe_builds import RecordingQueue, setup
 
 
 @pytest.fixture(scope="session")
@@ -59,9 +60,23 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
 
-    plan = RecipeBuildService(sessions, bundles=bundles).plan(
-        revision.id, node_id, now=now
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
     )
+    queued = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="test",
+        request_id=str(uuid.uuid4()),
+    )
+    assert queued.kind == "recipe.build.v1" and queued.state == "running"
 
     def probe(operation: str, payload: dict[str, object]) -> dict[str, object]:
         completed = subprocess.run(
