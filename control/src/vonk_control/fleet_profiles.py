@@ -26,6 +26,7 @@ from .fleet_profile_contract import (
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
+    FleetProfileIntendedConfiguration,
     FleetProfileLibraryPlacementContext,
     FleetProfileList,
     FleetProfileNode,
@@ -1735,23 +1736,59 @@ class FleetProfileService:
         request_key: str,
         actor: str,
         operation_kind: str,
+        retry_of_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
+            profile = session.get(FleetProfile, preview.profile_id, with_for_update=True)
+            if profile is None:
+                raise KeyError(preview.profile_id)
             existing = session.scalar(
                 select(FleetProfileApplication).where(
                     FleetProfileApplication.request_key == request_key
                 )
             )
             if existing is not None:
+                existing_progress = FleetProfileApplicationProgress.model_validate(existing.progress)
                 if (
-                    existing.plan_digest != preview.plan_digest
-                    or existing.profile_id != preview.profile_id
+                    existing.profile_id != preview.profile_id
+                    or existing_progress.retry_of_application_id != retry_of_application_id
+                    or (retry_of_application_id is None and existing.plan_digest != preview.plan_digest)
                 ):
                     raise FleetProfileConflict(
                         "Fleet profile request key was reused for another plan"
                     )
                 return self._application_view(existing)
+            intended_view = self._view(session, profile)
+            intended = FleetProfileIntendedConfiguration.model_validate(intended_view.model_dump(include={"profile_digest", "installation_policy", "scope", "assignments"}))
+            if intended.profile_digest != preview.profile_digest:
+                raise FleetProfileConflict("Fleet profile changed during application admission")
+            attempt = 1
+            placement = None
+            if retry_of_application_id is not None:
+                parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
+                if parent is None:
+                    raise KeyError(retry_of_application_id)
+                prior = FleetProfileApplicationProgress.model_validate(parent.progress)
+                if parent.state not in {"failed", "waiting-for-operator"}:
+                    raise FleetProfileConflict("Only failed or waiting applications can be retried")
+                if parent.profile_digest != intended.profile_digest:
+                    raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
+                applications = session.scalars(select(FleetProfileApplication).where(
+                    FleetProfileApplication.profile_id == parent.profile_id,
+                    FleetProfileApplication.id != parent.id,
+                ))
+                for other in applications:
+                    other_progress = FleetProfileApplicationProgress.model_validate(other.progress)
+                    if (other_progress.retry_of_application_id == parent.id
+                            or other.state in {"queued", "running"}
+                            or _aware(other.created_at) > _aware(parent.created_at)):
+                        raise FleetProfileConflict("Application has been superseded by another application")
+                if prior.intended_profile is None:
+                    raise FleetProfileConflict("Persisted application intent is unavailable")
+                intended = prior.intended_profile
+                attempt = prior.attempt + 1
+                placement = prior.library_placement
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,
@@ -1763,6 +1800,10 @@ class FleetProfileService:
                 current_operation_id=None,
                 progress=FleetProfileApplicationProgress(
                     operation_kind=operation_kind,
+                    attempt=attempt,
+                    retry_of_application_id=retry_of_application_id,
+                    intended_profile=intended,
+                    library_placement=placement,
                     completed_steps=0,
                     total_steps=len(preview.steps),
                 ).model_dump(mode="json"),
@@ -1778,6 +1819,80 @@ class FleetProfileService:
             session.add(row)
             session.flush()
             return self._application_view(row)
+
+    def retry_eligible(self, application_id: str) -> bool:
+        """Whether this receipt is still the current recoverable profile intent."""
+        with self._sessions() as session:
+            row = session.get(FleetProfileApplication, application_id)
+            return row is not None and self._retry_eligible(session, row)
+
+    def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
+        if row.state not in {"failed", "waiting-for-operator"}:
+            return False
+        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        profile = session.get(FleetProfile, row.profile_id)
+        if (progress.intended_profile is None or profile is None
+                or self._view(session, profile).profile_digest != row.profile_digest):
+            return False
+        others = session.scalars(select(FleetProfileApplication).where(
+            FleetProfileApplication.profile_id == row.profile_id,
+            FleetProfileApplication.id != row.id,
+        ))
+        return not any(
+            FleetProfileApplicationProgress.model_validate(other.progress).retry_of_application_id == row.id
+            or other.state in {"queued", "running"}
+            or _aware(other.created_at) > _aware(row.created_at)
+            for other in others
+        )
+
+    def retry(
+        self, application_id: str, *, request_key: str, actor: str
+    ) -> FleetProfileApplicationView:
+        """Persist a new reconciliation attempt, retaining the original receipt."""
+        with self._sessions() as session:
+            replay = session.scalar(select(FleetProfileApplication).where(
+                FleetProfileApplication.request_key == request_key
+            ))
+            if replay is not None:
+                progress = FleetProfileApplicationProgress.model_validate(replay.progress)
+                if progress.retry_of_application_id != application_id:
+                    raise FleetProfileConflict("Retry request key was reused for another application")
+                return self._application_view(replay)
+            parent = session.get(FleetProfileApplication, application_id)
+            if parent is None:
+                raise KeyError(application_id)
+            progress = FleetProfileApplicationProgress.model_validate(parent.progress)
+            if parent.state not in {"failed", "waiting-for-operator"}:
+                raise FleetProfileConflict("Only failed or waiting applications can be retried")
+            if progress.intended_profile is None:
+                raise FleetProfileConflict("Persisted application intent is unavailable")
+            if parent.current_operation_id is not None:
+                provider = self._switch_adapter if progress.child_source == "switch-adapter" else self._recipe_operations
+                if provider is None:
+                    raise FleetProfileConflict("Current child operation authority is unavailable")
+                try:
+                    child = provider.get(parent.current_operation_id)
+                except (KeyError, RuntimeError, ValueError) as error:
+                    raise FleetProfileConflict("Current child operation state must be reconciled before retry") from error
+                if child.state not in {"succeeded", "failed", "cancelled", "expired", "waiting-for-operator"}:
+                    raise FleetProfileConflict("Current child operation is still active")
+            profile_id = parent.profile_id
+            operation_kind = progress.operation_kind or "fleet-profile.apply"
+            profile_digest = parent.profile_digest
+        preview = (self.prepare_preview(profile_id)
+                   if operation_kind == "fleet-profile.prepare" else self.preview(profile_id))
+        if preview.profile_digest != profile_digest:
+            raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
+        if not preview.allowed:
+            raise FleetProfileConflict("Current Fleet state blocks application recovery")
+        # Attempt identity is distinct even when the remaining work is unchanged.
+        preview = preview.model_copy(update={"plan_digest": _digest({
+            "schema_version": 2, "reconciliation_digest": preview.plan_digest,
+            "retry_of_application_id": application_id, "request_key": request_key,
+        })})
+        return self._queue_application(preview, request_key=request_key, actor=actor,
+                                       operation_kind=operation_kind,
+                                       retry_of_application_id=application_id)
 
     def operation_provider(self) -> object:
         """Project profile applications into the global Activity provider contract."""
@@ -1828,7 +1943,7 @@ class FleetProfileService:
                     )
                 rows = tuple(session.scalars(statement.limit(limit)))
                 return OperationListPage(
-                    items=[self._operation_item(row) for row in rows],
+                    items=[self._operation_item(row, retry_available=self._retry_eligible(session, row)) for row in rows],
                     next_cursor=None,
                     total=total,
                 )
@@ -1838,7 +1953,7 @@ class FleetProfileService:
                 row = session.get(FleetProfileApplication, operation_id)
                 if row is None:
                     raise KeyError(operation_id)
-                return self._operation_item(row)
+                return self._operation_item(row, retry_available=self._retry_eligible(session, row))
 
         return OperationProvider(
             family="fleet-profile",
@@ -1875,7 +1990,7 @@ class FleetProfileService:
         return "final_verify"
 
     @classmethod
-    def _operation_item(cls, row: FleetProfileApplication) -> dict[str, object]:
+    def _operation_item(cls, row: FleetProfileApplication, *, retry_available: bool = False) -> dict[str, object]:
         """Build a schema-2 Activity row for inspect-only profile recovery.
 
         Profile applications currently have one durable resumable attempt; the
@@ -2021,6 +2136,7 @@ class FleetProfileService:
                 row.current_step += 1
             if row.current_step >= len(steps):
                 row.state = "succeeded"
+                row.status_reason = None
                 row.progress = FleetProfileApplicationProgress.model_validate({
                     **dict(row.progress),
                     "completed_steps": len(steps),
@@ -2068,7 +2184,7 @@ class FleetProfileService:
                 )
                 if failed is not None and failed.state in {"queued", "running"}:
                     failed.state = "failed"
-                    failed.status_reason = str(error)[:512]
+                    failed.status_reason = str(error)[:512] or "Profile operation could not be started"
                     failed.updated_at = _aware(self._clock())
             return True
         with self._sessions.begin() as session:
@@ -2642,6 +2758,8 @@ class FleetProfileService:
             profile_digest=row.profile_digest,
             plan_digest=row.plan_digest,
             state=row.state,
+            attempt=FleetProfileApplicationProgress.model_validate(row.progress).attempt,
+            retry_of_application_id=FleetProfileApplicationProgress.model_validate(row.progress).retry_of_application_id,
             current_step=row.current_step,
             total_steps=len(plan.steps),
             current_operation_id=row.current_operation_id,
@@ -2651,6 +2769,15 @@ class FleetProfileService:
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
         )
+
+    @staticmethod
+    def _intended_profile(application: FleetProfileApplication) -> FleetProfileIntendedConfiguration:
+        progress = FleetProfileApplicationProgress.model_validate(application.progress)
+        if progress.intended_profile is None:
+            raise FleetProfileConflict("Persisted application intent is unavailable")
+        if progress.intended_profile.profile_digest != application.profile_digest:
+            raise FleetProfileConflict("Persisted application intent digest is inconsistent")
+        return progress.intended_profile
 
     def _application_assignment(
         self, application_id: str, assignment_id: object
@@ -2665,7 +2792,7 @@ class FleetProfileService:
             return next(
                 (
                     item
-                    for item in self._view(session, profile).assignments
+                    for item in self._intended_profile(application).assignments
                     if item.id == assignment_id
                 ),
                 None,
@@ -2688,7 +2815,7 @@ class FleetProfileService:
             profile = session.get(FleetProfile, application.profile_id)
             if profile is None:
                 raise KeyError(application.profile_id)
-            assignments = self._view(session, profile).assignments
+            assignments = self._intended_profile(application).assignments
             return tuple(sorted(assignments, key=lambda item: item.id))
 
     def _assignment_context(

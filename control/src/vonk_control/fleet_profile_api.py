@@ -19,6 +19,7 @@ from .fleet_profile_contract import (
     FleetProfilePrepareRequest,
     FleetProfilePreview,
     FleetProfilePreviewRequest,
+    FleetProfileRetryRequest,
     FleetProfileStatusView,
     FleetProfileView,
 )
@@ -26,6 +27,7 @@ from .fleet_profiles import FleetProfileConflict
 from .operation_api import bounded_error_responses
 
 FLEET_PROFILE_OPERATION_IDS = {
+    ("post", "/api/v1/fleet-profile-applications/{application_id}/retry"): "retryFleetProfileApplication",
     ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
     ("post", "/api/v1/fleet-profiles"): "createFleetProfile",
     ("post", "/api/v1/fleet-profiles/capture-current"): (
@@ -475,6 +477,34 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=503, detail="Fleet profile application unavailable"
             ) from None
+
+
+    @app.post(
+        "/api/v1/fleet-profile-applications/{application_id}/retry",
+        response_model=FleetProfileApplicationView,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="retryFleetProfileApplication",
+    )
+    def retry_application(
+        request: Request,
+        application_id: Annotated[str, Path(pattern=_UUID)],
+        body: FleetProfileRetryRequest,
+        actor: Actor = authenticated,
+    ) -> FleetProfileApplicationView:
+        require_mutation(actor, "POST", "/api/v1/fleet-profile-applications/{application_id}/retry")
+        try:
+            result = service().retry(application_id, request_key=body.request_key, actor=actor.subject)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Application not found") from None
+        except FleetProfileConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(status_code=503, detail="Application recovery unavailable") from None
+        audit(request, actor, "fleet-profile.retry", (application_id, result.id))
+        return result
 
 
 __all__ = ["FLEET_PROFILE_OPERATION_IDS", "install_fleet_profile_routes"]

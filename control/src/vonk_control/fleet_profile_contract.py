@@ -407,9 +407,21 @@ class FleetProfileStepResult(_StrictModel):
     kind: Annotated[str, StringConstraints(min_length=1, max_length=80)] | None = None
     result: FleetProfileChildResult | None = None
 
+class FleetProfileIntendedConfiguration(_StrictModel):
+    """Immutable desired configuration captured when execution is admitted."""
+
+    profile_digest: Digest
+    installation_policy: Literal["keep-cached", "exact"]
+    scope: FleetProfileScope
+    assignments: list[FleetProfileAssignment] = Field(max_length=64)
+
+
 class FleetProfileApplicationProgress(_StrictModel):
     """Typed progress tree persisted with every profile application."""
 
+    attempt: int = Field(default=1, ge=1)
+    retry_of_application_id: UuidId | None = None
+    intended_profile: FleetProfileIntendedConfiguration | None = None
     operation_kind: Literal["fleet-profile.apply", "fleet-profile.prepare"] | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
@@ -498,6 +510,10 @@ class FleetProfileApplyRequest(_StrictModel):
     request_key: UuidId
 
 
+class FleetProfileRetryRequest(_StrictModel):
+    request_key: UuidId
+
+
 class FleetProfilePreviewRequest(_StrictModel):
     """Explicit empty body keeps CSRF-protected preview calls typed."""
 
@@ -508,6 +524,8 @@ class FleetProfileApplicationView(_StrictModel):
     profile_id: UuidId
     profile_digest: Digest
     plan_digest: Digest
+    attempt: int = Field(default=1, ge=1)
+    retry_of_application_id: UuidId | None = None
     state: Literal[
         "queued", "running", "waiting-for-operator", "succeeded", "failed", "cancelled"
     ]
@@ -519,6 +537,22 @@ class FleetProfileApplicationView(_StrictModel):
     result: FleetProfileApplicationResult | None
     created_at: datetime
     updated_at: datetime
+
+
+    @model_validator(mode="after")
+    def application_state_is_consistent(self) -> FleetProfileApplicationView:
+        if self.current_step > self.total_steps:
+            raise ValueError("application step exceeds total steps")
+        if self.attempt != self.progress.attempt or self.retry_of_application_id != self.progress.retry_of_application_id:
+            raise ValueError("application recovery identity disagrees with persisted progress")
+        if self.state == "succeeded":
+            if self.result is None or self.status_reason is not None:
+                raise ValueError("successful application requires a result and no failure reason")
+            if self.current_step != self.total_steps or self.result.completed_steps != self.total_steps:
+                raise ValueError("successful application must complete every planned step")
+        if self.state in {"failed", "waiting-for-operator"} and not (self.status_reason or "").strip():
+            raise ValueError("failed or waiting application requires a failure reason")
+        return self
 
 
 class FleetProfileStatusView(_StrictModel):
@@ -579,6 +613,7 @@ __all__ = [
     "FleetProfileChildResult",
     "FleetProfileDuplicateInput",
     "FleetProfileInput",
+    "FleetProfileIntendedConfiguration",
     "FleetProfileLibraryPlacementContext",
     "FleetProfileList",
     "FleetProfileNode",
@@ -589,6 +624,7 @@ __all__ = [
     "FleetProfilePreview",
     "FleetProfilePreviewRequest",
     "FleetProfileReason",
+    "FleetProfileRetryRequest",
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStatusView",
