@@ -1514,7 +1514,6 @@ def production_app() -> FastAPI:
         load_reconciliation_authority_input,
     )
     from .agent_upgrades import AgentUpgradeService
-    from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
     from .dashboard import DashboardService
@@ -1792,7 +1791,6 @@ def production_app() -> FastAPI:
         sessions,
         install_admission=InstallAdmissionService(
             sessions,
-            sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
