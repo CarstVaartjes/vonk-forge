@@ -247,8 +247,8 @@
           "expected_identity": {
             "$ref": "#/components/schemas/AgentUpgradeIdentityResponse"
           },
-          "legacy_generic_ambiguous": {
-            "title": "Legacy Generic Ambiguous",
+          "failure_details_unavailable": {
+            "title": "Failure Details Unavailable",
             "type": "boolean"
           },
           "next_action": {
@@ -287,7 +287,7 @@
         "required": [
           "expected_identity",
           "targets",
-          "legacy_generic_ambiguous"
+          "failure_details_unavailable"
         ],
         "title": "AgentUpgradeDiagnosticsResponse",
         "type": "object"
@@ -5467,6 +5467,19 @@
             ],
             "title": "Eta Seconds"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "members": {
             "anyOf": [
               {
@@ -5481,6 +5494,18 @@
               }
             ],
             "title": "Members"
+          },
+          "object_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Sha256"
           },
           "phase": {
             "maxLength": 80,
@@ -10924,6 +10949,19 @@
             ],
             "title": "Eta Seconds"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "members": {
             "items": {
               "$ref": "#/components/schemas/OperationMemberProgress"
@@ -10931,6 +10969,18 @@
             "maxItems": 1024,
             "title": "Members",
             "type": "array"
+          },
+          "object_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Sha256"
           },
           "phase": {
             "maxLength": 80,

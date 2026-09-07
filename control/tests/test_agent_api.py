@@ -240,7 +240,7 @@ class Authority(CertificateAuthority):
             b"certificate",
             b"chain",
             "issued-serial",
-            "issued-fingerprint",
+            "e" * 64,
             now,
             now + timedelta(days=1),
         )

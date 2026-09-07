@@ -12,7 +12,6 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -83,6 +82,8 @@ class OperationProgress(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
@@ -92,59 +93,6 @@ class OperationProgress(BaseModel):
     members: list[OperationMemberProgress] = Field(
         default_factory=list, max_length=1024
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_compact_wire_names(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        value = dict(value)
-        for key in (
-            "completed_bytes",
-            "bytes_done",
-            "bytes_completed",
-            "total_bytes",
-            "bytes_total",
-        ):
-            candidate = value.get(key)
-            if candidate is not None and (
-                not isinstance(candidate, int) or isinstance(candidate, bool)
-            ):
-                raise ValueError(f"{key} must be an integer")
-        for key in (
-            "bytes_per_second",
-            "rate_bytes_per_second",
-            "rate",
-            "eta_seconds",
-        ):
-            candidate = value.get(key)
-            if candidate is not None and (
-                not isinstance(candidate, (int, float))
-                or isinstance(candidate, bool)
-            ):
-                raise ValueError(f"{key} must be numeric")
-        for key in ("total_bytes_known", "total_unknown"):
-            if key in value and not isinstance(value[key], bool):
-                raise ValueError(f"{key} must be a boolean")
-        # Keep one canonical API vocabulary while accepting common agent names
-        # at the boundary during the rollout of this contract.
-        aliases = {
-            "bytes_done": "completed_bytes",
-            "bytes_completed": "completed_bytes",
-            "bytes_total": "total_bytes",
-            "rate_bytes_per_second": "bytes_per_second",
-            "rate": "bytes_per_second",
-        }
-        for source, target in aliases.items():
-            if target not in value and source in value:
-                value[target] = value[source]
-            value.pop(source, None)
-        if "total_unknown" in value and "total_bytes_known" not in value:
-            value["total_bytes_known"] = not value["total_unknown"]
-        value.pop("total_unknown", None)
-        if value.get("total_bytes") is not None and "total_bytes_known" not in value:
-            value["total_bytes_known"] = True
-        return value
 
     @model_validator(mode="after")
     def totals_are_explicit_and_consistent(self) -> OperationProgress:
@@ -281,7 +229,7 @@ class OperationRecovery(BaseModel):
 
 
 def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and canonicalize progress while retaining the legacy phase-only shape."""
+    """Validate and canonicalize progress while retaining phase-only updates."""
 
     parsed = OperationProgress.model_validate(value)
     document = parsed.model_dump(mode="json", exclude_none=True)
@@ -294,33 +242,13 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
     if (
         parsed.completed_bytes == 0
         and "completed_bytes" not in value
-        and "bytes_done" not in value
-        and "bytes_completed" not in value
     ):
         document.pop("completed_bytes", None)
-    extended = bool(
-        set(value)
-        & {
-            "completed_bytes",
-            "bytes_done",
-            "bytes_completed",
-            "total_bytes",
-            "bytes_total",
-            "bytes_per_second",
-            "rate_bytes_per_second",
-            "rate",
-            "eta_seconds",
-            "checkpoint",
-            "members",
-            "total_bytes_known",
-            "total_unknown",
-        }
-    )
+    extended = bool(set(value) & set(OperationProgress.model_fields) - {"phase"})
     if (
         parsed.total_bytes_known is False
         and not extended
         and "total_bytes_known" not in value
-        and "total_unknown" not in value
     ):
         document.pop("total_bytes_known", None)
     return document
@@ -335,9 +263,11 @@ def validate_progress_update(
     if not previous:
         return normalized
     old = normalize_operation_progress(previous)
-    # A legacy heartbeat may report only a new phase. Keep the last durable
+    # A phase-only heartbeat may report only a new phase. Keep the last durable
     # counters/checkpoint instead of treating omitted fields as zero/reset.
     for key in (
+        "kind",
+        "object_sha256",
         "completed_bytes",
         "total_bytes",
         "total_bytes_known",
