@@ -8,7 +8,6 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, Union
 from urllib.parse import urlsplit
-from uuid import UUID
 
 from pydantic import (
     Field,
@@ -37,6 +36,12 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 CONTENT_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+UUID4 = Annotated[
+    str,
+    Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    ),
+]
 
 
 def _duplicate_free_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -87,18 +92,6 @@ def _bounded_text(value: Any, *, name: str, maximum: int = 256) -> str:
     return value
 
 
-def _uuid4(value: Any, *, name: str) -> str:
-    if not isinstance(value, str):
-        raise AgentProtocolError(f"{name} must be a canonical UUIDv4")
-    try:
-        parsed = UUID(value)
-    except ValueError as error:
-        raise AgentProtocolError(f"{name} must be a canonical UUIDv4") from error
-    if parsed.version != 4 or str(parsed) != value:
-        raise AgentProtocolError(f"{name} must be a canonical UUIDv4")
-    return value
-
-
 def _sha256(value: Any, *, name: str, prefixed: bool) -> str:
     pattern = CONTENT_DIGEST if prefixed else SHA256
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
@@ -126,7 +119,7 @@ def _https_url(value: Any, *, name: str) -> str:
 
 class _HttpsSource(WireModel):
     provider: Literal["https"]
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
 
     @field_validator("url")
     @classmethod
@@ -143,7 +136,7 @@ class _OciSource(WireModel):
 
 class _GitSource(WireModel):
     provider: Literal["git"]
-    repository: str
+    repository: str = Field(min_length=1, max_length=2048)
     commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
     @field_validator("repository")
@@ -162,7 +155,7 @@ class _HuggingFaceSource(WireModel):
 
 class _IndexSource(WireModel):
     provider: Literal["python-index", "signed-http-index"]
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @field_validator("url")
@@ -314,7 +307,7 @@ class _PythonIndexIdentity(WireModel):
 
 class _SignedHttpIndexIdentity(WireModel):
     provider: Literal["signed-http-index"]
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @field_validator("url")
@@ -539,16 +532,9 @@ class PackageHelperOperation(StrEnum):
 
 
 class PackageHelperSignature(WireModel):
-    algorithm: str
+    algorithm: Literal["ed25519"]
     key_id: str
     value: str
-
-    @field_validator("algorithm")
-    @classmethod
-    def algorithm_is_ed25519(cls, value: str) -> str:
-        if value != "ed25519":
-            raise ValueError("package helper signature algorithm is invalid")
-        return value
 
     key_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     value: str = Field(pattern=r"^[0-9a-f]{128}$")
@@ -569,23 +555,18 @@ class PackageHelperSignature(WireModel):
 class PackageHelperGrantClaims(WireModel):
     schema_version: Literal[1]
     authority: Literal[PACKAGE_HELPER_AUTHORITY]
-    request_id: str
+    request_id: UUID4
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str
-    operation_id: str
+    job_id: UUID4
+    operation_id: UUID4
     attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str
+    fence: UUID4
     release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     generation: str
     operation: PackageHelperOperation
     request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     issued_at: int = Field(ge=1, le=2**63 - 1)
     expires_at: int = Field(ge=1, le=2**63 - 1)
-
-    @field_validator("request_id", "job_id", "operation_id", "fence")
-    @classmethod
-    def ids_are_uuid4(cls, value: str, info: Any) -> str:
-        return _uuid4(value, name=f"package helper {info.field_name}")
 
     generation: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
 
@@ -642,7 +623,7 @@ class PackageObjectReceiptClaims(WireModel):
     authority: Literal[PACKAGE_HELPER_AUTHORITY]
     object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     size: int = Field(ge=1, le=2**63 - 1)
-    relative_name: str
+    relative_name: str = Field(pattern=r"^objects/sha256/[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def relative_name_matches_digest(self) -> PackageObjectReceiptClaims:

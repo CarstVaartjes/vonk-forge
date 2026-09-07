@@ -465,6 +465,20 @@ def test_generated_schema_validates_synthetic_lock() -> None:
     )
     assert schema["additionalProperties"] is False
     assert not tuple(Draft202012Validator(schema).iter_errors(lock_document()))
+    component_schema = schema["$defs"]["ComponentDescriptor"]
+    assert component_schema["properties"]["name"]["pattern"].startswith("^[a-z0-9]")
+    assert component_schema["properties"]["kind"]["pattern"].startswith("^[a-z0-9]")
+    assert "media_type" in component_schema["required"]
+    assert component_schema["properties"]["platforms"]["items"]["pattern"]
+    for source_name, field_name in (
+        ("_HttpsSource", "url"),
+        ("_GitSource", "repository"),
+        ("_IndexSource", "url"),
+        ("_SignedHttpIndexIdentity", "url"),
+    ):
+        assert schema["$defs"][source_name]["properties"][field_name].get(
+            "maxLength", 2048
+        ) == 2048
     assert schema == workload_release_lock_schema()
     assert PackageReleaseLock.parse(lock_document()).family_id == (
         "future-synthetic-stack"
