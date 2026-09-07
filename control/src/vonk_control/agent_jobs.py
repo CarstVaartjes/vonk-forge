@@ -39,6 +39,7 @@ from .models import (
 )
 from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
+from .operation_progress import observe_progress, progress_write_due
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
@@ -541,6 +542,7 @@ class AgentJobService:
                 )
                 if active_mutation is not None:
                     return None
+            resumable_progress = None
             if operation.current_attempt:
                 previous = session.scalar(
                     select(AgentOperationAttempt)
@@ -550,6 +552,11 @@ class AgentJobService:
                     )
                     .with_for_update(of=AgentOperationAttempt)
                 )
+                if previous is not None and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                    resumable_progress = (
+                        None if previous.progress is None
+                        else validate_progress_update(None, previous.progress)
+                    )
                 if previous is not None and previous.state in {
                     "running",
                     "waiting-for-operator",
@@ -575,6 +582,7 @@ class AgentJobService:
                 lease_deadline=deadline,
                 agent_certificate_serial=certificate_serial,
                 state="running",
+                progress=resumable_progress,
             )
             session.add(attempt)
             return AgentClaim(
@@ -926,13 +934,24 @@ class AgentJobService:
                 progress=progress,
             )
             try:
-                attempt.progress = validate_progress_update(
-                    attempt.progress, message.progress
-                )
+                current_progress = dict(message.progress)
+                if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
+                    # A restarted transfer walks already durable objects again.
+                    # Replayed offsets are not loss of retained operation bytes.
+                    for key in ("completed_bytes", "completed_items"):
+                        if key in current_progress and key in attempt.progress:
+                            current_progress[key] = max(current_progress[key], attempt.progress[key])
+                validated = validate_progress_update(attempt.progress, current_progress)
+                write_progress = progress_write_due(attempt.progress, validated, _aware(now))
+                if write_progress:
+                    attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
             except (TypeError, ValueError) as error:
                 raise ValueError(f"operation progress is invalid: {error}") from error
-            attempt.lease_deadline = deadline
-            operation.updated_at = now
+            if write_progress:
+                attempt.lease_deadline = deadline
+                operation.updated_at = now
+            else:
+                deadline = _aware(attempt.lease_deadline)
             parent = session.get(Job, operation.parent_job_id)
             cancel_requested = bool(
                 parent is not None
@@ -946,7 +965,7 @@ class AgentJobService:
                 attempt=message.attempt,
                 fence=message.fence,
                 node_id=message.node_id,
-                deadline=message.deadline,
+                deadline=deadline,
                 cancel_requested=cancel_requested,
             )
 
@@ -1042,6 +1061,14 @@ class AgentJobService:
                     ) from error
             else:
                 message_result = _document(message.result)
+            if state == "succeeded" and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                # Final authoritative evidence closes a last sample that may
+                # have been coalesced immediately before result publication.
+                final_progress = {"phase": "completed", "completed_bytes": message_result["downloaded_bytes"]}
+                if attempt.progress and attempt.progress.get("total_items") is not None:
+                    final_progress["completed_items"] = attempt.progress["total_items"]
+                final_progress = validate_progress_update(attempt.progress, final_progress)
+                attempt.progress = observe_progress(attempt.progress, final_progress, _aware(now))
             attempt.result = message_result
             attempt.state = state
             operation.state = state

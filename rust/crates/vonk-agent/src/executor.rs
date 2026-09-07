@@ -256,6 +256,10 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
+    async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
+        self.client.set_progress_phase(claim.operation_id, phase);
+    }
+
     pub async fn report_exact_recipe_run_observations(
         &self,
     ) -> Result<usize, RecipeObservationError>
@@ -351,6 +355,16 @@ impl<R> RecipeExecutor<'_, R> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError> {
+        self.report_phase(
+            claim,
+            match action {
+                HostRuntimeAction::ImageImport => "extracting",
+                HostRuntimeAction::Start => "starting",
+                HostRuntimeAction::Stop => "stopping",
+                _ => "verifying",
+            },
+        )
+        .await;
         let request_root = self.runtime_root.join("runtime-requests");
         HostRuntimeBoundary {
             client: self.client,
@@ -659,6 +673,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if request.validate().is_err() || request.plan_digest != claim.authority_revision {
                 return failed("artifact distribution plan identity is invalid");
             }
+            self.report_phase(claim, "preparing").await;
             let destination = self.runtime.data_root.join("distribution");
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
@@ -669,6 +684,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 // Progress is a snapshot, not an event log. Coalesce fast
                 // transfer updates instead of accumulating an unbounded queue
                 // of heartbeat requests before image import can begin.
+                let mut completed_bytes = 0_u64;
+                let mut completed_items = 0_u64;
                 let mut cadence = tokio::time::interval(Duration::from_secs(1));
                 cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 while progress_receiver.changed().await.is_ok() {
@@ -676,6 +693,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let Some(item) = progress_receiver.borrow_and_update().clone() else {
                         continue;
                     };
+                    // Retries rescan durable objects from the beginning. Keep the
+                    // operation-wide high-water mark while those objects replay.
+                    progress_client.set_progress_phase(progress_claim.operation_id, item.phase);
+                    completed_bytes = completed_bytes.max(item.bytes);
+                    completed_items = completed_items.max(item.completed_items);
                     let progress = AgentProgress {
                         attempt: progress_claim.attempt,
                         deadline: *progress_deadline.borrow(),
@@ -684,10 +706,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         node_id: progress_claim.node_id.clone(),
                         operation_id: progress_claim.operation_id,
                         progress: json!({
-                            "phase": "copying",
+                            "phase": item.phase,
+                            "completed_items": completed_items,
+                            "total_items": item.total_items,
                             "object_sha256": item.object_sha256,
                             "kind": item.kind,
-                            "completed_bytes": item.bytes,
+                            "completed_bytes": completed_bytes,
                             "total_bytes": item.total_bytes,
                             "total_bytes_known": item.total_bytes.is_some(),
                         }),
@@ -786,6 +810,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         };
         match request {
             RecipeOperationRequest::Build(request) => {
+                self.report_phase(claim, "downloading").await;
                 let archive = match self
                     .client
                     .source_bundle(&request.source_bundle_sha256, request.source_bundle_bytes)
@@ -800,10 +825,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     runtime_root: self.runtime_root,
                     egress_binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 };
+                self.report_phase(claim, "building").await;
                 let cancelled = || *cancellation.borrow();
                 match builder.build_cancellable(&request, claim.operation_id, &archive, &cancelled)
                 {
                     Ok(evidence) => {
+                        self.report_phase(claim, "uploading").await;
                         if self
                             .client
                             .upload_recipe_image(
@@ -832,6 +859,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::ImageImport(request) => {
+                self.report_phase(claim, "downloading").await;
                 if self
                     .runtime
                     .ensure_disk_available(request.image_bytes)
@@ -885,6 +913,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     Err(_) => return failed("OCI image archive cache is invalid"),
                 };
+                self.report_phase(claim, "verifying").await;
                 match importer.verify(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(
@@ -932,6 +961,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::JobRun(request) => {
+                self.report_phase(claim, "preparing").await;
                 let started = Instant::now();
                 let installation_id = request.installation_id.to_string();
                 let job_scope = request.job_id.to_string();
@@ -1317,6 +1347,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Install(request) => {
+                self.report_phase(claim, "installing").await;
                 let inline_spec =
                     match parse_compiled_execution_plan(&request.compiled_execution_plan) {
                         Ok(spec) => spec,
@@ -1393,6 +1424,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Start(request) => {
+                self.report_phase(claim, "starting").await;
                 let installation_id = request.installation_id.to_string();
                 let spec = match parse_compiled_execution_plan(&request.compiled_execution_plan) {
                     Ok(spec) => spec,
@@ -1740,6 +1772,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Stop(request) => {
+                self.report_phase(claim, "stopping").await;
                 let run_id = request.run_id.to_string();
                 let plan = match self.runtime.prepare_stop(&run_id) {
                     Ok(plan) => plan,
@@ -1790,6 +1823,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Uninstall(request) => {
+                self.report_phase(claim, "uninstalling").await;
                 let installation_id = request.installation_id.to_string();
                 match self.runtime.recipe_digest_if_present(&installation_id) {
                     Ok(None) => {
@@ -1826,6 +1860,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::ModelCleanup(request) => {
+                self.report_phase(claim, "cleanup").await;
                 let installations = request
                     .installations
                     .into_iter()
@@ -2373,7 +2408,11 @@ async fn run_heartbeats<C: LoopClient>(
             progress: json!({"phase": "executing"}),
             schema_version: claim.schema_version,
         };
-        let directive = client.heartbeat(&progress).await?;
+        let directive = match client.heartbeat(&progress).await {
+            Ok(directive) => directive,
+            Err(error) if error.retryable() && Utc::now() < deadline => continue,
+            Err(error) => return Err(error.into()),
+        };
         state.apply_heartbeat(&progress, &directive)?;
         lease_deadline.send_replace(directive.deadline);
         deadline = directive.deadline;
@@ -2883,7 +2922,7 @@ mod tests {
 
         async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
             self.heartbeats.lock().unwrap().push(progress.clone());
-            if self.fail_heartbeat {
+            if self.fail_heartbeat && self.heartbeats.lock().unwrap().len() == 1 {
                 return Err(ClientError::Retryable);
             }
             Ok(AgentDirective {
@@ -3104,7 +3143,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn heartbeat_failure_leaves_a_durable_terminal_result_not_a_busy_attempt() {
+    async fn transient_heartbeat_failure_does_not_terminate_healthy_execution() {
         let directory = tempdir().unwrap();
         let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let client = RecordingClient {
@@ -3116,12 +3155,12 @@ mod tests {
         };
         let executor = HeartbeatGatedExecutor {
             heartbeats,
-            minimum: 1,
+            minimum: 2,
             observed_deadline: Arc::new(Mutex::new(None)),
         };
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
-        let error = run_once_with_heartbeat_interval(
+        run_once_with_heartbeat_interval(
             &client,
             &mut state,
             &executor,
@@ -3134,13 +3173,11 @@ mod tests {
             || Ok(()),
         )
         .await
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(
-            error,
-            super::LoopError::Client(ClientError::Retryable)
-        ));
-        assert_eq!(state.pending_results().unwrap().len(), 1);
+        assert!(client.heartbeats.lock().unwrap().len() >= 2);
+        assert_eq!(client.results.lock().unwrap().len(), 1);
+        assert!(state.pending_results().unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub mod operation_progress;
+pub use operation_progress::{
+    OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
@@ -715,6 +720,9 @@ impl AgentProgress {
         {
             return Err(ProtocolError::Identity("progress document"));
         }
+        let progress: OperationProgress = serde_json::from_value(self.progress.clone())
+            .map_err(|_| ProtocolError::Identity("operation progress"))?;
+        progress.validate()?;
         Ok(())
     }
 }
