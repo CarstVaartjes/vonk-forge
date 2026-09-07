@@ -23,7 +23,7 @@ function plan(overrides: Partial<LibraryModelDeletionPlan> = {}): LibraryModelDe
       {installation_ids: ["installation-chat"], installed_bytes: 60 * GIB, node_id: "node-beta", recipe_ids: ["recipe-chat"]},
     ],
     plan_digest: "plan-one",
-    shared_cache_policy: "Shared/global downloaded model caches remain installed; only selected installation copies are eligible for cleanup.",
+    shared_cache_policy: "retain-shared-download-cache",
     warnings: [],
     ...overrides,
   };
@@ -58,10 +58,10 @@ test("blocks model deletion while showing exact active runs and multi-Spark impa
 
   const dialog = await screen.findByRole("dialog", {name: "Remove Qwen 3 BF16 installation copies"});
   expect(within(dialog).getByText("1 recipe installation across 2 Sparks will have their copies removed.")).toBeVisible();
-  expect(within(dialog).getByText(/120 GiB of installation copies will be freed/)).toBeVisible();
+  expect(within(dialog).getByText(/120\.0 GiB of installation copies will be freed/)).toBeVisible();
   expect(within(dialog).getByRole("heading", {name: "1 active run blocks removing installation copies"})).toBeVisible();
   expect(within(dialog).getByText("model_delete.active_runs")).toBeVisible();
-  expect(within(dialog).getByText(/Shared\/global downloaded model caches remain installed/)).toBeVisible();
+  expect(within(dialog).getByText(/Shared and global downloaded model caches remain available/)).toBeVisible();
   expect(within(dialog).getByRole("button", {name: "Remove installation copies"})).toBeDisabled();
 });
 
