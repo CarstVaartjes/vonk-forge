@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import (
     AgentOperation,
     AgentProtocolError,
@@ -14,6 +20,7 @@ from .contracts import (
     _mapping,
     _uuid,
     _version,
+    canonical_message,
 )
 
 RECIPE_OPERATIONS = frozenset(
@@ -25,11 +32,130 @@ RECIPE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_MODEL_UNINSTALL,
     }
 )
+
+class _StrictPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+class RecipeInstallPayload(_StrictPayload):
+    schema_version: Literal[2]
+    installation_id: str
+    plan_digest: str
+    rank: int
+    role: str
+    expected_bytes: int
+    compiled_execution_plan: CompiledExecutionPlan
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def schema_version_is_strict(cls, value: object) -> object:
+        if type(value) is not int or value != 2:
+            raise ValueError("schema version is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def identity_matches(self) -> RecipeInstallPayload:
+        _uuid(self.installation_id, name="installation_id")
+        _digest(self.plan_digest, "plan_digest")
+        if self.rank < 0 or _ROLE.fullmatch(self.role) is None or not 0 <= self.expected_bytes <= 16 * 1024**4:
+            raise ValueError("install identity is invalid")
+        placement = self.compiled_execution_plan.runtime.placement
+        if (self.rank, self.role) != (placement.rank, placement.role):
+            raise ValueError("install placement does not match compiled plan")
+        return self
+
+class RecipeStartPayload(_StrictPayload):
+    schema_version: Literal[2]
+    run_id: str
+    installation_id: str
+    recipe_revision_id: str
+    recipe_content_sha256: str
+    mapping_id: str
+    mapping_generation: int
+    image_digest: str
+    plan_digest: str
+    alias: str
+    rank: int
+    role: str
+    port: int
+    reserved_memory_bytes: int
+    endpoint_address: str
+    world_size: int
+    compiled_execution_plan: CompiledExecutionPlan
+    local_address: str | None
+    master_address: str | None
+    master_port: int | None
+    phase: Literal["rank-launch", "collective-readiness"] | None = None
+    start_deadline: str | None = None
+    run_generation: int | None = None
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def schema_version_is_strict(cls, value: object) -> object:
+        if type(value) is not int or value != 2:
+            raise ValueError("schema version is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def placement_matches(self) -> RecipeStartPayload:
+        for key in ("run_id", "installation_id", "recipe_revision_id", "mapping_id"):
+            _uuid(getattr(self, key), name=key)
+        for key in ("plan_digest", "recipe_content_sha256"):
+            _digest(getattr(self, key), key)
+        if not _OCI_DIGEST.fullmatch(self.image_digest) or _ALIAS.fullmatch(self.alias) is None or _ROLE.fullmatch(self.role) is None:
+            raise ValueError("start identity is invalid")
+        if self.mapping_generation < 1 or self.rank < 0 or not 1024 <= self.port <= 65535 or not 1 <= self.reserved_memory_bytes <= 16 * 1024**4 or self.world_size < 1 or self.rank >= self.world_size:
+            raise ValueError("start placement is invalid")
+        placement = self.compiled_execution_plan.runtime.placement
+        if (self.rank, self.role, self.world_size) != (placement.rank, placement.role, placement.world_size):
+            raise ValueError("start placement does not match compiled plan")
+        if self.image_digest != self.compiled_execution_plan.runtime.image_digest:
+            raise ValueError("start image does not match compiled plan")
+        if self.recipe_content_sha256 != self.compiled_execution_plan.identity.recipe_revision_sha256:
+            raise ValueError("start recipe digest does not match compiled plan")
+        placement = self.compiled_execution_plan.runtime.placement
+        endpoint_matches = self.endpoint_address == placement.endpoint_address
+        if placement.endpoint_address is None and self.world_size > 1:
+            endpoint_matches = self.endpoint_address == self.local_address
+        if not endpoint_matches or self.port != placement.port or self.reserved_memory_bytes != placement.reserved_memory_bytes or self.local_address != placement.local_address or self.master_address != placement.master_address or self.master_port != placement.master_port:
+            raise ValueError("start placement does not match compiled plan")
+        for name, address in (
+            ("endpoint_address", self.endpoint_address),
+            ("local_address", self.local_address),
+            ("master_address", self.master_address),
+        ):
+            if address is None:
+                continue
+            parsed_address = ipaddress.ip_address(address)
+            if parsed_address.is_loopback or parsed_address.is_link_local or parsed_address.is_multicast or parsed_address.is_unspecified or str(parsed_address) != address:
+                raise ValueError(f"{name} is invalid")
+        if self.world_size == 1:
+            if self.rank != 0 or self.local_address is not None or self.master_address is not None or self.master_port is not None:
+                raise ValueError("single-node rendezvous is invalid")
+        elif self.local_address is None or self.master_address is None or self.master_port is None or self.master_port < 1024:
+            raise ValueError("distributed rendezvous is invalid")
+        if self.world_size == 1 and (
+            self.phase is not None
+            or self.start_deadline is not None
+            or self.run_generation is not None
+        ):
+            raise ValueError("single-node start phases are invalid")
+        if self.phase is not None:
+            try:
+                deadline = datetime.fromisoformat(self.start_deadline or "")
+            except ValueError as error:
+                raise ValueError("start deadline is invalid") from error
+            if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(deadline):
+                raise ValueError("start deadline must be UTC")
+        if self.phase is None and (self.start_deadline is not None or self.run_generation is not None):
+            raise ValueError("start phase binding is invalid")
+        if self.phase is not None and (self.start_deadline is None or self.run_generation is None or self.run_generation < 1):
+            raise ValueError("start phase binding is invalid")
+        return self
+
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _ALIAS = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?\Z")
 _ROLE = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
-
 
 def _digest(value: object, name: str) -> str:
     if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
@@ -72,68 +198,80 @@ class RecipeOperationRequest:
     local_address: str | None = None
     master_address: str | None = None
     master_port: int | None = None
-    cleanup_model_version_sha256: str | None = None
-    model_version_sha256: str | None = None
+    phase: str | None = None
+    start_deadline: str | None = None
+    run_generation: int | None = None
+    cleanup_model_content_sha256: str | None = None
+    model_content_sha256: str | None = None
     installations: tuple[tuple[str, str], ...] = ()
+    compiled_execution_plan: Mapping[str, Any] | None = None
 
     @classmethod
     def parse(cls, operation: AgentOperation, payload: Any) -> RecipeOperationRequest:
         if operation not in RECIPE_OPERATIONS:
             raise AgentProtocolError("recipe operation is not supported")
-        value = _mapping(payload)
-        common = {"schema_version", "plan_digest"}
+        value = json.loads(canonical_message(_mapping(payload)))
         if operation is AgentOperation.RECIPE_INSTALL:
-            required = common | {
-                "installation_id",
-                "recipe_revision_id",
-                "recipe_content_sha256",
-                "mapping_id",
-                "mapping_generation",
-                "recipe_build_id",
-                "image_digest",
-                "rank",
-                "role",
-                "expected_bytes",
-            }
-        elif operation is AgentOperation.RECIPE_START:
-            required = common | {
-                "run_id",
-                "installation_id",
-                "recipe_revision_id",
-                "recipe_content_sha256",
-                "mapping_id",
-                "mapping_generation",
-                "image_digest",
-                "alias",
-                "rank",
-                "role",
-                "port",
-                "reserved_memory_bytes",
-                "endpoint_address",
-                "world_size",
-                "local_address",
-                "master_address",
-                "master_port",
-            }
-        elif operation is AgentOperation.RECIPE_STOP:
+            try:
+                parsed = RecipeInstallPayload.model_validate(value)
+            except Exception as error:
+                raise AgentProtocolError("recipe install payload is invalid") from error
+            return cls(
+                operation=operation,
+                schema_version=2,
+                plan_digest=parsed.plan_digest,
+                installation_id=parsed.installation_id,
+                rank=parsed.rank,
+                role=parsed.role,
+                expected_bytes=parsed.expected_bytes,
+                compiled_execution_plan=parsed.compiled_execution_plan.to_mapping(),
+            )
+        if operation is AgentOperation.RECIPE_START:
+            try:
+                parsed = RecipeStartPayload.model_validate(value)
+            except Exception as error:
+                raise AgentProtocolError("recipe start payload is invalid") from error
+            return cls(
+                operation=operation,
+                schema_version=2,
+                plan_digest=parsed.plan_digest,
+                installation_id=parsed.installation_id,
+                recipe_revision_id=parsed.recipe_revision_id,
+                recipe_content_sha256=parsed.recipe_content_sha256,
+                mapping_id=parsed.mapping_id,
+                mapping_generation=parsed.mapping_generation,
+                image_digest=parsed.image_digest,
+                run_id=parsed.run_id,
+                alias=parsed.alias,
+                rank=parsed.rank,
+                role=parsed.role,
+                port=parsed.port,
+                reserved_memory_bytes=parsed.reserved_memory_bytes,
+                endpoint_address=parsed.endpoint_address,
+                world_size=parsed.world_size,
+                local_address=parsed.local_address,
+                master_address=parsed.master_address,
+                master_port=parsed.master_port,
+                phase=parsed.phase,
+                start_deadline=parsed.start_deadline,
+                run_generation=parsed.run_generation,
+                compiled_execution_plan=parsed.compiled_execution_plan.to_mapping(),
+            )
+        common = {"schema_version", "plan_digest"}
+        if operation is AgentOperation.RECIPE_STOP:
             required = common | {"run_id"}
         elif operation is AgentOperation.RECIPE_MODEL_UNINSTALL:
-            required = common | {"model_version_sha256", "installations"}
+            required = common | {"model_content_sha256", "installations"}
         else:
             required = common | {"installation_id", "recipe_content_sha256"}
-            if "cleanup_model_version_sha256" in value:
-                required.add("cleanup_model_version_sha256")
+            if "cleanup_model_content_sha256" in value:
+                required.add("cleanup_model_content_sha256")
         _fields(value, required=required)
         schema_version = _version(value["schema_version"])
         plan_digest = _digest(value["plan_digest"], "plan_digest")
         installation_id = (
             _uuid(value["installation_id"], name="installation_id")
             if "installation_id" in value
-            else None
-        )
-        recipe_revision_id = (
-            _uuid(value["recipe_revision_id"], name="recipe_revision_id")
-            if "recipe_revision_id" in value
             else None
         )
         recipe_digest = (
@@ -143,15 +281,15 @@ class RecipeOperationRequest:
         )
         cleanup_model_digest = (
             _digest(
-                value["cleanup_model_version_sha256"],
-                "cleanup_model_version_sha256",
+                value["cleanup_model_content_sha256"],
+                "cleanup_model_content_sha256",
             )
-            if value.get("cleanup_model_version_sha256") is not None
+            if value.get("cleanup_model_content_sha256") is not None
             else None
         )
         model_digest = (
-            _digest(value["model_version_sha256"], "model_version_sha256")
-            if "model_version_sha256" in value
+            _digest(value["model_content_sha256"], "model_content_sha256")
+            if "model_content_sha256" in value
             else None
         )
         installations: tuple[tuple[str, str], ...] = ()
@@ -186,147 +324,17 @@ class RecipeOperationRequest:
             if "expected_bytes" in value
             else None
         )
-        mapping_id = (
-            _uuid(value["mapping_id"], name="mapping_id")
-            if "mapping_id" in value
-            else None
-        )
-        mapping_generation = value.get("mapping_generation")
-        if "mapping_generation" in value and (
-            not isinstance(mapping_generation, int)
-            or isinstance(mapping_generation, bool)
-            or mapping_generation < 1
-        ):
-            raise AgentProtocolError("mapping generation is invalid")
-        recipe_build_id = (
-            _uuid(value["recipe_build_id"], name="recipe_build_id")
-            if "recipe_build_id" in value
-            else None
-        )
-        image_digest = value.get("image_digest")
-        if "image_digest" in value and (
-            not isinstance(image_digest, str)
-            or _OCI_DIGEST.fullmatch(image_digest) is None
-        ):
-            raise AgentProtocolError("image digest is invalid")
         run_id = _uuid(value["run_id"], name="run_id") if "run_id" in value else None
-        alias = value.get("alias")
-        rank = value.get("rank")
-        role = value.get("role")
-        port = value.get("port")
-        reserved_memory = value.get("reserved_memory_bytes")
-        endpoint_address = value.get("endpoint_address")
-        world_size = value.get("world_size")
-        local_address = value.get("local_address")
-        master_address = value.get("master_address")
-        master_port = value.get("master_port")
-        if operation is AgentOperation.RECIPE_INSTALL and (
-            not isinstance(rank, int)
-            or isinstance(rank, bool)
-            or rank < 0
-            or not isinstance(role, str)
-            or _ROLE.fullmatch(role) is None
-        ):
-            raise AgentProtocolError("recipe install placement is invalid")
-        if operation is AgentOperation.RECIPE_START:
-            if not isinstance(alias, str) or _ALIAS.fullmatch(alias) is None:
-                raise AgentProtocolError("recipe alias is invalid")
-            if (
-                not isinstance(rank, int)
-                or isinstance(rank, bool)
-                or rank < 0
-                or not isinstance(role, str)
-                or _ROLE.fullmatch(role) is None
-                or not isinstance(port, int)
-                or isinstance(port, bool)
-                or not 1024 <= port <= 65535
-            ):
-                raise AgentProtocolError("recipe start placement is invalid")
-            if (
-                not isinstance(world_size, int)
-                or isinstance(world_size, bool)
-                or not 1 <= world_size <= 2**32 - 1
-                or rank >= world_size
-            ):
-                raise AgentProtocolError("recipe start world size is invalid")
-            try:
-                address = ipaddress.ip_address(endpoint_address)
-            except (TypeError, ValueError) as error:
-                raise AgentProtocolError(
-                    "recipe endpoint address is invalid"
-                ) from error
-            if (
-                address.is_loopback
-                or address.is_link_local
-                or address.is_multicast
-                or address.is_unspecified
-                or str(address) != endpoint_address
-            ):
-                raise AgentProtocolError("recipe endpoint address is invalid")
-            if world_size == 1:
-                if (
-                    rank != 0
-                    or local_address is not None
-                    or master_address is not None
-                    or master_port is not None
-                ):
-                    raise AgentProtocolError("recipe single-node rendezvous is invalid")
-            else:
-                for candidate in (local_address, master_address):
-                    try:
-                        fabric = ipaddress.ip_address(candidate)
-                    except (TypeError, ValueError) as error:
-                        raise AgentProtocolError(
-                            "recipe fabric address is invalid"
-                        ) from error
-                    if (
-                        fabric.is_loopback
-                        or fabric.is_link_local
-                        or fabric.is_multicast
-                        or fabric.is_unspecified
-                        or str(fabric) != candidate
-                    ):
-                        raise AgentProtocolError("recipe fabric address is invalid")
-                if (
-                    not isinstance(master_port, int)
-                    or isinstance(master_port, bool)
-                    or not 1024 <= master_port <= 65535
-                ):
-                    raise AgentProtocolError("recipe fabric port is invalid")
-            reserved_memory = _bytes(
-                reserved_memory, "reserved_memory_bytes", positive=True
-            )
         return cls(
             operation=operation,
             schema_version=schema_version,
             plan_digest=plan_digest,
             installation_id=installation_id,
-            recipe_revision_id=recipe_revision_id,
             recipe_content_sha256=recipe_digest,
-            mapping_id=mapping_id,
-            mapping_generation=(
-                mapping_generation if isinstance(mapping_generation, int) else None
-            ),
-            recipe_build_id=recipe_build_id,
-            image_digest=image_digest if isinstance(image_digest, str) else None,
             expected_bytes=expected_bytes,
             run_id=run_id,
-            alias=alias if isinstance(alias, str) else None,
-            rank=rank if isinstance(rank, int) and not isinstance(rank, bool) else None,
-            role=role if isinstance(role, str) else None,
-            port=port if isinstance(port, int) and not isinstance(port, bool) else None,
-            reserved_memory_bytes=reserved_memory
-            if isinstance(reserved_memory, int)
-            else None,
-            endpoint_address=endpoint_address
-            if isinstance(endpoint_address, str)
-            else None,
-            world_size=world_size if isinstance(world_size, int) else None,
-            local_address=local_address if isinstance(local_address, str) else None,
-            master_address=master_address if isinstance(master_address, str) else None,
-            master_port=master_port if isinstance(master_port, int) else None,
-            cleanup_model_version_sha256=cleanup_model_digest,
-            model_version_sha256=model_digest,
+            cleanup_model_content_sha256=cleanup_model_digest,
+            model_content_sha256=model_digest,
             installations=installations,
         )
 

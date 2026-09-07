@@ -88,7 +88,7 @@ test("one Run action previews and applies the exact model and selected Spark gro
     schema_version: 2,
     generated_at: "2026-09-04T12:00:00Z",
     action: "run",
-    model_version_sha256: fullLibraryDetail.model_documents[0]!.selection.model.content_sha256,
+    model_content_sha256: fullLibraryDetail.model_documents[0]!.selection.model.content_sha256,
     recipe_revision_id: fullLibraryDetail.recipe.recipe_revision_id,
     recipe_content_sha256: recipeRevisionId,
     alias: "qwen-chat",
@@ -154,7 +154,7 @@ test("one Run action previews and applies the exact model and selected Spark gro
     fireEvent.click(screen.getAllByRole("button", {name: "Run"})[0]!);
     await Promise.resolve();
   });
-  expect(previewRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({schema_version: 2, model_version_sha256: fullLibraryDetail.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: recipeRevisionId, action: "run", spark_group: {nodes: [{node_id: nodeA, rank: 0, role: "leader", endpoint_owner: true}]}}));
+  expect(previewRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({schema_version: 2, model_content_sha256: fullLibraryDetail.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: recipeRevisionId, action: "run", spark_group: {nodes: [{node_id: nodeA, rank: 0, role: "leader", endpoint_owner: true}]}}));
   expect(screen.queryByRole("button", {name: "Review Load"})).not.toBeInTheDocument();
   expect(await screen.findByText("Copying model to Spark One")).toBeVisible();
   expect(applyRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({plan_digest: digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)}));

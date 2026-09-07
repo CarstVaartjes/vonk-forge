@@ -7,60 +7,30 @@ from vonk_agent_protocol import (
     RecipeOperationRequest,
 )
 
-INSTALL = {
-    "schema_version": 1,
-    "installation_id": "00000000-0000-4000-8000-000000000001",
-    "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-    "recipe_content_sha256": "a" * 64,
-    "mapping_id": "00000000-0000-4000-8000-000000000007",
-    "mapping_generation": 1,
-    "recipe_build_id": "00000000-0000-4000-8000-000000000008",
-    "image_digest": "sha256:" + "d" * 64,
-    "rank": 0,
-    "role": "entrypoint",
-    "plan_digest": "b" * 64,
-    "expected_bytes": 100,
-}
-START = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000003",
-    "installation_id": INSTALL["installation_id"],
-    "recipe_revision_id": INSTALL["recipe_revision_id"],
-    "recipe_content_sha256": "a" * 64,
-    "mapping_id": INSTALL["mapping_id"],
-    "mapping_generation": 1,
-    "image_digest": INSTALL["image_digest"],
-    "plan_digest": "c" * 64,
-    "alias": "qwen3",
-    "rank": 0,
-    "role": "entrypoint",
-    "port": 8000,
-    "reserved_memory_bytes": 200,
-    "endpoint_address": "192.168.1.211",
-    "world_size": 1,
-    "local_address": None,
-    "master_address": None,
-    "master_port": None,
-}
+INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
+RUN_ID = "00000000-0000-4000-8000-000000000003"
+RECIPE_DIGEST = "a" * 64
+PLAN_DIGEST = "b" * 64
 STOP = {
     "schema_version": 1,
-    "run_id": START["run_id"],
-    "plan_digest": START["plan_digest"],
+    "run_id": RUN_ID,
+    "plan_digest": PLAN_DIGEST,
 }
 UNINSTALL = {
     "schema_version": 1,
-    "installation_id": INSTALL["installation_id"],
-    "recipe_content_sha256": INSTALL["recipe_content_sha256"],
-    "plan_digest": INSTALL["plan_digest"],
+    "installation_id": INSTALLATION_ID,
+    "recipe_content_sha256": RECIPE_DIGEST,
+    "plan_digest": PLAN_DIGEST,
 }
+UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" * 64}
 MODEL_UNINSTALL = {
     "schema_version": 1,
-    "model_version_sha256": "f" * 64,
-    "plan_digest": INSTALL["plan_digest"],
+    "model_content_sha256": "f" * 64,
+    "plan_digest": PLAN_DIGEST,
     "installations": [
         {
-            "installation_id": INSTALL["installation_id"],
-            "recipe_content_sha256": INSTALL["recipe_content_sha256"],
+            "installation_id": INSTALLATION_ID,
+            "recipe_content_sha256": RECIPE_DIGEST,
         }
     ],
 }
@@ -86,10 +56,9 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
-        (AgentOperation.RECIPE_INSTALL, INSTALL),
-        (AgentOperation.RECIPE_START, START),
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
+        (AgentOperation.RECIPE_UNINSTALL, UNINSTALL_WITH_MODEL_CLEANUP),
         (AgentOperation.RECIPE_MODEL_UNINSTALL, MODEL_UNINSTALL),
     ],
 )
@@ -105,8 +74,6 @@ def test_recipe_operation_payloads_are_typed_and_digest_bound(
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
-        (AgentOperation.RECIPE_INSTALL, INSTALL | {"shell": "curl evil"}),
-        (AgentOperation.RECIPE_START, START | {"environment": {"TOKEN": "x"}}),
         (AgentOperation.RECIPE_STOP, STOP | {"plan_digest": "not-a-digest"}),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL | {"host_path": "/tmp"}),
     ],
@@ -116,57 +83,3 @@ def test_recipe_operations_reject_hacks_unknown_fields_and_weak_identity(
 ) -> None:
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(operation, payload)
-
-
-def test_recipe_start_accepts_tailnet_address_but_rejects_localhost() -> None:
-    request = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START | {"endpoint_address": "100.100.20.30"},
-    )
-    assert request.endpoint_address == "100.100.20.30"
-
-    with pytest.raises(AgentProtocolError, match="endpoint address"):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_START,
-            START | {"endpoint_address": "127.0.0.1"},
-        )
-
-
-def test_multinode_start_requires_explicit_direct_fabric_rendezvous() -> None:
-    request = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START
-        | {
-            "world_size": 2,
-            "local_address": "192.168.100.3",
-            "master_address": "192.168.100.2",
-            "master_port": 29500,
-            "rank": 1,
-            "role": "worker",
-        },
-    )
-    assert request.master_address == "192.168.100.2"
-
-    large = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START
-        | {
-            "world_size": 17,
-            "local_address": "192.168.100.3",
-            "master_address": "192.168.100.2",
-            "master_port": 29500,
-        },
-    )
-    assert large.world_size == 17
-
-    with pytest.raises(AgentProtocolError, match="fabric"):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_START,
-            START
-            | {
-                "world_size": 2,
-                "local_address": None,
-                "master_address": "192.168.100.2",
-                "master_port": 29500,
-            },
-        )

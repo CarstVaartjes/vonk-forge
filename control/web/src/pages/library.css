@@ -2384,7 +2384,7 @@
 }
 
 .library-model-family-heading small,
-.library-model-version header small,
+.library-model header small,
 .library-model-identity small,
 .library-profile-list button small,
 .library-profile-assignment header small,
@@ -2403,11 +2403,11 @@
   white-space: nowrap;
 }
 
-.library-model-version {
+.library-model {
   border-top: 1px solid var(--border);
 }
 
-.library-model-version > header {
+.library-model > header {
   align-items: center;
   display: flex;
   gap: 1rem;
@@ -2415,7 +2415,7 @@
   padding: 0.7rem 1rem 0.5rem;
 }
 
-.library-model-version h3 {
+.library-model h3 {
   font-size: 0.95rem;
   margin: 0;
 }
@@ -3606,11 +3606,11 @@
 
 /* Compact model hierarchy: a single linked version stays in the family row,
    while richer families retain their explicit version headings. */
-.library-model-version.is-flat {
+.library-model.is-flat {
   border-top: 0;
 }
 
-.library-model-version.is-flat .library-model-row {
+.library-model.is-flat .library-model-row {
   border-top: 0;
 }
 

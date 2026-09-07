@@ -5,6 +5,8 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -96,3 +98,18 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
     ).stdout.splitlines()
     selected = _module().select(diff, "pull_request")
     assert selected["rust"] is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/acceptance/recipe-library-revision.txt",
+        "scripts/tests/check_recipe_launch_contracts.py",
+        "scripts/tests/run_install_start_wire_bridge.py",
+        "config/execution-harnesses/vllm.json",
+        "src/cluster_profiles/compiler.py",
+        "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
+    ],
+)
+def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:
+    assert _module().select([path], "pull_request")["control"] is True

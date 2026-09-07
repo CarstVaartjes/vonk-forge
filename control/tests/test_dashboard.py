@@ -71,11 +71,10 @@ def test_dashboard_joins_registered_fleet_with_latest_observation(tmp_path) -> N
     assert {key: node[key] for key in ("id", "display_name", "hostname", "lifecycle", "healthy", "labels")} == {
         "id": "spk_00000000000000000000000000000001", "display_name": "Alpha", "hostname": "alpha", "lifecycle": "ready", "healthy": True, "labels": {"zone": "lab"},
     }
-    assert node["profile"] is None
-    assert fleet_response(result).nodes[0].profile is None
+    assert fleet_response(result).nodes[0].health_probe_stale is True
     assert "management" not in result["nodes"][0]
     assert node["probe_age_seconds"] == 301.0
-    assert node["stale"] is True
+    assert node["health_probe_stale"] is True
 
 
 def test_fleet_queries_only_latest_health_per_node(tmp_path) -> None:
@@ -238,7 +237,8 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     assert nodes["Active"]["healthy"] is None
     assert nodes["Active"]["probe_age_seconds"] is None
     assert nodes["Active"]["health_probe_stale"] is True
-    assert nodes["Active"]["stale"] is nodes["Active"]["health_probe_stale"]
+    assert "stale" not in nodes["Active"]
+    assert "profile" not in nodes["Active"]
     assert nodes["Active"]["inventory_capabilities"] == [
         "build.rootless-podman.v1",
         "recipe.operations.v1",
