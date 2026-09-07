@@ -187,7 +187,6 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         metrics=metrics,
         metrics_token="metrics-token-long",
     )
@@ -214,7 +213,6 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=lambda: fleet_state,
         metrics=metrics,
         metrics_token="metrics-token-long",
         metrics_refresh=lambda: refresh_fleet_metrics(metrics, fleet_state),

@@ -35,7 +35,7 @@ class Proposals:
 def test_admin_proposal_returns_canonical_patch_and_digest() -> None:
     codec = TokenCodec(b"k" * 32)
     app = create_app(
-        jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), fleet=lambda: {"nodes": []}, now=lambda: 10,
+        jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), now=lambda: 10,
         admin=AdminServices(authority=Repository(), proposals=Proposals(), changes=None),
     )
     client = TestClient(app)
@@ -60,7 +60,6 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
         jobs=Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         admin=AdminServices(authority=Repository(), proposals=Proposals(), changes=None),
     )
@@ -120,7 +119,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
 
 def test_authority_document_reads_require_authentication() -> None:
     codec = TokenCodec(b"k" * 32)
-    app = create_app(jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), fleet=dict, admin=AdminServices(Repository(), Proposals(), None))
+    app = create_app(jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), admin=AdminServices(Repository(), Proposals(), None))
     client = TestClient(app)
     assert client.get("/api/v1/authority", params={"revision": "a" * 64}).status_code == 401
 

@@ -65,7 +65,6 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
         jobs=_SchemaJobs(),
         tokens=TokenCodec(signing_key),
         audits=MemoryAuditStore(),
-        fleet=lambda: {"commit": "0" * 40, "nodes": []},
         browser_auth=(
             BrowserAuthService(
                 sessionmaker(),

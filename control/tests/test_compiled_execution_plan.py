@@ -870,7 +870,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

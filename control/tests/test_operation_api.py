@@ -152,14 +152,13 @@ class ProjectedFleet:
         )
 
 
-def _client(*, fleet=None, fleet_projection=None, operations=None, role="operator"):
+def _client(*, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=fleet or (lambda: {"authority_revision": COMMIT, "nodes": []}),
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
         admin=AdminServices(

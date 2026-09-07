@@ -162,7 +162,6 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         jobs=operations,
         tokens=codec,
         audits=audits,
-        fleet=lambda: projection.read().model_dump(mode="json"),
         fleet_projection=projection,
         library_projection=library_projection,
         now=lambda: int(now.timestamp()),

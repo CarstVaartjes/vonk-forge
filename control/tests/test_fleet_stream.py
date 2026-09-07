@@ -1007,7 +1007,6 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
         jobs=Jobs(),
         tokens=tokens,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"authority_revision": COMMIT, "nodes": []},
         fleet_projection=Projection(),
         fleet_stream=api_stream,
         now=lambda: 10,
