@@ -23,12 +23,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
+from pydantic import ConfigDict, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
 from .logging import redact_text
@@ -44,6 +47,7 @@ from .models import (
 )
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
+from .strict_json import StrictJSONModel
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
@@ -64,32 +68,6 @@ _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
-_ARTIFACT_MANIFEST_FIELDS = frozenset(
-    {
-        "key",
-        "id",
-        "path",
-        "kind",
-        "repository",
-        "source",
-        "revision",
-        "sha256",
-        "download_bytes",
-        "roles",
-        "model_content_sha256",
-    }
-)
-_ARTIFACT_SET_MANIFEST_FIELDS = frozenset(
-    {
-        "schema_version",
-        "source_policy",
-        "model_content_sha256",
-        "recipe_revision_sha256",
-        "model_definition_ref",
-        "model_content_digests",
-        "artifacts",
-    }
-)
 
 
 class ModelCacheError(RuntimeError):
@@ -124,6 +102,34 @@ class ModelCacheResolutionError(ModelCacheError):
 
 class ModelCacheStorageError(ModelCacheError):
     pass
+
+
+class _CacheManifestWireModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+class _ArtifactManifestWire(_CacheManifestWireModel):
+    key: str
+    id: str
+    path: str
+    kind: str
+    repository: str | None
+    source: str
+    revision: str | None
+    sha256: str
+    download_bytes: int
+    roles: list[str]
+    model_content_sha256: str | None
+
+
+class _ArtifactSetManifestWire(_CacheManifestWireModel):
+    schema_version: Literal[2]
+    source_policy: Literal["nas-first"]
+    model_content_sha256: str | None
+    recipe_revision_sha256: str | None
+    model_definition_ref: ModelReference | None
+    model_content_digests: list[str]
+    artifacts: list[_ArtifactManifestWire]
 
 
 _TERMINAL_FAILURE_MARKERS = (
@@ -289,44 +295,29 @@ class ArtifactSpec:
 
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
-        if set(value) != _ARTIFACT_MANIFEST_FIELDS:
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid",
-                "cache manifest artifact fields are invalid",
-            )
         try:
-            string_fields = ("key", "id", "path", "kind", "source", "sha256")
-            if any(type(value[field]) is not str for field in string_fields):
-                raise TypeError
-            if any(
-                value[field] is not None and type(value[field]) is not str
-                for field in ("repository", "revision", "model_content_sha256")
-            ):
-                raise TypeError
-            if type(value["download_bytes"]) is not int or value["download_bytes"] < 0:
-                raise TypeError
-            roles = value["roles"]
-            if type(roles) is not list or not all(
-                type(role) is str and role for role in roles
-            ):
-                raise TypeError
-            result = cls(
-                key=value["key"],
-                artifact_id=value["id"],
-                path=value["path"],
-                kind=value["kind"],
-                repository=value["repository"],
-                source=value["source"],
-                revision=value["revision"],
-                sha256=value["sha256"],
-                expected_bytes=value["download_bytes"],
-                roles=tuple(roles),
-                model_content_sha256=value["model_content_sha256"],
-            )
-        except (KeyError, TypeError, ValueError) as error:
+            wire = _ArtifactManifestWire.model_validate(value)
+        except ValidationError as error:
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid", "cache manifest artifact is invalid"
             ) from error
+        return cls._from_wire(wire)
+
+    @classmethod
+    def _from_wire(cls, wire: _ArtifactManifestWire) -> ArtifactSpec:
+        result = cls(
+            key=wire.key,
+            artifact_id=wire.id,
+            path=wire.path,
+            kind=wire.kind,
+            repository=wire.repository,
+            source=wire.source,
+            revision=wire.revision,
+            sha256=wire.sha256,
+            expected_bytes=wire.download_bytes,
+            roles=tuple(wire.roles),
+            model_content_sha256=wire.model_content_sha256,
+        )
         _validate_artifact(result)
         return result
 
@@ -337,7 +328,7 @@ class ArtifactSetManifest:
     recipe_revision_sha256: str | None
     model_content_digests: tuple[str, ...]
     artifacts: tuple[ArtifactSpec, ...]
-    model_definition_ref: Mapping[str, object] | None = None
+    model_definition_ref: ModelReference | None = None
 
     def document(self) -> dict[str, object]:
         return {
@@ -348,7 +339,7 @@ class ArtifactSetManifest:
             "model_definition_ref": (
                 None
                 if self.model_definition_ref is None
-                else dict(self.model_definition_ref)
+                else self.model_definition_ref.model_dump(mode="json")
             ),
             "model_content_digests": list(self.model_content_digests),
             "artifacts": [item.identity() for item in self.artifacts],
@@ -375,52 +366,34 @@ class ArtifactSetManifest:
 
     @classmethod
     def from_document(cls, value: Mapping[str, object]) -> ArtifactSetManifest:
-        if value.get("schema_version") != SCHEMA_VERSION:
-            raise ModelCacheResolutionError(
-                "model_cache.schema_unsupported", "cache manifest schema is unsupported"
+        try:
+            wire = _ArtifactSetManifestWire.model_validate(value)
+        except ValidationError as error:
+            code = (
+                "model_cache.schema_unsupported"
+                if any(
+                    issue.get("loc") == ("schema_version",)
+                    for issue in error.errors()
+                )
+                else "model_cache.manifest_invalid"
             )
-        if set(value) != _ARTIFACT_SET_MANIFEST_FIELDS:
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid",
-                "cache manifest fields are invalid",
+            detail = (
+                "cache manifest schema is unsupported"
+                if code == "model_cache.schema_unsupported"
+                else "cache manifest shape is invalid"
             )
-        raw_artifacts = value.get("artifacts")
-        raw_model_content_digests = value["model_content_digests"]
-        if (
-            type(value["schema_version"]) is not int
-            or type(value["source_policy"]) is not str
-            or value["source_policy"] != SOURCE_POLICY
-            or type(raw_artifacts) is not list
-            or type(raw_model_content_digests) is not list
-            or not all(type(item) is str for item in raw_model_content_digests)
-            or (
-                value["model_definition_ref"] is not None
-                and not isinstance(value["model_definition_ref"], Mapping)
-            )
-            or any(
-                value[field] is not None and type(value[field]) is not str
-                for field in ("model_content_sha256", "recipe_revision_sha256")
-            )
-            or any(not isinstance(item, Mapping) for item in raw_artifacts)
-        ):
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid", "cache manifest shape is invalid"
-            )
-        artifacts = tuple(
-            ArtifactSpec.from_manifest(item) for item in raw_artifacts
-        )
+            raise ModelCacheResolutionError(code, detail) from error
         result = cls(
-            model_content_sha256=_optional_digest(value.get("model_content_sha256")),
-            recipe_revision_sha256=_optional_digest(
-                value.get("recipe_revision_sha256")
+            model_content_sha256=_optional_digest(wire.model_content_sha256),
+            recipe_revision_sha256=_optional_digest(wire.recipe_revision_sha256),
+            model_content_digests=tuple(wire.model_content_digests),
+            artifacts=tuple(
+                sorted(
+                    (ArtifactSpec._from_wire(item) for item in wire.artifacts),
+                    key=lambda item: item.key,
+                )
             ),
-            model_content_digests=tuple(raw_model_content_digests),
-            artifacts=tuple(sorted(artifacts, key=lambda item: item.key)),
-            model_definition_ref=(
-                value.get("model_definition_ref")
-                if isinstance(value.get("model_definition_ref"), Mapping)
-                else None
-            ),
+            model_definition_ref=wire.model_definition_ref,
         )
         _validate_manifest(result)
         return result
@@ -1052,16 +1025,14 @@ class ModelCacheService:
             for digest in requested_model_digests:
                 self._collect_model_definitions(session, digest, model_rows)
             specs: list[ArtifactSpec] = []
-            model_ref: Mapping[str, object] | None = None
+            model_ref: ModelReference | None = None
             for digest, row in sorted(model_rows.items()):
                 if digest == model_digest:
-                    model_ref = {
-                        "kind": "model",
-                        "publisher": row.publisher,
-                        "slug": row.slug,
-                        "content_sha256": digest,
-                        "artifact_key": row.artifact_key,
-                    }
+                    model_ref = ModelReference(
+                        publisher=row.publisher,
+                        slug=row.slug,
+                        content_sha256=digest,
+                    )
                 raw_artifacts = _canonical_model_artifacts(row)
                 selected_ids = _recipe_model_file_ids(recipe_document, digest)
                 for raw in raw_artifacts:
@@ -1159,10 +1130,6 @@ class ModelCacheService:
         try:
             definition = ModelDefinition.model_validate(row.document)
             rows[digest] = row
-            if len(rows) > _MAX_ARTIFACTS:
-                raise ModelCacheResolutionError(
-                    "model_cache.dependency_count", "model dependency set is too large"
-                )
             for dependency in definition.dependencies:
                 self._collect_model_definitions(
                     session,
@@ -4235,24 +4202,23 @@ class ModelCacheService:
         session: Session, manifest: ArtifactSetManifest
     ) -> tuple[CatalogDocumentRevision | None, list[CatalogDocumentRevision]]:
         ref = manifest.model_definition_ref
-        if not isinstance(ref, Mapping):
+        if ref is None:
             return None, []
-        current_digest = ref.get("content_sha256")
+        current_digest = ref.content_sha256
         current = None
-        if isinstance(current_digest, str):
-            current = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "model",
-                    CatalogDocumentRevision.content_digest == current_digest,
-                    CatalogDocumentRevision.state == "active",
-                )
+        current = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.content_digest == current_digest,
+                CatalogDocumentRevision.state == "active",
             )
+        )
         if current is None:
             current = session.scalar(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == "model",
-                    CatalogDocumentRevision.publisher == ref.get("publisher"),
-                    CatalogDocumentRevision.slug == ref.get("slug"),
+                    CatalogDocumentRevision.publisher == ref.publisher,
+                    CatalogDocumentRevision.slug == ref.slug,
                     CatalogDocumentRevision.state == "active",
                 ).order_by(CatalogDocumentRevision.revision_number.asc())
             )
