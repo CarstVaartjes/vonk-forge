@@ -132,6 +132,28 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
 
 
+def _strict_json_datetime(value: object) -> object:
+    """Decode the JSON datetime representation before strict validation.
+
+    FastAPI hands Pydantic an already-decoded Python mapping, whereas
+    ``model_validate_json(..., strict=True)`` still accepts ISO datetime text.
+    Decode that one documented wire representation explicitly so strict route
+    models behave the same in both entry points.
+    """
+
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("observed time must be an RFC 3339 string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("observed time must be an RFC 3339 string") from error
+    if "T" not in value and "t" not in value:
+        raise ValueError("observed time must be an RFC 3339 string")
+    return parsed
+
+
 def _runtime_image_receipt_matches(
     runtime_image: Mapping[str, object],
     identity: Mapping[str, object],
@@ -284,7 +306,7 @@ class EnrollmentRateLimiter:
 
 
 class GrantRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
     purpose: Literal["new-node", "re-enroll"] = "new-node"
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
@@ -297,7 +319,7 @@ class GrantRequest(BaseModel):
 
 
 class EnrollmentSubmitRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     grant_token: str = Field(min_length=43, max_length=64)
     csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
     evidence: dict[str, str] = Field(min_length=6, max_length=_MAX_EVIDENCE_FIELDS)
@@ -333,7 +355,7 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
 
 
 class EnrollmentGrantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     expires_at: str = Field(min_length=1, max_length=64)
     purpose: Literal["new-node", "re-enroll"]
@@ -350,7 +372,7 @@ class EnrollmentGrantResponse(BaseModel):
 
 
 class EnrollmentBootstrapResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -363,7 +385,7 @@ class EnrollmentBootstrapResponse(BaseModel):
 
 
 class EnrollmentSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     state: str = Field(min_length=1, max_length=32)
@@ -378,13 +400,13 @@ class EnrollmentSummary(BaseModel):
 
 
 class EnrollmentListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     enrollments: list[EnrollmentSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=128)
 
 
 class AgentRuntimeIdentityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -412,7 +434,7 @@ class AgentRuntimeIdentityRequest(BaseModel):
 
 
 class ClaimRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     lease_seconds: int = Field(default=30, ge=1, le=300, strict=True)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     hostname: str | None = Field(
@@ -431,7 +453,7 @@ class ClaimRequest(BaseModel):
 
 
 class AgentUpgradePackageRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(ge=1, le=1024**3, strict=True)
     package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -444,7 +466,7 @@ class AgentUpgradePackageRequest(BaseModel):
 
 
 class AgentRepairManifestRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[2]
     kind: Literal["agent-upgrade-repair"]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -453,7 +475,7 @@ class AgentRepairManifestRequest(BaseModel):
 
 
 class AgentUpgradePreviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
     package: AgentUpgradePackageRequest | None = None
     repair_manifest: AgentRepairManifestRequest | None = None
@@ -465,7 +487,7 @@ class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
 
 
 class AgentUpgradePreviewResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     node_ids: list[str] = Field(max_length=64)
     package: AgentUpgradePackageRequest
@@ -475,7 +497,7 @@ class AgentUpgradePreviewResponse(BaseModel):
 
 
 class AgentUpgradeApplyResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=32)
 
@@ -537,17 +559,17 @@ class PackageHelperGrantRequest(BaseModel):
 
 
 class AgentGrantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     grant: dict[str, object]
 
 
 class PackageHelperReceiptsResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[dict[str, object]]
 
 
 class RecipeRunObservationGrantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     grant: dict[str, object]
@@ -605,7 +627,7 @@ def _agent_upgrade_request_material(
 
 
 class InventoryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observed_at: datetime
     disk_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
@@ -623,6 +645,11 @@ class InventoryRequest(BaseModel):
     )
     nvidia_driver_version: str = Field(min_length=1, max_length=256)
     container_runtime_version: str = Field(min_length=1, max_length=256)
+
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
 
     @model_validator(mode="after")
     def internally_consistent(self) -> InventoryRequest:
@@ -642,7 +669,7 @@ class InventoryRequest(BaseModel):
 
 
 class RecipeRunObservationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     run_id: str = Field(
         pattern=(
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -653,7 +680,7 @@ class RecipeRunObservationRequest(BaseModel):
 
 
 class RecipeRunObservationIdentityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     run_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
@@ -704,6 +731,11 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
     grant: dict[str, object]
     helper_receipt: dict[str, object]
 
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
+
     @field_validator("observed_at")
     @classmethod
     def aware_observed_at(cls, value: datetime) -> datetime:
@@ -725,12 +757,17 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
 
 
 class RecipeRunObservationsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1, 2]
     observed_at: datetime
     runs: list[RecipeRunObservationRequest | RecipeRunExactObservationRequest] = Field(
         max_length=64
     )
+
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
 
     @model_validator(mode="after")
     def unique_runs(self) -> RecipeRunObservationsRequest:
@@ -749,7 +786,7 @@ class RecipeRunObservationsRequest(BaseModel):
 
 
 class TelemetryDetailsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
     accelerator_performance_state: str | None = Field(
         default=None, min_length=1, max_length=32
@@ -757,7 +794,7 @@ class TelemetryDetailsRequest(BaseModel):
 
 
 class TelemetrySampleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     boot_id: str = Field(
         pattern=(
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
@@ -822,12 +859,7 @@ class TelemetrySampleRequest(BaseModel):
     @field_validator("observed_at", mode="before")
     @classmethod
     def rfc3339_observed_at(cls, value: object) -> object:
-        if not isinstance(value, str):
-            # Pydantic turns ValueError into the stable request validation response.
-            raise ValueError(  # noqa: TRY004
-                "telemetry observed time must be an RFC 3339 string"
-            )
-        return value
+        return _strict_json_datetime(value)
 
     @model_validator(mode="after")
     def internally_consistent(self) -> TelemetrySampleRequest:
@@ -846,7 +878,7 @@ class TelemetrySampleRequest(BaseModel):
 
 
 class TelemetryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
 
@@ -875,13 +907,13 @@ class TelemetryRequest(BaseModel):
 
 
 class RenewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
 
 
 class ActivateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     generation: int = Field(ge=1)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
 
