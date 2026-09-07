@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 PROBES = {
-    "VONK_INSTALL_START_WIRE_PROBE": "install_start_wire_probe",
-    "VONK_HEARTBEAT_WIRE_PROBE": "heartbeat_wire_probe",
-    "VONK_ENROLLMENT_WIRE_PROBE": "enrollment_wire_probe",
+    "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
+    "VONK_HEARTBEAT_WIRE_PROBE": ("vonk-agent", "heartbeat_wire_probe"),
+    "VONK_ENROLLMENT_WIRE_PROBE": ("vonk-agent", "enrollment_wire_probe"),
 }
 
 
@@ -32,21 +32,25 @@ def main() -> int:
     probe_directory = args.probe_directory or target_root / "debug" / "examples"
     if not probe_directory.is_absolute():
         probe_directory = repository / probe_directory
-    missing = [name for key, name in PROBES.items() if key not in environment]
-    if missing and args.probe_directory is None:
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "--package",
-                "vonk-agent",
-                *[argument for name in missing for argument in ("--example", name)],
-            ],
-            cwd=repository,
-            check=True,
-        )
-    for key, name in PROBES.items():
+    if args.probe_directory is None:
+        packages: dict[str, list[str]] = {}
+        for key, (package, name) in PROBES.items():
+            if key not in environment:
+                packages.setdefault(package, []).append(name)
+        for package, names in packages.items():
+            subprocess.run(
+                [
+                    "cargo",
+                    "build",
+                    "--locked",
+                    "--package",
+                    package,
+                    *[argument for name in names for argument in ("--example", name)],
+                ],
+                cwd=repository,
+                check=True,
+            )
+    for key, (_, name) in PROBES.items():
         probe = Path(environment.get(key, probe_directory / name))
         if not probe.is_absolute():
             probe = repository / probe

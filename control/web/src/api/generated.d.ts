@@ -1802,8 +1802,8 @@ export interface components {
         /** AgentUpgradeDiagnosticsResponse */
         AgentUpgradeDiagnosticsResponse: {
             expected_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
-            /** Legacy Generic Ambiguous */
-            legacy_generic_ambiguous: boolean;
+            /** Failure Details Unavailable */
+            failure_details_unavailable: boolean;
             /** Next Action */
             next_action?: string | null;
             /** Operator Summary */
