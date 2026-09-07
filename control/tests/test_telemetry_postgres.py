@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -22,7 +23,6 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 from vonk_control.telemetry_maintenance import TelemetryMaintenance, bucket_start
 
 NODE_A = "spk_" + "a" * 32

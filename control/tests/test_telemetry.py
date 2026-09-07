@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 from vonk_control import telemetry_maintenance
 from vonk_control.models import (
     AgentNode,
@@ -25,7 +26,6 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

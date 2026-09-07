@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
+from telemetry_fixtures import telemetry_metrics_document
 from vonk_control.fleet_projection import (
     CapacityReservations,
     FleetProjection,
@@ -40,7 +41,6 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-from telemetry_fixtures import telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64

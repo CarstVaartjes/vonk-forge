@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from telemetry_fixtures import telemetry_metrics
 from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
 from vonk_control.auth import TokenCodec
@@ -25,7 +26,6 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from telemetry_fixtures import telemetry_metrics
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 

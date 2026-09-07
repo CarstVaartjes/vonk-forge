@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine, event, func, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import sessionmaker
+from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import FleetProjection
@@ -33,7 +34,6 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = "00000000-0000-4000-8000-000000000001"

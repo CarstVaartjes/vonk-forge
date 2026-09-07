@@ -24,6 +24,7 @@ from vonk_agent_protocol.telemetry import (
     TelemetryWorkload,
     TelemetryWorkloadState,
 )
+
 __all__ = [
     "TelemetryCapability",
     "TelemetryDetails",
