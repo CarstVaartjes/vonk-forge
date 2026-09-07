@@ -825,6 +825,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         def __init__(self) -> None:
             self.grant_calls: list[dict[str, object]] = []
             self.receipt_calls: list[dict[str, object]] = []
+            self.receipt_output: object | None = None
 
         def issue_grant(self, **kwargs: object) -> object:
             self.grant_calls.append(kwargs)
@@ -844,6 +845,8 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
             self.receipt_calls.append(kwargs)
+            if self.receipt_output is not None:
+                return self.receipt_output  # type: ignore[return-value]
             return tuple(
                 receipt_issuer.issue_object_receipt(
                     object_digest=item["object_digest"], size=item["size"]
@@ -855,6 +858,36 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     package = RecordingPackageAuthority()
     object.__setattr__(services, "host_runtime_authority", host)
     object.__setattr__(services, "workload_helper_authority", package)
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert schemas["PackageHelperSignature"]["properties"]["algorithm"][
+        "const"
+    ] == "ed25519"
+    uuid4_pattern = (
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    grant_claims = schemas["PackageHelperGrantClaims"]["properties"]
+    assert set(schemas["PackageHelperGrantClaims"]["required"]) >= {
+        "request_id",
+        "job_id",
+        "operation_id",
+        "fence",
+    }
+    for field_name in ("request_id", "job_id", "operation_id", "fence"):
+        assert grant_claims[field_name]["pattern"] == uuid4_pattern
+    assert "relative_name" in schemas["PackageObjectReceiptClaims"]["required"]
+    assert schemas["PackageObjectReceiptClaims"]["properties"]["relative_name"][
+        "pattern"
+    ] == r"^objects/sha256/[0-9a-f]{64}$"
+    assert (
+        schemas["PackageHelperReceiptsResponse"]["properties"]["receipts"]["items"][
+            "$ref"
+        ]
+        == "#/components/schemas/SignedPackageObjectReceipt"
+    )
+    assert (
+        schemas["PackageHelperGrantResponse"]["properties"]["grant"]["$ref"]
+        == "#/components/schemas/SignedPackageHelperGrant"
+    )
     headers = agent_headers(NODE_A, "serial-a")
     common = {
         "node_id": NODE_A,
@@ -907,6 +940,19 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         {"object_digest": "e" * 64, "size": 17}
     ]
 
+    package.receipt_output = ({"claims": {"unexpected": True}},)
+    malformed_receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert malformed_receipt_response.status_code == 409
+    package.receipt_output = None
+
     grant_body = common | {
         "request_id": request_id,
         "release_digest": "d" * 64,
@@ -951,7 +997,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         ).status_code
         == 422
     )
-    assert len(package.receipt_calls) == 1
+    assert len(package.receipt_calls) == 2
     assert (
         client.post(
             "/agent/v1/host-runtime/grant",
