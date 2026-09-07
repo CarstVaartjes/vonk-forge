@@ -75,12 +75,7 @@ fn same_installed_workload(
 }
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
-    let image_digest = spec
-        .runtime
-        .image_digest
-        .strip_prefix("sha256:")
-        .unwrap_or_default()
-        .to_owned();
+    let image_digest = spec.runtime.image_digest.clone();
     let model_identity = spec
         .artifacts
         .first()
@@ -2436,7 +2431,7 @@ mod tests {
         .unwrap();
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let (image_digest, model_identity) = readiness_identity(&plan);
-        assert_eq!(image_digest, &plan.runtime.image_digest[7..]);
+        assert_eq!(image_digest, plan.runtime.image_digest);
         let artifact = &plan.artifacts[0];
         assert_eq!(
             model_identity,

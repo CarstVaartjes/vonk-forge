@@ -139,7 +139,7 @@ def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult,
         else:
             assert "evidence" in result.result
         if "image_digest" in evidence:
-            assert not str(evidence["image_digest"]).startswith("sha256:")
+            assert evidence["image_digest"] == row.payload["image_digest"]
         if "model_identity" in evidence:
             assert "@" in evidence["model_identity"]
     return parsed
