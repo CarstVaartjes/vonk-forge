@@ -7,8 +7,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from .recipe_contract import RecipeContractError, recipe_topology
-
 
 class ArtifactSizeError(RuntimeError):
     pass
@@ -58,12 +56,9 @@ class DeclaredArtifactSizeResolver:
 
     def resolve(self, recipe: Mapping[str, object]) -> tuple[ArtifactSize, ...]:
         artifacts = recipe.get("artifacts")
-        try:
-            topology = recipe_topology(recipe)
-        except RecipeContractError as error:
-            raise ArtifactSizeError(
-                "recipe topology artifact sizes are invalid"
-            ) from error
+        topology = recipe.get("topology")
+        if not isinstance(topology, Mapping):
+            raise ArtifactSizeError("recipe topology artifact sizes are invalid")
         if not isinstance(artifacts, list):
             raise ArtifactSizeError("recipe artifact sizes are invalid")
         resolved: list[ArtifactSize] = []

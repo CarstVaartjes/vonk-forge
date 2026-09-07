@@ -61,7 +61,6 @@ def artifact_size_document() -> dict[str, Any]:
 
 
 def topology_document() -> dict[str, Any]:
-    """Return the canonical topology at the current validator seam."""
+    """Return a complete canonical recipe document for topology tests."""
 
-    topology = canonical_recipe().topology.model_dump(mode="json")
-    return {"topology": topology}
+    return canonical_recipe().model_dump(mode="json")
