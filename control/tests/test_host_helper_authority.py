@@ -300,6 +300,28 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
         )
 
 
+def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
+    arguments = {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 2,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT,
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+    service = runtime_service(operation_kind="runtime.preflight.v1")
+    grant = service.issue_grant(**arguments)
+    assert grant.claims.operation.action == "runtime-preflight"
+    assert grant.claims.operation.request_sha256 == "e" * 64
+    for changes in [{"fence": "50000000-0000-4000-8000-000000000005"}, {"action": ContainerRuntimeAction.START}]:
+        with pytest.raises(HostHelperAuthorityError):
+            service.issue_grant(**{**arguments, **changes})
+    with pytest.raises(HostHelperAuthorityError):
+        runtime_service(operation_kind="recipe.start").issue_grant(**arguments)
+
+
 def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None:
     with pytest.raises(HostHelperAuthorityError, match="lease"):
         runtime_service(lease_seconds=10).issue_grant(

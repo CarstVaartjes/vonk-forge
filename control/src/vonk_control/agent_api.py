@@ -444,7 +444,7 @@ class AgentGrantRequest(StrictJSONModel):
 
 
 class HostRuntimeGrantRequest(AgentGrantRequest):
-    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

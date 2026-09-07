@@ -148,6 +148,7 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
         let helper_timeout = match action {
+            HostRuntimeAction::RuntimePreflight => Duration::from_secs(14),
             HostRuntimeAction::Start => arguments
                 .iter()
                 .find_map(|value| value.strip_prefix("VONK_JOB_TIMEOUT_SECONDS="))

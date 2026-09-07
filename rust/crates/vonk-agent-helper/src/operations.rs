@@ -891,6 +891,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<RuntimeRequestOutcome, OperationError> {
         let request = self.read_runtime_request(request_sha256)?;
         let expected_action = match action {
+            ContainerRuntimeAction::RuntimePreflight => HostRuntimeAction::RuntimePreflight,
             ContainerRuntimeAction::ImageImport => HostRuntimeAction::ImageImport,
             ContainerRuntimeAction::ImageInspect => HostRuntimeAction::ImageInspect,
             ContainerRuntimeAction::RunInspect => HostRuntimeAction::RunInspect,
@@ -929,6 +930,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
             _ => return Err(OperationError::InvalidOperation),
         }
         match request.action {
+            HostRuntimeAction::RuntimePreflight => {
+                let code = crate::runtime_preflight::run(
+                    Path::new("/var/lib/vonk-forge"),
+                    Path::new(crate::runtime_preflight::PROBE_BINARY),
+                    |arguments, timeout| self.run_docker_with_timeout(arguments, timeout)
+                        .map(|output| (output.success, output.stdout))
+                        .map_err(|_| std::io::Error::other("preflight runtime unavailable")),
+                ).map_err(|_| OperationError::CommandFailed)?;
+                Ok(RuntimeRequestOutcome { exit_code: Some(code), recipe_run_observation: None })
+            }
             HostRuntimeAction::ImageImport => {
                 self.runtime_image_import(&request.arguments)
                     .map(|()| RuntimeRequestOutcome {

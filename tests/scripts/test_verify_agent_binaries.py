@@ -37,6 +37,7 @@ def fixture(root: Path, machine: int = 183) -> Path:
     (root / "vonk-build-egress").write_bytes(
         binary(machine, identity=False, static=True)
     )
+    (root / "vonk-runtime-probe").write_bytes(binary(machine, identity=False, static=True))
     for path in root.iterdir():
         path.chmod(0o555)
     return root
@@ -77,6 +78,7 @@ def test_verifier_accepts_exact_identity_bound_binary_set(tmp_path: Path) -> Non
         "vonk-agent",
         "vonk-agent-helper",
         "vonk-build-egress",
+        "vonk-runtime-probe",
     }
 
 

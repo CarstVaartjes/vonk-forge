@@ -83,6 +83,7 @@ _NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
+        AgentOperation.RUNTIME_PREFLIGHT.value,
         "recipe.model-uninstall.v1",
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
@@ -1187,7 +1188,11 @@ class AgentJobService:
             not isinstance(value, str) or not value for value in values
         ):
             raise ValueError("agent capabilities are invalid")
-        return tuple(sorted(set(values) & _KNOWN_CAPABILITIES))
+        return tuple(sorted({
+            value for value in values
+            if value in _KNOWN_CAPABILITIES
+            or re.fullmatch(r"runtime\.preflight\.fingerprint\.[0-9a-f]{64}", value)
+        }))
 
     @staticmethod
     def _validate_agent_contract(
