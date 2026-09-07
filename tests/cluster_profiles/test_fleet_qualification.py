@@ -1752,7 +1752,7 @@ def test_artifact_projection_uses_selected_recipe_files_only() -> None:
     from cluster_profiles.generated_control.models.model_file import ModelFile
 
     current = _current_recipe_fixture()
-    current.model_documents[0].files.append(  # type: ignore[union-attr]
+    current.model_documents[0].model_document.files.append(
         ModelFile.from_dict(
             {
                 "id": "unselected",

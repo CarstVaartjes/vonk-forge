@@ -26,6 +26,7 @@ from .qualification_fixtures import (
 )
 from .generated_control.models.library_recipe_detail import LibraryRecipeDetail
 from .generated_control.models.library_recipe_list import LibraryRecipeList
+from .generated_control.models.library_recipe_model import LibraryRecipeModel
 from .generated_control.models.model_definition import ModelDefinition
 from .generated_control.models.recipe_definition import RecipeDefinition
 from .generated_control.types import Unset
@@ -86,7 +87,7 @@ class _CurrentRecipe:
     slug: str
     content_sha256: str
     definition: RecipeDefinition
-    model_documents: tuple[ModelDefinition, ...]
+    model_documents: tuple[LibraryRecipeModel, ...]
 
     @property
     def key(self) -> str:
@@ -107,9 +108,16 @@ class _CurrentRecipe:
     @property
     def artifact_identities(self) -> list[dict[str, object]]:
         rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
-        for selection, model in zip(
-            self.definition.models, self.model_documents, strict=True
-        ):
+        documents_by_digest = {
+            selected_model.selection.model.content_sha256: selected_model.model_document
+            for selected_model in self.model_documents
+        }
+        for selection in self.definition.models:
+            model = documents_by_digest.get(selection.model.content_sha256)
+            if model is None:
+                raise QualificationError(
+                    "recipe model selection references a missing Library model document"
+                )
             model_key = f"{model.identity.publisher}/{model.identity.slug}"
             files_by_id = {file.id: file for file in model.files}
             for selected_file in selection.files:
@@ -419,41 +427,35 @@ def _territorial_restrictions(
     restrictions = model.license_.territorial_restrictions
     if restrictions is None or isinstance(restrictions, Unset):
         return None
-    return restrictions.to_dict()
+    value = restrictions.to_dict()
+    denied = value.get("denied_jurisdictions")
+    if (
+        not isinstance(denied, list)
+        or not denied
+        or any(
+            not isinstance(item, str)
+            or not 2 <= len(item) <= 3
+            or item != item.upper()
+            for item in denied
+        )
+    ):
+        raise QualificationError(
+            "resolved model license restrictions are malformed; qualification fails closed"
+        )
+    return value
 
 
 def legal_blockers(
     recipe: RecipeDefinition,
     jurisdiction: str | None = None,
     *,
-    model_documents: Iterable[ModelDefinition] = (),
+    model_documents: Iterable[ModelDefinition | LibraryRecipeModel] = (),
 ) -> list[Blocker]:
     """Validate license metadata without enforcing territorial restrictions."""
 
     del jurisdiction
     del recipe
-    for model in model_documents:
-        restrictions = _territorial_restrictions(model)
-        if restrictions is None:
-            continue
-        denied = restrictions.get("denied_jurisdictions")
-        if (
-            not isinstance(denied, list)
-            or not denied
-            or any(
-                not isinstance(item, str)
-                or not 2 <= len(item) <= 3
-                or item != item.upper()
-                for item in denied
-            )
-        ):
-            return [
-                Blocker(
-                    "license",
-                    "license.territorial_restrictions_invalid",
-                    "Resolved model license restrictions are malformed; qualification fails closed.",
-                )
-            ]
+    del model_documents
     # The declaration is retained and validated as catalog metadata.  The
     # qualification runner has no reliable basis to determine an operator's
     # territory, so these facts cannot block a plan or an execution smoke.
@@ -730,12 +732,11 @@ def _parse_library_detail(
     try:
         detail = LibraryRecipeDetail.from_dict(value)
         definition = detail.definition
-        model_documents = tuple(
-            item.model_document
-            for item in detail.model_documents
-        )
+        model_documents = tuple(detail.model_documents)
     except (KeyError, TypeError, ValueError) as error:
         raise QualificationError("current Library recipe detail is invalid") from error
+    for model in model_documents:
+        _territorial_restrictions(model.model_document)
     return detail, definition, model_documents
 
 
