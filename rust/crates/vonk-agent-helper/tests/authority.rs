@@ -704,7 +704,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         .join("artifact-a.bin");
     fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
-    fs::create_dir_all(&model).unwrap();
+    fs::create_dir_all(model.parent().unwrap()).unwrap();
+    fs::write(&model, b"model artifact").unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
@@ -785,7 +786,10 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--publish".to_owned(),
         "192.168.1.211:8101:8000".to_owned(),
         "--mount".to_owned(),
-        format!("type=bind,src={},dst=/models,readonly", model.display()),
+        format!(
+            "type=bind,src={},dst=/models/artifact-a.bin,readonly",
+            model.display()
+        ),
         "--mount".to_owned(),
         format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),
