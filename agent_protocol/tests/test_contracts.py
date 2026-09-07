@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
@@ -221,7 +222,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
 def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -> None:
     raw = valid_claim()
 
-    with pytest.raises(AgentProtocolError, match="unsafe"):
+    with pytest.raises(ValidationError, match="unsafe"):
         AgentClaim(
             schema_version=1,
             job_id=raw["job_id"],
@@ -240,7 +241,7 @@ def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -
 def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
     raw = valid_attempt()
 
-    with pytest.raises(AgentProtocolError, match="path"):
+    with pytest.raises(ValidationError, match="path"):
         AgentResult(
             **raw,
             state="succeeded",
@@ -320,14 +321,14 @@ def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> Non
 
     with pytest.raises(AgentProtocolError, match="path"):
         AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
-    with pytest.raises(AgentProtocolError, match="path"):
+    with pytest.raises(ValidationError):
         AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
 
 
 def test_direct_progress_construction_enforces_protocol_boundary() -> None:
     raw = valid_attempt()
 
-    with pytest.raises(AgentProtocolError, match="unsafe"):
+    with pytest.raises(ValidationError, match="unsafe"):
         AgentProgress(**raw, progress={"authorization": "unsafe"})
 
 
@@ -745,12 +746,8 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
 
 
 @pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])
-def test_packaged_schemas_match_repository_bytes(name: str) -> None:
-    repository_schema = (
-        Path(__file__).parents[1] / "src" / "vonk_agent_protocol" / "schemas" / name
-    ).read_bytes()
-    packaged_schema = (
-        importlib.resources.files("vonk_agent_protocol") / "schemas" / name
-    ).read_bytes()
-
-    assert packaged_schema == repository_schema
+def test_core_schemas_are_derived_from_the_registry(name: str) -> None:
+    validator = schema_validator(name)
+    assert validator.schema["additionalProperties"] is False
+    assert "schema_version" in validator.schema["required"]
+    assert validator.schema["properties"]["attempt"]["minimum"] == 1

@@ -6,6 +6,7 @@ import ipaddress
 import json
 import re
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -90,6 +91,14 @@ PATH_KEY_CAMEL_CASE = "|".join(
 PATH_KEY = re.compile(
     rf"(?:^|[_-])(?:{PATH_KEY_ANY_CASE})(?:$|[_-]|[A-Z])"
     rf"|[a-z0-9](?:{PATH_KEY_CAMEL_CASE})(?:$|[_-]|[A-Z])"
+)
+UNSAFE_SCHEMA_KEY_PATTERN = (
+    r"[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|"
+    r"[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|"
+    r"[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|"
+    r"[Pp][Rr][Ii][Vv][Aa][Tt][Ee].?[Kk][Ee][Yy]|"
+    r"[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Ss][Hh][Ee][Ll][Ll]|"
+    r"[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]"
 )
 AGENT_PACKAGE_URL = re.compile(
     r"https://install\.vonkforge\.ai/"
@@ -1064,7 +1073,17 @@ def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-class AgentClaim(WireModel):
+class _ProtocolEnvelopeModel(WireModel):
+    """Wire envelope base with the derived extension-map security schema."""
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        document = super().model_json_schema(*args, **kwargs)
+        _add_protocol_schema_constraints(document)
+        return document
+
+
+class AgentClaim(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
@@ -1152,7 +1171,7 @@ class AgentClaim(WireModel):
             raise AgentProtocolError(str(error)) from error
 
 
-class AgentProgress(WireModel):
+class AgentProgress(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
@@ -1202,7 +1221,7 @@ class AgentProgress(WireModel):
             raise AgentProtocolError(str(error)) from error
 
 
-class AgentDirective(WireModel):
+class AgentDirective(_ProtocolEnvelopeModel):
     """Authenticated heartbeat response for deadline renewal and cancellation."""
 
     schema_version: Literal[1]
@@ -1244,7 +1263,7 @@ class AgentDirective(WireModel):
             raise AgentProtocolError(str(error)) from error
 
 
-class AgentResult(WireModel):
+class AgentResult(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
@@ -1332,6 +1351,70 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         except (OSError, json.JSONDecodeError) as error:
             raise AgentProtocolError("packaged protocol schema is invalid") from error
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
+
+
+def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
+    """Add recursive boundary constraints to schemas derived from WireModel.
+
+    Pydantic describes the recursive JSON value types, while these two
+    constraints are security semantics shared by every extension map. Keeping
+    them attached during registry derivation makes ``schema_validator`` and
+    the runtime parser enforce the same boundary without a second schema file.
+    """
+
+    safe_property_names = {
+        "allOf": [
+            {"not": {"pattern": UNSAFE_SCHEMA_KEY_PATTERN}},
+            {"not": {"pattern": PATH_KEY.pattern}},
+        ]
+    }
+    json_value = document.get("$defs", {}).get("JsonValue")
+    if isinstance(json_value, Mapping):
+        for branch in json_value.get("anyOf", ()):
+            if isinstance(branch, dict) and branch.get("type") == "object":
+                branch["propertyNames"] = safe_property_names
+    properties = document.get("properties", {})
+    for name in ("payload", "result"):
+        value = properties.get(name)
+        if isinstance(value, dict) and value.get("type") == "object":
+            value["propertyNames"] = safe_property_names
+    result = properties.get("result")
+    if (
+        isinstance(result, dict)
+        and result.get("type") == "object"
+        and isinstance(json_value, Mapping)
+    ):
+        # Result strings are operator evidence and cannot carry client paths.
+        # Keep claim payload strings broad because typed operation payloads
+        # include authorized URLs and platform targets.
+        result_schema = deepcopy(json_value)
+        result_schema_name = "ResultJsonValue"
+        result_schema_text = json.dumps(result_schema)
+        result_schema_text = result_schema_text.replace(
+            "#/$defs/JsonValue", "#/$defs/ResultJsonValue"
+        )
+        result_schema = json.loads(result_schema_text)
+
+        def restrict_result_values(value: object) -> None:
+            if not isinstance(value, dict):
+                return
+            if value.get("type") == "string":
+                value["not"] = {"pattern": r"[/\\]"}
+            if value.get("type") == "object":
+                value["propertyNames"] = safe_property_names
+            for child in value.values():
+                if isinstance(child, dict):
+                    restrict_result_values(child)
+                elif isinstance(child, list):
+                    for item in child:
+                        restrict_result_values(item)
+
+        restrict_result_values(result_schema)
+        document.setdefault("$defs", {})[result_schema_name] = result_schema
+        result["additionalProperties"] = {"$ref": f"#/$defs/{result_schema_name}"}
+    deadline = properties.get("deadline")
+    if isinstance(deadline, dict):
+        deadline["pattern"] = r"(?:Z|\+00:00)$"
 
 
 def validate_schema_message(schema_name: str, raw: Any) -> Any:
