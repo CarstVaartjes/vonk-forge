@@ -81,7 +81,7 @@ class CompleteArtifactInspector:
         self,
         _session,
         *,
-        model_version_sha256,
+        model_content_sha256,
         recipe_revision_id,
         node_ids,
         retention,
@@ -113,12 +113,12 @@ class ModelCacheManifestProvider:
     def resolve_artifact_set(self, **kwargs):
         if self.fail:
             raise RuntimeError("trusted catalog manifest unavailable")
-        model_digest = str(kwargs["model_version_sha256"])
+        model_digest = str(kwargs["model_content_sha256"])
         return SimpleNamespace(
             digest=MODEL_ARTIFACT_SET,
-            model_version_sha256=model_digest,
+            model_content_sha256=model_digest,
             expected_bytes=1024,
-            model_versions=(model_digest,),
+            model_content_sha256s=(model_digest,),
             artifacts=(
                 SimpleNamespace(
                     sha256=MODEL_ARTIFACT,
@@ -406,7 +406,7 @@ def _request(sessions, node_id: str, *, action: str = "run", retention: str = "r
         model = revision.document["models"][0]["model"]
         model_digest = model["content_sha256"]
     return RunSwitchPreviewRequest(
-        model_version_sha256=model_digest,
+        model_content_sha256=model_digest,
         recipe_revision_id=revision.id,
         spark_group=SparkGroup(
             nodes=[

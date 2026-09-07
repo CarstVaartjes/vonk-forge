@@ -51,7 +51,7 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
             "model_child": {
                 "id": "model-child",
                 "artifact_set_sha256": "c" * 64,
-                "model_versions": ["model"],
+                "model_content_sha256s": ["model"],
             },
         },
         failure=None,

@@ -917,8 +917,8 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         artifact_set_sha256 = (
             model.artifact_set_sha256 if model is not None else plan.storage.artifact_set_sha256
         )
-        model_version_sha256 = (
-            model.model_version_sha256 if model is not None else plan.model_version_sha256
+        model_content_sha256 = (
+            model.model_content_sha256 if model is not None else plan.model_content_sha256
         )
         recipe_revision_sha256 = (
             model.recipe_revision_sha256 if model is not None else plan.recipe_content_sha256
@@ -943,7 +943,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         }
         if plan.recipe_revision_id is not None:
             pins.update(
-                model_version_sha256=model_version_sha256,
+                model_content_sha256=model_content_sha256,
                 recipe_revision_id=plan.recipe_revision_id,
             )
         preview = preview_method(**pins)
