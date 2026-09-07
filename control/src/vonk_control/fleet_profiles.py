@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -88,6 +89,41 @@ _CHILD_FAILED_STATES = frozenset(
     {"failed", "expired", "cancelled", "waiting-for-operator"}
 )
 _INTERNAL_PLACEMENT_PREFIX = "~placement-"
+
+
+def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview:
+    """Load the complete stored preview through its canonical contract."""
+
+    try:
+        plan = FleetProfilePreview.model_validate_json(
+            json.dumps(row.plan), strict=True
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise FleetProfileConflict("Persisted Fleet profile plan is invalid") from error
+    if (
+        plan.profile_id != row.profile_id
+        or plan.profile_digest != row.profile_digest
+        or plan.plan_digest != row.plan_digest
+    ):
+        raise FleetProfileConflict("Persisted Fleet profile plan identity is invalid")
+    return plan
+
+
+def _persisted_profile_result(
+    row: FleetProfileApplication,
+) -> FleetProfileApplicationResult | None:
+    """Load a stored result without treating malformed JSON as no result."""
+
+    if row.result is None:
+        if row.state == "succeeded":
+            raise FleetProfileConflict("Persisted Fleet profile result is invalid")
+        return None
+    try:
+        return FleetProfileApplicationResult.model_validate_json(
+            json.dumps(row.result), strict=True
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise FleetProfileConflict("Persisted Fleet profile result is invalid") from error
 _INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
 _PROFILE_PHASE_BY_RUN_PHASE = {
     "transfer": "target-copy",
@@ -1812,22 +1848,15 @@ class FleetProfileService:
 
     @staticmethod
     def _operation_scope(row: FleetProfileApplication) -> tuple[str, ...]:
-        plan = row.plan if isinstance(row.plan, Mapping) else {}
-        scope = plan.get("scope")
-        node_ids = scope.get("node_ids") if isinstance(scope, Mapping) else None
-        if not isinstance(node_ids, list):
-            return ()
-        return tuple(node_id for node_id in node_ids if isinstance(node_id, str))
+        return tuple(_persisted_profile_plan(row).scope.node_ids)
 
     @classmethod
     def _operation_phase(cls, row: FleetProfileApplication) -> str:
         if row.state == "succeeded":
             return "final_verify"
-        plan = row.plan if isinstance(row.plan, Mapping) else {}
-        steps = plan.get("steps")
-        if isinstance(steps, list) and 0 <= row.current_step < len(steps):
-            step = steps[row.current_step]
-            kind = step.get("kind") if isinstance(step, Mapping) else None
+        plan = _persisted_profile_plan(row)
+        if 0 <= row.current_step < len(plan.steps):
+            kind = plan.steps[row.current_step].kind
             if kind in {"create-placement", "build", "install"}:
                 return "prepare"
             if kind == "distribute-image":
@@ -1872,10 +1901,8 @@ class FleetProfileService:
             "updated_at": _aware(row.updated_at).isoformat(),
             "supported_actions": [],
             "result": (
-                FleetProfileApplicationResult.model_validate(row.result).model_dump(
-                    mode="json"
-                )
-                if isinstance(row.result, Mapping)
+                result.model_dump(mode="json")
+                if (result := _persisted_profile_result(row)) is not None
                 else None
             ),
         }
@@ -1905,12 +1932,14 @@ class FleetProfileService:
             )
             if row is None:
                 return False
-            steps = row.plan.get("steps") if isinstance(row.plan, Mapping) else None
-            if not isinstance(steps, list):
+            try:
+                plan = _persisted_profile_plan(row)
+            except FleetProfileConflict as error:
                 row.state = "failed"
-                row.status_reason = "Persisted Fleet profile plan is invalid"
+                row.status_reason = str(error)[:512]
                 row.updated_at = now
                 return True
+            steps = [step.model_dump(mode="json") for step in plan.steps]
             if row.current_operation_id:
                 try:
                     child_source = (
@@ -2606,7 +2635,7 @@ class FleetProfileService:
     def _application_view(
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
-        steps = row.plan.get("steps") if isinstance(row.plan, Mapping) else []
+        plan = _persisted_profile_plan(row)
         return FleetProfileApplicationView(
             id=row.id,
             profile_id=row.profile_id,
@@ -2614,15 +2643,11 @@ class FleetProfileService:
             plan_digest=row.plan_digest,
             state=row.state,
             current_step=row.current_step,
-            total_steps=len(steps) if isinstance(steps, list) else 0,
+            total_steps=len(plan.steps),
             current_operation_id=row.current_operation_id,
             status_reason=row.status_reason,
             progress=FleetProfileApplicationProgress.model_validate(row.progress),
-            result=(
-                FleetProfileApplicationResult.model_validate(row.result)
-                if isinstance(row.result, Mapping)
-                else None
-            ),
+            result=_persisted_profile_result(row),
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
         )
