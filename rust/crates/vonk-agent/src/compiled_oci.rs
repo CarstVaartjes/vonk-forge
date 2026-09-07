@@ -714,6 +714,7 @@ mod tests {
     fn job_projection_keeps_input_output_and_lifecycle_boundaries() {
         let mut value = fixture();
         value["endpoint"] = Value::Null;
+        value["runtime"]["placement"]["port"] = Value::Null;
         value["job"] = json!({
             "interface": "image-job",
             "input": {"path": "/inputs"},

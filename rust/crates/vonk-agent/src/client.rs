@@ -2971,7 +2971,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telemetry_posts_exact_task_three_shape_without_node_identity() {
+    async fn telemetry_posts_current_contract_without_node_identity() {
         let sample = telemetry_sample(1);
         let (client, server) = observation_client(204);
 
@@ -3019,6 +3019,7 @@ mod tests {
                 "load_average_1m",
                 "memory_available_bytes",
                 "memory_total_bytes",
+                "metrics",
                 "network_receive_bytes_per_second",
                 "network_transmit_bytes_per_second",
                 "observed_at",

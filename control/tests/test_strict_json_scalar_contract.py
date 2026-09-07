@@ -10,8 +10,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, ValidationError
 from vonk_control.agent_api import (
-    AgentGrantResponse,
     GrantRequest,
+    HostHelperGrantResponse,
     RecipeRunObservationsRequest,
 )
 from vonk_control.library_contract import (
@@ -163,11 +163,11 @@ def test_representative_wire_models_reject_scalar_coercion() -> None:
         )
 
 
-def test_declared_content_maps_keep_their_flexible_values() -> None:
-    response = AgentGrantResponse.model_validate_json(
-        '{"grant":{"provider_field":{"future":true},"count":"1"}}'
-    )
-    assert response.grant == {"provider_field": {"future": True}, "count": "1"}
+def test_host_grants_require_the_signed_contract_structure() -> None:
+    with pytest.raises(ValidationError):
+        HostHelperGrantResponse.model_validate_json(
+            '{"grant":{"provider_field":{"future":true},"count":"1"}}'
+        )
 
 
 def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -> None:
