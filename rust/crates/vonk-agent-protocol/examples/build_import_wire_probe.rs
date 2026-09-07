@@ -11,22 +11,28 @@ fn main() {
             continue;
         }
         let input: Value = serde_json::from_str(&line).expect("probe request");
-        let operation = input["operation"].as_str().expect("operation");
-        let payload = input["payload"].clone();
-        let payload_bytes = canonical_json(&payload).expect("payload canonicalization");
-        let claim = AgentClaim {
-            attempt: 1,
-            authority_revision: "a".repeat(64),
-            deadline: "2026-12-31T00:00:00Z".parse().expect("deadline"),
-            fence: Uuid::new_v4(),
-            job_id: Uuid::new_v4(),
-            node_id: "spk_11111111111111111111111111111111".to_owned(),
-            operation: operation.to_owned(),
-            operation_id: Uuid::new_v4(),
-            payload: payload.clone(),
-            payload_digest: hex_sha256(&payload_bytes),
-            schema_version: 1,
+        let claim = if input.get("claim").is_some() {
+            serde_json::from_value(input["claim"].clone()).expect("wire claim")
+        } else {
+            let operation = input["operation"].as_str().expect("operation");
+            let payload = input["payload"].clone();
+            let payload_bytes = canonical_json(&payload).expect("payload canonicalization");
+            AgentClaim {
+                attempt: 1,
+                authority_revision: "a".repeat(64),
+                deadline: "2026-12-31T00:00:00Z".parse().expect("deadline"),
+                fence: Uuid::new_v4(),
+                job_id: Uuid::new_v4(),
+                node_id: "spk_11111111111111111111111111111111".to_owned(),
+                operation: operation.to_owned(),
+                operation_id: Uuid::new_v4(),
+                payload: payload.clone(),
+                payload_digest: hex_sha256(&payload_bytes),
+                schema_version: 1,
+            }
         };
+        let operation = claim.operation.clone();
+        let payload = claim.payload.clone();
         let parsed = RecipeOperationRequest::parse(&claim).expect("valid operation");
         let evidence = match parsed {
             RecipeOperationRequest::Build(_) => json!({
