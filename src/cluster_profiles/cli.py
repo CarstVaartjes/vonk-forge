@@ -228,9 +228,6 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
     recipes = payload.get("recipes")
     if isinstance(recipes, list):
         recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
-        identity = (
-            "uri" if any("uri" in recipe for recipe in recipe_rows) else "recipe_id"
-        )
         if recipe_rows:
             _print_table(
                 recipe_rows,
@@ -239,7 +236,7 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
                     ("qualification", "QUALIFICATION"),
                     ("execution_readiness", "READINESS"),
                     ("node_count", "SPARKS"),
-                    (identity, "URI" if identity == "uri" else "RECIPE ID"),
+                    ("recipe_id", "RECIPE ID"),
                 ),
             )
         else:

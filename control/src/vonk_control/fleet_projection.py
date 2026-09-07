@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
@@ -36,6 +35,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -159,7 +159,7 @@ RunDegradedReason = Literal[
 ]
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 

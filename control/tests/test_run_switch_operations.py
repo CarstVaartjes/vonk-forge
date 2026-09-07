@@ -18,6 +18,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
 from vonk_control.models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -49,6 +50,7 @@ from vonk_control.run_switch_operations import (
     ArtifactInspection,
     PhaseExecution,
     RecipeLifecyclePhaseExecutor,
+    RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _transient_distribution_exception,
@@ -80,7 +82,7 @@ class CompleteArtifactInspector:
         self,
         _session,
         *,
-        model_version_sha256,
+        model_content_sha256,
         recipe_revision_id,
         node_ids,
         retention,
@@ -112,27 +114,41 @@ class ModelCacheManifestProvider:
     def resolve_artifact_set(self, **kwargs):
         if self.fail:
             raise RuntimeError("trusted catalog manifest unavailable")
-        model_digest = str(kwargs["model_version_sha256"])
-        return SimpleNamespace(
-            digest=MODEL_ARTIFACT_SET,
-            model_version_sha256=model_digest,
-            expected_bytes=1024,
-            model_versions=(model_digest,),
+        model_digest = str(kwargs["model_content_sha256"])
+        return ArtifactSetManifest(
+            model_content_sha256=model_digest,
+            recipe_revision_sha256="b" * 64,
+            model_content_digests=(model_digest,),
             artifacts=(
-                SimpleNamespace(
+                ArtifactSpec(
+                    key="primary:weights",
+                    artifact_id="weights",
+                    path="weights.safetensors",
+                    kind="huggingface",
+                    repository="vonk-forge/primary",
+                    source="https://huggingface.co/vonk-forge/primary/resolve/main/weights.safetensors",
+                    revision="0" * 40,
                     sha256=MODEL_ARTIFACT,
                     expected_bytes=1024,
+                    roles=("weights",),
+                    model_content_sha256=model_digest,
                 ),
             ),
         )
 
-    def download_preview(self, **_kwargs):
-        if self.fail:
-            raise RuntimeError("trusted catalog manifest unavailable")
+    def download_preview(self, **kwargs):
+        manifest = self.resolve_artifact_set(**kwargs)
         return {
-            "artifact_set_sha256": MODEL_ARTIFACT_SET,
+            "schema_version": 2,
+            "artifact_set_sha256": manifest.digest,
+            "plan_digest": "a" * 64,
+            "source_policy": "nas-first",
+            "artifact_count": len(manifest.artifacts),
+            "expected_bytes": manifest.expected_bytes,
+            "already_cached_bytes": manifest.expected_bytes - self.missing_nas_bytes,
             "new_bytes": self.missing_nas_bytes,
             "blockers": [],
+            "warnings": [],
         }
 
 
@@ -170,6 +186,7 @@ class RecordingArtifactExecutor:
                 result={
                     "verified": True,
                     "verified_digests": digests,
+                    "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
                 }
@@ -379,6 +396,7 @@ class ColdStartPhaseExecutor:
                 result={
                     "verified": True,
                     "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
                 }
@@ -403,7 +421,7 @@ def _request(sessions, node_id: str, *, action: str = "run", retention: str = "r
         model = revision.document["models"][0]["model"]
         model_digest = model["content_sha256"]
     return RunSwitchPreviewRequest(
-        model_version_sha256=model_digest,
+        model_content_sha256=model_digest,
         recipe_revision_id=revision.id,
         spark_group=SparkGroup(
             nodes=[
@@ -547,8 +565,11 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     ]
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
-    assert plan.preparation.model.artifact_set_sha256 == MODEL_ARTIFACT_SET
-    assert plan.storage.artifact_set_sha256 == MODEL_ARTIFACT_SET
+    expected_manifest = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=plan.preparation.model.model_content_sha256
+    )
+    assert plan.preparation.model.artifact_set_sha256 == expected_manifest.digest
+    assert plan.storage.artifact_set_sha256 == expected_manifest.digest
     assert plan.storage.artifact_set_bytes == plan.preparation.model.artifact_set_bytes
     assert "run-switch.nas-coverage-unknown" not in {
         reason.code for reason in plan.blockers
@@ -800,6 +821,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     result={
                         "verified": True,
                         "verified_digests": list(plan.storage.artifact_digests),
+                        "verified_build_id": getattr(plan, "recipe_build_id", None),
                         "verified_image_digest": plan.image_digest,
                         "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
                     }
@@ -828,14 +850,24 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         expected_runtime_interface="vonk.runtime.v1",
     )
 
+    request_key = str(uuid.uuid4())
     operation = service.apply(
         RunSwitchApplyRequest(
             **request.model_dump(),
             plan_digest=plan.plan_digest,
-            request_key=str(uuid.uuid4()),
+            request_key=request_key,
         ),
         actor="admin",
     )
+    replay = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=request_key,
+        ),
+        actor="admin",
+    )
+    assert replay.operation_id == operation.operation_id
     assert service.tick() is True
     assert service.tick() is True
     assert executor.events == ["model-download", "runtime-image"]
@@ -911,7 +943,16 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         build.image_digest = None
         build.oci_layout_sha256 = None
         build.image_bytes = None
-        build.plan = {"platform": "linux/arm64"}
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        build.plan = {
+            "build_id": build.id,
+            "recipe_revision_id": revision.id,
+            "recipe_content_sha256": revision.content_digest,
+            "source_bundle_sha256": build.source_bundle_sha256,
+            "build_input_sha256": build.build_input_sha256,
+            "platform": "linux/arm64",
+        }
         session.add(
             RecipeSourceBundle(
                 sha256=build.source_bundle_sha256,
@@ -935,8 +976,6 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         )
         assert snapshot is not None
         snapshot.capabilities = ["recipe.build.v1"]
-        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
-        assert revision is not None
         build_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=revision.id,
@@ -950,13 +989,19 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     child_id = str(uuid.uuid4())
     build_preview_calls: list[str] = []
     build_start_calls: list[str] = []
+    build_start_plans: list[RecipeBuildPlan] = []
 
     def preview_build(_revision_id, _builder_id):
         build_preview_calls.append(_builder_id)
-        return build_plan
+        return replace(
+            build_plan,
+            build_id=str(uuid.uuid4()),
+            build_input_sha256="a" * 64,
+        )
 
-    def start_build(*_args, **_kwargs):
+    def start_build(build_plan, **_kwargs):
         build_start_calls.append("start")
+        build_start_plans.append(build_plan)
         return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
 
     lifecycle.preview_build = preview_build
@@ -999,8 +1044,13 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert waiting.current_phase == "prepare"
     assert waiting.progress.subphase == "container-build"
     assert waiting.result["child_operation_id"] == child_id
-    assert build_preview_calls == [nodes[0]]
+    # Apply consumes the plan persisted during preview.  A fresh planner call
+    # would admit mutable builder evidence and can derive a new identity.
+    assert build_preview_calls == []
     assert build_start_calls == ["start"]
+    assert build_start_plans[0].build_id == build_id
+    assert build_start_plans[0].build_input_sha256 == build_plan.build_input_sha256
+    assert build_start_plans[0].agent_payload["recipe_content_sha256"] == revision.content_digest
 
     restarted = RunSwitchOperationService(
         sessions,
@@ -1012,7 +1062,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         memory_floor_bytes=50,
     )
     assert restarted.tick() is True
-    assert build_preview_calls == [nodes[0]]
+    assert build_preview_calls == []
     assert build_start_calls == ["start"]
 
     executor.children[child_id].state = "succeeded"
@@ -1159,13 +1209,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         build.image_digest = None
         build.oci_layout_sha256 = None
         build.image_bytes = None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": build.recipe_revision_id,
-            "source_bundle_sha256": source_digest,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        build.source_bundle_sha256 = source_digest
         session.add(
             RecipeSourceBundle(
                 sha256=source_digest,
@@ -1180,6 +1224,14 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
+        build.plan = {
+            "build_id": build.id,
+            "recipe_revision_id": build.recipe_revision_id,
+            "recipe_content_sha256": revision.content_digest,
+            "source_bundle_sha256": source_digest,
+            "build_input_sha256": build.build_input_sha256,
+            "platform": "linux/arm64",
+        }
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
@@ -1206,14 +1258,11 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         row = session.get(RecipeBuild, build_id)
         assert row is not None
         row.build_input_sha256 = build_plan.build_input_sha256
-
-    def preview_build(_revision_id, _builder_id):
-        return build_plan
+        row.plan["build_input_sha256"] = build_plan.build_input_sha256
 
     def start_build(*_args, **_kwargs):
         return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
 
-    lifecycle_stub.preview_build = preview_build
     lifecycle_stub.build = start_build
     executor = RecipeLifecyclePhaseExecutor(
         lifecycle_stub,
@@ -1245,6 +1294,25 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         "build_input_sha256": "e" * 64,
         "state": "running",
     }
+
+    # A durable plan mutation is rejected before dispatch; execution never
+    # re-plans around the changed identity.
+    with sessions.begin() as session:
+        row = session.get(RecipeBuild, build_id)
+        assert row is not None
+        row.plan = {**row.plan, "build_input_sha256": "a" * 64}
+    with pytest.raises(
+        RunSwitchOperationConflict,
+        match="run-switch.container-build-plan-invalid",
+    ):
+        executor.execute(
+            plan,
+            phase,
+            item_index=0,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            progress={},
+        )
 
 
 def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_before_prepare(

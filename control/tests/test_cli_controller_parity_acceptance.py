@@ -88,7 +88,7 @@ class _Ledger:
             "result": {
                 "request_key": request_key,
                 "plan_digest": plan_digest,
-                "model_version_sha256": MODEL,
+                "model_content_sha256": MODEL,
                 "recipe_revision_id": RECIPE,
                 "artifact_set_sha256": ARTIFACT_SET,
                 "scope_node_ids": [NODE],
@@ -145,7 +145,7 @@ def _cache_operation(ledger: _Ledger, operation_id: str, request_key: str, plan_
         artifact_set_sha256=ARTIFACT_SET,
         plan_digest=plan_digest,
         progress=progress,
-        result={"model_version_sha256": MODEL, "recipe_revision_id": RECIPE},
+        result={"model_content_sha256": MODEL, "recipe_revision_id": RECIPE},
         last_error=None,
         created_at=NOW,
         updated_at=NOW,
@@ -217,7 +217,7 @@ def _run_plan() -> dict[str, object]:
         "schema_version": 2,
         "generated_at": NOW_DT,
         "action": "run",
-        "model_version_sha256": MODEL,
+        "model_content_sha256": MODEL,
         "recipe_revision_id": RECIPE,
         "recipe_content_sha256": "d" * 64,
         "alias": "parity",
@@ -355,7 +355,7 @@ class _RunSwitch:
                 "members": [{"node_id": NODE, "phase": "start", "state": "succeeded", "completed_bytes": 128, "total_bytes": 128, "error": None}],
             },
             "status_reason": None,
-            "result": {"model_version_sha256": MODEL, "recipe_revision_id": RECIPE, "scope_node_ids": [NODE]},
+            "result": {"model_content_sha256": MODEL, "recipe_revision_id": RECIPE, "scope_node_ids": [NODE]},
         }
         self.requests[request_key] = result
         self.ledger.add(
@@ -545,8 +545,8 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     transport = _AppTransport(api, headers)
 
     download_key = "00000000-0000-4000-8000-000000000101"
-    download_preview = api.post("/api/v1/model-cache/download-preview", headers=headers, json={"model_version_sha256": MODEL})
-    download = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_version_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
+    download_preview = api.post("/api/v1/model-cache/download-preview", headers=headers, json={"model_content_sha256": MODEL})
+    download = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
     assert download_preview.status_code == 200
     assert download.status_code == 202
     api_download = download.json()
@@ -557,7 +557,7 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     assert cli_download["request_key"] == api_download["request_key"] == download_key
 
     run_key = "00000000-0000-4000-8000-000000000102"
-    run_body = {"model_version_sha256": MODEL, "recipe_revision_id": RECIPE, "spark_group": {"nodes": [{"node_id": NODE, "rank": 0, "role": "entrypoint", "endpoint_owner": True}]}, "alias": "parity", "action": "run", "retention": "retain-cached", "invocation": {"origin": "operator", "correlation_id": None, "reason": None, "context": {}}}
+    run_body = {"model_content_sha256": MODEL, "recipe_revision_id": RECIPE, "spark_group": {"nodes": [{"node_id": NODE, "rank": 0, "role": "entrypoint", "endpoint_owner": True}]}, "alias": "parity", "action": "run", "retention": "retain-cached", "invocation": {"origin": "operator", "correlation_id": None, "reason": None, "context": {}}}
     api_run_preview = api.post("/api/v1/recipes/run-switch-plans/preview", headers=headers, json=run_body)
     api_run = api.post("/api/v1/recipes/run-switches", headers=headers, json={**run_body, "plan_digest": api_run_preview.json()["plan_digest"], "request_key": run_key})
     assert api_run_preview.status_code == 200
@@ -565,7 +565,7 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     api_run_body = api_run.json()
     cli_run = _invoke(transport, "--json", "models", "run", "--input", json.dumps(run_body), "--request-key", run_key)
     assert cli_run["result"]["id"] == api_run_body["operation_id"]
-    assert cli_run["plan"]["model_version_sha256"] == api_run_preview.json()["model_version_sha256"] == MODEL
+    assert cli_run["plan"]["model_content_sha256"] == api_run_preview.json()["model_content_sha256"] == MODEL
     assert cli_run["result"]["progress"]["members"][0]["member_id"] == NODE
 
     profile_create = api.post("/api/v1/fleet-profiles", headers=headers, json={"name": "Parity profile", "scope": {"node_ids": [NODE]}, "assignments": []})
@@ -602,7 +602,7 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     activity_ids = {item["id"] for item in activity.json()["operations"]}
     assert {api_download["id"], api_run_body["operation_id"], api_profile["current_operation_id"], retry["id"]} <= activity_ids
 
-    replay = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_version_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
+    replay = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
     assert replay.status_code == 202
     assert replay.json()["id"] == api_download["id"]
 
@@ -637,7 +637,7 @@ def test_uncertain_cache_submission_reuses_request_key_against_same_app() -> Non
         "--json",
         "cache",
         "download",
-        "--model-version-sha256",
+        "--model-content-sha256",
         MODEL,
         "--request-key",
         request_key,
@@ -645,7 +645,7 @@ def test_uncertain_cache_submission_reuses_request_key_against_same_app() -> Non
     assert code == 2
     assert failure["request_key"] == request_key
     assert failure["reconcile"]["request_key"] == request_key
-    replay_code, replay = _invoke_uncertain(transport, "--json", "cache", "download", "--model-version-sha256", MODEL, "--request-key", request_key)
+    replay_code, replay = _invoke_uncertain(transport, "--json", "cache", "download", "--model-content-sha256", MODEL, "--request-key", request_key)
     assert replay_code == 0, replay
     assert replay["request_key"] == request_key
     assert replay["result"]["id"] == ledger.id_for(request_key, "download")
@@ -787,14 +787,14 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     preview = api.post(
         "/api/v1/model-cache/download-preview",
         headers=headers,
-        json={"model_version_sha256": model_digest},
+        json={"model_content_sha256": model_digest},
     )
     assert preview.status_code == 200
     download = api.post(
         "/api/v1/model-cache/download",
         headers={**headers, "x-request-id": download_key},
         json={
-            "model_version_sha256": model_digest,
+            "model_content_sha256": model_digest,
             "plan_digest": preview.json()["plan_digest"],
             "request_key": download_key,
         },
@@ -806,7 +806,7 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
 
     run_key = "00000000-0000-4000-8000-000000000302"
     run_input = {
-        "model_version_sha256": model_digest,
+        "model_content_sha256": model_digest,
         "recipe_revision_id": revision_id,
         "spark_group": {
             "nodes": [
@@ -854,7 +854,7 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
         "--detach",
     )
     assert cli_run["result"].get("operation_id") == run_apply.json()["operation_id"], cli_run
-    assert cli_run["plan"]["model_version_sha256"] == model_digest
+    assert cli_run["plan"]["model_content_sha256"] == model_digest
     assert cli_run["result"]["progress"]["members"][0]["node_id"] == node_id, cli_run
 
     profile = api.post(

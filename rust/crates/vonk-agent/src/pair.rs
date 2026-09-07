@@ -8,11 +8,14 @@ use std::{
 
 use rcgen::PublicKeyData;
 use reqwest::{Certificate, Client, StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x509_pem};
+
+pub use vonk_agent_protocol::EnrollmentEvidence;
+use vonk_agent_protocol::EnrollmentRequest;
 
 use crate::{
     config::AgentConfig,
@@ -50,26 +53,6 @@ pub enum PairingError {
     Certificate,
     #[error("local identity operation failed")]
     Identity(#[from] crate::identity::IdentityError),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentEvidence {
-    pub agent_digest: String,
-    pub boot_id: String,
-    pub csr_public_key_fingerprint: String,
-    pub hardware_fingerprint: String,
-    pub host_key_fingerprint: String,
-    pub node_id: String,
-    pub observation_receipt_public_key: String,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct EnrollmentRequest<'a> {
-    csr: &'a str,
-    evidence: &'a EnrollmentEvidence,
-    grant_token: &'a str,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -157,6 +140,7 @@ pub async fn pair(
     evidence
         .csr_public_key_fingerprint
         .clone_from(&pending.public_key_fingerprint);
+    evidence.validate().map_err(|_| PairingError::Response)?;
     let client = Client::builder()
         .https_only(true)
         .tls_built_in_root_certs(false)
@@ -172,9 +156,9 @@ pub async fn pair(
         .post(endpoint)
         .header("content-type", "application/json")
         .json(&EnrollmentRequest {
-            csr,
-            evidence: &evidence,
-            grant_token: token,
+            csr: csr.to_owned(),
+            evidence,
+            grant_token: token.to_owned(),
         })
         .send()
         .await?;

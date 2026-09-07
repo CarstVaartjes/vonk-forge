@@ -1240,10 +1240,7 @@ def _validate_evidence(
 ) -> tuple[dict[str, str], str | None]:
     values: dict[str, str] = {}
     fields = set(evidence)
-    if fields not in (
-        set(_EVIDENCE_FIELDS),
-        {*_EVIDENCE_FIELDS, _OBSERVATION_RECEIPT_PUBLIC_KEY},
-    ):
+    if fields != {*_EVIDENCE_FIELDS, _OBSERVATION_RECEIPT_PUBLIC_KEY}:
         return values, "evidence fields are invalid"
     for name in fields:
         value = evidence.get(name)
@@ -1264,8 +1261,8 @@ def _validate_evidence(
         return values, "evidence CSR public-key fingerprint is invalid"
     if _HEX_64.fullmatch(values["agent_digest"]) is None:
         return values, "evidence agent digest is invalid"
-    receipt_key = values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
-    if receipt_key is not None and _HEX_64.fullmatch(receipt_key) is None:
+    receipt_key = values[_OBSERVATION_RECEIPT_PUBLIC_KEY]
+    if _HEX_64.fullmatch(receipt_key) is None:
         return values, "evidence observation receipt public key is invalid"
     return values, None
 

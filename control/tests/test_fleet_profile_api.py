@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from importlib.resources import files
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -230,6 +231,47 @@ def test_profiles_are_authenticated_role_bound_and_audited() -> None:
         audits.for_request("20000000-0000-4000-8000-000000000001").action
         == "fleet-profile.create"
     )
+
+
+def test_profile_json_input_rejects_extra_fields_and_type_coercion() -> None:
+    client, headers, _audits = _setup()
+
+    extra = {**_body(), "unexpected": "must be rejected"}
+    malformed = {**_body(), "favorite": 1}
+
+    extra_response = client.post(
+        "/api/v1/fleet-profiles", headers=headers(), json=extra
+    )
+    malformed_response = client.post(
+        "/api/v1/fleet-profiles", headers=headers(), json=malformed
+    )
+
+    assert extra_response.status_code == 422
+    assert malformed_response.status_code == 422
+
+
+def test_profile_preview_contract_rejects_duplicate_or_out_of_scope_nodes() -> None:
+    from pydantic import ValidationError
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentPreview,
+        FleetProfileScopePreview,
+    )
+
+    with pytest.raises(ValidationError, match="must be unique"):
+        FleetProfileAssignmentPreview(
+            assignment_id=PROFILE,
+            recipe_revision_id=REVISION,
+            recipe_title="Recipe",
+            desired_state="running",
+            current_state="running",
+            node_ids=[NODE, NODE],
+            actions=["keep"],
+            reasons=[],
+        )
+    with pytest.raises(ValidationError, match="inside the profile scope"):
+        FleetProfileScopePreview(
+            node_ids=[NODE], idle_node_ids=["spk_" + "0" * 32]
+        )
 
 
 def test_profile_preview_exposes_blockers_and_apply_rejects_stale_plan() -> None:

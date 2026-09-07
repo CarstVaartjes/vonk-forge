@@ -188,7 +188,7 @@ def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
         publisher="vonk-forge-test",
         slug="canonical-synthetic-canary",
         recipe_content_sha256="b" * 64,
-        model_version_sha256="c" * 64,
+        model_content_sha256="c" * 64,
         role="entrypoint",
         serving_check={},
         recipe={},

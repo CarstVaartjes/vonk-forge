@@ -202,12 +202,15 @@ pub fn project(
     validate_security(plan)?;
 
     let mut mounts = Vec::with_capacity(plan.artifacts.len() + 3);
-    let mut source_paths = BTreeSet::new();
     let mut target_paths = BTreeSet::new();
     for artifact in &plan.artifacts {
         let source = model_source(paths, artifact)?;
         let target = model_target(artifact)?;
-        if !source_paths.insert(source.clone()) || !target_paths.insert(target.clone()) {
+        // A physical file may be projected at more than one model target.
+        // Workload validation has already proved that repeated source paths
+        // carry the exact same receipt-bound object; retain every distinct
+        // target mount while reusing that source.
+        if !target_paths.insert(target.clone()) {
             return Err(CompiledOciError::Invalid("duplicate materialized path"));
         }
         mounts.push(OciMount {
@@ -619,7 +622,35 @@ mod tests {
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(matches!(
             project(&plan, &paths()),
-            Err(CompiledOciError::Invalid("duplicate materialized path"))
+            Err(CompiledOciError::Workload(_))
+        ));
+    }
+
+    #[test]
+    fn one_physical_source_can_be_projected_to_two_targets() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert_eq!(invocation.mounts.len(), 7);
+        assert_eq!(invocation.mounts[0].source, invocation.mounts[3].source);
+        assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
+        assert_eq!(invocation.mounts[3].target, "/models/secondary/config.json");
+    }
+
+    #[test]
+    fn conflicting_duplicate_physical_source_is_rejected() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        projection["file_id"] = json!("different-file");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            project(&plan, &paths()),
+            Err(CompiledOciError::Workload(_))
         ));
     }
 
