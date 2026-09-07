@@ -17,7 +17,7 @@ function plan(overrides: Partial<LibraryModelDeletionPlan> = {}): LibraryModelDe
     bytes_removed: 120 * GIB,
     installations: [{installation_id: "installation-chat", installed_bytes: 120 * GIB, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
     model_title: "Qwen 3 BF16",
-    model_version_sha256: digest,
+    model_content_sha256: digest,
     nodes: [
       {installation_ids: ["installation-chat"], installed_bytes: 60 * GIB, node_id: "node-alpha", recipe_ids: ["recipe-chat"]},
       {installation_ids: ["installation-chat"], installed_bytes: 60 * GIB, node_id: "node-beta", recipe_ids: ["recipe-chat"]},
@@ -37,7 +37,7 @@ function renderDialog(api: ControlApi, onRefresh = vi.fn(async () => undefined))
   return {onRefresh, ...render(<LibraryModelDeletionDialog
     api={api}
     modelTitle="Qwen 3 BF16"
-    modelVersionSha256={digest}
+    modelContentSha256={digest}
     nodeNames={{"node-alpha": "Aurora", "node-beta": "Borealis"}}
     onClose={vi.fn()}
     onRefresh={onRefresh}

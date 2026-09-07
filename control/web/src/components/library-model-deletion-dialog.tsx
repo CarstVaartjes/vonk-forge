@@ -13,10 +13,10 @@ function errorMessage(value: unknown): string {
   return (value instanceof Error ? value.message : "The Controller could not complete this request.").slice(0, 256);
 }
 
-export function LibraryModelDeletionDialog({api, modelTitle, modelVersionSha256, nodeNames, onBusyChange, onClose, onRefresh}: {
+export function LibraryModelDeletionDialog({api, modelTitle, modelContentSha256, nodeNames, onBusyChange, onClose, onRefresh}: {
   api: LibraryApi;
   modelTitle: string;
-  modelVersionSha256: string;
+  modelContentSha256: string;
   nodeNames: Record<string, string>;
   onBusyChange?(busy: boolean): void;
   onClose(): void;
@@ -55,12 +55,12 @@ export function LibraryModelDeletionDialog({api, modelTitle, modelVersionSha256,
     setConfirmed(false);
     setStale(false);
     setLoading(true);
-    void api.previewLibraryModelDeletion(modelVersionSha256, controller.signal)
+    void api.previewLibraryModelDeletion(modelContentSha256, controller.signal)
       .then(value => { if (!controller.signal.aborted) setPlan(value); })
       .catch(value => { if (!controller.signal.aborted) setPreviewError(errorMessage(value)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [api, modelVersionSha256, previewAttempt]);
+  }, [api, modelContentSha256, previewAttempt]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -106,7 +106,7 @@ export function LibraryModelDeletionDialog({api, modelTitle, modelVersionSha256,
     setApplying(true);
     setApplyError("");
     try {
-      const next = await api.deleteLibraryModel(modelVersionSha256, {plan_digest: plan.plan_digest, request_key: requestKey.current}, controller.signal);
+      const next = await api.deleteLibraryModel(modelContentSha256, {plan_digest: plan.plan_digest, request_key: requestKey.current}, controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
       setOperation(next);
       if (operationSettled(next.state)) await onRefresh(controller.signal);
@@ -137,7 +137,7 @@ export function LibraryModelDeletionDialog({api, modelTitle, modelVersionSha256,
           <p className="authority-copy">Shared cache policy: {plan.shared_cache_policy}</p>
           <LibraryPlanReasons heading="Delete blockers" reasons={plan.blockers}/>
           <LibraryPlanReasons heading="Delete warnings" reasons={plan.warnings}/>
-          <div className="library-digest-confirmation"><span>Authority is locked to this fleet-wide preview</span><small>Any changed installation, run, or dependency invalidates this plan and requires a fresh review.</small><TechnicalDetails items={[{label: "Model digest", value: plan.model_version_sha256}, {label: "Plan digest", value: plan.plan_digest}]}/></div>
+          <div className="library-digest-confirmation"><span>Authority is locked to this fleet-wide preview</span><small>Any changed installation, run, or dependency invalidates this plan and requires a fresh review.</small><TechnicalDetails items={[{label: "Model content digest", value: plan.model_content_sha256}, {label: "Plan digest", value: plan.plan_digest}]}/></div>
           {plan.allowed && !operation && <label className="library-destructive-confirmation"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/><span>I understand that every listed recipe installation and this exact model will be removed from the listed Sparks.</span></label>}
         </div>}
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p>{stale ? <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh preview</button> : <button type="button" onClick={() => void applyPlan()}>Retry deletion request</button>}</div>}

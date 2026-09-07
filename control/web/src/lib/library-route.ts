@@ -22,7 +22,7 @@ export function libraryRoute(path: string): LibraryRoute {
   return {kind: "root"};
 }
 
-export function modelVersionKey(model: {publisher: string; slug: string; content_sha256: string}): string {
+export function modelKey(model: {publisher: string; slug: string; content_sha256: string}): string {
   return `${model.publisher}/${model.slug}@${model.content_sha256}`;
 }
 
