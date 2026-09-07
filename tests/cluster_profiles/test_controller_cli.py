@@ -2230,3 +2230,15 @@ def test_placement_apply_rejects_binding_fields_in_intent() -> None:
             "--plan-digest", "d" * 64, "--apply", "--json",
         ), control_client=client) != 0
     assert client.calls == []
+
+
+def test_progress_line_shows_canonical_aggregate_rates_eta_and_freshness():
+    from cluster_profiles.controller_cli import _operation_progress_line
+    line = _operation_progress_line({"progress": {"operation": {
+        "phase": "copying", "completed_bytes": 10, "total_bytes": 100,
+        "bytes_per_second": 20.0, "smoothed_bytes_per_second": 15.0,
+        "eta_seconds": 6.0, "elapsed_seconds": 2.0,
+        "last_progress_at": "2026-09-08T00:00:02Z", "activity": "possibly_stalled",
+    }}})
+    for value in ("bytes: 10/100", "smoothed: 15 bytes/s", "ETA: 6s", "elapsed: 2s", "last progress: 2026-09-08T00:00:02Z", "activity: possibly stalled"):
+        assert value in line

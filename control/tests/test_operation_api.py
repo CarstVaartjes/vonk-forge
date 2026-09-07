@@ -321,6 +321,7 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
     assert projected is not None
     assert projected.model_dump(mode="json") == {
         "phase": "download",
+        "activity": "waiting",
         "kind": "oci-layer",
         "object_sha256": "a" * 64,
         "completed_bytes": 128,
@@ -329,12 +330,10 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
     }
     assert operation_api._progress_projection({"phase": "verify"}).model_dump(
         mode="json"
-    ) == {"phase": "verify"}
+    ) == {"phase": "verify", "activity": "waiting"}
     for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
-        assert (
+        with pytest.raises(ValueError):
             operation_api._progress_projection({"phase": "download", retired: 1})
-            is None
-        )
 
 
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
@@ -559,7 +558,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert first.json()["next_cursor"] is not None
     assert detail.status_code == 200
     assert detail.json()["kind"] == "fleet-profile.apply"
-    assert detail.json()["progress"] == {"phase": "start"}
+    assert detail.json()["progress"] == ({"phase": "start", "activity": "waiting"} if profile_state == "running" else {"phase": "start"})
     if profile_state != "running":
         failure = detail.json()["failure"]
         assert failure["error_code"] == "fleet_profile_application_failed"
@@ -773,7 +772,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
         "operations": [],
         "operation_next_cursor": None,
         "operation_total": 0,
-        "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
+        "progress": {"operation": None, "completed": 0, "failed": 0, "running": 0, "total": 0},
         "state": "queued",
         "status_reason": None,
         "targets": [NODE_ID],
@@ -1148,7 +1147,10 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
     while True:
         page = services.job_operations(job.id, cursor, 7)
         found.extend(str(item["id"]) for item in page.items)
-        assert page.progress.model_dump() == {
+        assert page.progress.operation is not None
+        assert len(page.progress.operation.members) == 23
+        assert page.progress.operation.total_bytes is None
+        assert page.progress.model_dump(exclude={"operation"}) == {
             "completed": 8,
             "failed": 0,
             "running": 15,
@@ -1609,3 +1611,40 @@ def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
         assert (
             schema["components"]["schemas"][component]["additionalProperties"] is False
         )
+
+
+def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) -> None:
+    now = datetime.now(UTC)
+    engine = create_engine(f"sqlite:///{tmp_path / 'parallel-progress.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    job = Job(request_id="33333333-3333-4333-8333-333333333333", kind="reconcile", state="running",
+              actor="operator", authority_revision=COMMIT, targets=[NODE_ID, "spk_"+"2"*32],
+              payload_digest="e"*64, payload={}, current_attempt=1, created_at=now, updated_at=now)
+    with sessions.begin() as session:
+        session.add(job)
+        session.flush()
+        for index, target in enumerate(job.targets, 1):
+            session.add(AgentNode(node_id=target, state="active", capabilities=[]))
+            operation = AgentOperation(parent_job_id=job.id, node_id=target, kind="node.probe",
+                                       payload_digest=f"{index:064x}", payload={}, authority_revision=COMMIT,
+                                       state="running", current_attempt=1, created_at=now, updated_at=now)
+            session.add(operation)
+            session.flush()
+            session.add(AgentOperationAttempt(operation_id=operation.id, attempt=1, fence=f"00000000-0000-4000-8000-{index:012d}",
+                lease_deadline=now+timedelta(minutes=1), agent_certificate_serial=f"serial-{index}", state="running",
+                progress={"phase":"copying", "completed_bytes":index*10, "total_bytes":index*100,
+                          "total_bytes_known":True, "bytes_per_second":float(index*10), "eta_seconds":9.0,
+                          "observed_at":now.isoformat(), "last_progress_at":now.isoformat()}))
+    services = operation_api.durable_operation_services(sessions, tmp_path / "routes", clock=lambda: now,
+                                                        cursors=TokenCodec(b"k"*32).cursor_codec())
+    first = services.job_operations(job.id, None, 1)
+    assert len(first.items) == 1 and first.next_cursor
+    second = services.job_operations(job.id, first.next_cursor, 1)
+    for page in (first, second):
+        aggregate = page.progress.operation
+        assert aggregate.completed_bytes == 30
+        assert aggregate.total_bytes == 300
+        assert aggregate.bytes_per_second == 30.0
+        assert aggregate.eta_seconds == 9.0
+        assert len(aggregate.members) == 2

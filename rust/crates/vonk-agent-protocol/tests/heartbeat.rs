@@ -54,3 +54,19 @@ fn heartbeat_messages_reject_invalid_attempts_and_nodes() {
     invalid_node.node_id = "spark-one".to_owned();
     assert!(invalid_node.validate().is_err());
 }
+
+#[test]
+fn nested_progress_rejects_invalid_totals_scalars_and_unknown_fields() {
+    for document in [
+        json!({"phase":"copying", "completed_bytes":true}),
+        json!({"phase":"copying", "completed_bytes":10, "total_bytes":5, "total_bytes_known":true}),
+        json!({"phase":"copying", "total_bytes":5}),
+        json!({"phase":"copying", "rate":1.0}),
+        json!({"phase":"copying", "observed_at":"2026-09-08T00:00:00"}),
+        json!({"phase":"copying", "members":[{"member_id":"a","phase":"copying"},{"member_id":"a","phase":"copying"}]}),
+    ] {
+        let mut message = progress();
+        message.progress = document;
+        assert!(message.validate().is_err());
+    }
+}

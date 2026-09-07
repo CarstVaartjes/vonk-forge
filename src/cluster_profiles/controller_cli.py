@@ -2686,6 +2686,8 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     progress = observed.get("progress")
     if not isinstance(progress, Mapping):
         return None
+    if isinstance(progress.get("operation"), Mapping):
+        progress = progress["operation"]
     phase = progress.get("phase")
     pieces: list[str] = []
     if isinstance(phase, str) and phase:
@@ -2700,6 +2702,19 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
             pieces.append(f"bytes: {completed}/{total}")
         else:
             pieces.append(f"bytes: {completed}")
+    for field, label, suffix in (
+        ("smoothed_bytes_per_second", "smoothed", " bytes/s"),
+        ("bytes_per_second", "current", " bytes/s"),
+        ("eta_seconds", "ETA", "s"),
+        ("elapsed_seconds", "elapsed", "s"),
+    ):
+        value = progress.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            pieces.append(f"{label}: {value:.0f}{suffix}")
+    for field, label in (("activity", "activity"), ("last_progress_at", "last progress")):
+        value = progress.get(field)
+        if isinstance(value, str) and value:
+            pieces.append(f"{label}: {value.replace('_', ' ')}")
     artifact = progress.get("current_artifact_key")
     if isinstance(artifact, str) and artifact:
         pieces.append(f"artifact: {artifact}")

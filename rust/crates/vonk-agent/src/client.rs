@@ -2,6 +2,7 @@ use std::{
     fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -252,6 +253,9 @@ pub struct DistributionDownloadEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DistributionProgress {
+    pub phase: &'static str,
+    pub completed_items: u64,
+    pub total_items: u64,
     pub object_sha256: String,
     pub kind: String,
     pub bytes: u64,
@@ -263,6 +267,7 @@ pub struct AgentHttpClient {
     client: Client,
     controller: Url,
     node_id: String,
+    progress_phase: Arc<Mutex<Option<(uuid::Uuid, String)>>>,
 }
 
 impl AgentHttpClient {
@@ -272,6 +277,7 @@ impl AgentHttpClient {
             client: reqwest::Client::new(),
             controller: Url::parse(controller).expect("test controller URL must be valid"),
             node_id: node_id.to_owned(),
+            progress_phase: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -308,6 +314,7 @@ impl AgentHttpClient {
             client,
             controller: config.controller_url.clone(),
             node_id: config.node_id.clone(),
+            progress_phase: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -362,12 +369,37 @@ impl AgentHttpClient {
         }
     }
 
+    pub(crate) fn set_progress_phase(&self, operation_id: uuid::Uuid, phase: &str) {
+        *self
+            .progress_phase
+            .lock()
+            .expect("progress phase lock poisoned") = Some((operation_id, phase.to_owned()));
+    }
+
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        let mut progress = progress.clone();
+        if progress
+            .progress
+            .get("phase")
+            .and_then(serde_json::Value::as_str)
+            == Some("executing")
+        {
+            if let Some((operation_id, phase)) = self
+                .progress_phase
+                .lock()
+                .expect("progress phase lock poisoned")
+                .as_ref()
+            {
+                if *operation_id == progress.operation_id {
+                    progress.progress["phase"] = serde_json::json!(phase);
+                }
+            }
+        }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(progress).map_err(|_| ClientError::Protocol)?;
+        let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/heartbeat")?)
@@ -773,7 +805,7 @@ impl AgentHttpClient {
             expected_bytes,
             destination,
             destination.parent().ok_or(ClientError::Protocol)?,
-            |_| {},
+            |_, _| {},
         )
         .await
     }
@@ -853,7 +885,7 @@ impl AgentHttpClient {
         let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
         let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
-        for object in &assignment.objects {
+        for (index, object) in assignment.objects.iter().enumerate() {
             let path = if object.kind == "model" {
                 model_root.join(&object.sha256)
             } else if object.sha256 == assignment.oci_archive_sha256 && object.kind == "oci-archive"
@@ -884,8 +916,11 @@ impl AgentHttpClient {
                 object.bytes,
                 &path,
                 managed_root,
-                |bytes| {
+                |bytes, phase| {
                     progress(DistributionProgress {
+                        phase,
+                        completed_items: index as u64,
+                        total_items: assignment.objects.len() as u64,
                         object_sha256: object_digest.clone(),
                         kind: kind.clone(),
                         bytes: base.saturating_add(bytes),
@@ -895,6 +930,15 @@ impl AgentHttpClient {
             )
             .await?;
             downloaded_bytes = downloaded_bytes.saturating_add(object.bytes);
+            progress(DistributionProgress {
+                phase: "verifying",
+                completed_items: index as u64 + 1,
+                total_items: assignment.objects.len() as u64,
+                object_sha256: object.sha256.clone(),
+                kind: object.kind.clone(),
+                bytes: downloaded_bytes,
+                total_bytes: Some(total_bytes),
+            });
             if object.kind == "model" {
                 model_paths.push(path);
                 model_digests.push(object.sha256.clone());
@@ -934,7 +978,7 @@ impl AgentHttpClient {
         mut progress: F,
     ) -> Result<(), ClientError>
     where
-        F: FnMut(u64),
+        F: FnMut(u64, &'static str),
     {
         // The assignment-bound mTLS endpoint and its exact ranged response
         // headers establish the transfer contract. Hash the completed object
@@ -955,10 +999,11 @@ impl AgentHttpClient {
 
         if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
             drop(file);
+            progress(expected_bytes, "verifying");
             if sha256_path(destination, expected_bytes).await? != sha256 {
                 return Err(ClientError::Protocol);
             }
-            progress(expected_bytes);
+            progress(expected_bytes, "verifying");
             return Ok(());
         }
 
@@ -975,13 +1020,15 @@ impl AgentHttpClient {
             tokio::fs::rename(&partial, destination).await?;
             sync_parent(parent).await?;
             validate_trusted_file(destination, expected_bytes).await?;
+            progress(expected_bytes, "verifying");
             if sha256_path(destination, expected_bytes).await? != sha256 {
                 return Err(ClientError::Protocol);
             }
-            progress(expected_bytes);
+            progress(expected_bytes, "verifying");
             return Ok(());
         }
 
+        progress(offset, "copying");
         while offset < expected_bytes {
             let end = expected_bytes
                 .saturating_sub(1)
@@ -1028,13 +1075,14 @@ impl AgentHttpClient {
                 return Err(ClientError::Protocol);
             }
             offset = end + 1;
-            progress(offset);
+            progress(offset, "copying");
         }
         output.sync_all().await?;
         drop(output);
         tokio::fs::rename(&partial, destination).await?;
         sync_parent(parent).await?;
         validate_trusted_file(destination, expected_bytes).await?;
+        progress(expected_bytes, "verifying");
         if sha256_path(destination, expected_bytes).await? != sha256 {
             return Err(ClientError::Protocol);
         }
@@ -1685,6 +1733,7 @@ mod tests {
                 client: reqwest::Client::new(),
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+                progress_phase: Default::default(),
             },
             server,
         )
@@ -1937,6 +1986,7 @@ mod tests {
                 .unwrap(),
             controller: Url::parse(controller).unwrap(),
             node_id: node_id.to_owned(),
+            progress_phase: Default::default(),
         }
     }
 
@@ -2064,10 +2114,26 @@ mod tests {
         let assignment_root = root.path().join("distribution").join("plan");
         let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(&assignment_root).unwrap();
+        let mut snapshots = Vec::new();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
+            .download_distribution_with_progress(
+                &assignment.plan_digest,
+                &assignment_root,
+                &archive_root,
+                |item| snapshots.push(item),
+            )
             .await
             .unwrap();
+        assert!(snapshots.iter().any(|item| item.phase == "copying"));
+        assert!(snapshots.iter().any(|item| item.phase == "verifying"));
+        assert!(
+            snapshots
+                .windows(2)
+                .all(|pair| pair[0].bytes <= pair[1].bytes)
+        );
+        let final_progress = snapshots.last().unwrap();
+        assert_eq!(final_progress.bytes, evidence.downloaded_bytes);
+        assert_eq!(final_progress.completed_items, final_progress.total_items);
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
         assert_eq!(
             evidence.oci_archive_path,
@@ -2498,6 +2564,7 @@ mod tests {
                 client: reqwest::Client::new(),
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+                progress_phase: Default::default(),
             },
             server,
         )
@@ -2576,6 +2643,7 @@ mod tests {
                 client: http_client,
                 controller: base_client.controller,
                 node_id: base_client.node_id,
+                progress_phase: Default::default(),
             },
             server,
         )
@@ -2954,6 +3022,7 @@ mod tests {
             client: reqwest::Client::new(),
             controller: Url::parse("http://127.0.0.1:9/").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            progress_phase: Default::default(),
         };
         assert!(matches!(
             client.report_telemetry(&[]).await,

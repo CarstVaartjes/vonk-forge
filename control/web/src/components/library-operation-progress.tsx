@@ -1,3 +1,4 @@
+import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
 import {useEffect, useRef, useState} from "react";
 import type {JobDetail, LibraryApi, LibraryOperation} from "../api/types";
 import type {LibraryActionName} from "./library-action-types";
@@ -114,6 +115,8 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
     <p>{operation.nodes.map(nodeName).join(" + ")}</p>
     <TechnicalDetails compact items={[{label: "Operation ID", value: operation.id}, ...operation.nodes.map((node, index) => ({label: `Node ${index + 1} ID`, value: node}))]}/>
     {job && <p>{job.progress.completed} of {job.progress.total} ranks completed · {job.progress.failed} failed</p>}
+    {job && "operation" in job.progress && job.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(job.progress.operation)}/>}
+    {job && <ul className="library-availability-members">{job.operations.filter(item => item.progress).map(item => <li key={item.id}><strong>{nodeName(item.node_id)}</strong><LibraryAvailabilityProgress progress={availabilityProgress(item.progress)}/></li>)}</ul>}
     {error && <div role="alert"><p>{error}</p>{!incomplete && <button type="button" onClick={() => setPollAttempt(value => value + 1)}>Retry status</button>}</div>}
     {incomplete && <button type="button" onClick={() => void retry()} disabled={retrying}>{retrying ? "Retrying…" : "Retry incomplete operation"}</button>}
   </section>;

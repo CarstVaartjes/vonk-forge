@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -114,12 +116,28 @@ class OperationMemberProgress(WireModel):
     total_bytes: int | None = Field(default=None, strict=True, ge=0)
     bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
     eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
+    smoothed_bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    completed_items: int | None = Field(default=None, strict=True, ge=0)
+    total_items: int | None = Field(default=None, strict=True, ge=0)
+    elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
+    observed_at: str | None = Field(default=None, max_length=64)
+    last_progress_at: str | None = Field(default=None, max_length=64)
+    activity: Literal["active", "waiting", "possibly_stalled"] | None = None
     state: str = Field(default="running", min_length=1, max_length=32)
+
+    @field_validator("observed_at", "last_progress_at")
+    @classmethod
+    def timestamp_has_timezone(cls, value: str | None) -> str | None:
+        if value is not None and datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError("progress timestamp must include a timezone")
+        return value
 
     @model_validator(mode="after")
     def totals_are_consistent(self) -> OperationMemberProgress:
         if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
             raise ValueError("completed bytes cannot exceed total bytes")
+        if self.total_items is not None and (self.completed_items or 0) > self.total_items:
+            raise ValueError("completed items cannot exceed total items")
         return self
 
 
@@ -134,13 +152,20 @@ class OperationProgress(WireModel):
     total_bytes_known: bool = False
     bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
     eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
+    smoothed_bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    completed_items: int | None = Field(default=None, strict=True, ge=0)
+    total_items: int | None = Field(default=None, strict=True, ge=0)
+    elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
+    observed_at: str | None = Field(default=None, max_length=64)
+    last_progress_at: str | None = Field(default=None, max_length=64)
+    activity: Literal["active", "waiting", "possibly_stalled"] | None = None
     checkpoint: OperationCheckpoint | None = None
     members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
 
     @model_serializer(mode="wrap")
     def serialize_compact(self, handler: Any):
         document = handler(self)
-        for key in ("kind", "object_sha256", "total_bytes", "bytes_per_second", "eta_seconds", "checkpoint"):
+        for key in ("kind", "object_sha256", "total_bytes", "bytes_per_second", "eta_seconds", "checkpoint", "smoothed_bytes_per_second", "completed_items", "total_items", "elapsed_seconds", "observed_at", "last_progress_at", "activity"):
             if document.get(key) is None:
                 document.pop(key, None)
         if "completed_bytes" not in self.model_fields_set:
@@ -151,6 +176,13 @@ class OperationProgress(WireModel):
             document.pop("members", None)
         return document
 
+    @field_validator("observed_at", "last_progress_at")
+    @classmethod
+    def timestamp_has_timezone(cls, value: str | None) -> str | None:
+        if value is not None and datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError("progress timestamp must include a timezone")
+        return value
+
     @model_validator(mode="after")
     def totals_are_explicit_and_consistent(self) -> OperationProgress:
         if self.total_bytes_known != (self.total_bytes is not None):
@@ -159,6 +191,8 @@ class OperationProgress(WireModel):
             )
         if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
             raise ValueError("completed bytes cannot exceed total bytes")
+        if self.total_items is not None and (self.completed_items or 0) > self.total_items:
+            raise ValueError("completed items cannot exceed total items")
         member_ids = [member.member_id for member in self.members]
         if len(member_ids) != len(set(member_ids)):
             raise ValueError("operation progress members must be unique")
