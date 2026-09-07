@@ -25,8 +25,9 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     RecipeUninstallResult,
 )
+from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
-from .library_contract import Digest, ImageDigest, NodeId, UuidId
+from .library_contract import NodeId, UuidId
 from .strict_json import StrictJSONModel
 
 
@@ -47,33 +48,6 @@ class LifecycleCodeFailureResult(LifecycleModel):
 
     code: str = Field(min_length=1, max_length=128)
     detail: str | None = Field(default=None, min_length=1, max_length=512)
-
-
-class TensorParallelStartEvidence(LifecycleModel):
-    """Endpoint evidence emitted by the phase-free tensor-parallel path.
-
-    Tensor-parallel recipes use the current exact run inspection fields while
-    keeping the single start phase.  The protocol's phased start variants do
-    not model this flat projection, so this Controller projection keeps the
-    actual producer shape typed without weakening any required field.
-    """
-
-    recipe_revision_id: UuidId
-    recipe_content_sha256: Digest
-    image_digest: ImageDigest
-    artifact_set_digest: Digest
-    model_identity: str | None = Field(default=None, max_length=1024)
-    rank: int = Field(ge=0)
-    world_size: int = Field(ge=1)
-    memory_reservation_bytes: int = Field(ge=1)
-    evidence_digest: Digest
-    endpoint: str
-    ready: Literal[True]
-    run_generation: int = Field(ge=1)
-    runtime_arguments_sha256: Digest
-    local_address: str
-    master_address: str
-    master_port: int = Field(ge=1024, le=65535)
 
 
 LifecycleNodeResult = Annotated[

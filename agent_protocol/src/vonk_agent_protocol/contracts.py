@@ -226,10 +226,23 @@ class RecipeStartCollectiveReadinessEvidence(_RecipeStartEvidenceCommon):
     ready: Literal[True]
 
 
+class TensorParallelStartEvidence(_RecipeStartEvidenceCommon):
+    """Exact endpoint evidence for a phase-free tensor-parallel start."""
+
+    endpoint: str
+    ready: Literal[True]
+    run_generation: int = Field(strict=True, ge=1)
+    runtime_arguments_sha256: DigestText
+    local_address: str
+    master_address: str
+    master_port: int = Field(strict=True, ge=1024, le=65535)
+
+
 RecipeStartEvidence = (
     RecipeStartSingleEvidence
     | RecipeStartRankLaunchEvidence
     | RecipeStartCollectiveReadinessEvidence
+    | TensorParallelStartEvidence
 )
 
 
