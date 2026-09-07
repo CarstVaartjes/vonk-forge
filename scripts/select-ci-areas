@@ -84,6 +84,8 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
                 "scripts/generate-control-clients",
                 "control/openapi-python-client.yaml",
                 "control/openapi.json",
+                "src/cluster_profiles/schemas/control-openapi.json",
+                "schemas/control-openapi.json",
             ),
         ):
             selected["generated"] = True

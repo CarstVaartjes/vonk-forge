@@ -48,6 +48,18 @@ def test_control_contract_change_selects_backend_and_generation() -> None:
     assert selected["web"] is False
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/cluster_profiles/schemas/control-openapi.json",
+        "schemas/control-openapi.json",
+    ],
+)
+def test_packaged_openapi_change_selects_generated_gate(path: str) -> None:
+    selected = _module().select([path], "pull_request")
+    assert selected["generated"] is True
+
+
 def test_shared_ci_authority_selects_every_family() -> None:
     assert all(
         _module().select([".github/workflows/ci.yml"], "pull_request").values()

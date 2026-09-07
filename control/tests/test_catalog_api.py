@@ -33,6 +33,11 @@ class _FailingSync:
         return None
 
 
+class _BundleService:
+    def read_source_bundle(self, _sha256: str) -> bytes:
+        return b"raw source bundle bytes"
+
+
 def _sync_client(error: Exception) -> TestClient:
     app = FastAPI()
 
@@ -51,6 +56,26 @@ def _sync_client(error: Exception) -> TestClient:
     return TestClient(app)
 
 
+def test_source_bundle_download_preserves_raw_bytes() -> None:
+    app = FastAPI()
+    install_catalog_routes(
+        app,
+        actor_dependency=_administrator,
+        audits=MemoryAuditStore(),
+        service=_BundleService(),
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/catalog/source-bundles/" + "a" * 64
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"raw source bundle bytes"
+    assert response.headers["content-type"] == (
+        "application/vnd.vonk-forge.source-bundle.v1+tar"
+    )
+
+
 def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     app = FastAPI()
     install_catalog_routes(
@@ -61,6 +86,9 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     )
     paths = app.openapi()["paths"]
     assert "/api/v1/catalog/source-bundles/{sha256}" in paths
+    assert paths["/api/v1/catalog/source-bundles/{sha256}"]["get"][
+        "x-vonk-streaming-transport"
+    ] is True
     assert "/api/v1/catalog/managed-recipes/sync" in paths
     assert "/api/v1/catalog/managed-recipes/sync-status" in paths
     assert "/api/v1/catalog/public-recipes" not in paths
