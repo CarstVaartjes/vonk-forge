@@ -299,7 +299,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         assert binding["port"] == run_node.port
         assert binding["world_size"] == launch["world_size"]
         assert binding["recipe_content_sha256"] == launch["recipe_content_sha256"]
-        assert binding["image_digest"] == launch["image_digest"]
+        assert f"sha256:{binding['image_digest']}" == launch["image_digest"]
         assert binding["artifact_set_digest"] == launch["artifact_set_digest"]
         assert binding["runtime_arguments_sha256"] == launch["runtime_arguments_sha256"]
         assert binding["local_address"] == launch.get("local_address")
