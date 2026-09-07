@@ -18,6 +18,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import (
     BaseModel,
     Field,
+    TypeAdapter,
     ValidationError,
     model_validator,
 )
@@ -858,13 +859,12 @@ def validate_result_for_operation(
     result: Any,
     *,
     state: str,
-) -> BaseModel | None:
+) -> BaseModel:
     """Validate a result against the operation stored by the Controller.
 
-    The generic evidence branch remains available for operation kinds whose
-    producer has no shared result model.  A current operation with a typed
-    result model must pass that model, preventing the generic branch from
-    silently accepting malformed known-operation evidence.
+    Success and failure both use the current typed graph. A one-shot recipe
+    job reports its process result on failure; infrastructure failures use the
+    shared failure model. Neither permits another operation's success receipt.
     """
 
     try:
@@ -878,9 +878,16 @@ def validate_result_for_operation(
             f"result model is not registered for {operation_kind.value}"
         ) from error
     if state != "succeeded":
-        return None
+        model = AgentFailureResult
     try:
-        return model.model_validate_json(canonical_message(result))
+        parsed = (
+            TypeAdapter(AgentFailureResult | RecipeJobRunResult).validate_json(canonical_message(result))
+            if state != "succeeded" and operation_kind == AgentOperation.RECIPE_JOB_RUN
+            else model.model_validate_json(canonical_message(result))
+        )
+        if state == "failed" and isinstance(parsed, RecipeJobRunResult) and parsed.exit_code == 0:
+            raise ValueError("failed recipe job requires a nonzero process exit code")
+        return parsed
     except (TypeError, ValueError, ValidationError) as error:
         raise AgentProtocolError(
             f"{operation_kind.value} result does not match its typed model"

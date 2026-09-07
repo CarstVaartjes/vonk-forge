@@ -56,6 +56,7 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -2261,7 +2262,7 @@ def install_agent_routes(
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
-            if message.state == "failed":
+            if message.state == "failed" and not isinstance(message.result, RecipeJobRunResult):
                 error_code = message.result.get("error_code")
                 if (
                     message.result.get("status") != "failed"

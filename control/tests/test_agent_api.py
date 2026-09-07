@@ -3546,6 +3546,30 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
         assert attempt.result is None
 
 
+def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(agent_system):
+    import json
+    from pathlib import Path
+
+    client, services, _, clock = agent_system
+    vectors = Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
+    request = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())["payload"]
+    job_result = json.loads((vectors / "recipe-job-run-result-v1.json").read_text())["result"]
+    services.operations.enqueue(
+        parent(services.sessions, clock).id, NODE_A, "recipe.job.run.v1", "a" * 64, request,
+    )
+    claim_response = client.post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claim_response.status_code == 200
+    claim = claim_response.json()
+    result = {key: claim[key] for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")}
+    result.update(state="failed", result=dict(job_result, exit_code=1, reason="runtime failed"))
+    response = client.post("/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    assert response.status_code == 204
+    with services.sessions() as session:
+        attempt = session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
+        assert attempt.state == "failed"
+        assert attempt.result["exit_code"] == 1
+
+
 def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
     client, _, _, _ = agent_system
 

@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     RecipeJobRunRequest,
     RecipeJobRunResult,
     canonical_message,
+    validate_result_for_operation,
     validate_schema_message,
 )
 
@@ -169,3 +170,13 @@ def test_recipe_job_result_rejects_manifest_drift() -> None:
     result["output_manifest"]["files"][0]["size_bytes"] = 5
     with pytest.raises(AgentProtocolError, match="manifest"):
         RecipeJobRunResult.parse(result)
+
+
+def test_failed_process_result_is_valid_only_for_its_current_operation() -> None:
+    _, envelope = documents()
+    result = dict(envelope["result"], exit_code=1, reason="runtime failed")
+    assert validate_result_for_operation("recipe.job.run.v1", result, state="failed").exit_code == 1
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation("recipe.stop", result, state="failed")
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation("recipe.job.run.v1", envelope["result"], state="failed")
