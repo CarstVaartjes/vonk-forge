@@ -16,7 +16,8 @@ from types import SimpleNamespace
 
 from vonk_agent_protocol import canonical_message, validate_compiled_execution_plan
 from vonk_control.compiled_execution_plan import compile_verified_execution_plan
-from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
+from vonk_control.models import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -144,21 +145,22 @@ def check_catalog(root: Path) -> dict[str, object]:
                     raise RuntimeError(f"{path.stem}: {error}") from error
                 topology = runtime["topology"]
                 world_size = topology["world_size"]
+                placement = _placement(
+                    recipe,
+                    runtime,
+                    ClusterMappingNode(rank=rank, role=role_entry.name),
+                    world_size,
+                )
+                # Supply only the simulated fleet addresses. Memory and port
+                # semantics come from the production placement constructor.
+                if placement["port"] is not None:
+                    placement["endpoint_address"] = "100.100.20.30"
+                if world_size > 1:
+                    placement["local_address"] = f"100.100.20.{rank + 2}"
+                    placement["master_address"] = "100.100.20.2"
                 payload = plan.to_compiled_launch_payload(
                     runtime,
-                    placement={
-                        "endpoint_address": "100.100.20.30",
-                        "rank": rank,
-                        "role": role_entry.name,
-                        "world_size": world_size,
-                        "local_address": f"100.100.20.{rank + 2}"
-                        if world_size > 1
-                        else None,
-                        "master_address": "100.100.20.2" if world_size > 1 else None,
-                        "master_port": 29500 if world_size > 1 else None,
-                        "port": 8000,
-                        "reserved_memory_bytes": 1024,
-                    },
+                    placement=placement,
                 )
                 try:
                     validate_compiled_execution_plan(payload)
