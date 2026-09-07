@@ -627,11 +627,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if request.validate().is_err() || request.plan_digest != claim.authority_revision {
                 return failed("artifact distribution plan identity is invalid");
             }
-            let destination = self
-                .runtime
-                .data_root
-                .join("distribution")
-                .join(&request.plan_digest);
+            let destination = self.runtime.data_root.join("distribution");
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
             let progress_client = self.client.clone();
@@ -1341,16 +1337,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("local disk capacity changed after install admission");
                 }
-                if self
-                    .runtime
-                    .install(
-                        &spec,
-                        &request.installation_id.to_string(),
-                        &spec.identity.recipe_revision_sha256,
-                    )
-                    .is_err()
-                {
-                    return failed("recipe artifacts or container image could not be installed");
+                match self.runtime.install(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &spec.identity.recipe_revision_sha256,
+                ) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        let (stage, category) = error.safe_install_context();
+                        return failed_owned(format!(
+                            "recipe artifacts or container image could not be installed (stage={stage}; category={category})"
+                        ));
+                    }
                 }
                 let installed_bytes = self
                     .runtime
@@ -1827,6 +1825,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
 }
 
 fn failed(reason: &'static str) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({"reason": reason}),
+    }
+}
+
+fn failed_owned(reason: String) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
         body: json!({"reason": reason}),

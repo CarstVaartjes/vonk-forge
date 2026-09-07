@@ -42,6 +42,35 @@ pub enum OciError {
     Json(#[from] serde_json::Error),
     #[error("local disk or memory capacity changed after admission")]
     Capacity,
+    #[error("install {stage} failed: {source}")]
+    Install {
+        stage: &'static str,
+        #[source]
+        source: Box<OciError>,
+    },
+}
+
+impl OciError {
+    pub fn safe_install_context(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Install { stage, source } => (*stage, source.safe_category()),
+            error => ("unknown", error.safe_category()),
+        }
+    }
+
+    fn safe_category(&self) -> &'static str {
+        match self {
+            Self::Process(_) => "process",
+            Self::Workload(_) => "workload",
+            Self::Runtime => "runtime",
+            Self::ImageDigest => "image-digest",
+            Self::Artifact => "artifact",
+            Self::Io(_) => "storage",
+            Self::Json(_) => "metadata",
+            Self::Capacity => "capacity",
+            Self::Install { source, .. } => source.safe_category(),
+        }
+    }
 }
 
 pub struct OciRuntime<'a, R> {
@@ -113,6 +142,13 @@ type PhysicalArtifactIdentity = (
     String,
 );
 type PhysicalMaterialization = (PathBuf, PhysicalArtifactIdentity);
+
+fn install_error(stage: &'static str, source: OciError) -> OciError {
+    OciError::Install {
+        stage,
+        source: Box::new(source),
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -369,43 +405,55 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Artifact);
         }
-        self.verify_image(spec)?;
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        fs::create_dir_all(&installation)?;
-        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
-        self.ensure_runtime_cache(installation_id)?;
-        let distribution_root = self
-            .data_root
-            .join("distribution")
-            .join(&spec.identity.execution_sha256);
-        self.materialize_compiled_models(spec, &distribution_root, installation_id)?;
-        self.verify_compiled_image_archive(spec)?;
-        let encoded_spec = serde_json::to_vec(spec)?;
+        self.verify_image(spec)
+            .map_err(|error| install_error("image-verification", error))?;
+        let installation = managed_path(self.data_root, "installations", installation_id)
+            .map_err(|error| install_error("installation-path", OciError::Workload(error)))?;
+        fs::create_dir_all(&installation)
+            .map_err(OciError::Io)
+            .map_err(|error| install_error("installation-directory", error))?;
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))
+            .map_err(OciError::Io)
+            .map_err(|error| install_error("installation-directory", error))?;
+        self.ensure_runtime_cache(installation_id)
+            .map_err(|error| install_error("runtime-cache", error))?;
+        self.materialize_compiled_models(spec, installation_id)
+            .map_err(|error| install_error("model-materialization", error))?;
+        self.verify_compiled_image_archive(spec)
+            .map_err(|error| install_error("image-archive", error))?;
+        let encoded_spec = serde_json::to_vec(spec)
+            .map_err(OciError::Json)
+            .map_err(|error| install_error("installation-metadata", error))?;
         if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
-            return Err(OciError::Artifact);
+            return Err(install_error("installation-metadata", OciError::Artifact));
         }
-        write_installation_metadata(&installation, spec)?;
-        atomic_write(&installation, "spec.json", &encoded_spec)?;
+        write_installation_metadata(&installation, spec)
+            .map_err(|error| install_error("installation-metadata", error))?;
+        atomic_write(&installation, "spec.json", &encoded_spec)
+            .map_err(|error| install_error("installation-metadata", error))?;
         atomic_write(
             &installation,
             "recipe-content.sha256",
             recipe_content_sha256.as_bytes(),
-        )?;
-        File::open(&installation)?.sync_all()?;
+        )
+        .map_err(|error| install_error("installation-metadata", error))?;
+        File::open(&installation)
+            .map_err(OciError::Io)
+            .and_then(|file| file.sync_all().map_err(OciError::Io))
+            .map_err(|error| install_error("installation-metadata", error))?;
         Ok(())
     }
 
     /// Materialize only the model files authorized by a compiled Controller
-    /// plan. The distribution client must preserve the selection scope in its
-    /// staging layout; a flat path would make colliding files such as
-    /// ``config.json`` ambiguous and is rejected by this boundary.
+    /// plan. Distribution objects live under the plan-independent,
+    /// content-addressed model artifact-set root; each selected path remains
+    /// an explicit installation projection.
     pub fn materialize_compiled_models(
         &self,
         plan: &CompiledExecutionPlan,
-        distribution_root: &Path,
         installation_id: &str,
     ) -> Result<Vec<PathBuf>, OciError> {
-        materialize_compiled_models(self.data_root, plan, distribution_root, installation_id)
+        materialize_compiled_models(self.data_root, plan, installation_id)
     }
 
     pub fn verify_image(&self, spec: &CompiledExecutionPlan) -> Result<(), OciError> {
@@ -438,9 +486,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .join(&plan.runtime_image.oci_layout_sha256);
         let metadata = fs::symlink_metadata(&archive)?;
         if metadata.file_type().is_symlink()
-            || !metadata.file_type().is_file()
-            || metadata.len() != plan.runtime_image.image_bytes
-            || sha256_file(&archive)? != plan.runtime_image.oci_layout_sha256
+            || !trusted_model_metadata(&metadata, plan.runtime_image.image_bytes)
         {
             return Err(OciError::ImageDigest);
         }
@@ -1411,25 +1457,40 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     }
 }
 
-fn sha256_file(path: &Path) -> Result<String, OciError> {
-    #[cfg(test)]
-    SHA256_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
+fn sync_parent(parent: &Path) -> Result<(), OciError> {
+    File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+struct TemporaryArtifact {
+    path: PathBuf,
+    retained: bool,
+}
+
+impl TemporaryArtifact {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            retained: false,
         }
-        hasher.update(&buffer[..read]);
     }
-    Ok(hex::encode(hasher.finalize()))
+
+    fn retain(&mut self) {
+        self.retained = true;
+    }
+}
+
+impl Drop for TemporaryArtifact {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn sha256_open_file(file: &mut File, before: &fs::Metadata) -> Result<String, OciError> {
     #[cfg(test)]
-    SHA256_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
     file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -1459,7 +1520,12 @@ fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 thread_local! {
-    static SHA256_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SHA256_OPEN_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn test_sha256_open_file_call_count() -> usize {
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.get())
 }
 
 fn write_installation_metadata(
@@ -1699,10 +1765,9 @@ fn hook_arguments(main: &[String], image: &str, hook: &[String]) -> Result<Vec<S
 fn materialize_compiled_models(
     data_root: &Path,
     plan: &CompiledExecutionPlan,
-    distribution_root: &Path,
     installation_id: &str,
 ) -> Result<Vec<PathBuf>, OciError> {
-    if !distribution_root.is_absolute() || !data_root.is_absolute() {
+    if !data_root.is_absolute() {
         return Err(OciError::Artifact);
     }
     plan.validate()?;
@@ -1713,9 +1778,23 @@ fn materialize_compiled_models(
     fs::create_dir_all(&destination_root)?;
     fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o700))?;
 
-    let scoped_root = distribution_root
+    let scoped_root = data_root
+        .join("distribution")
         .join("models")
         .join(&plan.identity.model_artifact_set_sha256);
+    let scoped_metadata = fs::symlink_metadata(&scoped_root)?;
+    if scoped_metadata.file_type().is_symlink() || !scoped_metadata.is_dir() {
+        return Err(OciError::Artifact);
+    }
+    let receipt_index = read_installation_metadata(&installation)?
+        .filter(|receipt| receipt_matches_plan(receipt, plan))
+        .map(|receipt| {
+            receipt
+                .entries
+                .into_iter()
+                .map(|entry| ((entry.selection_id.clone(), entry.path.clone()), entry))
+                .collect::<BTreeMap<_, _>>()
+        });
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
     let mut physical_by_path: BTreeMap<(String, String), PhysicalMaterialization> = BTreeMap::new();
     for artifact in &plan.artifacts {
@@ -1747,59 +1826,73 @@ fn materialize_compiled_models(
             // second OCI mount intent.
             continue;
         }
-        let source = scoped_root
-            .join(&artifact.selection_id)
-            .join(&artifact.path);
-        if !source.starts_with(&scoped_root) {
-            return Err(OciError::Artifact);
-        }
-        let source_metadata = fs::symlink_metadata(&source)?;
-        if !source_metadata.file_type().is_file()
-            || source_metadata.file_type().is_symlink()
-            || source_metadata.len() != artifact.size_bytes
-            || sha256_file(&source)? != artifact.sha256
-        {
-            return Err(OciError::Artifact);
-        }
-
         if !destination.starts_with(&destination_root) {
             return Err(OciError::Artifact);
         }
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)?;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let parent = destination.parent().ok_or(OciError::Artifact)?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(OciError::Artifact);
+            }
+            let reusable = receipt_index.as_ref().and_then(|index| {
+                index
+                    .get(&(artifact.selection_id.clone(), artifact.path.clone()))
+                    .filter(|entry| metadata_matches_receipt(&metadata, entry))
+            });
+            if let Some(entry) = reusable {
+                let (_, opened_metadata) =
+                    open_trusted_model_file(&destination, artifact.size_bytes)?;
+                if metadata_matches_receipt(&opened_metadata, entry) {
+                    physical_by_path.insert(physical_key, (destination.clone(), physical));
+                    materialized.push(destination);
+                    continue;
+                }
+            }
         }
-        if destination.exists() {
-            let metadata = fs::symlink_metadata(&destination)?;
-            if metadata.file_type().is_symlink()
-                || !metadata.file_type().is_file()
-                || metadata.len() != artifact.size_bytes
-                || sha256_file(&destination)? != artifact.sha256
-            {
-                return Err(OciError::Artifact);
-            }
-        } else {
-            let temporary = destination.with_extension(format!(
-                "{}.{}.partial",
-                std::process::id(),
-                artifact.file_id
-            ));
-            if temporary.exists() {
-                return Err(OciError::Artifact);
-            }
-            fs::copy(&source, &temporary)?;
-            let metadata = fs::symlink_metadata(&temporary)?;
-            if metadata.file_type().is_symlink()
-                || !metadata.file_type().is_file()
-                || metadata.len() != artifact.size_bytes
-                || sha256_file(&temporary)? != artifact.sha256
-            {
-                let _ = fs::remove_file(&temporary);
-                return Err(OciError::Artifact);
-            }
-            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
-            fs::rename(&temporary, &destination)?;
+        let source = scoped_root.join(&artifact.sha256);
+        if !source.starts_with(&scoped_root) {
+            return Err(OciError::Artifact);
         }
+        let (mut source_file, source_metadata) =
+            open_trusted_model_file(&source, artifact.size_bytes)?;
+        if sha256_open_file(&mut source_file, &source_metadata)? != artifact.sha256 {
+            return Err(OciError::Artifact);
+        }
+        source_file.seek(SeekFrom::Start(0))?;
+        let temporary = destination.with_extension(format!(
+            "{}.{}.{}.partial",
+            std::process::id(),
+            uuid::Uuid::new_v4(),
+            artifact.file_id
+        ));
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
+            )
+            .open(&temporary)?;
+        let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
+        let copied = std::io::copy(&mut source_file, &mut output)?;
+        output.sync_all()?;
+        let source_after = source_file.metadata()?;
+        let output_metadata = output.metadata()?;
+        if copied != artifact.size_bytes
+            || !trusted_model_file(&source_file, &source_after, artifact.size_bytes)
+            || !metadata_stable(&source_metadata, &source_after)
+            || !trusted_model_metadata(&output_metadata, artifact.size_bytes)
+        {
+            drop(output);
+            let _ = fs::remove_file(&temporary);
+            return Err(OciError::Artifact);
+        }
+        drop(output);
+        fs::rename(&temporary, &destination)?;
+        temporary_guard.retain();
+        sync_parent(parent)?;
         physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
     }
@@ -1961,7 +2054,7 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OciError, OciRuntime, SHA256_FILE_CALLS, materialize_compiled_models,
+        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
         read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
         write_installation_metadata,
     };
@@ -2243,11 +2336,11 @@ mod tests {
         let (installation_id, _, _) = persisted_installation(data.path());
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
     }
 
@@ -2278,16 +2371,16 @@ mod tests {
 
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         std::thread::sleep(Duration::from_millis(2));
         fs::write(installation.join("models/primary/config.json"), b"primary").unwrap();
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
     }
 
     #[test]
@@ -2301,11 +2394,11 @@ mod tests {
         );
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
     }
 
@@ -2317,9 +2410,9 @@ mod tests {
         let primary = installation.join("models/primary/config.json");
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         apply_acl(
             &primary,
@@ -2332,11 +2425,11 @@ mod tests {
             ],
         );
         runtime.verify_installation(&installation_id).unwrap();
-        let after_acl = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after_acl = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after_acl, before + 1);
 
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), after_acl);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), after_acl);
     }
 
     #[test]
@@ -2397,14 +2490,14 @@ mod tests {
         fs::write(&primary, b"mutated").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         assert!(matches!(
             runtime.verify_installation(&installation_id),
             Err(OciError::Artifact)
         ));
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before + 1);
     }
 
@@ -2417,14 +2510,14 @@ mod tests {
         fs::write(&primary, b"primary").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        let final_count = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let final_count = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(final_count, after);
     }
 
@@ -2506,28 +2599,47 @@ mod tests {
     }
 
     #[test]
+    fn model_materialization_temp_cleanup_is_task_owned() {
+        let data = tempdir().unwrap();
+        let temporary = data.path().join("model.partial");
+        fs::write(&temporary, b"incomplete").unwrap();
+        {
+            let _guard = super::TemporaryArtifact::new(temporary.clone());
+        }
+        assert!(!temporary.exists());
+
+        fs::write(&temporary, b"published").unwrap();
+        {
+            let mut guard = super::TemporaryArtifact::new(temporary.clone());
+            guard.retain();
+        }
+        assert_eq!(fs::read(temporary).unwrap(), b"published");
+    }
+
+    #[test]
     fn compiled_models_materialize_selection_scoped_colliding_paths() {
         let plan: crate::workloads::CompiledExecutionPlan =
             serde_json::from_value(compiled_plan()).unwrap();
         plan.validate().unwrap();
         let data = tempdir().unwrap();
-        let distribution = tempdir().unwrap();
-        let root = distribution
+        let root = data
             .path()
+            .join("distribution")
             .join("models")
             .join(&plan.identity.model_artifact_set_sha256);
-        fs::create_dir_all(root.join("primary")).unwrap();
-        fs::create_dir_all(root.join("secondary")).unwrap();
-        fs::write(root.join("primary/config.json"), b"primary").unwrap();
-        fs::write(root.join("secondary/config.json"), b"secondary").unwrap();
+        fs::create_dir_all(&root).unwrap();
+        for (artifact, bytes) in [
+            (&plan.artifacts[0], b"primary".as_slice()),
+            (&plan.artifacts[1], b"secondary".as_slice()),
+        ] {
+            let path = root.join(&artifact.sha256);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
 
-        let paths = materialize_compiled_models(
-            data.path(),
-            &plan,
-            distribution.path(),
-            "cb555393-764b-4eb6-8f15-b416d289428f",
-        )
-        .unwrap();
+        let paths =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
         assert_eq!(paths.len(), 2);
         assert_eq!(
             fs::read(data.path().join(
@@ -2565,21 +2677,17 @@ mod tests {
         value["artifacts"] = json!([artifact.clone()]);
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let data = tempdir().unwrap();
-        let distribution = tempdir().unwrap();
-        let source = distribution
+        let source = data
             .path()
+            .join("distribution")
             .join("models")
-            .join(&plan.identity.model_artifact_set_sha256)
-            .join("primary");
+            .join(&plan.identity.model_artifact_set_sha256);
         fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("tokenizer_config.json"), []).unwrap();
-        materialize_compiled_models(
-            data.path(),
-            &plan,
-            distribution.path(),
-            "cb555393-764b-4eb6-8f15-b416d289428f",
-        )
-        .unwrap();
+        let source_file = source.join(&plan.artifacts[0].sha256);
+        fs::write(&source_file, []).unwrap();
+        fs::set_permissions(&source_file, fs::Permissions::from_mode(0o600)).unwrap();
+        materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+            .unwrap();
         assert_eq!(
             fs::metadata(data.path().join("installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/tokenizer_config.json")).unwrap().len(),
             0
@@ -2595,7 +2703,6 @@ mod tests {
         let result = materialize_compiled_models(
             Path::new("/tmp/vonk-agent-test-data"),
             &plan,
-            Path::new("/tmp/vonk-agent-test-distribution"),
             "cb555393-764b-4eb6-8f15-b416d289428f",
         );
         assert!(matches!(result, Err(OciError::Workload(_))));
@@ -2610,21 +2717,18 @@ mod tests {
         value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let data = tempdir().unwrap();
-        let distribution = tempdir().unwrap();
-        let source = distribution
+        let source = data
             .path()
+            .join("distribution")
             .join("models")
-            .join(&plan.identity.model_artifact_set_sha256)
-            .join("primary");
+            .join(&plan.identity.model_artifact_set_sha256);
         fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("config.json"), b"primary").unwrap();
-        let paths = materialize_compiled_models(
-            data.path(),
-            &plan,
-            distribution.path(),
-            "cb555393-764b-4eb6-8f15-b416d289428f",
-        )
-        .unwrap();
+        let source_file = source.join(&plan.artifacts[0].sha256);
+        fs::write(&source_file, b"primary").unwrap();
+        fs::set_permissions(&source_file, fs::Permissions::from_mode(0o600)).unwrap();
+        let paths =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
         assert_eq!(paths.len(), 1);
         assert_eq!(
             paths[0],
@@ -2632,5 +2736,16 @@ mod tests {
                 "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
             )
         );
+        let installation = data
+            .path()
+            .join("installations/cb555393-764b-4eb6-8f15-b416d289428f");
+        write_installation_metadata(&installation, &plan).unwrap();
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        let repeated =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(plan.artifacts.len(), 2);
     }
 }
