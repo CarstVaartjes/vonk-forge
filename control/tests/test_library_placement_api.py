@@ -7,6 +7,7 @@ from vonk_control import operation_api
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.library_placement_contract import (
     LibraryPlacementApplication,
     LibraryPlacementLocations,
@@ -97,7 +98,9 @@ class Placements:
             total_steps=1,
             current_operation_id=None,
             status_reason=None,
-            progress={"completed_steps": 0, "total_steps": 1},
+            progress=FleetProfileApplicationProgress(
+                completed_steps=0, total_steps=1
+            ),
             locations=LibraryPlacementLocations(
                 installation_ids=[], run_ids=[], installed=False, running=False
             ),
@@ -160,7 +163,9 @@ def test_preview_and_apply_share_transport_neutral_contract_and_are_audited() ->
     assert preview.json()["invocation"] == "keyboard"
     assert applied.status_code == 202
     assert progress.status_code == 200
-    assert progress.json()["progress"] == {"completed_steps": 0, "total_steps": 1}
+    assert progress.json()["progress"] == FleetProfileApplicationProgress(
+        completed_steps=0, total_steps=1
+    ).model_dump(mode="json")
     audit = audits.for_request(request_id)
     assert audit.action == "library.placement.apply"
     assert audit.targets == (APPLICATION, DIGEST, NODE)
