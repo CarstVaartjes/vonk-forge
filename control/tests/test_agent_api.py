@@ -71,9 +71,9 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRouteAuthority,
     RecipeRun,
     RecipeSourceBundle,
-    Reconciliation,
     RoutePublication,
     RunNode,
     RuntimeImageAuthorization,
@@ -92,17 +92,43 @@ from vonk_forge_contracts import RecipeDefinition, content_sha256
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
-CAPABILITIES = [
-    "agent.runtime.rust.v1",
-    "node.probe",
-    "release.install",
-    "runtime.vonk.v1",
-    "workload.health",
-    "workload.prepare",
-    "workload.start",
-    "workload.stop",
-    "workload.verify",
-]
+CAPABILITIES = sorted(
+    [
+        "agent.runtime.rust.v1",
+        "runtime.vonk.v1",
+        "agent.upgrade.v1",
+        "artifact.distribution.v1",
+        "recipe.build.v1",
+        "recipe.image.import.v1",
+        "recipe.install",
+        "recipe.start",
+        "recipe.job.run.v1",
+        "recipe.stop",
+        "recipe.uninstall",
+        "recipe.model-uninstall.v1",
+    ]
+)
+STOP_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": "a" * 64,
+}
+
+
+def image_import_payload(digest: str) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "kind": "recipe.image.import.v1",
+        "build_id": "00000000-0000-4000-8000-000000000010",
+        "mapping_id": "00000000-0000-4000-8000-000000000011",
+        "mapping_generation": 1,
+        "source_node_id": NODE_A,
+        "image_digest": "sha256:" + "b" * 64,
+        "oci_layout_sha256": digest,
+        "image_bytes": 8,
+    }
+
+
 PACKAGED_RUNTIME_IDENTITY = {
     "architecture": "linux-amd64",
     "binary_digest": "c" * 64,
@@ -167,23 +193,6 @@ def _controller_ca() -> tuple[str, str]:
     )
     pem = certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
     return pem, certificate.fingerprint(hashes.SHA256()).hex()
-
-
-PROBE_RESULT = {
-    "status": "ok",
-    "evidence": {
-        "vonk_forge": {
-            "schema_version": 1,
-            "memory": {"available_bytes": 1_000, "total_bytes": 4_000},
-            "storage": {"available_bytes": 2_000, "total_bytes": 8_000},
-            "accelerator": {
-                "available": True,
-                "active_nvidia_compute_processes": 0,
-            },
-        },
-        "nvidia": {"tools": {}},
-    },
-}
 
 
 class Jobs:
@@ -530,8 +539,7 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
     encoded = canonical_message(payload)
     assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
     assert (
-        len(TelemetryRequest.parse(payload).samples[0].metrics.series)
-        == series_count
+        len(TelemetryRequest.parse(payload).samples[0].metrics.series) == series_count
     )
     response = client.post(
         "/agent/v1/telemetry",
@@ -791,9 +799,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         clock=clock,
         request_id_factory=lambda: uuid.UUID(request_id),
     )
-    receipt_issuer = WorkloadObjectReceiptIssuer(
-        ed25519.Ed25519PrivateKey.generate()
-    )
+    receipt_issuer = WorkloadObjectReceiptIssuer(ed25519.Ed25519PrivateKey.generate())
 
     class RecordingHostAuthority:
         def __init__(self) -> None:
@@ -868,9 +874,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     object.__setattr__(services, "host_runtime_authority", host)
     object.__setattr__(services, "workload_helper_authority", package)
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    assert schemas["PackageHelperSignature"]["properties"]["algorithm"][
-        "const"
-    ] == "ed25519"
+    assert (
+        schemas["PackageHelperSignature"]["properties"]["algorithm"]["const"]
+        == "ed25519"
+    )
     uuid4_pattern = (
         r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     )
@@ -884,9 +891,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     for field_name in ("request_id", "job_id", "operation_id", "fence"):
         assert grant_claims[field_name]["pattern"] == uuid4_pattern
     assert "relative_name" in schemas["PackageObjectReceiptClaims"]["required"]
-    assert schemas["PackageObjectReceiptClaims"]["properties"]["relative_name"][
-        "pattern"
-    ] == r"^objects/sha256/[0-9a-f]{64}$"
+    assert (
+        schemas["PackageObjectReceiptClaims"]["properties"]["relative_name"]["pattern"]
+        == r"^objects/sha256/[0-9a-f]{64}$"
+    )
     assert (
         schemas["PackageHelperReceiptsResponse"]["properties"]["receipts"]["items"][
             "$ref"
@@ -913,7 +921,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         json=common | {"action": "start", "request_sha256": "a" * 64},
     )
     assert host_response.status_code == 200
-    assert isinstance(SignedHostHelperGrant.parse(host_response.json()["grant"]), SignedHostHelperGrant)
+    assert isinstance(
+        SignedHostHelperGrant.parse(host_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
     assert host.grant_calls[0]["job_id"] == job_id
 
     upgrade_response = client.post(
@@ -934,7 +945,9 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     receipt_response = client.post(
         "/agent/v1/package-helper/receipts",
         headers=headers,
-        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        json={
+            key: value for key, value in common.items() if key != "expires_in_seconds"
+        }
         | {
             "release_digest": "d" * 64,
             "objects": [{"object_digest": "e" * 64, "size": 17}],
@@ -953,7 +966,9 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     malformed_receipt_response = client.post(
         "/agent/v1/package-helper/receipts",
         headers=headers,
-        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        json={
+            key: value for key, value in common.items() if key != "expires_in_seconds"
+        }
         | {
             "release_digest": "d" * 64,
             "objects": [{"object_digest": "e" * 64, "size": 17}],
@@ -999,9 +1014,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             }
             | {
                 "release_digest": "d" * 64,
-                "objects": [
-                    {"object_digest": "e" * 64, "size": 17, "extra": True}
-                ],
+                "objects": [{"object_digest": "e" * 64, "size": 17, "extra": True}],
             },
         ).status_code
         == 422
@@ -1993,7 +2006,11 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -2050,7 +2067,11 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -2073,7 +2094,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
             "node_id",
             "deadline",
         )
-    } | {"state": "succeeded", "result": PROBE_RESULT}
+    } | {"state": "succeeded", "result": {"stopped": True}}
 
     def reject_post_commit(_source) -> None:
         raise AssertionError("presence must be written inside the queue transaction")
@@ -2101,65 +2122,14 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         assert presence.observed_at.replace(tzinfo=UTC) == clock.now
 
 
-def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) -> None:
+def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
-    )
-    claim = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "wait_seconds": 0,
-        },
-    ).json()
-    clock.now += timedelta(seconds=2)
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "succeeded", "result": PROBE_RESULT}
-
-    response = client.post(
-        "/agent/v1/result",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=result,
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        observations = list(
-            session.scalars(select(Observation).where(Observation.node_id == NODE_A))
-        )
-        assert len(observations) == 1
-        assert observations[0].kind == "health"
-        assert observations[0].observed_at.replace(tzinfo=UTC) == clock.now
-        assert observations[0].payload == {
-            "active_nvidia_compute_processes": 0,
-            "compute_occupancy": "clean",
-            "disk_available_bytes": 2_000,
-            "disk_total_bytes": 8_000,
-            "memory_available_bytes": 1_000,
-            "memory_total_bytes": 4_000,
-            "status": "healthy",
-        }
-
-
-def test_failed_probe_result_never_writes_health_observation(agent_system) -> None:
-    client, services, _, clock = agent_system
-    services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2177,7 +2147,7 @@ def test_failed_probe_result_never_writes_health_observation(agent_system) -> No
         )
     } | {
         "state": "failed",
-        "result": {"status": "failed", "error_code": "probe_failed"},
+        "result": {"status": "failed", "error_code": "stop_failed"},
     }
 
     assert (
@@ -2211,7 +2181,11 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node.protocol_version is None
 
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2238,7 +2212,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     } | {
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
 
     rejected = client.post(
@@ -2314,7 +2288,11 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
 def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2335,7 +2313,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         **result,
         "node_id": NODE_B,
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
     assert (
         client.post(
@@ -2347,7 +2325,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         **result,
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
     assert (
         client.post(
@@ -2825,17 +2803,14 @@ def test_reenrollment_submission_reconciles_observation_receipt_key_through_api(
     with services.sessions.begin() as session:
         session.get(AgentNode, NODE_A).observation_receipt_public_key = "d" * 64
         session.add(
-            Reconciliation(
-                id=RECIPE_ROUTE_AUTHORITY_ID,
-                authority_revision="4" * 64,
-                status="completed",
-                summary={},
+            RecipeRouteAuthority(
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
                 created_at=services.clock(),
             )
         )
         session.add(
             RoutePublication(
-                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
                 state="completed",
                 generation=1,
                 plan_digest="5" * 64,
@@ -3145,9 +3120,9 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     spec_route = client.get("/openapi.json").json()["paths"][
         "/agent/v1/recipe-installations/{installation_id}/spec"
     ]["get"]
-    assert spec_route["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ]["$ref"].endswith("/CompiledExecutionPlan")
+    assert spec_route["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/CompiledExecutionPlan")
 
     tampered = copy.deepcopy(payload)
     tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64
@@ -3480,7 +3455,11 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3498,7 +3477,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         )
     } | {
         "state": "failed",
-        "result": {"status": "failed", "error_code": "probe_failed"},
+        "result": {"status": "failed", "error_code": "stop_failed"},
     }
 
     response = client.post(
@@ -3511,8 +3490,8 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
         )
         parent_job = session.get(Job, claim["job_id"])
-        assert attempt.result == {"status": "failed", "error_code": "probe_failed"}
-        assert parent_job is not None and parent_job.status_reason == "probe_failed"
+        assert attempt.result == {"status": "failed", "error_code": "stop_failed"}
+        assert parent_job is not None and parent_job.status_reason == "stop_failed"
 
 
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
@@ -3520,7 +3499,11 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3536,7 +3519,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
             "node_id",
             "deadline",
         )
-    } | {"state": "failed", "result": {"reason": "unstructured failure"}}
+    } | {"state": "failed", "result": {"unexpected": "unstructured failure"}}
 
     response = client.post(
         "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3577,7 +3560,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         )
         time.sleep(0.05)
         operation = services.operations.enqueue(
-            parent_job.id, NODE_A, "node.probe", "a" * 64, {}
+            parent_job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD
         )
         response = waiting.result(timeout=1)
 
@@ -3853,13 +3836,16 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
 ) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
-    (services.artifact_root / digest).write_bytes(b"artifact")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(b"artifact")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     response = client.get(
         f"/agent/v1/artifacts/{digest}",
@@ -3938,13 +3924,16 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
 def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64
-    (services.artifact_root / digest).symlink_to(tmp_path / "outside")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).symlink_to(tmp_path / "outside")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     assert (
         client.get(
@@ -3961,9 +3950,19 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "agent.upgrade.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        {
+            "schema_version": 1,
+            "architecture": "linux-arm64",
+            "package_bytes": 8,
+            "package_sha256": digest,
+            "package_signature": "a" * 128,
+            "package_url": "https://install.vonkforge.ai/releases/test/vonk-forge-agent.deb",
+            "package_version": "1.2.3",
+            "target_binary_digest": "b" * 64,
+            "target_build_digest": "sha256:" + "c" * 64,
+        },
     )
     assert (
         client.get(
@@ -4031,13 +4030,16 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
 def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
-    (services.artifact_root / digest).write_bytes(b"artifact")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(b"artifact")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
     before = len(os.listdir(fd_directory))
@@ -4364,8 +4366,13 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
 @pytest.mark.parametrize(
     "missing",
     (
-        "capabilities", "lease_seconds", "node_id", "protocol_version",
-        "runtime_identity", "wait_seconds", "observation_receipt_public_key",
+        "capabilities",
+        "lease_seconds",
+        "node_id",
+        "protocol_version",
+        "runtime_identity",
+        "wait_seconds",
+        "observation_receipt_public_key",
     ),
 )
 def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
@@ -4385,8 +4392,10 @@ def test_claim_requires_the_current_agent_document(agent_system, missing: str) -
     # Use the raw request method: the convenience test client must not refill
     # deliberately missing fields and hide a production boundary regression.
     response = client.request(
-        "POST", "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"), json=body,
+        "POST",
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=body,
     )
     assert response.status_code == 422
 
