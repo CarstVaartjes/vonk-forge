@@ -336,12 +336,12 @@ class CompiledExecutionPlan(_StrictModel):
             previous = by_digest.setdefault(artifact.sha256, artifact.bytes)
             if previous != artifact.bytes:
                 raise ValueError("one model digest cannot have multiple byte counts")
-        if sum(by_digest.values()) != self.model_artifact_set_bytes:
-            raise ValueError("model artifact-set bytes do not match selected receipts")
             mount_path = (artifact.mount.target, artifact.path)
             if mount_path in mount_paths:
                 raise ValueError("compiled model artifacts repeat a mount target")
             mount_paths.add(mount_path)
+        if sum(by_digest.values()) != self.model_artifact_set_bytes:
+            raise ValueError("model artifact-set bytes do not match selected receipts")
         return self
 
     def reusable_identity_document(self) -> dict[str, object]:

@@ -202,7 +202,6 @@ pub fn project(
     validate_security(plan)?;
 
     let mut mounts = Vec::with_capacity(plan.artifacts.len() + 3);
-    let mut source_paths = BTreeSet::new();
     let mut target_paths = BTreeSet::new();
     for artifact in &plan.artifacts {
         let source = model_source(paths, artifact)?;
@@ -211,7 +210,6 @@ pub fn project(
         // Workload validation has already proved that repeated source paths
         // carry the exact same receipt-bound object; retain every distinct
         // target mount while reusing that source.
-        source_paths.insert(source.clone());
         if !target_paths.insert(target.clone()) {
             return Err(CompiledOciError::Invalid("duplicate materialized path"));
         }
@@ -625,6 +623,34 @@ mod tests {
         assert!(matches!(
             project(&plan, &paths()),
             Err(CompiledOciError::Invalid("duplicate materialized path"))
+        ));
+    }
+
+    #[test]
+    fn one_physical_source_can_be_projected_to_two_targets() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert_eq!(invocation.mounts.len(), 5);
+        assert_eq!(invocation.mounts[0].source, invocation.mounts[1].source);
+        assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
+        assert_eq!(invocation.mounts[1].target, "/models/secondary/config.json");
+    }
+
+    #[test]
+    fn conflicting_duplicate_physical_source_is_rejected() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        projection["file_id"] = json!("different-file");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            project(&plan, &paths()),
+            Err(CompiledOciError::Workload(_))
         ));
     }
 

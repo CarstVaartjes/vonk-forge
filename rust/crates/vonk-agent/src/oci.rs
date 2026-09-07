@@ -1248,18 +1248,51 @@ fn materialize_compiled_models(
         .join("models")
         .join(&plan.identity.model_artifact_set_sha256);
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
-    let mut physical_by_path: BTreeMap<(String, String), PathBuf> = BTreeMap::new();
+    let mut physical_by_path: BTreeMap<
+        (String, String),
+        (
+            PathBuf,
+            (
+                String,
+                String,
+                u64,
+                String,
+                String,
+                String,
+                String,
+                String,
+                u64,
+                String,
+            ),
+        ),
+    > = BTreeMap::new();
     for artifact in &plan.artifacts {
         let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
         let destination = destination_root
             .join(&artifact.selection_id)
             .join(&artifact.path);
-        if physical_by_path.contains_key(&physical_key) {
+        let physical = (
+            artifact.file_id.clone(),
+            artifact.sha256.clone(),
+            artifact.size_bytes,
+            artifact.model.publisher.clone(),
+            artifact.model.slug.clone(),
+            artifact.model.content_sha256.clone(),
+            artifact.distribution_object.name.clone(),
+            artifact.distribution_object.sha256.clone(),
+            artifact.distribution_object.bytes,
+            artifact.distribution_object.kind.clone(),
+        );
+        if let Some((_, previous)) = physical_by_path.get(&physical_key) {
+            if previous != &physical {
+                return Err(OciError::Workload(WorkloadError::Invalid(
+                    "compiled model artifact physical identity",
+                )));
+            }
             // The workload validator proved this is the same receipt-bound
             // physical object. Its first projection performed the only source
             // and destination hash verification; this projection only adds a
             // second OCI mount intent.
-            materialized.push(destination);
             continue;
         }
         let source = scoped_root
@@ -1315,7 +1348,7 @@ fn materialize_compiled_models(
             fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
             fs::rename(&temporary, &destination)?;
         }
-        physical_by_path.insert(physical_key, destination.clone());
+        physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
     }
     File::open(&destination_root)?.sync_all()?;
@@ -1657,7 +1690,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_models_reject_duplicate_path_within_one_selection() {
+    fn compiled_models_reject_duplicate_final_target() {
         let mut value = compiled_plan();
         let duplicate = value["artifacts"][0].clone();
         value["artifacts"] = json!([duplicate.clone(), duplicate]);
@@ -1669,5 +1702,37 @@ mod tests {
             "cb555393-764b-4eb6-8f15-b416d289428f",
         );
         assert!(matches!(result, Err(OciError::Workload(_))));
+    }
+
+    #[test]
+    fn compiled_models_materialize_one_source_for_two_mount_projections() {
+        let mut value = compiled_plan();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/target");
+        value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let data = tempdir().unwrap();
+        let distribution = tempdir().unwrap();
+        let source = distribution
+            .path()
+            .join("models")
+            .join(&plan.identity.model_artifact_set_sha256)
+            .join("primary");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("config.json"), b"primary").unwrap();
+        let paths = materialize_compiled_models(
+            data.path(),
+            &plan,
+            distribution.path(),
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+        )
+        .unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths[0],
+            data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
+            )
+        );
     }
 }

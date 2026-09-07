@@ -1083,8 +1083,108 @@ def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
     duplicate["id"] = "duplicate"
     duplicate["file_id"] = "duplicate"
     document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError, match="materialized path"):
+    with pytest.raises(ValidationError, match="physical identity"):
         CompiledExecutionPlan.model_validate(document)
+
+
+def test_plan_rejects_duplicate_final_projection_target() -> None:
+    document = _compile().model_dump(mode="json")
+    duplicate = copy.deepcopy(document["artifacts"][0])
+    duplicate["id"] = "duplicate-projection"
+    document["artifacts"].append(duplicate)
+    with pytest.raises(ValidationError, match="mount target"):
+        CompiledExecutionPlan.model_validate(document)
+
+
+def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
+    document = _compile().model_dump(mode="json")
+    duplicate = copy.deepcopy(document["artifacts"][0])
+    duplicate["id"] = "second-projection"
+    duplicate["mount"]["target"] = "/models/target"
+    document["artifacts"].append(duplicate)
+    plan = CompiledExecutionPlan.model_validate(document)
+    assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
+        ("/models", "model.safetensors"),
+        ("/models/target", "model.safetensors"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "recipe_name",
+    [
+        "ltx-2-5-22b-distilled-bf16-diffusers-single.json",
+        "ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
+    ],
+)
+def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
+    recipe_name: str,
+) -> None:
+    recipe = json.loads(
+        (Path("/opt/vonk-forge-recipes") / "recipes" / recipe_name).read_text(
+            encoding="utf-8"
+        )
+    )
+    raw_artifacts = {item["id"]: item for item in recipe["artifacts"]}
+    targets = [
+        raw_artifacts["license-token-preflight"]["mount"]["target"],
+        raw_artifacts["target"]["mount"]["target"],
+    ]
+    payload = b"production LTX filtered snapshot"
+    file_sha256 = hashlib.sha256(payload).hexdigest()
+    model_object = {
+        "model_content_sha256": "e" * 64,
+        "file_id": "filtered-snapshot",
+        "path": "filtered-snapshot",
+        "sha256": file_sha256,
+        "bytes": len(payload),
+        "roles": ["entrypoint", "weights"],
+        "distribution_object": {
+            "name": "filtered-snapshot",
+            "sha256": file_sha256,
+            "bytes": len(payload),
+            "kind": "model",
+        },
+    }
+    spec = _spec()
+    spec["model_dependencies"] = [
+        {
+            "selection_id": "primary",
+            "publisher": "vonk-forge",
+            "slug": "synthetic-tiny-fp16",
+            "content_sha256": "e" * 64,
+            "artifact_key": "filtered-snapshot",
+        }
+    ]
+    spec["artifacts"] = [
+        {
+            "id": artifact_id,
+            "selection_id": "primary",
+            "file_id": "filtered-snapshot",
+            "path": "filtered-snapshot",
+            "sha256": file_sha256,
+            "bytes": len(payload),
+            "roles": ["entrypoint", "weights"],
+            "mount": {"source": "/run/vonk/models/primary", "target": target, "read_only": True},
+            "model": {
+                "publisher": "vonk-forge",
+                "slug": "synthetic-tiny-fp16",
+                "content_sha256": "e" * 64,
+            },
+        }
+        for artifact_id, target in zip(
+            ("license-token-preflight", "target"), targets, strict=True
+        )
+    ]
+    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    plan = compile_verified_execution_plan(
+        spec,
+        model_artifact_set_sha256="d" * 64,
+        model_objects=[model_object],
+        runtime_image=_image(),
+    )
+    assert len(plan.artifacts) == 2
+    assert [artifact.mount.target for artifact in plan.artifacts] == targets
+    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == file_sha256
 
 
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(
