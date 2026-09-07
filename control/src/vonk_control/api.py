@@ -228,8 +228,6 @@ def build_agent_services(
         operations = AgentJobService(
             sessions,
             clock=clock,
-            revision_eligible=revision_eligible,
-            current_revision=current_revision,
         )
         policy = ManagementAddressPolicy.parse(
             settings.management_cidrs or "127.0.0.1/32",
@@ -310,8 +308,6 @@ def build_agent_services(
     operations = AgentJobService(
         sessions,
         clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
     )
     operations.set_contact_consumer(presence.observe_in_session)
     helper_authority = None
