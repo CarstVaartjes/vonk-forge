@@ -1120,6 +1120,13 @@ class AgentClaim(WireModel):
                 ArtifactDistributionPayload.model_validate_json(canonical_message(payload))
             except ValidationError as error:
                 raise AgentProtocolError("artifact distribution request is invalid") from error
+        elif self.operation is AgentOperation.RECIPE_JOB_RUN:
+            from .recipe_jobs import RecipeJobRunRequest
+
+            try:
+                RecipeJobRunRequest.model_validate_json(canonical_message(payload))
+            except ValidationError as error:
+                raise AgentProtocolError("recipe job request is invalid") from error
         if hashlib.sha256(canonical_message(payload)).hexdigest() != self.payload_digest:
             raise AgentProtocolError("payload digest does not match payload")
         if self.operation is AgentOperation.RECIPE_BUILD:
