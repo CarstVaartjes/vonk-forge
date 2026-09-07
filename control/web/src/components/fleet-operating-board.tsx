@@ -1,5 +1,6 @@
 import {useEffect, useState} from "react";
 import type {ControlApi, FleetProfile, FleetProfileApplication, FleetProfilePreview} from "../api/types";
+import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
 
 const TERMINAL_APPLICATION_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -11,7 +12,7 @@ function profileStatus(preview?: FleetProfilePreview): {label: string; tone: "go
 }
 
 function progressRecord(application: FleetProfileApplication): Record<string, unknown> {
-  return application.progress && typeof application.progress === "object" ? application.progress : {};
+  return application.progress.child_progress ?? application.progress;
 }
 
 function bytes(value: unknown): string | undefined {
@@ -51,16 +52,12 @@ function memberProgress(application: FleetProfileApplication): Array<{completed?
 
 function ApplicationProgress({application}: {application: FleetProfileApplication}) {
   const progress = progressRecord(application);
-  const completed = bytes(progress.completed_bytes);
+  const completed = bytes(progress.bytes);
   const total = bytes(progress.total_bytes);
   const members = memberProgress(application);
-  const hasTotal = typeof progress.total_bytes === "number" && Number.isFinite(progress.total_bytes);
-  const value = hasTotal && typeof progress.completed_bytes === "number"
-    ? Math.min(100, Math.max(0, progress.completed_bytes / Number(progress.total_bytes) * 100))
-    : undefined;
   return <section className={`fleet-profile-progress state-${application.state}`} aria-live="polite" aria-label="Profile switch progress">
     <div className="fleet-profile-progress-heading"><div><strong>{applicationPhase(application)}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
-    <div className={`fleet-profile-progress-track${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
+    <LibraryAvailabilityProgress progress={availabilityProgress(progress)}/>
     {members.length > 0 && <ul className="fleet-profile-progress-members" aria-label="Profile switch targets">{members.map(member => <li key={member.nodeId}><span>{member.nodeId}</span><small>{member.state}{member.completed ? ` · ${member.completed}${member.total ? ` of ${member.total}` : ""}` : ""}</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
   </section>;

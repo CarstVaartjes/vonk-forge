@@ -103,3 +103,38 @@ def test_run_switch_conflict_route_serializes_the_declared_model() -> None:
     assert RunSwitchConflictResponse.model_validate_json(response.content).detail == (
         "plan is stale"
     )
+
+
+def test_cancel_route_records_durable_intent_and_audit(tmp_path):
+    import uuid
+
+    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+
+    from .test_recipe_operations import NOW, setup_services
+    from .test_run_switch_operations import (
+        RecordingArtifactExecutor,
+        _request,
+        _service,
+    )
+
+    sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    preview_request = _request(sessions, nodes[0])
+    plan = service.preview(preview_request, actor="test")
+    operation = service.apply(RunSwitchApplyRequest(**preview_request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="test")
+    app = FastAPI()
+    audits = MemoryAuditStore()
+
+    @app.middleware("http")
+    async def identity(request, call_next):
+        request.state.request_id = str(uuid.uuid4())
+        return await call_next(request)
+
+    install_run_switch_routes(app, actor_dependency=Depends(_administrator), audits=audits, service=service)
+    body = {"schema_version": 2, "request_key": str(uuid.uuid4()), "reason": "Keep the current profile"}
+    client = TestClient(app)
+    response = client.post(f"/api/v1/recipes/run-switches/{operation.operation_id}/cancel", json=body)
+    assert response.status_code == 202
+    assert response.json()["state"] == "cancelled"
+    assert response.json()["result"]["cancellation"]["request_key"] == body["request_key"]
+    assert client.post(f"/api/v1/recipes/run-switches/{operation.operation_id}/cancel", json=body).json() == response.json()
