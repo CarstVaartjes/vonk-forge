@@ -2029,7 +2029,6 @@ def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> N
         session.add(
             RoutePublicationOwner(
                 singleton_id=1,
-                reconciliation_id=None,
                 owner_generation=0,
                 updated_at=NOW,
             )
@@ -4048,7 +4047,6 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     live_root = tmp_path / "live-routes"
     runtime = AtomicRouteBundlePublisher(
         live_root,
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
         clock=lambda: current["now"],
     )
     atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
@@ -4175,7 +4173,6 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
 
     runtime = AtomicRouteBundlePublisher(
         live_root,
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
         clock=lambda: current["now"],
         await_supervisor_ack=expire_while_waiting_for_ack,
     )

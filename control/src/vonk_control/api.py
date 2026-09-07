@@ -1636,10 +1636,6 @@ def production_app() -> FastAPI:
 
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
-        management_policy=ManagementAddressPolicy.parse(
-            settings.management_cidrs,
-            forbidden_cidrs=settings.direct_fabric_cidrs,
-        ),
         clock=clock,
         maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(

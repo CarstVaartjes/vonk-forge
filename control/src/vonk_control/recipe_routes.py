@@ -9,7 +9,7 @@ import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -27,8 +27,8 @@ from .models import (
     ClusterMapping,
     Job,
     RecipeInstallation,
+    RecipeRouteAuthority,
     RecipeRun,
-    Reconciliation,
     RoutePublication,
     RoutePublicationOwner,
     RunNode,
@@ -151,7 +151,6 @@ def lock_route_publication_owner_in_session(
                 session.add(
                     RoutePublicationOwner(
                         singleton_id=1,
-                        reconciliation_id=None,
                         owner_generation=0,
                     )
                 )
@@ -254,7 +253,7 @@ class AtomicRecipeRoutePublisher:
                     alias: endpoint.route_document()
                     for alias, endpoint in sorted(endpoints.items())
                 },
-                "schema_version": 1,
+                "schema_version": 2,
                 "state": state,
             }
             if state == "maintenance":
@@ -265,7 +264,7 @@ class AtomicRecipeRoutePublisher:
             marker = self._publisher._activate(
                 generation=generation,
                 state=state,
-                reconciliation_id=self._AUTHORITY_ID,
+                authority_id=self._AUTHORITY_ID,
                 plan_digest=route_digest,
                 evidence_set_digest=route_digest,
                 routes=routes,
@@ -674,8 +673,7 @@ class RecipeRouteService:
             owner = session.get(RoutePublicationOwner, 1)
             publication = (
                 session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-                if owner is not None
-                and owner.reconciliation_id == RECIPE_ROUTE_AUTHORITY_ID
+                if owner is not None and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
                 else None
             )
             current_expiry = (
@@ -732,34 +730,15 @@ class RecipeRouteService:
         if not isinstance(marker, ActivationMarker):
             return
         now = _aware(self._clock())
-        graph = {
-            "authority_revision": "recipe",
-            "nodes": [],
-            "schema_version": 1,
-            "targets": [],
-        }
-        reconciliation = session.get(Reconciliation, RECIPE_ROUTE_AUTHORITY_ID)
-        if reconciliation is None:
-            reconciliation = Reconciliation(
-                id=RECIPE_ROUTE_AUTHORITY_ID,
-                authority_revision="recipe",
-                status="succeeded",
-                summary={"authority": "recipe-routes"},
-                graph=graph,
-                graph_digest=hashlib.sha256(
-                    json.dumps(graph, sort_keys=True, separators=(",", ":")).encode()
-                ).hexdigest(),
-                plan_digest=marker.plan_digest,
-                current_phase="completed",
-                created_at=now,
+        authority = session.get(RecipeRouteAuthority, RECIPE_ROUTE_AUTHORITY_ID)
+        if authority is None:
+            authority = RecipeRouteAuthority(
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID, created_at=now, updated_at=now
             )
-            session.add(reconciliation)
+            session.add(authority)
             session.flush()
         else:
-            reconciliation.status = "succeeded"
-            reconciliation.plan_digest = marker.plan_digest
-            reconciliation.current_phase = "completed"
-            reconciliation.terminal_reason = None
+            authority.updated_at = now
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         values = {
             "state": state,
@@ -769,14 +748,14 @@ class RecipeRouteService:
             "route_digest": marker.routes_sha256,
             "litellm_digest": marker.litellm_sha256,
             "bundle_digest": marker.manifest_sha256,
-            "activation_marker": asdict(marker),
+            "activation_marker": marker.model_dump(),
             "activation_marker_digest": marker.digest,
             "lease_issued_at": datetime.fromisoformat(marker.issued_at),
             "lease_expires_at": datetime.fromisoformat(marker.expires_at),
         }
         if publication is None:
             publication = RoutePublication(
-                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID, **values
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID, **values
             )
             session.add(publication)
         else:
@@ -787,13 +766,13 @@ class RecipeRouteService:
             session.add(
                 RoutePublicationOwner(
                     singleton_id=1,
-                    reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
+                    authority_id=RECIPE_ROUTE_AUTHORITY_ID,
                     owner_generation=marker.generation,
                     updated_at=now,
                 )
             )
         else:
-            owner.reconciliation_id = RECIPE_ROUTE_AUTHORITY_ID
+            owner.authority_id = RECIPE_ROUTE_AUTHORITY_ID
             owner.owner_generation = marker.generation
             owner.updated_at = now
 
@@ -1044,13 +1023,19 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
         or revision.schema_version != 2
         or revision.state != "active"
     ):
-        raise RecipeRouteError("recipe runtime interface authority is stale", run_id=run.id)
+        raise RecipeRouteError(
+            "recipe runtime interface authority is stale", run_id=run.id
+        )
     try:
         recipe = RecipeDefinition.model_validate(revision.document)
     except (TypeError, ValueError) as error:
-        raise RecipeRouteError("recipe runtime interface authority is invalid", run_id=run.id) from error
+        raise RecipeRouteError(
+            "recipe runtime interface authority is invalid", run_id=run.id
+        ) from error
     if content_sha256(recipe) != revision.content_digest:
-        raise RecipeRouteError("recipe runtime interface authority is stale", run_id=run.id)
+        raise RecipeRouteError(
+            "recipe runtime interface authority is stale", run_id=run.id
+        )
     interfaces = recipe.model_dump(mode="json").get("interfaces")
     interface = None
     if isinstance(interfaces, list):
