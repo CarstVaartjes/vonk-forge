@@ -59,6 +59,12 @@ from .recipe_jobs import (
 from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from .recipe_observations import (
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
+    RecipeRunObservationGrantWire,
+    RecipeRunObservationsWire,
+    RecipeRunObservationWire,
+)
 from .recipe_operations import (
     RECIPE_OPERATIONS,
     RecipeInstallPayload,
@@ -72,11 +78,6 @@ from .recipe_operations import (
     RecipeUninstallPayload,
     RecipeUninstallResult,
     parse_recipe_operation_result,
-)
-from .recipe_observations import (
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-    RecipeRunObservationWire,
-    RecipeRunObservationsWire,
 )
 from .telemetry import TelemetryReport
 from .workload_packages import (
@@ -99,6 +100,7 @@ __all__ = [
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
     "RECIPE_OPERATIONS",
+    "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
     "AgentClaim",
     "AgentDirective",
     "AgentOperation",
@@ -139,10 +141,10 @@ __all__ = [
     "RecipeModelCleanupPayload",
     "RecipeModelCleanupResult",
     "RecipeOperationRequest",
+    "RecipeRunObservationGrantWire",
     "RecipeRunObservationReceiptClaims",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
-    "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
     "RecipeStartPayload",
     "RecipeStopPayload",
     "RecipeStopResult",

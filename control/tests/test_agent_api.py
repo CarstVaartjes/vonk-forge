@@ -2420,10 +2420,34 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
 ) -> None:
     client, services, _, clock = agent_system
 
-    class Grant:
-        @staticmethod
-        def to_mapping() -> dict[str, object]:
-            return {"schema_version": 1, "test": "exact-rank-inspection"}
+    grant = SignedHostHelperGrant.model_validate(
+        {
+            "schema_version": 1,
+            "claims": {
+                "schema_version": 1,
+                "authority": "vonk.host-maintenance-helper",
+                "request_id": "50000000-0000-4000-8000-000000000005",
+                "node_id": NODE_A,
+                "issued_at": 1788000000,
+                "expires_at": 1788000060,
+                "operation": {
+                    "type": "execute-container-runtime-request",
+                    "action": "run-inspect",
+                    "job_id": "10000000-0000-4000-8000-000000000001",
+                    "operation_id": "50000000-0000-4000-8000-000000000005",
+                    "attempt": 3,
+                    "fence": "60000000-0000-4000-8000-000000000006",
+                    "request_sha256": "e" * 64,
+                    "observation_identity_sha256": "f" * 64,
+                },
+            },
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": "a" * 64,
+                "value": "b" * 128,
+            },
+        }
+    )
 
     class ExactObservationAuthority:
         def __init__(self) -> None:
@@ -2433,7 +2457,7 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
             self.calls.append(values)
             assert values["certificate_serial"] == "serial-a"
             assert values["expires_in_seconds"] == 10
-            return "f" * 64, Grant()
+            return "f" * 64, grant
 
     authority = ExactObservationAuthority()
     object.__setattr__(services, "host_runtime_authority", authority)
@@ -2498,7 +2522,7 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert accepted.json() == {
         "schema_version": 1,
         "observation_identity_sha256": "f" * 64,
-        "grant": {"schema_version": 1, "test": "exact-rank-inspection"},
+        "grant": grant.to_mapping(),
     }
     assert wrong_node.status_code == 409
     assert unknown_field.status_code == 422

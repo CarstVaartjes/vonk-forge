@@ -8,7 +8,6 @@ run/readiness boolean is not a valid observation.
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -29,7 +28,7 @@ def _strict_datetime(value: object, message: str) -> object:
         return value
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return datetime.fromisoformat(value)
         except ValueError as error:
             raise ValueError(message) from error
     raise ValueError(message)
@@ -179,8 +178,17 @@ class RecipeRunObservationsWire(WireModel):
             raise AgentProtocolError("recipe run observation snapshot is invalid") from error
 
 
+class RecipeRunObservationGrantWire(WireModel):
+    """Canonical grant response used to authorize one exact observation."""
+
+    schema_version: Literal[1]
+    observation_identity_sha256: Digest
+    grant: SignedHostHelperGrant
+
+
 __all__ = [
     "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
+    "RecipeRunObservationGrantWire",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
 ]

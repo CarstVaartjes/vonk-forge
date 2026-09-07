@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
@@ -546,13 +547,6 @@ class HostHelperGrantResponse(AgentGrantResponse):
 class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[dict[str, object]]
-
-
-class RecipeRunObservationGrantResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
-    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    grant: dict[str, object]
 
 
 def _host_grant_response(grant: object) -> dict[str, object]:
@@ -2032,10 +2026,13 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/recipe-runs/observation-grants")
+    @agent.post(
+        "/recipe-runs/observation-grants",
+        response_model=RecipeRunObservationGrantWire,
+    )
     def recipe_run_observation_grant(
         body: RecipeRunObservationGrantRequest, request: Request
-    ) -> Response:
+    ) -> RecipeRunObservationGrantWire:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         if body.node_id != identity.node_id:
@@ -2077,12 +2074,10 @@ def install_agent_routes(
                 status_code=409,
                 detail="recipe run observation authority rejected request",
             ) from None
-        return _json_response(
-            RecipeRunObservationGrantResponse(
-                schema_version=1,
-                observation_identity_sha256=observation_identity,
-                grant=grant.to_mapping(),
-            ).model_dump()
+        return RecipeRunObservationGrantWire(
+            schema_version=1,
+            observation_identity_sha256=observation_identity,
+            grant=SignedHostHelperGrant.parse(grant.to_mapping()),
         )
 
     @agent.get("/source-bundles/{source_sha256}")
