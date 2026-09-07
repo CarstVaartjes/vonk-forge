@@ -556,9 +556,9 @@ class RecipeRunObservationGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
-def _host_grant_response(grant: object) -> dict[str, object]:
+def _host_grant_response(grant: object) -> HostHelperGrantResponse:
     parsed = SignedHostHelperGrant.parse(grant.to_mapping())
-    return HostHelperGrantResponse(grant=parsed.to_mapping()).model_dump()
+    return HostHelperGrantResponse(grant=parsed.to_mapping())
 
 
 def _package_grant_response(grant: object) -> dict[str, object]:
@@ -2478,10 +2478,10 @@ def install_agent_routes(
             )
         return required
 
-    @agent.post("/host-runtime/grant")
+    @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
     def host_runtime_grant(
         body: HostRuntimeGrantRequest, request: Request
-    ) -> Response:
+    ) -> HostHelperGrantResponse:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
@@ -2496,18 +2496,16 @@ def install_agent_routes(
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response(
-                _host_grant_response(grant)
-            )
+            return _host_grant_response(grant)
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
 
-    @agent.post("/agent-upgrade/grant")
+    @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
     def agent_upgrade_grant(
         body: AgentUpgradeGrantRequest, request: Request
-    ) -> Response:
+    ) -> HostHelperGrantResponse:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
@@ -2522,9 +2520,7 @@ def install_agent_routes(
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response(
-                _host_grant_response(grant)
-            )
+            return _host_grant_response(grant)
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
