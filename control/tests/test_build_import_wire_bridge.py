@@ -179,7 +179,9 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             node_id=operation.node_id,
             operation=ProtocolOperation.RECIPE_IMAGE_IMPORT,
             authority_revision=operation.authority_revision,
-            payload_digest=hashlib.sha256(canonical_message(operation.payload)).hexdigest(),
+            payload_digest=hashlib.sha256(
+                canonical_message(operation.payload)
+            ).hexdigest(),
             payload=operation.payload,
             deadline=now,
         )
