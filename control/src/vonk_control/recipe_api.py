@@ -308,13 +308,17 @@ class ModelDeletionPlanResponse(StrictModel):
         max_length=512
     )
     nodes: list[ModelDeletionNodeImpactResponse] = Field(max_length=1024)
-    bytes_removed: int = Field(ge=0)
+    bytes_removed: int = Field(
+        ge=0,
+        description="Bytes freed from affected installation copies; shared/global cache bytes are excluded.",
+    )
     active_runs: list[UninstallActiveRunResponse] = Field(max_length=128)
     active_run_count: int = Field(ge=0)
     blockers: list[PlanReason] = Field(max_length=32)
     warnings: list[PlanReason] = Field(max_length=32)
     shared_cache_policy: str = Field(
-        pattern=r"^remove-unreferenced-model-artifacts-only$"
+        pattern=r"^remove-unreferenced-model-artifacts-only$",
+        description="Shared/global downloaded model caches remain installed.",
     )
     plan_digest: Digest
 
