@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
@@ -231,13 +232,14 @@ def _compiled_plan(
     rank: int,
     model_digest: str,
     recipe_digest: str,
-    build_input: str,
+    build_input: str | None,
+    build_id: str | None,
     image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
     image_digest = image_digest or "sha256:" + "1" * 64
     layout_digest = "2" * 64
-    return {
+    payload = {
         "schema_version": 2,
         "identity": {
             "recipe_revision_sha256": recipe_digest,
@@ -292,11 +294,14 @@ def _compiled_plan(
             "image_bytes": 30,
             "architecture": "linux-arm64",
             "runtime_interface": "vonk.runtime.v1",
-            "source": "controller-build",
-            "build_id": "test-build",
-            "registry_manifest_digest": None,
+            "source": "controller-build" if build_id is not None else "published",
+            "build_id": build_id,
+            "registry_manifest_digest": None if build_id is not None else image_digest,
             "platform_manifest_digest": image_digest,
             "local_image_config_id": "sha256:" + "4" * 64,
+            "local_image_reference": (
+                f"localhost/vonk/compiled-runtime-{layout_digest}@{image_digest}"
+            ),
             "runtime_interface_label": "v1",
             "distribution_object": {
                 "name": "image.oci.tar",
@@ -338,6 +343,7 @@ def _compiled_plan(
         },
         "job": None,
     }
+    return CompiledExecutionPlan.model_validate(payload).model_dump(mode="json")
 
 
 def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
@@ -346,7 +352,7 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
     build = kwargs["build"]
     resolved_entities = kwargs["resolved_entities"]
     model_revision = resolved_entities["models"][0]
-    build_input = build.build_input_sha256 if build is not None else "b" * 64
+    build_input = build.build_input_sha256 if build is not None else None
     execution = revision.document.get("execution", {})
     image = execution.get("image") if isinstance(execution, dict) else None
     image_digest = (
@@ -361,6 +367,7 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
             model_digest=model_revision.content_digest,
             recipe_digest=revision.content_digest,
             build_input=build_input,
+            build_id=build.id if build is not None else None,
             image_digest=image_digest,
         )
         for node in mapping_nodes
