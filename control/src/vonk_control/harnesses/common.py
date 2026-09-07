@@ -8,10 +8,42 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
-from ..runtime_environment import distribution_allowed_environment
+from ..runtime_writable_paths import (
+    effective_environment,
+    reject_recipe_environment,
+    telemetry_contract,
+    validate_telemetry,
+)
+from ..runtime_writable_paths import (
+    validate_paths as validate_runtime_paths,
+)
+from ..runtime_writable_paths import (
+    writable_paths as engine_writable_paths,
+)
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
+_SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
+_SAFE_ENGINE_ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
+_FORBIDDEN_ENGINE_ENVIRONMENT_NAMES = frozenset(
+    {
+        "BASH_ENV",
+        "CUDA_INJECTION32_PATH",
+        "CUDA_INJECTION64_PATH",
+        "ENV",
+        "GCONV_PATH",
+        "NODE_OPTIONS",
+        "PATH",
+        "PERL5OPT",
+        "PYTHONBREAKPOINT",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "RUBYOPT",
+        "SHELLOPTS",
+    }
+)
+_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES = ("DYLD_", "LD_", "VONK_")
 _SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
@@ -22,6 +54,18 @@ _SHELL_LAUNCHERS = frozenset({"env", "busybox", "sudo", "doas"})
 _CUSTOM_ADAPTER_BIN = PurePosixPath("/opt/vonk/adapters/bin")
 _IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
 _SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
+_BUILTIN_HARNESS_SLUGS = frozenset(
+    {
+        "vllm",
+        "sglang",
+        "tensorrt-llm",
+        "llama-cpp",
+        "ds4",
+        "diffusers",
+        "comfyui",
+        "pytorch-pipeline",
+    }
+)
 
 
 class HarnessCompileError(ValueError):
@@ -38,20 +82,25 @@ class ArgumentSpec:
     validate: Callable[[str], bool] = lambda _value: True
 
 
-def structured_command(value: object) -> tuple[str, ...]:
+def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise HarnessCompileError("harness command must be a structured argv")
     command = tuple(value)
     if not command or len(command) > 256:
         raise HarnessCompileError("harness command size is invalid")
     if any(
-        type(item) is not str or _SAFE_ARGUMENT.fullmatch(item) is None
+        type(item) is not str
+        or len(item.encode("utf-8")) > (65536 if canonical_argv else 2048)
+        or "\x00" in item
+        or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item) is None)
         for item in command
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     executable = PurePosixPath(command[0]).name.lower()
-    if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS) or "-c" in command:
+    if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
+    if canonical_argv and sum(len(item.encode("utf-8")) for item in command) > 1_048_576:
+        raise HarnessCompileError("harness command exceeds its total argv bound")
     return command
 
 
@@ -76,17 +125,25 @@ def custom_adapter_command(value: object) -> tuple[str, ...]:
     return command
 
 
-def validate_projection(projection: HarnessProjection) -> None:
+def validate_projection(
+    projection: HarnessProjection,
+    *,
+    canonical_argv: bool = False,
+    canonical_mounts: bool = False,
+) -> None:
     if type(projection.slug) is not str or not projection.slug:
         raise HarnessCompileError("harness projection slug is invalid")
     if type(projection.command) is not tuple:
         raise HarnessCompileError("harness command must use the exact tuple contract")
-    structured_command(projection.command)
+    structured_command(projection.command, canonical_argv=canonical_argv)
     if type(projection.contract_version) is not int or projection.contract_version != 1:
         raise HarnessCompileError("harness contract version is invalid")
     if type(projection.image) is not str or _IMAGE.fullmatch(projection.image) is None:
         raise HarnessCompileError("harness image must be digest-pinned")
-    if type(projection.network_mode) is not str or projection.network_mode != "none":
+    if type(projection.network_mode) is not str or (
+        projection.network_mode != "none"
+        and not (canonical_argv and projection.network_mode == "bridge")
+    ):
         raise HarnessCompileError("harness projection requires an offline network")
     if (
         type(projection.architecture) is not str
@@ -111,6 +168,8 @@ def validate_projection(projection: HarnessProjection) -> None:
         or projection.capabilities
     ):
         raise HarnessCompileError("harness projection must drop all capabilities")
+    if type(projection.read_only_root) is not bool or not projection.read_only_root:
+        raise HarnessCompileError("harness projection requires a read-only root")
     if (
         type(projection.environment) is not tuple
         or any(
@@ -119,13 +178,40 @@ def validate_projection(projection: HarnessProjection) -> None:
             or type(item[0]) is not str
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item[0])
             or type(item[1]) is not str
-            or _SAFE_ARGUMENT.fullmatch(item[1]) is None
+            or len(item[1].encode("utf-8")) > (65536 if canonical_argv else 2048)
+            or "\x00" in item[1]
+            or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item[1]) is None)
             for item in projection.environment
         )
         or len({name for name, _value in projection.environment})
         != len(projection.environment)
     ):
         raise HarnessCompileError("harness projection environment is invalid")
+    enforce_engine_contract = (
+        not canonical_argv
+        and
+        projection.slug in _BUILTIN_HARNESS_SLUGS
+        and _is_builtin_launch_command(projection.slug, projection.command)
+    )
+    if enforce_engine_contract:
+        if projection.telemetry is None:
+            raise HarnessCompileError("built-in harness telemetry is missing")
+        try:
+            validate_telemetry(
+                projection.slug, projection.telemetry, dict(projection.environment)
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessCompileError(str(error)) from error
+        _validate_engine_launch(projection.slug, projection.command)
+    if enforce_engine_contract or projection.writable_paths:
+        try:
+            validate_runtime_paths(
+                projection.slug,
+                projection.writable_paths,
+                dict(projection.environment),
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessCompileError(str(error)) from error
     if (
         type(projection.model_mounts) is not tuple
         or not projection.model_mounts
@@ -161,7 +247,8 @@ def validate_projection(projection: HarnessProjection) -> None:
     for mount in mounts:
         _mount_path(mount.source)
         _mount_path(mount.target)
-    _disjoint_mount_paths(tuple(mount.source for mount in mounts))
+    if not canonical_mounts:
+        _disjoint_mount_paths(tuple(mount.source for mount in mounts))
     _disjoint_mount_paths(tuple(mount.target for mount in mounts))
     for source in (mount.source for mount in mounts):
         for target in (mount.target for mount in mounts):
@@ -171,9 +258,9 @@ def validate_projection(projection: HarnessProjection) -> None:
     if (
         type(binding) is not HarnessBinding
         or type(binding.harness_content_sha256) is not str
-        or type(binding.distribution_content_sha256) is not str
+        or type(binding.execution_content_sha256) is not str
         or not re.fullmatch(r"[a-f0-9]{64}", binding.harness_content_sha256)
-        or not re.fullmatch(r"[a-f0-9]{64}", binding.distribution_content_sha256)
+        or not re.fullmatch(r"[a-f0-9]{64}", binding.execution_content_sha256)
         or type(binding.topology_node_count) is not int
         or binding.topology_node_count < 1
         or type(binding.role) is not str
@@ -248,9 +335,15 @@ def compile_arguments(
         if type(name) is not str:
             raise HarnessCompileError("harness recipe argument is invalid")
         specification = specifications.get(name)
+        unknown_specification = specification is None
         if specification is None:
-            raise HarnessCompileError(f"harness argument is not allowlisted: {name}")
-        if specification.flag in parsed:
+            if _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None:
+                raise HarnessCompileError(f"harness engine option name is invalid: {name}")
+            # The recipe is bound to a trusted, digest-pinned runtime. Preserve
+            # safe options so a newer runtime can consume them without a
+            # platform allowlist silently dropping intent.
+            specification = ArgumentSpec(f"--{name}")
+        if specification.flag in parsed and not unknown_specification:
             raise HarnessCompileError(
                 f"harness argument is repeated: {specification.flag}"
             )
@@ -285,7 +378,7 @@ def compile_arguments(
         or set(parameters) != referenced
     ):
         raise HarnessCompileError("harness parameters are not exact")
-    structured_command(("/opt/vonk/bin/argv-check", *rendered))
+    structured_command(("/opt/vonk/bin/argv-check", *rendered), canonical_argv=True)
     return tuple(rendered), parsed
 
 
@@ -314,27 +407,32 @@ def compile_environment(
     recipe: Mapping[str, object],
     distribution: Mapping[str, object],
     allowlist: frozenset[str],
+    *,
+    engine_slug: str | None = None,
 ) -> tuple[tuple[str, str], ...]:
+    del distribution, allowlist
     runtime = recipe.get("runtime")
     environment = runtime.get("environment") if isinstance(runtime, Mapping) else None
     if type(environment) is not list:
         raise HarnessCompileError("harness environment is invalid")
-    try:
-        allowed_names = allowlist | distribution_allowed_environment(
-            distribution.get("capabilities")
-        )
-    except (TypeError, ValueError) as exc:
-        raise HarnessCompileError(str(exc)) from exc
     result: list[tuple[str, str]] = []
     names: set[str] = set()
     for item in environment:
         if not isinstance(item, Mapping) or set(item) != {"name", "value"}:
             raise HarnessCompileError("harness environment is invalid")
         name = item.get("name")
-        if type(name) is not str or name not in allowed_names or name in names:
-            raise HarnessCompileError("harness environment is not allowlisted")
+        if (
+            type(name) is not str
+            or _SAFE_ENGINE_ENVIRONMENT_NAME.fullmatch(name) is None
+            or name in _FORBIDDEN_ENGINE_ENVIRONMENT_NAMES
+            or name.startswith(_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES)
+            or name in names
+        ):
+            raise HarnessCompileError("harness environment name is invalid")
         result.append((name, _safe_scalar(item.get("value"), "harness environment")))
         names.add(name)
+    if engine_slug is not None:
+        reject_recipe_environment(engine_slug, result)
     return tuple(result)
 
 
@@ -637,6 +735,13 @@ def projection(
         if job_input_contract(recipe) is not None or allow_local_media_input
         else None
     )
+    runtime_paths = engine_writable_paths(slug)
+    validate_runtime_paths(slug, runtime_paths, dict(environment))
+    try:
+        effective = effective_environment(slug, environment)
+    except (TypeError, ValueError) as error:
+        raise HarnessCompileError(str(error)) from error
+    validate_runtime_paths(slug, runtime_paths, dict(effective))
     value = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -652,9 +757,58 @@ def projection(
             "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
         ),
         input_mount=input_mount,
-        environment=environment,
+        environment=effective,
+        writable_paths=runtime_paths,
+        telemetry=telemetry_contract(slug),
+        read_only_root=True,
     )
     return value
+
+
+_ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "vllm": ("/opt/vonk/bin/vllm", "serve"),
+    "sglang": ("/opt/vonk/bin/sglang-serve",),
+    "tensorrt-llm": ("/usr/local/bin/trtllm-serve", "serve", "/models"),
+    "llama-cpp": ("/opt/vonk/bin/llama-server",),
+    "ds4": ("/opt/vonk/bin/ds4-serve",),
+    "diffusers": ("/opt/vonk/bin/diffusers-job",),
+    "comfyui": ("/opt/vonk/bin/comfyui-job",),
+    "pytorch-pipeline": ("/opt/vonk/bin/pytorch-pipeline",),
+}
+
+
+def _validate_engine_launch(slug: str, command: tuple[str, ...]) -> None:
+    """Check the stable wrapper boundary while retaining recipe arguments."""
+    prefix = _ENGINE_LAUNCH_PREFIXES[slug]
+    if command[: len(prefix)] != prefix:
+        raise HarnessCompileError("built-in harness launch wrapper is invalid")
+    if slug == "vllm" and (
+        len(command) < 3
+        or not (command[2] == "/models" or command[2].startswith("/models/"))
+    ):
+        raise HarnessCompileError("vLLM launch must name its model mount")
+    if slug in {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}:
+        if "--host" not in command or "--port" not in command:
+            raise HarnessCompileError("serving harness launch lacks host and port")
+    else:
+        try:
+            output_index = command.index("--output-dir")
+        except ValueError as error:
+            raise HarnessCompileError("job harness launch lacks output directory") from error
+        if output_index + 1 >= len(command) or command[output_index + 1] != "/outputs":
+            raise HarnessCompileError("job harness output directory is invalid")
+
+
+def _is_builtin_launch_command(slug: str, command: tuple[str, ...]) -> bool:
+    # Synthetic test projections use a deliberately relative ``serve`` argv.
+    # Every trusted executable projection is absolute, so trusted builtin
+    # variants still receive the same central writable/security checks even
+    # when their wrapper prefix differs from the stock compiler.
+    return (
+        slug in _BUILTIN_HARNESS_SLUGS
+        and command[0].startswith("/")
+        and not command[0].startswith(f"{_CUSTOM_ADAPTER_BIN}/")
+    )
 
 
 def model_artifact_mounts(
@@ -813,8 +967,8 @@ def _safe_scalar(value: object, label: str) -> str:
         rendered = str(value)
     else:
         raise HarnessCompileError(f"{label} value is invalid")
-    if _SAFE_ARGUMENT.fullmatch(rendered) is None:
-        raise HarnessCompileError(f"{label} value contains unsafe shell syntax")
+    if "\x00" in rendered or len(rendered.encode("utf-8")) > 65_536:
+        raise HarnessCompileError(f"{label} value exceeds the bounded argv contract")
     return rendered
 
 

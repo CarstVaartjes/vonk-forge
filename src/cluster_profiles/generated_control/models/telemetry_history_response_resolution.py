@@ -1,8 +1,8 @@
 from typing import Literal, cast
 
-TelemetryHistoryResponseResolution = Literal['fifteen-minute', 'minute', 'raw']
+TelemetryHistoryResponseResolution = Literal['daily', 'fifteen-minute', 'minute', 'raw']
 
-TELEMETRY_HISTORY_RESPONSE_RESOLUTION_VALUES: set[TelemetryHistoryResponseResolution] = { 'fifteen-minute', 'minute', 'raw',  }
+TELEMETRY_HISTORY_RESPONSE_RESOLUTION_VALUES: set[TelemetryHistoryResponseResolution] = { 'daily', 'fifteen-minute', 'minute', 'raw',  }
 
 def check_telemetry_history_response_resolution(value: str) -> TelemetryHistoryResponseResolution:
     if value in TELEMETRY_HISTORY_RESPONSE_RESOLUTION_VALUES:

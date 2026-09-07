@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
     AgentClaim,
     AgentOperation,
     AgentProgress,
@@ -378,6 +380,17 @@ def test_recipe_build_claim_matches_shared_cross_language_vectors() -> None:
                 AgentClaim.parse(raw)
 
 
+@pytest.mark.parametrize("capability", ["SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"])
+def test_recipe_build_claim_rejects_every_sys_capability(capability: str) -> None:
+    vectors = recipe_build_vectors()
+    payload = deepcopy(vectors["base_payload"])
+    assert isinstance(payload, dict)
+    payload["capabilities"] = [capability]
+
+    with pytest.raises(AgentProtocolError, match="capabilities are not allowed"):
+        AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -515,6 +528,7 @@ def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
 def test_operation_enum_contains_only_supported_operations() -> None:
     assert {member.value for member in AgentOperation} == {
         "agent.upgrade.v1",
+        "artifact.distribution.v1",
         "node.probe",
         "release.install",
         "workload.prepare",
@@ -656,6 +670,78 @@ def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents
         parser(raw)
     with pytest.raises(AgentProtocolError, match="large"):
         validate_schema_message(name, raw)
+
+
+@pytest.mark.parametrize("operation", ["recipe.install", "recipe.start"])
+def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
+    operation: str,
+) -> None:
+    compiled_plan = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "control"
+            / "tests"
+            / "fixtures"
+            / "compiled_plan_751.json"
+        ).read_text(encoding="utf-8")
+    )
+    placement = compiled_plan["runtime"]["placement"]
+    if operation == "recipe.install":
+        corpus_payload = {
+            "schema_version": 2,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b" * 64,
+            "rank": placement["rank"],
+            "role": placement["role"],
+            "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
+            "compiled_execution_plan": compiled_plan,
+        }
+    else:
+        compiled_plan = deepcopy(compiled_plan)
+        compiled_plan["runtime"]["placement"]["endpoint_address"] = "10.0.0.2"
+        compiled_plan["security"]["network_mode"] = "bridge"
+        placement = compiled_plan["runtime"]["placement"]
+        corpus_payload = {
+            "schema_version": 2,
+            "run_id": "00000000-0000-4000-8000-000000000005",
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000006",
+            "recipe_content_sha256": compiled_plan["identity"][
+                "recipe_revision_sha256"
+            ],
+            "mapping_id": "00000000-0000-4000-8000-000000000007",
+            "mapping_generation": 1,
+            "image_digest": compiled_plan["runtime"]["image_digest"],
+            "plan_digest": "b" * 64,
+            "alias": "synthetic-tiny",
+            "rank": placement["rank"],
+            "role": placement["role"],
+            "port": placement["port"],
+            "reserved_memory_bytes": placement["reserved_memory_bytes"],
+            "endpoint_address": placement["endpoint_address"],
+            "world_size": placement["world_size"],
+            "compiled_execution_plan": compiled_plan,
+            "local_address": placement["local_address"],
+            "master_address": placement["master_address"],
+            "master_port": placement["master_port"],
+        }
+
+    claim = AgentClaim.parse(claim_for_operation(operation, corpus_payload))
+    assert claim.operation.value == operation
+
+    oversized_plan = deepcopy(compiled_plan)
+    oversized_plan["runtime"]["executable"] = (
+        "/" + "x" * MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+    )
+    oversized = deepcopy(corpus_payload)
+    oversized["compiled_execution_plan"] = oversized_plan
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(claim_for_operation(operation, oversized))
+
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(
+            claim_for_operation("node.probe", {"value": "x" * MAX_DOCUMENT_BYTES})
+        )
 
 
 @pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])

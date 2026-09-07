@@ -21,18 +21,10 @@ NATIVE_LIFECYCLE = ROOT / "scripts/test-agent-package-native-lifecycle"
 EXPECTED_ACTION_OUTPUTS = {
     "version": "${{ steps.accepted.outputs.version }}",
     "arm64_package": "${{ steps.accepted.outputs.arm64_package }}",
-    "amd64_package": "${{ steps.accepted.outputs.amd64_package }}",
     "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
     "baseline_version": "${{ steps.accepted.outputs.baseline_version }}",
     "arm64_baseline_package": ("${{ steps.accepted.outputs.arm64_baseline_package }}"),
-    "amd64_baseline_package": ("${{ steps.accepted.outputs.amd64_baseline_package }}"),
     "baseline_artifact_name": ("${{ steps.accepted.outputs.baseline_artifact_name }}"),
-    "amd64_lifecycle_package": (
-        "${{ steps.accepted.outputs.amd64_lifecycle_package }}"
-    ),
-    "amd64_lifecycle_artifact_name": (
-        "${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}"
-    ),
 }
 
 
@@ -185,7 +177,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         struct.pack_into("<H", raw, 18, 183)
         marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
         raw[128 : 128 + len(marker)] = marker
-        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
         if name == "vonk-build-egress":
             struct.pack_into("<Q", raw, 32, 320)
@@ -203,7 +195,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             ROOT / "scripts/build-agent-deb",
             "--version",
-            "0.1.0",
+            "0.1.1",
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -228,7 +220,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             "/usr/bin/dpkg-deb",
             "--extract",
-            output / "vonk-forge-agent_0.1.0_arm64.deb",
+            output / "vonk-forge-agent_0.1.1_arm64.deb",
             payload,
         ],
         check=False,
@@ -240,7 +232,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
     assert (
         b"vonkforge.invalid"
-        not in (output / "vonk-forge-agent_0.1.0_arm64.deb").read_bytes()
+        not in (output / "vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
     )
 
 
@@ -254,7 +246,6 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
         "version",
         "next_version",
         "arm64_package",
-        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -312,50 +303,6 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "openssl pkey" in text
     assert "-pubout -outform DER" in text
     assert "sha256sum" in text
-
-
-def test_cross_compiler_install_includes_target_glibc_headers(
-    tmp_path: Path,
-) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    sudo_log = tmp_path / "sudo.log"
-    write_executable(fake_bin / "uname", 'printf "%s\\n" aarch64')
-    write_executable(
-        fake_bin / "sudo",
-        'printf "%s\\n" "$*" >> "$SUDO_LOG"',
-    )
-    write_executable(fake_bin / "rustup", ":")
-
-    result = subprocess.run(
-        [
-            "/bin/bash",
-            "-c",
-            package_step_run("Install pinned Rust toolchain"),
-        ],
-        cwd=ROOT,
-        env={
-            **os.environ,
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            "SUDO_LOG": str(sudo_log),
-        },
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
-    install = next(
-        line
-        for line in sudo_log.read_text().splitlines()
-        if line.startswith("apt-get install ")
-    )
-    installed = set(install.split()[4:])
-    assert installed == {
-        "binutils-x86-64-linux-gnu",
-        "gcc-x86-64-linux-gnu",
-        "libc6-dev-amd64-cross",
-    }
 
 
 def test_reusable_agent_package_build_validates_publication_authority() -> None:
@@ -423,10 +370,10 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "CRASH_MODE=full-cgroup" in text
     assert "STALE_PENDING_FORMAT" not in text
     assert "CANDIDATE_CUSTODY" not in text
-    for architecture in ("linux-arm64", "linux-amd64"):
+    for architecture in ("linux-arm64",):
         assert f"build_package {architecture}" in text
         assert f"build_baseline {architecture}" in text
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert f"vonk-forge-agent_${{VERSION}}_{architecture}.deb" in text
     assert "vonk-agent-supervisor" not in text
     assert "/var/lib/vonk-forge/slots" not in text
@@ -448,16 +395,13 @@ def test_development_parallelizes_only_prebuilt_deterministic_package_assembly()
 
     assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in candidate
     assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in baseline
-    assert candidate.count('package_pids+=("$!")') == 4
-    assert baseline.count('package_pids+=("$!")') == 2
+    assert candidate.count('package_pids+=("$!")') == 2
+    assert baseline.count('package_pids+=("$!")') == 1
     assert candidate.count('wait_for_packages "${package_pids[@]}"') == 1
     assert baseline.count('wait_for_packages "${package_pids[@]}"') == 1
     assert candidate.count("build_package linux-arm64") == 4
-    assert candidate.count("build_package linux-amd64") == 4
     assert baseline.count("build_baseline linux-arm64") == 2
-    assert baseline.count("build_baseline linux-amd64") == 2
     assert baseline.count("build_lifecycle linux-arm64") == 1
-    assert baseline.count("build_lifecycle linux-amd64") == 1
     assert baseline.index(
         'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]'
     ) < baseline.index("build_lifecycle linux-arm64")
@@ -476,7 +420,7 @@ def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
     assert text.count("stat -c '%U:%G:%a' \"$data_dir/machine-evidence\"") == 2
 
 
-def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -> None:
+def test_package_build_publishes_arm64_lower_acceptance_baseline() -> None:
     text = PACKAGE_WORKFLOW.read_text()
     validation = package_step("Validate package metadata and environment")
     lifecycle = package_step_run("Build lifecycle acceptance baseline packages")
@@ -485,12 +429,11 @@ def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -
 
     assert "baseline_version:" in text
     assert "arm64_baseline_package:" in text
-    assert "amd64_baseline_package:" in text
     assert "baseline_artifact_name:" in text
     assert "BASELINE_VERSION: ${{ inputs.baseline_version }}" in validation
     assert "--acceptance-baseline" in lifecycle
     assert '"$BASELINE_VERSION" "$VERSION"' in inline
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert (
             f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
             in upload
@@ -499,9 +442,9 @@ def test_package_build_publishes_dual_architecture_lower_acceptance_baseline() -
     assert "overwrite: false" in upload
 
 
-def test_package_build_outputs_and_attestations_name_both_architectures() -> None:
+def test_package_build_outputs_and_attestations_name_arm64() -> None:
     text = PACKAGE_WORKFLOW.read_text()
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert re.search(rf"^  {architecture}_package:\n", text, re.MULTILINE)
         package = f"vonk-forge-agent_${{{{ inputs.version }}}}_{architecture}.deb"
         assert f"subject-path: dist/{package}" in text
@@ -525,7 +468,6 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     assert lifecycle.count("scripts/build-agent-deb") == 2
     assert "--acceptance-baseline" in lifecycle
     assert "build_baseline linux-arm64" in lifecycle
-    assert "build_baseline linux-amd64" in lifecycle
     final_build = lifecycle.rindex("scripts/build-agent-deb")
     wait = lifecycle.index('wait_for_packages "${package_pids[@]}"')
     cleanup = lifecycle.index(immediate_cleanup)
@@ -537,11 +479,8 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         fallback_name,
         "Run inline ARM64 package lifecycle acceptance",
     ]
-    assert step_names[lifecycle_index + 3 : lifecycle_index + 5] == [
-        "Upload short-lived AMD64 lifecycle package",
-        "Upload immutable acceptance baseline packages",
-    ]
-    assert step_names[lifecycle_index + 5] == cosign_name
+    assert step_names[lifecycle_index + 3] == "Upload immutable acceptance baseline packages"
+    assert step_names[lifecycle_index + 4] == cosign_name
     inline = workflow_step_run(text, "Run inline ARM64 package lifecycle acceptance")
     assert 'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"' in inline
     assert "sudo scripts/test-agent-package-native-lifecycle" in inline
@@ -603,32 +542,23 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
 ):
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert text.count("actions/upload-artifact@") == 3
+    assert text.count("actions/upload-artifact@") == 2
     accepted = workflow_step(text, "Upload exact package release set")
     baseline = workflow_step(text, "Upload immutable acceptance baseline packages")
-    lifecycle = workflow_step(text, "Upload short-lived AMD64 lifecycle package")
 
     assert "name: ${{ inputs.artifact_name }}" in accepted
     assert "retention-days: 30" in accepted
     assert "path: dist/*" in accepted
     assert "name: ${{ inputs.baseline_artifact_name }}" in baseline
     assert "retention-days: 7" in baseline
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         package = (
             f"vonk-forge-agent_${{{{ inputs.baseline_version }}}}_{architecture}.deb"
         )
         assert package in baseline
         assert f"{package}.sha256" in baseline
         assert f"{package}.host.sig" in baseline
-    assert (
-        "name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}" in lifecycle
-    )
-    assert "if: inputs.lifecycle_gate_mode == 'inline'" in lifecycle
-    assert "retention-days: 1" in lifecycle
-    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb" in lifecycle
-    assert "vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256" in lifecycle
-    assert "dist/" not in lifecycle
-    for step in (accepted, baseline, lifecycle):
+    for step in (accepted, baseline):
         assert "overwrite: false" in step
         assert "if-no-files-found: error" in step
 
@@ -637,8 +567,8 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
     metadata = text.split("\n  compile-arm64-candidate:\n", 1)[0]
 
-    assert "  push:\n    branches: [main]\n  workflow_dispatch:" in text
-    assert "paths:" not in text.split("  workflow_dispatch:", 1)[0]
+    assert "  push:\n    branches: [main]\n    paths:" in text
+    assert "rust/crates/vonk-agent/**" in text.split("  workflow_dispatch:", 1)[0]
     assert "paths-ignore:" not in text.split("  workflow_dispatch:", 1)[0]
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
@@ -660,13 +590,13 @@ def test_development_cancels_only_stale_keyless_and_package_build_work() -> None
         "\n  security-gates:\n", 1
     )[0]
     security = text.split("\n  security-gates:\n", 1)[1].split(
-        "\n  native-amd64-lifecycle:\n", 1
+        "\n  native-arm64-lifecycle:\n", 1
     )[0]
-    native = text.split("\n  native-amd64-lifecycle:\n", 1)[1]
+    native = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "concurrency:" not in workflow_header
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         for binary_set in ("candidate", "baseline"):
             compiler = workflow_job(text, f"compile-{architecture}-{binary_set}")
             assert (
@@ -686,7 +616,7 @@ def test_development_cancels_only_stale_keyless_and_package_build_work() -> None
 def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() -> None:
     text = WORKFLOW.read_text()
     security = text.split("\n  security-gates:\n", 1)[1].split(
-        "\n  native-amd64-lifecycle:\n", 1
+        "\n  native-arm64-lifecycle:\n", 1
     )[0]
     package = text.split("\n  build-test-sign:\n", 1)[1].split(
         "\n  security-gates:\n", 1
@@ -697,8 +627,6 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
     for compiler in (
         "compile-arm64-candidate",
         "compile-arm64-baseline",
-        "compile-amd64-candidate",
-        "compile-amd64-baseline",
     ):
         assert f"- {compiler}" in package
     assert "runs-on: ubuntu-24.04-arm" in security
@@ -730,8 +658,6 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
     compilers = (
         ("compile-arm64-candidate", "linux-arm64", "candidate", "ubuntu-24.04-arm"),
         ("compile-arm64-baseline", "linux-arm64", "baseline", "ubuntu-24.04-arm"),
-        ("compile-amd64-candidate", "linux-amd64", "candidate", "ubuntu-24.04"),
-        ("compile-amd64-baseline", "linux-amd64", "baseline", "ubuntu-24.04"),
     )
     for job_name, architecture, binary_set, runner in compilers:
         job = workflow_job(text, job_name)
@@ -758,26 +684,26 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
         text.count("release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}")
         == 1
     )
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert (
             "pattern: ${{ needs.package-metadata.outputs.artifact_name }}"
             f"-compiled-{architecture}-*"
         ) in package
         assert package.count(f"path: prebuilt/{architecture}") == 1
-    assert package.count("merge-multiple: true") == 2
-    assert package.count("actions/download-artifact@") == 2
+    assert package.count("merge-multiple: true") == 1
+    assert package.count("actions/download-artifact@") == 1
 
 
 def test_development_compiler_fanout_is_role_complete_and_collision_free() -> None:
     text = WORKFLOW.read_text()
     compiler_names = {
         f"compile-{architecture}-{binary_set}"
-        for architecture in ("arm64", "amd64")
+        for architecture in ("arm64",)
         for binary_set in ("candidate", "baseline")
     }
 
-    assert text.count("uses: ./.github/actions/agent-package-compile") == 4
-    assert text.count("needs: [package-metadata]") == 5
+    assert text.count("uses: ./.github/actions/agent-package-compile") == 2
+    assert text.count("needs: [package-metadata]") == 3
     for compiler_name in compiler_names:
         compiler = workflow_job(text, compiler_name)
         assert f"group: vonk-forge-agent-development-{compiler_name}" in compiler
@@ -866,9 +792,7 @@ def test_protected_signer_validates_precompiled_bytes_before_key_materialization
     build = package_step("Build package twice reproducibly")
     lifecycle = package_step("Build lifecycle acceptance baseline packages")
     assert "prebuilt/arm64/candidate" in build
-    assert "prebuilt/amd64/candidate" in build
     assert "prebuilt/arm64/baseline" in lifecycle
-    assert "prebuilt/amd64/baseline" in lifecycle
 
 
 def test_package_security_gate_mode_is_explicit_and_channel_bound() -> None:
@@ -904,6 +828,7 @@ def test_development_metadata_uses_actions_publication_sequence() -> None:
 
 def test_development_workflows_bind_both_literal_environment_boundaries() -> None:
     text = WORKFLOW.read_text()
+    jobs = text.split("\njobs:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "uses: ./.github/actions/agent-package-build" in text
@@ -924,7 +849,7 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
     assert "tag_oid: ''" in publisher
     assert "needs: [authority]" in publisher
     assert "artifact_name: ${{ needs.authority.outputs.artifact_name }}" in publisher
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert (
             f"{architecture}_package: "
             f"${{{{ needs.authority.outputs.{architecture}_package }}}}" in publisher
@@ -937,23 +862,22 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
         "scripts/build-agent-deb",
         "cosign sign-blob",
     ):
-        assert forbidden not in text
+        assert forbidden not in jobs
 
 
-def test_development_publication_requires_native_amd64_lifecycle() -> None:
+def test_development_publication_requires_native_arm64_lifecycle() -> None:
     text = WORKFLOW.read_text()
-    lifecycle = text.split("\n  native-amd64-lifecycle:\n", 1)[1]
+    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "needs: [package-metadata, build-test-sign]" in lifecycle
-    assert "runs-on: ubuntu-24.04" in lifecycle
+    assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "actions/download-artifact@" in lifecycle
-    assert 'test "$(uname -m)" = x86_64' in lifecycle
+    assert 'test "$(uname -m)" = aarch64' in lifecycle
     assert "podman shellcheck slirp4netns uidmap" in lifecycle
-    assert 'scripts/verify-agent-deb --json "$package"' in lifecycle
-    assert 'dpkg -i "$package"' in lifecycle
-    assert "/usr/lib/vonk-forge/vonk-agent --version" in lifecycle
-    assert "'Lifecycle-test accepted AMD64 package on AMD64'" in publisher
+    assert 'scripts/verify-agent-deb --json "accepted/$ARM64_PACKAGE"' in lifecycle
+    assert "scripts/test-agent-package-native-lifecycle" in lifecycle
+    assert "'Lifecycle-test accepted ARM64 package on ARM64'" in publisher
 
 
 def test_development_apt_publication_is_exact_run_bound() -> None:
@@ -998,17 +922,14 @@ def test_development_apt_publication_is_exact_run_bound() -> None:
     assert 'test "$SOURCE_SHA" =' in accepted
     assert "jobs?filter=latest&per_page=100" in accepted
     assert "artifacts?per_page=100" in accepted
-    assert 'test "$(jq \'length\' "$jobs")" = 9' in accepted
+    assert 'test "$(jq \'length\' "$jobs")" = 6' in accepted
     for gate in (
         "Derive development package metadata",
         "Compile ARM64 candidate package binaries",
         "Compile ARM64 baseline package binaries",
-        "Compile AMD64 candidate package binaries",
-        "Compile AMD64 baseline package binaries",
-        "Build and sign AMD64 and ARM64; lifecycle-test ARM64",
+        "Build, sign, and lifecycle-test ARM64 Spark agent",
         "Run Rust and package security gates",
         "Lifecycle-test accepted ARM64 package on ARM64",
-        "Lifecycle-test accepted AMD64 package on AMD64",
     ):
         assert f"'{gate}'" in accepted
     assert "(.workflow_run.id | tostring) == $run_id" in accepted
@@ -1026,9 +947,7 @@ def test_development_apt_publication_is_exact_run_bound() -> None:
 
 def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:
     text = WORKFLOW.read_text()
-    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1].split(
-        "\n  native-amd64-lifecycle:\n", 1
-    )[0]
+    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
 
     assert "needs: [package-metadata, build-test-sign]" in lifecycle
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
@@ -1108,7 +1027,6 @@ def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
         "channel",
         "version",
         "arm64_package",
-        "amd64_package",
         "artifact_name",
         "environment",
         "source_sha",
@@ -1169,21 +1087,21 @@ def test_apt_publish_action_downloads_only_the_selected_run_artifact() -> None:
     assert "name: ${{ inputs.artifact_name }}" in upstream
 
 
-def test_apt_publisher_verifies_and_indexes_both_architectures_as_one_release() -> None:
+def test_apt_publisher_verifies_and_indexes_arm64_release() -> None:
     verify = apt_step("Verify exact downloaded package")
     generation = apt_step("Generate missing aptly state or public tree")
     state = APT_STATE.read_text()
 
-    for architecture in ("arm64", "amd64"):
+    for architecture in ("arm64",):
         assert f"vonk-forge-agent_${{VERSION}}_{architecture}.deb" in verify
     assert ".architecture == $architecture" in verify
-    assert 'for architecture in ("amd64", "arm64")' in state
+    assert 'for architecture in ("arm64",)' in state
     assert 'publication["packages"][architecture]["sha256"]' in state
     assert "str(package_paths[architecture])" in state
     assert "--phase prepare" in generation
     assert "binary-$architecture/Packages" in generation
-    assert 'architectures:["amd64","arm64"]' in generation
-    assert "-architectures=amd64,arm64" in generation
+    assert 'architectures:["arm64"]' in generation
+    assert "-architectures=arm64" in generation
 
 
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
@@ -1461,6 +1379,7 @@ def test_action_pin_guard_scans_yaml_and_keeps_local_calls_exempt(
 
 def test_development_agent_workflow_has_no_production_authority() -> None:
     text = WORKFLOW.read_text()
+    jobs = text.split("\njobs:\n", 1)[1]
     publisher = DEVELOPMENT_APT_WORKFLOW.read_text()
 
     assert "publish-apt:" not in text
@@ -1468,7 +1387,7 @@ def test_development_agent_workflow_has_no_production_authority() -> None:
     assert "apt-development" in publisher
     assert "apt-release" not in publisher
     assert "apt-release" not in text
-    assert "agent-release" not in text
+    assert "environment: agent-release" not in jobs
     assert "channel: stable" not in text
     assert "distribution: stable" not in text
     assert "gh release" not in text

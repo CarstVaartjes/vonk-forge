@@ -14,6 +14,7 @@ from ...models.telemetry_history_response import TelemetryHistoryResponse
 from ...types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
+from typing import cast, Union
 from typing import Union
 import datetime
 
@@ -26,6 +27,10 @@ def _get_kwargs(
     end: datetime.datetime,
     resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> dict[str, Any]:
 
@@ -44,6 +49,34 @@ def _get_kwargs(
     params["resolution"] = json_resolution
 
     params["maximum_points"] = maximum_points
+
+    json_key: Union[None, Unset, str]
+    if isinstance(key, Unset):
+        json_key = UNSET
+    else:
+        json_key = key
+    params["key"] = json_key
+
+    json_device_id: Union[None, Unset, str]
+    if isinstance(device_id, Unset):
+        json_device_id = UNSET
+    else:
+        json_device_id = device_id
+    params["device_id"] = json_device_id
+
+    json_interface_name: Union[None, Unset, str]
+    if isinstance(interface_name, Unset):
+        json_interface_name = UNSET
+    else:
+        json_interface_name = interface_name
+    params["interface_name"] = json_interface_name
+
+    json_run_id: Union[None, Unset, str]
+    if isinstance(run_id, Unset):
+        json_run_id = UNSET
+    else:
+        json_run_id = run_id
+    params["run_id"] = json_run_id
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -119,6 +152,10 @@ def sync_detailed(
     end: datetime.datetime,
     resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
     """ Node Telemetry History
@@ -129,6 +166,10 @@ def sync_detailed(
         end (datetime.datetime):
         resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -145,6 +186,10 @@ start=start,
 end=end,
 resolution=resolution,
 maximum_points=maximum_points,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )
 
@@ -162,6 +207,10 @@ def sync(
     end: datetime.datetime,
     resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
     """ Node Telemetry History
@@ -172,6 +221,10 @@ def sync(
         end (datetime.datetime):
         resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -189,6 +242,10 @@ start=start,
 end=end,
 resolution=resolution,
 maximum_points=maximum_points,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     ).parsed
 
@@ -200,6 +257,10 @@ async def asyncio_detailed(
     end: datetime.datetime,
     resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
     """ Node Telemetry History
@@ -210,6 +271,10 @@ async def asyncio_detailed(
         end (datetime.datetime):
         resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -226,6 +291,10 @@ start=start,
 end=end,
 resolution=resolution,
 maximum_points=maximum_points,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )
 
@@ -243,6 +312,10 @@ async def asyncio(
     end: datetime.datetime,
     resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
     """ Node Telemetry History
@@ -253,6 +326,10 @@ async def asyncio(
         end (datetime.datetime):
         resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -270,5 +347,9 @@ start=start,
 end=end,
 resolution=resolution,
 maximum_points=maximum_points,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )).parsed

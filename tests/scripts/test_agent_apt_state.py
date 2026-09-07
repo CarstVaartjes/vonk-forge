@@ -17,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/agent-apt-state"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-PACKAGE_BYTES = {"amd64": b"amd64 package bytes", "arm64": b"arm64 package bytes"}
+PACKAGE_BYTES = {"arm64": b"arm64 package bytes"}
 
 
 def load_state_module() -> ModuleType:
@@ -157,7 +157,7 @@ class ConcurrentPublicR2(FakeR2):
 
     def write(self, key: str, data: bytes) -> None:
         if key in {
-            "dists/dev/main/binary-amd64/Packages",
+            "dists/dev/main/binary-arm64/Packages",
             "vonk-forge-dev-archive-keyring.gpg",
         }:
             self.ordinary_barrier.wait(timeout=2)
@@ -183,17 +183,13 @@ def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, ob
     }
 
 
-def test_publication_receipt_binds_both_architecture_packages() -> None:
+def test_publication_receipt_binds_the_arm64_package() -> None:
     state = load_state_module()
     version = "0.1.0~dev.1786300000+g0123456789ab"
     publication = {
         "channel": "dev",
         "distribution": "dev",
         "packages": {
-            "amd64": {
-                "filename": f"vonk-forge-agent_{version}_amd64.deb",
-                "sha256": "a" * 64,
-            },
             "arm64": {
                 "filename": f"vonk-forge-agent_{version}_arm64.deb",
                 "sha256": "b" * 64,
@@ -384,7 +380,7 @@ def write_public_tree(
     distribution: str = "dev",
 ) -> Path:
     public = tmp_path / "public"
-    for architecture in ("amd64", "arm64"):
+    for architecture in ("arm64",):
         paragraphs: list[str] = []
         for package, version, record_architecture, digest in sorted(records):
             if record_architecture != architecture:
@@ -482,14 +478,14 @@ def test_development_compaction_workflow_retry_restores_prior_committed_state(
     monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
     failures = 0
 
-    def fail_second_add(arguments: tuple[str, ...]) -> bool:
+    def fail_first_add(arguments: tuple[str, ...]) -> bool:
         nonlocal failures
         if arguments[:3] == ("repo", "add", "vonk-forge-dev"):
             failures += 1
-            return failures == 2
+            return failures == 1
         return False
 
-    aptly.fail = fail_second_add
+    aptly.fail = fail_first_add
     with pytest.raises(RuntimeError, match="injected aptly interruption"):
         state.compact_aptly_state(
             publication,
@@ -591,7 +587,7 @@ def test_stable_compaction_retains_current_and_two_complete_predecessors(
         "prepare",
     )
     assert {record[1] for record in aptly.repo} == {"1.9.0", "1.10.0", "1.11.0"}
-    assert {record[2] for record in aptly.repo} == {"amd64", "arm64"}
+    assert {record[2] for record in aptly.repo} == {"arm64"}
     aptly.snapshots[publication["snapshot"]] = set(aptly.repo)
     public = write_public_tree(tmp_path, aptly.repo, "stable")
     state.compact_aptly_state(
@@ -629,7 +625,7 @@ def test_stable_compaction_rejects_rollback_before_mutation(
     assert not any(operation[:2] == ("repo", "remove") for operation in aptly.operations)
 
 
-def test_repository_version_requires_exactly_one_package_per_architecture() -> None:
+def test_repository_version_rejects_an_extra_architecture() -> None:
     state = load_state_module()
     publication = stable_receipt("1.2.3")
     records = package_records(publication)
@@ -641,15 +637,13 @@ def test_repository_version_requires_exactly_one_package_per_architecture() -> N
 
 def test_repository_version_rejects_incomplete_and_unexpected_packages() -> None:
     state = load_state_module()
-    publication = stable_receipt("1.2.3")
-    records = package_records(publication)
-    records = {record for record in records if record[2] == "amd64"}
+    records = {("vonk-forge-agent", "1.2.3", "amd64", "a" * 64)}
     with pytest.raises(state.StateError, match="incomplete package version"):
         state._group_complete_versions(records, "stable")
 
     with pytest.raises(state.StateError, match="package identity"):
         state._group_complete_versions(
-            {("another-package", "1.2.3", "amd64", "a" * 64)}, "stable"
+            {("another-package", "1.2.3", "arm64", "a" * 64)}, "stable"
         )
 
 
@@ -702,7 +696,7 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state", operations, fail_once={f"{prefix}/commit.json"}
     )
@@ -743,7 +737,7 @@ def test_candidate_data_objects_upload_concurrently_before_commit(
 
     state.commit_candidate(private, publication, state_bundle, public_bundle)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     commit = operations.index(f"state:write:{prefix}/commit.json")
     state_object = operations.index(f"state:write:{prefix}/aptly-state.tar.gz")
     public_object = operations.index(f"state:write:{prefix}/public-tree.tar.gz")
@@ -755,7 +749,7 @@ def test_single_partial_data_object_is_completed_on_exact_retry(tmp_path: Path) 
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state",
         operations,
@@ -780,7 +774,7 @@ def test_commit_requires_persisted_data_hashes_to_match(tmp_path: Path) -> None:
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state",
         operations,
@@ -809,6 +803,43 @@ def test_committed_manifest_is_the_monotonic_high_water_without_latest(
         state.prepare_candidate(private, older)
 
 
+def test_new_arm64_epoch_ignores_legacy_state_objects() -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    private.objects["versions/legacy/commit.json"] = b"incompatible historical receipt"
+
+    publication = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    prepared = state.prepare_candidate(private, publication)
+
+    assert prepared.mode == "pending"
+    assert "state:list:versions/" not in operations
+    assert "state:read:versions/legacy/commit.json" not in operations
+
+
+def test_new_arm64_epoch_preserves_global_publication_high_water() -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    historical_version = "0.1.0~dev.1786300001+g0123456789ab"
+    private.objects["latest.json"] = state.canonical_json(
+        {
+            "channel": "dev",
+            "commit": f"versions/{historical_version}/commit.json",
+            "commit_sha256": "a" * 64,
+            "version": historical_version,
+        }
+    )
+
+    with pytest.raises(state.StateError, match="publication epoch"):
+        state.prepare_candidate(
+            private,
+            receipt("0.1.0~dev.1786300000+g0123456789ab"),
+        )
+
+    assert "versions/legacy/commit.json" not in private.objects
+
+
 def test_pending_prepare_only_downloads_predecessor_aptly_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -826,7 +857,7 @@ def test_pending_prepare_only_downloads_predecessor_aptly_state(
 
     prepared = state.prepare_candidate(private, current)
 
-    prefix = f"versions/{previous['version']}"
+    prefix = f"arm64/versions/{previous['version']}"
     assert prepared.state_bundle == state_bundle
     assert f"state:read:{prefix}/aptly-state.tar.gz" in operations
     assert f"state:read:{prefix}/public-tree.tar.gz" not in operations
@@ -851,7 +882,7 @@ def test_prepare_scans_committed_manifests_concurrently(
         state_bundle, public_bundle = bundles(root, publication)
         state.commit_candidate(private, publication, state_bundle, public_bundle)
     private.concurrent_reads = {
-        f"versions/{publication['version']}/commit.json"
+        f"arm64/versions/{publication['version']}/commit.json"
         for publication in committed
     }
 
@@ -879,7 +910,7 @@ def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
         root.mkdir()
         state_bundle, public_bundle = bundles(root, publication)
         state.commit_candidate(private, publication, state_bundle, public_bundle)
-        commit_keys.add(f"versions/{publication['version']}/commit.json")
+        commit_keys.add(f"arm64/versions/{publication['version']}/commit.json")
     private.objects[max(commit_keys)] = b"{}\n"
     private.concurrent_reads = commit_keys
     operations.clear()
@@ -890,7 +921,7 @@ def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
             receipt("0.1.0~dev.1786300002+g0123456789ab"),
         )
 
-    assert operations[0] == "state:list:versions/"
+    assert operations[0] == "state:list:arm64/versions/"
     assert set(operations[1:]) == {
         f"state:read:{key}" for key in commit_keys
     }
@@ -906,7 +937,7 @@ def test_equal_replay_downloads_committed_bundles_concurrently(
     operations: list[str] = []
     private = ConcurrentReadR2("state", operations)
     state.commit_candidate(private, publication, state_bundle, public_bundle)
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private.concurrent_reads = {
         f"{prefix}/aptly-state.tar.gz",
         f"{prefix}/public-tree.tar.gz",
@@ -932,7 +963,7 @@ def test_commit_precedes_public_bytes_and_single_latest_pointer(
     state.commit_candidate(private, publication, state_bundle, public_bundle)
     state.publish_committed(private, public, publication)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     commit_index = operations.index(f"state:write:{prefix}/commit.json")
     public_indexes = [
         index
@@ -963,7 +994,7 @@ def test_publication_only_downloads_committed_public_tree(tmp_path: Path) -> Non
 
     state.publish_committed(private, public, publication)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     assert f"state:read:{prefix}/public-tree.tar.gz" in operations
     assert f"state:read:{prefix}/aptly-state.tar.gz" not in operations
 
@@ -1207,10 +1238,10 @@ def test_immutable_public_conflict_preserves_all_public_bytes_and_latest(
     second_root.mkdir()
     first_state, first_public = bundles(first_root, first)
     second_state, _ = bundles(second_root, second)
-    first_package = first["packages"]["amd64"]
+    first_package = first["packages"]["arm64"]
     assert isinstance(first_package, dict)
     predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
-    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["amd64"])
+    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["arm64"])
     second_public = state.build_bundle(second_root / "public", "public", second)
     state.commit_candidate(private, first, first_state, first_public)
     state.publish_committed(private, public, first)

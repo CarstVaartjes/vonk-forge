@@ -15,7 +15,7 @@ SCRIPT = ROOT / "scripts/render-install-bootstrap"
 def _artifacts(tmp_path: Path, kind: str) -> dict[str, Path]:
     platforms = {
         "nas": ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"),
-        "spark": ("linux-amd64", "linux-arm64"),
+        "spark": ("linux-arm64",),
     }[kind]
     result = {}
     for platform in platforms:
@@ -86,7 +86,7 @@ def test_renderer_pins_every_supported_native_installer(
             package = tmp_path / f"agent-{platform}.deb"
             assert hashlib.sha256(package.read_bytes()).hexdigest() in rendered
         assert "@SPARK_" not in rendered
-        assert rendered.count("1.2.3~dev.4+g0123456789ab") == 2
+        assert rendered.count("1.2.3~dev.4+g0123456789ab") == 1
     assert (
         result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
     )
@@ -96,26 +96,25 @@ def test_renderer_fails_closed_on_missing_duplicate_or_unsafe_inputs(
     tmp_path: Path,
 ) -> None:
     artifacts = _artifacts(tmp_path, "spark")
-    first = artifacts["linux-amd64"]
+    first = artifacts["linux-arm64"]
     unsafe = tmp_path / "unsafe"
     unsafe.symlink_to(first)
 
     for arguments in (
-        ["--artifact", f"linux-amd64={first}"],
+        [],
         [
             "--artifact",
-            f"linux-amd64={first}",
+            f"linux-arm64={first}",
             "--artifact",
-            f"linux-amd64={first}",
+            f"linux-arm64={first}",
         ],
         [
             "--artifact",
-            f"linux-amd64={unsafe}",
-            "--artifact",
-            f"linux-arm64={artifacts['linux-arm64']}",
+            f"linux-arm64={unsafe}",
         ],
     ):
-        output = tmp_path / f"failed-{len(arguments)}-{arguments[-1].replace('/', '_')}"
+        suffix = arguments[-1].replace("/", "_") if arguments else "missing"
+        output = tmp_path / f"failed-{len(arguments)}-{suffix}"
         result = subprocess.run(
             [
                 sys.executable,

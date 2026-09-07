@@ -11,14 +11,38 @@ fail() {
     exit 1
 }
 
-case "$kind:$#:${1:-}" in
-    nas:0:|spark:0:) ;;
-    nas:1:--enable-hermes|nas:1:--disable-hermes) ;;
-    spark:1:--enroll) ;;
-    nas:*) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
-    spark:*) fail "this installer accepts only --enroll" ;;
-    *) fail "the installer kind is invalid" ;;
-esac
+validate_arguments() {
+    case "$kind" in
+        nas)
+            hermes_option=
+            answers_file=
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --enable-hermes|--disable-hermes)
+                        [ -z "$hermes_option" ] || fail "the Hermes mode may be selected only once"
+                        hermes_option=$1
+                        shift
+                        ;;
+                    --answers-file)
+                        [ -z "$answers_file" ] || fail "the answers file may be selected only once"
+                        [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--answers-file requires a path"
+                        answers_file=$2
+                        shift 2
+                        ;;
+                    *) fail "this installer accepts only a Hermes mode and --answers-file PATH" ;;
+                esac
+            done
+            ;;
+        spark)
+            case "$#:${1:-}" in
+                0:|1:--enroll) ;;
+                *) fail "this installer accepts only --enroll" ;;
+            esac
+            ;;
+        *) fail "the installer kind is invalid" ;;
+    esac
+}
+validate_arguments "$@"
 case "$origin" in https://*) ;; *) fail "the installer origin is invalid" ;; esac
 for required in curl openssl sed head tail date mktemp awk; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required"

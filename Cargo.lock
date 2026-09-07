@@ -2248,7 +2248,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vonk-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2273,13 +2273,14 @@ dependencies = [
  "toml",
  "url",
  "uuid",
+ "vonk-agent-helper",
  "vonk-agent-protocol",
  "x509-parser",
 ]
 
 [[package]]
 name = "vonk-agent-helper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "ring",
@@ -2288,16 +2289,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tar",
  "tempfile",
  "thiserror",
  "uuid",
  "vonk-agent-protocol",
  "wait-timeout",
+ "xattr",
 ]
 
 [[package]]
 name = "vonk-agent-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "serde",
@@ -2310,11 +2313,11 @@ dependencies = [
 
 [[package]]
 name = "vonk-build-egress"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "vonk-nas-setup"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64ct",
  "clap",
@@ -2339,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "vonk-repair-helper-probe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "sha2 0.11.0",
@@ -2347,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "vonk-spark-setup"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "hex",

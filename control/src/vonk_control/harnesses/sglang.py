@@ -250,6 +250,7 @@ class SglangHarnessCompiler:
             frozenset(
                 {"NCCL_DEBUG", "HF_HUB_OFFLINE", "SGLANG_ENABLE_UNIFIED_RADIX_TREE"}
             ),
+            engine_slug=self.slug,
         )
         environment = (*environment, *rank_environment)
         return projection(

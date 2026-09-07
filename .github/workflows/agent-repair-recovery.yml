@@ -15,22 +15,6 @@ on:
       - scripts/verify-agent-deb
       - tests/nodes/test_agent_upgrade_repair_matrix.sh
       - tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - tests/test_agent_repair_workflow.py
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/agent-repair-recovery.yml
-      - Cargo.lock
-      - Cargo.toml
-      - packaging/debian/postinst-repair
-      - packaging/debian/preinst-repair
-      - rust/crates/vonk-build-egress/**
-      - rust/crates/vonk-repair-helper-probe/**
-      - scripts/build-agent-deb
-      - scripts/verify-agent-deb
-      - tests/nodes/test_agent_upgrade_repair_matrix.sh
-      - tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - tests/test_agent_repair_workflow.py
   workflow_dispatch:
 
 permissions:
@@ -73,7 +57,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            acl adduser build-essential ca-certificates curl fuse-overlayfs \
+            acl adduser build-essential ca-certificates crun curl fuse-overlayfs \
             init-system-helpers iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
       - name: Validate repair scripts before mutation

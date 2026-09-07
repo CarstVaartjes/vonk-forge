@@ -32,7 +32,7 @@ def run_metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
                 "public_prefix=dists/dev",
                 "keyring=vonk-forge-dev-archive-keyring.gpg",
                 "snapshot=dev-0.1.0~dev.1786300000+g0123456789ab",
-                "state_prefix=versions/0.1.0~dev.1786300000+g0123456789ab",
+                "state_prefix=arm64/versions/0.1.0~dev.1786300000+g0123456789ab",
             ],
         ),
         (
@@ -44,7 +44,7 @@ def run_metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
                 "public_prefix=dists/stable",
                 "keyring=vonk-forge-archive-keyring.gpg",
                 "snapshot=stable-0.1.0",
-                "state_prefix=versions/0.1.0",
+                "state_prefix=arm64/versions/0.1.0",
             ],
         ),
     ),

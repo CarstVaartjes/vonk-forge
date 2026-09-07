@@ -11,6 +11,7 @@ pinned openapi-fetch dependency; this task generates its schema types only.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -31,6 +32,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_OUTPUT = ROOT / "control/web/src/api/generated.d.ts"
+CLI_OPENAPI_OUTPUT = ROOT / "src/cluster_profiles/schemas/control-openapi.json"
+CLI_OPENAPI_MIRROR = ROOT / "schemas/control-openapi.json"
 
 
 class _SchemaJobs:
@@ -84,8 +87,10 @@ def _write_openapi(document: dict[str, object], *, path: Path = OPENAPI) -> None
     )
 
 
-def _generated_client_schema(document: dict[str, object]) -> dict[str, object]:
-    """Exclude byte streams that require the handwritten streaming transports."""
+def _generated_client_schema(
+    document: dict[str, object], *, python_compatibility: bool = False
+) -> dict[str, object]:
+    """Prepare a client schema without changing the tracked server contract."""
 
     schema = deepcopy(document)
     paths = schema.get("paths", {})
@@ -95,6 +100,18 @@ def _generated_client_schema(document: dict[str, object]) -> dict[str, object]:
                 del path_item[method]
         if not path_item:
             del paths[path]
+    if python_compatibility:
+        # openapi-python-client 0.26.2 cannot parse recursive anyOf unions.
+        # Keep the server and TypeScript schemas exact while representing these
+        # JSON-shaped values as mappings in the generated Python client.
+        components = schema.get("components", {})
+        schemas = components.get("schemas", {})
+        for name in ("JsonValue", "RuntimeArgumentValue"):
+            if name in schemas:
+                schemas[name] = {
+                    "type": "object",
+                    "additionalProperties": True,
+                }
     return schema
 
 
@@ -130,6 +147,24 @@ def _normalize_generated_text(path: Path) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--schema-only",
+        action="store_true",
+        help="regenerate only the tracked OpenAPI document without Node tooling",
+    )
+    arguments = parser.parse_args()
+
+    if arguments.schema_only:
+        _write_openapi(_schema(include_browser_auth=True))
+        _write_openapi(
+            _schema(include_browser_auth=False), path=CLI_OPENAPI_OUTPUT
+        )
+        _write_openapi(
+            _schema(include_browser_auth=False), path=CLI_OPENAPI_MIRROR
+        )
+        return
+
     # Keep the tracked document complete. Generated clients receive a filtered
     # copy because large byte streams use the handwritten Python and browser
     # transports instead of buffered typed-client methods.
@@ -138,7 +173,12 @@ def main() -> None:
 
         admin_schema = _schema(include_browser_auth=False)
         _write_openapi(admin_schema)
-        _write_openapi(_generated_client_schema(admin_schema), path=client_openapi)
+        _write_openapi(admin_schema, path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(admin_schema, path=CLI_OPENAPI_MIRROR)
+        _write_openapi(
+            _generated_client_schema(admin_schema, python_compatibility=True),
+            path=client_openapi,
+        )
         _run(
             [
                 "openapi-python-client",

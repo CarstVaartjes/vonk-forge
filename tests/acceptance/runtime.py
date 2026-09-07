@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
+OPTIONAL_SECRET_FILES = {"hf-token"}
 
 
 class AcceptanceError(RuntimeError):
@@ -119,7 +120,10 @@ def run_interactive(
             _assert_process_values_absent(pid, forbidden)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise AcceptanceError("interactive command timed out")
+                waiting = pending[0][0] if pending else "process completion"
+                raise AcceptanceError(
+                    f"interactive command timed out waiting for {waiting!r}"
+                )
             readable, _, _ = select.select([terminal], [], [], min(remaining, 0.2))
             if readable:
                 try:
@@ -222,9 +226,9 @@ def assert_bundle_contract(bundle: Path) -> None:
         else:
             _require_mode(path, 0o600)
         content = path.read_bytes().strip()
-        if not content:
+        if not content and relative.as_posix() not in OPTIONAL_SECRET_FILES:
             raise AcceptanceError(f"bundle file {relative} is empty")
-        if not runtime_config and (
+        if content and not runtime_config and (
             content in compose_raw or content in environment_raw
         ):
             raise AcceptanceError(

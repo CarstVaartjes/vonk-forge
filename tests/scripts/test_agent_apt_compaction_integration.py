@@ -72,7 +72,7 @@ def package(directory: Path, version: str, architecture: str) -> Path:
 def receipt(channel: str, version: str, package_dir: Path) -> dict[str, object]:
     packages = {
         architecture: package(package_dir, version, architecture)
-        for architecture in ("amd64", "arm64")
+        for architecture in ("arm64",)
     }
     return {
         "channel": channel,
@@ -105,7 +105,7 @@ def run_channel(
         json.dumps(
             {
                 "rootDir": str(aptly_root),
-                "architectures": ["amd64", "arm64"],
+                "architectures": ["arm64"],
                 "FileSystemPublishEndpoints": {
                     "integration": {
                         "rootDir": str(public),
@@ -169,7 +169,7 @@ def run_channel(
                 "publish",
                 "snapshot",
                 "-skip-signing",
-                "-architectures=amd64,arm64",
+                "-architectures=arm64",
                 f"-distribution={channel}",
                 "-component=main",
                 publication["snapshot"],
@@ -230,7 +230,7 @@ def run_channel(
         ]
         records = state._repository_records(config, repository)
         expected_versions = 1 if channel == "dev" else min(position + 1, 3)
-        assert len(records) == expected_versions * 2
+        assert len(records) == expected_versions
         assert state._sorted_versions({record[1] for record in records})[-1] == version
         state_sizes.append(len(state.build_bundle(aptly_root, "state", publication)))
         if first_public_path is None:

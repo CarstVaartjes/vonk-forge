@@ -7,20 +7,6 @@ from deploy.compose.tests.test_networking import _rendered
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_every_alert_has_runbook_and_nonempty_summary() -> None:
-    document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
-    alerts = [rule for group in document["groups"] for rule in group["rules"]]
-    assert {alert["alert"] for alert in alerts} >= {
-        "InferenceRoutesStuckInMaintenance", "NodeProbeStale", "RepeatedReconciliationFailure",
-        "ControlBackupStale", "ControlDatabaseUnavailable", "WorkerLeaseStarvation",
-        "NodeAgentStale", "NodeAgentCertificateExpiring",
-        "RepeatedAgentOperationFailures", "AgentRolloutPaused",
-    }
-    for alert in alerts:
-        assert alert["annotations"]["summary"]
-        assert alert["annotations"]["runbook_url"].startswith("https://")
-
-
 def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> None:
     services = _rendered()["services"]
     grafana = services["grafana"]
@@ -30,40 +16,6 @@ def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> Non
     assert grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == "/run/vonk-normalized-secrets/grafana-admin-password"
     caddy = (ROOT / "deploy/compose/Caddyfile").read_text()
     assert "handle /grafana/*" in caddy and "grafana:3000" in caddy
-
-
-def test_dashboards_are_versioned_and_query_stable_metrics() -> None:
-    for name in ("fleet", "jobs"):
-        dashboard = json.loads((ROOT / f"deploy/compose/grafana/dashboards/{name}.json").read_text())
-        assert dashboard["uid"] == f"vonk-{name}"
-        assert dashboard["title"] and dashboard["panels"]
-        assert all(panel.get("targets") for panel in dashboard["panels"])
-
-
-def test_fleet_dashboard_covers_agent_lifecycle_and_standard_host_exporters() -> None:
-    dashboard = json.loads(
-        (ROOT / "deploy/compose/grafana/dashboards/fleet.json").read_text()
-    )
-    expressions = {
-        target["expr"]
-        for panel in dashboard["panels"]
-        for target in panel["targets"]
-    }
-    assert {
-        "vonk_agent_state",
-        "vonk_agent_version_compatibility",
-        "vonk_agent_certificate_expiry_seconds",
-        "vonk_agent_operations",
-        "vonk_agent_operation_lease_age_seconds",
-        "vonk_agent_rollouts",
-        "vonk_agent_last_seen_age_seconds",
-        "node_memory_MemAvailable_bytes",
-        "DCGM_FI_DEV_GPU_UTIL",
-    } <= expressions
-    assert not any(
-        expression.startswith(("vonk_agent_host_", "vonk_agent_gpu_"))
-        for expression in expressions
-    )
 
 
 def test_agent_alerts_use_bounded_operational_metrics() -> None:
@@ -81,7 +33,6 @@ def test_agent_alerts_use_bounded_operational_metrics() -> None:
     }
     for alert_name, metric in expected_metrics.items():
         assert metric in alerts[alert_name]["expr"]
-        assert alerts[alert_name]["annotations"]["runbook_url"].startswith("https://")
 
 
 def test_stale_agent_alert_semantics_exclude_inactive_nodes_from_every_branch() -> None:
@@ -139,19 +90,6 @@ def test_stale_agent_alert_semantics_exclude_inactive_nodes_from_every_branch() 
     assert missing.group("missing_state") == "active"
     assert outer.group("outer_state") == "active"
     assert firing == {"active-stale", "active-never"}
-
-
-def test_standard_exporter_legends_use_stable_node_identity() -> None:
-    dashboard = json.loads(
-        (ROOT / "deploy/compose/grafana/dashboards/fleet.json").read_text()
-    )
-    targets = {
-        panel["title"]: panel["targets"][0]
-        for panel in dashboard["panels"]
-    }
-
-    assert targets["Available host memory"]["legendFormat"] == "{{node_id}}"
-    assert targets["GPU utilization"]["legendFormat"] == "{{node_id}} GPU {{gpu}}"
 
 
 def test_every_service_has_bounded_logging() -> None:

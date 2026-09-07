@@ -29,6 +29,20 @@ def test_bootstrap_command_forwards_only_explicit_installer_arguments() -> None:
     assert '/bin/sh "$bootstrap" "$@"' in command[2]
 
 
+def test_interactive_timeout_identifies_the_pending_prompt(tmp_path: Path) -> None:
+    with pytest.raises(
+        AcceptanceError,
+        match="interactive command timed out waiting for 'Expected prompt: '",
+    ):
+        run_interactive(
+            ["/bin/sleep", "2"],
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            responses=[("Expected prompt: ", "answer")],
+            timeout=1,
+        )
+
+
 def test_interactive_runner_drives_a_real_tty_without_exporting_answers(
     tmp_path: Path,
 ) -> None:
@@ -191,6 +205,30 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
 
     (bundle / "README.md").write_text("extra")
     with pytest.raises(AcceptanceError, match="exactly"):
+        assert_bundle_contract(bundle)
+
+
+def test_bundle_contract_allows_empty_optional_hugging_face_token(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "vonk-forge"
+    secrets = bundle / "secrets"
+    secrets.mkdir(parents=True)
+    (bundle / "docker-compose.yaml").write_text(
+        "services: {}\nsecrets:\n  hf-token:\n    file: ./secrets/hf-token\n"
+    )
+    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge-control\n")
+    (secrets / "hf-token").write_text("\n")
+    (bundle / "docker-compose.yaml").chmod(0o644)
+    (bundle / ".env").chmod(0o600)
+    secrets.chmod(0o700)
+    (secrets / "hf-token").chmod(0o600)
+
+    assert_bundle_contract(bundle)
+
+    (secrets / "token").write_text("")
+    (secrets / "token").chmod(0o600)
+    with pytest.raises(AcceptanceError, match="bundle file token is empty"):
         assert_bundle_contract(bundle)
 
 

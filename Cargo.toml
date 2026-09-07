@@ -11,7 +11,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 rust-version = "1.97.1"
@@ -49,6 +49,7 @@ toml = "1.1.4"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 wait-timeout = "0.2.1"
+xattr = "1.6.1"
 x509-parser = "0.18.1"
 
 [profile.release]

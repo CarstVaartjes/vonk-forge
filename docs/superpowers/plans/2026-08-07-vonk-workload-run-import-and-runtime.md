@@ -1,4 +1,8 @@
-# Vonk WorkloadRun Import and Runtime Implementation Plan
+# Retired: Vonk WorkloadRun Import and Runtime Implementation Plan
+
+> This historical plan is retained for provenance only. The WorkloadRun
+> authoring/import surface was retired during the schema-2 catalog cutover;
+> its routes, modules, fixtures, and UI callers are no longer active.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

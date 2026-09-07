@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
@@ -200,6 +201,174 @@ def _validate_model_version(document: Mapping[str, object]) -> None:
                 f"sizes.{field}",
                 f"{field} must equal the exact artifact inventory total",
             )
+    _validate_model_capabilities(document)
+
+
+_MODEL_CAPABILITIES = frozenset(
+    {
+        "chat",
+        "text-generation",
+        "text-understanding",
+        "reasoning",
+        "tool-use",
+        "code-generation",
+        "ocr",
+        "image-generation",
+        "image-understanding",
+        "image-editing",
+        "video-generation",
+        "video-understanding",
+        "audio-generation",
+        "audio-understanding",
+        "embeddings",
+        "3d-generation",
+    }
+)
+
+
+def _validate_model_capabilities(document: Mapping[str, object]) -> None:
+    """Validate the schema-2 capability authority nested in a model entity."""
+
+    raw = document.get("capabilities")
+    if raw is None:
+        return
+    if not isinstance(raw, Mapping):
+        raise CatalogContractError(
+            "catalog.model_capabilities_shape",
+            "capabilities",
+            "model capabilities must be a schema-2 object",
+        )
+    if raw.get("schema_version") != 2:
+        raise CatalogContractError(
+            "catalog.model_capabilities_schema",
+            "capabilities.schema_version",
+            "model capability declarations must use schema 2",
+        )
+    provenance = raw.get("provenance")
+    source_url = provenance.get("source_url") if isinstance(provenance, Mapping) else None
+    try:
+        parsed_source = urlsplit(source_url) if isinstance(source_url, str) else None
+    except ValueError:
+        parsed_source = None
+    if (
+        not isinstance(provenance, Mapping)
+        or not isinstance(source_url, str)
+        or parsed_source is None
+        or parsed_source.scheme != "https"
+        or parsed_source.hostname is None
+        or parsed_source.username is not None
+        or parsed_source.password is not None
+        or parsed_source.query
+        or parsed_source.fragment
+        or not isinstance(provenance.get("source_revision"), str)
+        or not isinstance(provenance.get("evidence_digest"), str)
+    ):
+        raise CatalogContractError(
+            "catalog.model_capabilities_provenance",
+            "capabilities.provenance",
+            "capability provenance must identify immutable external evidence",
+        )
+    facts = raw.get("facts")
+    if not isinstance(facts, list):
+        raise CatalogContractError(
+            "catalog.model_capabilities_facts",
+            "capabilities.facts",
+            "capability facts must be an array",
+        )
+    if len(facts) > 64:
+        raise CatalogContractError(
+            "catalog.model_capabilities_count",
+            "capabilities.facts",
+            "model capability declarations exceed the bounded fact count",
+        )
+    seen: set[tuple[object, ...]] = set()
+    ordering: list[tuple[str, str, str, str]] = []
+    for index, fact in enumerate(facts):
+        if not isinstance(fact, Mapping):
+            raise CatalogContractError(
+                "catalog.model_capability_fact",
+                f"capabilities.facts[{index}]",
+                "capability fact must be an object",
+            )
+        capability = fact.get("capability")
+        support = fact.get("support")
+        evidence_status = fact.get("evidence_status")
+        evidence_digest = fact.get("evidence_digest")
+        if not isinstance(capability, str) or capability not in _MODEL_CAPABILITIES:
+            raise CatalogContractError(
+                "catalog.model_capability_vocabulary",
+                f"capabilities.facts[{index}].capability",
+                "capability is outside the bounded model vocabulary",
+            )
+        if not isinstance(support, str) or support not in {
+            "supported",
+            "unsupported",
+            "unknown",
+        }:
+            raise CatalogContractError(
+                "catalog.model_capability_support",
+                f"capabilities.facts[{index}].support",
+                "model capability support is outside the bounded vocabulary",
+            )
+        if not isinstance(evidence_status, str) or evidence_status not in {
+            "declared",
+            "tested",
+            "contradicted",
+            "unknown",
+        }:
+            raise CatalogContractError(
+                "catalog.model_capability_evidence_status",
+                f"capabilities.facts[{index}].evidence_status",
+                "model capability evidence status is outside the bounded vocabulary",
+            )
+        if (
+            not isinstance(capability, str)
+            or not isinstance(support, str)
+            or not isinstance(evidence_status, str)
+            or (evidence_digest is not None and not isinstance(evidence_digest, str))
+        ):
+            raise CatalogContractError(
+                "catalog.model_capability_fact",
+                f"capabilities.facts[{index}]",
+                "capability fact fields have invalid types",
+            )
+        key = (capability, support, evidence_status, evidence_digest)
+        if key in seen:
+            raise CatalogContractError(
+                "catalog.model_capability_duplicate",
+                f"capabilities.facts[{index}]",
+                "capability facts must not contain exact duplicates",
+            )
+        seen.add(key)
+        ordering.append(
+            (capability, support, evidence_status, evidence_digest or "")
+        )
+        if evidence_status == "tested" and not isinstance(evidence_digest, str):
+            raise CatalogContractError(
+                "catalog.model_capability_evidence",
+                f"capabilities.facts[{index}].evidence_digest",
+                "tested capability facts require an evidence digest",
+            )
+        if evidence_status == "contradicted" and (
+            support != "unknown" or not isinstance(evidence_digest, str)
+        ):
+            raise CatalogContractError(
+                "catalog.model_capability_contradiction",
+                f"capabilities.facts[{index}]",
+                "contradicted capability facts require unknown support and evidence",
+            )
+        if evidence_status == "unknown" and support != "unknown":
+            raise CatalogContractError(
+                "catalog.model_capability_unknown",
+                f"capabilities.facts[{index}].support",
+                "unknown capability evidence cannot claim support",
+            )
+    if ordering != sorted(ordering):
+        raise CatalogContractError(
+            "catalog.model_capability_order",
+            "capabilities.facts",
+            "capability facts must use stable lexical ordering",
+        )
 
 
 def _validate_runtime_distribution(document: Mapping[str, object]) -> None:

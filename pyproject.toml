@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vonk-cluster-profiles"
-version = "0.1.0"
+version = "0.1.1"
 description = "Vonk Forge cluster workload-profile contracts"
 requires-python = ">=3.12"
 dependencies = [
@@ -36,6 +36,7 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
 "src/cluster_profiles/schemas/qualification-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-manifest-v2.schema.json"
+"src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
 
 [tool.ruff]
 required-version = "==0.16.1"

@@ -67,8 +67,8 @@ test("renders the complete node telemetry hierarchy and distinct recipe groups",
   expect(within(card).getByText("Updated 2 seconds ago")).toHaveAttribute("title");
 
   const workloads = within(card).getByLabelText("Workloads on Spark One");
-  expect(workloads).toHaveTextContent("Loaded now2");
-  expect(workloads).toHaveTextContent("Installed2");
+  expect(workloads).toHaveTextContent("Current work");
+  expect(workloads).toHaveTextContent("Local recipes");
   expect(within(workloads).getAllByText("Qwen pair")).toHaveLength(2);
   expect(within(workloads).getAllByText("Vision pair")).toHaveLength(2);
   expect(workloads).toHaveTextContent("vision · degraded");
@@ -91,8 +91,57 @@ test("renders offline certificate reasons and absent metrics honestly", () => {
   expect(within(card).getByText("Certificate expired")).toBeVisible();
   expect(within(card).getAllByText("Not reported").length).toBeGreaterThanOrEqual(6);
   expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
-  expect(within(card).getByText("No complete install")).toBeVisible();
-  expect(within(card).getByText("No active model")).toBeVisible();
+  expect(within(card).getByText("No local recipe reported")).toBeVisible();
+  expect(within(card).getByText("No active model reported")).toBeVisible();
+  expect(card.querySelectorAll("svg")).toHaveLength(0);
+});
+
+test("does not draw a flat line for an isolated offline sample", () => {
+  const projected = completeNode();
+  projected.connection = {...projected.connection, online_state: "offline", offline_reason: "stale"};
+  projected.telemetry = null;
+  const isolated: TelemetryHistory = {
+    schema_version: 1,
+    node_id: projected.id,
+    start: "2026-08-15T11:00:00Z",
+    end: "2026-08-15T12:00:00Z",
+    resolution: "raw",
+    maximum_points: 60,
+    points: [{...completeNode().telemetry!.sample, id: "isolated", observed_at: "2026-08-15T11:55:00Z", gpu_utilization_percent: 44}],
+  };
+  render(<NodeCard node={projected} now={NOW} selected={false} history={isolated} onEdit={() => undefined} onSelect={() => undefined}/>);
+
+  const card = screen.getByRole("article", {name: "Spark One — Offline"});
+  expect(within(card).getByRole("img", {name: "GPU 24h trend has only one reported sample"})).toHaveTextContent("Current sample only");
+  expect(card.querySelectorAll("svg")).toHaveLength(0);
+});
+
+test("labels the last observed time when an offline Spark has historical samples", () => {
+  const projected = completeNode();
+  projected.connection = {...projected.connection, online_state: "offline", offline_reason: "stale"};
+  projected.telemetry = null;
+  const template = completeNode().telemetry!.sample;
+  const historical: TelemetryHistory = {
+    schema_version: 1,
+    node_id: projected.id,
+    start: "2026-08-15T11:00:00Z",
+    end: "2026-08-15T12:00:00Z",
+    resolution: "raw",
+    maximum_points: 60,
+    points: [
+      {...template, id: "history-1", observed_at: "2026-08-15T11:50:00Z", gpu_utilization_percent: 40},
+      {...template, id: "history-2", observed_at: "2026-08-15T11:59:59Z", gpu_utilization_percent: 44},
+    ],
+  };
+  render(<NodeCard node={projected} now={NOW} selected={false} history={historical} onEdit={() => undefined} onSelect={() => undefined}/>);
+
+  const card = screen.getByRole("article", {name: "Spark One — Offline"});
+  const gpu = card.querySelector(".node-card-trend") as HTMLElement | null;
+  expect(gpu).not.toBeNull();
+  if (!gpu) return;
+  expect(within(gpu).getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Current reading unavailable; last observed/);
+  expect(within(gpu).getByText("Last observed")).toBeVisible();
+  expect(within(gpu).getByRole("time")).toHaveAttribute("dateTime", "2026-08-15T11:59:59.000Z");
 });
 
 test("uses a friendly hostname fallback and renders an accessible live trend", () => {

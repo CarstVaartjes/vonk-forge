@@ -20,6 +20,7 @@ class RuntimeSecretError(RuntimeError):
 class SharedRuntimePaths:
     """Shared named-volume roots initialized by the control API pre-exec."""
 
+    agent_artifacts: Path = Path("/state/agent-artifacts")
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
     workload_publication: Path = Path("/workload-tuf")
@@ -138,6 +139,53 @@ def stage_private_key(
     )
 
 
+def _stage_optional_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o400,
+) -> None:
+    """Stage an optional secret, removing a stale projection when disabled."""
+    source = Path(source)
+    destination = Path(destination)
+    # Compose uses /dev/null as the bounded default for an unset optional
+    # secret. A bind mount appears at /run/secrets/hf-token, so identify it by
+    # its zero-length character-device type and exact Linux null-device ID.
+    if source.is_symlink():
+        raise RuntimeSecretError("optional runtime secret source is unsafe")
+    source_is_absent = _is_null_device(source) or not source.exists()
+    if not source_is_absent and not source.is_file():
+        raise RuntimeSecretError("optional runtime secret source is unsafe")
+    if source_is_absent or source.stat().st_size == 0:
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                raise RuntimeSecretError("optional runtime secret destination is unsafe")
+            destination.unlink()
+        return
+    stage_private_key(
+        source,
+        destination,
+        owner_uid=owner_uid,
+        owner_gid=owner_gid,
+        mode=mode,
+    )
+
+
+def _is_null_device(source: Path) -> bool:
+    try:
+        metadata = source.stat()
+    except OSError:
+        return False
+    return bool(
+        stat.S_ISCHR(metadata.st_mode)
+        and metadata.st_size == 0
+        and os.major(metadata.st_rdev) == 1
+        and os.minor(metadata.st_rdev) == 3
+    )
+
+
 def stage_runtime_assets(
     source_root: Path = Path("/run/vonk-source-assets"),
     destination_root: Path = Path("/normalized/runtime-assets"),
@@ -251,6 +299,13 @@ def stage_compose_secrets(
                 owner_gid=10001,
                 mode=0o400,
             )
+    _stage_optional_private_key(
+        source_root / "hf-token",
+        destination_root / "hf-token",
+        owner_uid=10001,
+        owner_gid=10001,
+        mode=0o400,
+    )
     for name in (
         "step-ca-root-certificate",
         "agent-intermediate-certificate",
@@ -315,6 +370,7 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     """Apply the existing per-consumer ownership contract to shared volumes."""
     paths = SharedRuntimePaths() if paths is None else paths
     _directory(paths.state, 10001, 10001, 0o750)
+    _directory(paths.agent_artifacts, 10001, 10001, 0o750)
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)

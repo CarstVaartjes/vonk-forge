@@ -21,20 +21,39 @@ from threading import Lock
 from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentProgress,
     AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
+    DistributionAssignment,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
     canonical_message,
+)
+from vonk_agent_protocol.enrollment import (
+    ActivateRequest,
+    EnrollmentBootstrapResponse,
+    EnrollmentSubmitRequest,
+    IssuedCertificateResponse,
+    RenewRequest,
 )
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -46,6 +65,12 @@ from .auth import (
     agent_identity_from_scope,
     agent_source_from_scope,
 )
+from .compiled_execution_plan import (
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
+    CompiledExecutionPlanError,
+    validate_compiled_launch_payload,
+)
+from .distribution import DistributionError, DistributionService
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -65,44 +90,47 @@ from .models import (
     AgentEnrollment,
     AgentNode,
     AgentOperation,
+    CatalogDocumentRevision,
     ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
+    RuntimeImageAuthorization,
+    RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
+from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import (
     RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
 )
-from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-    resolve_recipe_entities,
-)
+from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
+from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
 )
+from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 from .workload_helper_authority import (
     WorkloadHelperAuthorityError,
     WorkloadHelperAuthorityService,
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_UUID4_TEXT = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
-_MAX_CSR_BYTES = 16 * 1024
-_MAX_EVIDENCE_FIELDS = 8
-_MAX_EVIDENCE_BYTES = 8 * 1024
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
@@ -115,6 +143,112 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
 )
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
+
+
+def _strict_json_datetime(value: object) -> object:
+    """Decode the JSON datetime representation before strict validation.
+
+    FastAPI hands Pydantic an already-decoded Python mapping, whereas
+    ``model_validate_json(..., strict=True)`` still accepts ISO datetime text.
+    Decode that one documented wire representation explicitly so strict route
+    models behave the same in both entry points.
+    """
+
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        # Pydantic turns ValueError into the stable request validation response.
+        raise ValueError(  # noqa: TRY004
+            "observed time must be an RFC 3339 string"
+        )
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("observed time must be an RFC 3339 string") from error
+    if "T" not in value and "t" not in value:
+        raise ValueError("observed time must be an RFC 3339 string")
+    return parsed
+
+
+def _runtime_image_receipt_matches(
+    runtime_image: Mapping[str, object],
+    identity: Mapping[str, object],
+    receipt: object,
+    *,
+    revision_id: str,
+    revision_digest: str,
+    installation_image_digest: str,
+    installation_recipe_build_id: str | None,
+    authorization: object | None = None,
+) -> bool:
+    """Bind one persisted launch image to its verified Controller receipt."""
+
+    if (
+        getattr(receipt, "state", None) != "verified"
+        or identity.get("recipe_revision_sha256") != revision_digest
+        or getattr(receipt, "effective_execution_key", None)
+        != identity.get("execution_sha256")
+        or runtime_image.get("image_digest") != installation_image_digest
+        or runtime_image.get("image_digest")
+        != getattr(receipt, "platform_manifest_digest", None)
+        or runtime_image.get("platform_manifest_digest")
+        != getattr(receipt, "platform_manifest_digest", None)
+        or runtime_image.get("registry_manifest_digest")
+        != getattr(receipt, "registry_manifest_digest", None)
+        or runtime_image.get("local_image_config_id")
+        != getattr(receipt, "local_image_config_id", None)
+        or runtime_image.get("oci_layout_sha256")
+        != getattr(receipt, "oci_archive_sha256", None)
+        or runtime_image.get("image_bytes") != getattr(receipt, "image_bytes", None)
+        or runtime_image.get("architecture") != getattr(receipt, "architecture", None)
+        or runtime_image.get("runtime_interface")
+        != getattr(receipt, "runtime_interface", None)
+        or runtime_image.get("runtime_interface_label")
+        != getattr(receipt, "runtime_interface_label", None)
+        or runtime_image.get("source") != getattr(receipt, "source", None)
+        or runtime_image.get("build_id") != getattr(receipt, "build_id", None)
+    ):
+        return False
+    if authorization is None:
+        if (
+            getattr(receipt, "recipe_revision_id", None) != revision_id
+            or getattr(receipt, "original_content_digest", None) != revision_digest
+        ):
+            return False
+    elif (
+        getattr(authorization, "recipe_revision_id", None) != revision_id
+        or getattr(authorization, "receipt_id", None) != getattr(receipt, "id", None)
+        or getattr(authorization, "original_content_digest", None)
+        != getattr(receipt, "original_content_digest", None)
+        or getattr(authorization, "effective_execution_key", None)
+        != getattr(receipt, "effective_execution_key", None)
+        or getattr(authorization, "source", None) != getattr(receipt, "source", None)
+        or getattr(authorization, "platform_manifest_digest", None)
+        != getattr(receipt, "platform_manifest_digest", None)
+        or getattr(authorization, "local_image_config_id", None)
+        != getattr(receipt, "local_image_config_id", None)
+        or getattr(authorization, "oci_archive_sha256", None)
+        != getattr(receipt, "oci_archive_sha256", None)
+        or getattr(authorization, "image_bytes", None) != getattr(receipt, "image_bytes", None)
+        or getattr(authorization, "build_id", None) != getattr(receipt, "build_id", None)
+    ):
+        return False
+    source = runtime_image.get("source")
+    if source == "published":
+        return (
+            runtime_image.get("registry_manifest_digest") is not None
+            and getattr(receipt, "registry_manifest_digest", None) is not None
+            and runtime_image.get("build_id") is None
+            and getattr(receipt, "build_id", None) is None
+            and installation_recipe_build_id is None
+        )
+    if source == "controller-build":
+        return (
+            runtime_image.get("build_id") is not None
+            and getattr(receipt, "build_id", None) is not None
+            and getattr(receipt, "registry_manifest_digest", None) is None
+        )
+    return False
 
 
 class _ActorDependency(Protocol):
@@ -145,6 +279,10 @@ class AgentApiServices:
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
     bootstrap: EnrollmentBootstrapConfig | None = None
+    # Optional production adapter. The run/profile worker registers exact
+    # assignments; the source itself remains owned by the NAS cache worker and
+    # recipe image store.
+    distribution: DistributionService | None = None
 
 
 class EnrollmentRateLimiter:
@@ -183,8 +321,8 @@ class EnrollmentRateLimiter:
             return True
 
 
-class GrantRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class GrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
     purpose: Literal["new-node", "re-enroll"] = "new-node"
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
@@ -196,35 +334,6 @@ class GrantRequest(BaseModel):
         return self
 
 
-class EnrollmentSubmitRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    grant_token: str = Field(min_length=43, max_length=64)
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    evidence: dict[str, str] = Field(min_length=6, max_length=_MAX_EVIDENCE_FIELDS)
-
-    @field_validator("evidence")
-    @classmethod
-    def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        legacy = {
-            "node_id",
-            "csr_public_key_fingerprint",
-            "host_key_fingerprint",
-            "hardware_fingerprint",
-            "agent_digest",
-            "boot_id",
-        }
-        receipt_key = "observation_receipt_public_key"
-        if set(evidence) not in (legacy, legacy | {receipt_key}) or any(
-            not value.strip() for value in evidence.values()
-        ):
-            raise ValueError("evidence fields are invalid")
-        if receipt_key in evidence and _DIGEST.fullmatch(evidence[receipt_key]) is None:
-            raise ValueError("observation receipt public key is invalid")
-        if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
-            raise ValueError("evidence is too large")
-        return evidence
-
-
 _ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
@@ -232,8 +341,8 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
     return enrollment.state
 
 
-class EnrollmentGrantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     expires_at: str = Field(min_length=1, max_length=64)
     purpose: Literal["new-node", "re-enroll"]
@@ -249,21 +358,8 @@ class EnrollmentGrantResponse(BaseModel):
     ]
 
 
-class EnrollmentBootstrapResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    controller_endpoint: str = Field(min_length=1, max_length=2048)
-    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
-    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    ca_pem: str = Field(min_length=1, max_length=64 * 1024)
-    controller_address: str | None = None
-    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
-    host_helper_authority_public_key: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-
-
-class EnrollmentSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentSummary(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     state: str = Field(min_length=1, max_length=32)
@@ -277,17 +373,14 @@ class EnrollmentSummary(BaseModel):
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
 
-class EnrollmentListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentListResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     enrollments: list[EnrollmentSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=128)
 
 
-class AgentRuntimeIdentityRequest(BaseModel):
-    # Runtime identity is an extensible envelope.  Newer agents may add
-    # attestations or diagnostics; the Controller only consumes the stable
-    # identity fields below and must not reject an otherwise compatible agent.
-    model_config = ConfigDict(extra="ignore")
+class AgentRuntimeIdentityRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -314,13 +407,9 @@ class AgentRuntimeIdentityRequest(BaseModel):
         return value
 
 
-class ClaimRequest(BaseModel):
-    # Claims are a version-skew boundary.  Unknown top-level fields are
-    # intentionally ignored so a newer Spark can still claim work from this
-    # Controller; operation safety comes from the negotiated capability
-    # intersection below.
-    model_config = ConfigDict(extra="ignore")
-    lease_seconds: int = Field(default=30, ge=1, le=300)
+class ClaimRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    lease_seconds: int = Field(default=30, ge=1, le=300, strict=True)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     hostname: str | None = Field(
         default=None,
@@ -334,11 +423,11 @@ class ClaimRequest(BaseModel):
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=128)
     runtime_identity: AgentRuntimeIdentityRequest
-    wait_seconds: int = Field(default=0, ge=0, le=60)
+    wait_seconds: int = Field(default=0, ge=0, le=60, strict=True)
 
 
-class AgentUpgradePackageRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentUpgradePackageRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(ge=1, le=1024**3, strict=True)
     package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -350,8 +439,8 @@ class AgentUpgradePackageRequest(BaseModel):
     target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
-class AgentRepairManifestRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentRepairManifestRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[2]
     kind: Literal["agent-upgrade-repair"]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -359,8 +448,8 @@ class AgentRepairManifestRequest(BaseModel):
     package: AgentUpgradePackageRequest
 
 
-class AgentUpgradePreviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentUpgradePreviewRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
     package: AgentUpgradePackageRequest | None = None
     repair_manifest: AgentRepairManifestRequest | None = None
@@ -369,6 +458,113 @@ class AgentUpgradePreviewRequest(BaseModel):
 
 class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradePreviewResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_ids: list[str] = Field(max_length=64)
+    package: AgentUpgradePackageRequest
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    repair_manifest: AgentRepairManifestRequest | None = None
+    strategy: Literal["one-at-a-time", "all-at-once"]
+
+
+class AgentUpgradeApplyResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=32)
+
+
+class AgentGrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    expires_in_seconds: int = Field(ge=1, le=300)
+
+
+class HostRuntimeGrantRequest(AgentGrantRequest):
+    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradeGrantRequest(AgentGrantRequest):
+    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class PackageHelperReceiptObjectRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(strict=True, gt=0, le=2**63 - 1)
+
+
+class PackageHelperReceiptsRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    objects: list[PackageHelperReceiptObjectRequest] = Field(
+        min_length=1, max_length=256
+    )
+
+
+class PackageHelperGrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(pattern=_UUID4_TEXT)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation: str = Field(strict=True, pattern=_IDENTIFIER_TEXT)
+    operation: Literal[
+        "prepare", "verify", "start", "health", "infer", "stop", "verify-release"
+    ]
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_in_seconds: int = Field(ge=1, le=900)
+
+
+class AgentGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: dict[str, object]
+
+
+class PackageHelperReceiptsResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    receipts: list[dict[str, object]]
+
+
+class RecipeRunObservationGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1]
+    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    grant: dict[str, object]
+
+
+def _host_grant_response(grant: object) -> dict[str, object]:
+    parsed = SignedHostHelperGrant.parse(grant.to_mapping())
+    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+
+
+def _package_grant_response(grant: object) -> dict[str, object]:
+    parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
+    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+
+
+def _package_receipts_response(receipts: object) -> dict[str, object]:
+    parsed = [
+        SignedPackageObjectReceipt.parse(receipt.to_mapping()).to_mapping()
+        for receipt in receipts
+    ]
+    return PackageHelperReceiptsResponse(receipts=parsed).model_dump()
 
 
 def _agent_upgrade_request_material(
@@ -404,8 +600,8 @@ def _agent_upgrade_request_material(
     return package, None
 
 
-class InventoryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class InventoryRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observed_at: datetime
     disk_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
@@ -424,6 +620,11 @@ class InventoryRequest(BaseModel):
     nvidia_driver_version: str = Field(min_length=1, max_length=256)
     container_runtime_version: str = Field(min_length=1, max_length=256)
 
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
+
     @model_validator(mode="after")
     def internally_consistent(self) -> InventoryRequest:
         if (
@@ -441,8 +642,8 @@ class InventoryRequest(BaseModel):
         return self
 
 
-class RecipeRunObservationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeRunObservationRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     run_id: str = Field(
         pattern=(
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -452,8 +653,8 @@ class RecipeRunObservationRequest(BaseModel):
     ready: bool = Field(strict=True)
 
 
-class RecipeRunObservationIdentityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeRunObservationIdentityRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     run_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
@@ -504,6 +705,11 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
     grant: dict[str, object]
     helper_receipt: dict[str, object]
 
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
+
     @field_validator("observed_at")
     @classmethod
     def aware_observed_at(cls, value: datetime) -> datetime:
@@ -524,13 +730,18 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
         )
 
 
-class RecipeRunObservationsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeRunObservationsRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1, 2]
     observed_at: datetime
     runs: list[RecipeRunObservationRequest | RecipeRunExactObservationRequest] = Field(
         max_length=64
     )
+
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def parse_observed_at(cls, value: object) -> object:
+        return _strict_json_datetime(value)
 
     @model_validator(mode="after")
     def unique_runs(self) -> RecipeRunObservationsRequest:
@@ -548,16 +759,16 @@ class RecipeRunObservationsRequest(BaseModel):
         return self
 
 
-class TelemetryDetailsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class TelemetryDetailsRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
     accelerator_performance_state: str | None = Field(
         default=None, min_length=1, max_length=32
     )
 
 
-class TelemetrySampleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class TelemetrySampleRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     boot_id: str = Field(
         pattern=(
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
@@ -607,6 +818,10 @@ class TelemetrySampleRequest(BaseModel):
     )
     gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
     details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
+    # ``metrics`` is additive to the active telemetry wire contract.  A
+    # scalar-only sample remains valid for an already enrolled agent while
+    # native agents progressively publish the richer contract.
+    metrics: TelemetryMetrics = Field(default_factory=empty_telemetry_metrics)
 
     @field_validator("boot_id")
     @classmethod
@@ -618,12 +833,7 @@ class TelemetrySampleRequest(BaseModel):
     @field_validator("observed_at", mode="before")
     @classmethod
     def rfc3339_observed_at(cls, value: object) -> object:
-        if not isinstance(value, str):
-            # Pydantic turns ValueError into the stable request validation response.
-            raise ValueError(  # noqa: TRY004
-                "telemetry observed time must be an RFC 3339 string"
-            )
-        return value
+        return _strict_json_datetime(value)
 
     @model_validator(mode="after")
     def internally_consistent(self) -> TelemetrySampleRequest:
@@ -641,8 +851,8 @@ class TelemetrySampleRequest(BaseModel):
         return self
 
 
-class TelemetryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class TelemetryRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
 
@@ -670,18 +880,6 @@ class TelemetryRequest(BaseModel):
         return self
 
 
-class RenewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
-class ActivateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    generation: int = Field(ge=1)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
 def _wire(value: object) -> object:
     return json.loads(canonical_message(value))
 
@@ -690,17 +888,17 @@ def _now(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _issued_response(issued: object) -> dict[str, object]:
-    return {
-        "node_id": issued.node_id,
-        "certificate_pem": issued.certificate_pem.decode("ascii"),
-        "chain_pem": issued.chain_pem.decode("ascii"),
-        "serial": issued.serial,
-        "fingerprint": issued.fingerprint,
-        "not_before": _now(issued.not_before).isoformat(),
-        "not_after": _now(issued.not_after).isoformat(),
-        "generation": issued.generation,
-    }
+def _issued_response(issued: IssuedCertificate) -> IssuedCertificateResponse:
+    return IssuedCertificateResponse(
+        node_id=issued.node_id,
+        certificate_pem=issued.certificate_pem.decode("ascii"),
+        chain_pem=issued.chain_pem.decode("ascii"),
+        serial=issued.serial,
+        fingerprint=issued.fingerprint,
+        not_before=_now(issued.not_before).isoformat(),
+        not_after=_now(issued.not_after).isoformat(),
+        generation=issued.generation,
+    )
 
 
 def _json_response(value: object, *, status_code: int = 200) -> Response:
@@ -1054,7 +1252,14 @@ def _open_owned_artifact(
     try:
         root_fd = os.open(os.fspath(services.artifact_root), root_flags)
         try:
-            descriptor = os.open(digest, file_flags, dir_fd=root_fd)
+            if recipe_image:
+                image_fd = os.open(IMAGE_CACHE_DIRECTORY, root_flags, dir_fd=root_fd)
+                try:
+                    descriptor = os.open(digest, file_flags, dir_fd=image_fd)
+                finally:
+                    os.close(image_fd)
+            else:
+                descriptor = os.open(digest, file_flags, dir_fd=root_fd)
         finally:
             os.close(root_fd)
     except OSError:
@@ -1102,12 +1307,8 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
         directory_descriptor = os.open(os.fspath(root), root_flags)
         try:
             opened_root = os.fstat(directory_descriptor)
-            root_identity = lambda item: (
-                item.st_dev,
-                item.st_ino,
-                item.st_mode,
-                item.st_uid,
-            )
+            def root_identity(item: os.stat_result) -> tuple[int, int, int, int]:
+                return (item.st_dev, item.st_ino, item.st_mode, item.st_uid)
             if root_identity(root_metadata) != root_identity(opened_root):
                 raise OSError("TUF root changed")
             for component in components[:-1]:
@@ -1165,16 +1366,17 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
             first_digest.update(chunk)
             remaining -= len(chunk)
         after = os.fstat(descriptor)
-        identity = lambda item: (
-            item.st_dev,
-            item.st_ino,
-            item.st_mode,
-            item.st_uid,
-            item.st_nlink,
-            item.st_size,
-            item.st_mtime_ns,
-            item.st_ctime_ns,
-        )
+        def identity(item: os.stat_result) -> tuple[int, ...]:
+            return (
+                item.st_dev,
+                item.st_ino,
+                item.st_mode,
+                item.st_uid,
+                item.st_nlink,
+                item.st_size,
+                item.st_mtime_ns,
+                item.st_ctime_ns,
+            )
         if identity(before) != identity(after) or os.read(descriptor, 1):
             raise HTTPException(status_code=404, detail="TUF file changed")
         os.lseek(descriptor, 0, os.SEEK_SET)
@@ -1298,11 +1500,16 @@ def install_agent_routes(
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
 
-    @human.post("/upgrades/preview")
+    @human.post(
+        "/upgrades/preview",
+        response_model=AgentUpgradePreviewResponse,
+        response_model_exclude_none=True,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def preview_agent_upgrade(
         body: AgentUpgradePreviewRequest,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePreviewResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
         if upgrades is None:
             raise HTTPException(
@@ -1318,39 +1525,44 @@ def install_agent_routes(
             )
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        return {
-            "authority_revision": plan.authority_revision,
-            "node_ids": list(plan.node_ids),
-            "package": plan.package,
-            "plan_digest": plan.plan_digest,
-            **(
-                {"repair_manifest": plan.repair_manifest}
-                if plan.repair_manifest is not None
-                else {}
-            ),
-            "strategy": plan.strategy,
-        }
+        return AgentUpgradePreviewResponse(
+            authority_revision=plan.authority_revision,
+            node_ids=list(plan.node_ids),
+            package=plan.package,
+            plan_digest=plan.plan_digest,
+            repair_manifest=plan.repair_manifest,
+            strategy=plan.strategy,
+        )
 
-    @human.get("/upgrades/candidate")
+    @human.get(
+        "/upgrades/candidate",
+        response_model=AgentUpgradePackageRequest,
+        responses=bounded_error_responses(401, 403, 503),
+    )
     def current_agent_upgrade(
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePackageRequest:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
             )
         try:
-            return upgrades.current_package()
+            return AgentUpgradePackageRequest.model_validate(upgrades.current_package())
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
 
-    @human.post("/upgrades", status_code=status.HTTP_202_ACCEPTED)
+    @human.post(
+        "/upgrades",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=AgentUpgradeApplyResponse,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def apply_agent_upgrade(
         body: AgentUpgradeApplyRequest,
         request: Request,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradeApplyResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades")
         if upgrades is None:
             raise HTTPException(
@@ -1378,7 +1590,7 @@ def install_agent_routes(
                 tuple(job.targets),
             )
         )
-        return {"id": job.id, "state": job.state}
+        return AgentUpgradeApplyResponse(id=job.id, state=job.state)
 
     @human.post(
         "/enrollments/grants",
@@ -1560,7 +1772,7 @@ def install_agent_routes(
             ).model_dump(exclude_none=True, exclude_defaults=True)
         )
 
-    @agent.post("/enroll")
+    @agent.post("/enroll", response_model=IssuedCertificateResponse)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1598,31 +1810,31 @@ def install_agent_routes(
         if scan.top_level_keys != 1:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
-        if not isinstance(body.get("grant_token"), str):
-            _consume_enrollment_denial(required, scan.tokens)
-            raise HTTPException(status_code=422, detail="enrollment grant is required")
-        csr = body.get("csr")
-        evidence = body.get("evidence")
         try:
-            csr_bytes = csr.encode("ascii") if isinstance(csr, str) else b""
+            submitted = EnrollmentSubmitRequest.model_validate(body)
+        except ValidationError:
+            _consume_enrollment_denial(required, scan.tokens)
+            if scan.tokens:
+                # Keep the enrollment oracle closed: a discoverable grant is
+                # consumed and reported as denied even when the request shape
+                # is malformed.  The canonical model handles valid requests;
+                # this branch preserves the bounded burn-on-invalid policy.
+                raise HTTPException(status_code=403, detail="enrollment denied") from None
+            raise HTTPException(status_code=422, detail="enrollment request is invalid") from None
+        try:
+            csr_bytes = submitted.csr.encode("ascii")
         except UnicodeEncodeError:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        service_evidence = (
-            evidence
-            if isinstance(evidence, Mapping)
-            and set(body) == {"grant_token", "csr", "evidence"}
-            else {}
-        )
         try:
             outcome = required.enrollment.submit(
-                body["grant_token"], csr_bytes, service_evidence
+                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except EnrollmentIssuanceUncertain as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1636,7 +1848,7 @@ def install_agent_routes(
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1650,7 +1862,7 @@ def install_agent_routes(
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
         token_identifier = hashlib.sha256(
-            body["grant_token"].encode("utf-8")
+            submitted.grant_token.encode("utf-8")
         ).hexdigest()
         audits.append(
             AuditRecord(
@@ -1688,11 +1900,12 @@ def install_agent_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        return (
-            Response(status_code=status.HTTP_204_NO_CONTENT)
-            if result is None
-            else _json_response(_wire(result))
-        )
+        if result is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        encoded_claim = canonical_message(_wire(result))
+        if len(encoded_claim) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
+            raise HTTPException(status_code=500, detail="agent claim is too large")
+        return Response(content=encoded_claim, media_type="application/json")
 
     @agent.post("/inventory", status_code=status.HTTP_204_NO_CONTENT)
     def inventory(body: InventoryRequest, request: Request) -> Response:
@@ -1781,6 +1994,7 @@ def install_agent_routes(
                                 sample.details.accelerator_performance_state
                             ),
                         ),
+                        metrics=sample.metrics,
                     )
                     for sample in body.samples
                 ),
@@ -1957,11 +2171,11 @@ def install_agent_routes(
                 detail="recipe run observation authority rejected request",
             ) from None
         return _json_response(
-            {
-                "schema_version": 1,
-                "observation_identity_sha256": observation_identity,
-                "grant": grant.to_mapping(),
-            }
+            RecipeRunObservationGrantResponse(
+                schema_version=1,
+                observation_identity_sha256=observation_identity,
+                grant=grant.to_mapping(),
+            ).model_dump()
         )
 
     @agent.get("/source-bundles/{source_sha256}")
@@ -2027,59 +2241,214 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            revision = session.get(
+                CatalogDocumentRevision, installation.recipe_revision_id
+            )
             mapping = session.get(ClusterMapping, installation.mapping_id)
-            build = session.get(RecipeBuild, installation.recipe_build_id)
-            if (
-                revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 is None
-                or mapping is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or build is None
-                or build.state != "succeeded"
-                or build.image_digest != installation.image_digest
-                or build.recipe_revision_id != revision.id
-            ):
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
+            mapping_node = session.scalar(
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == installation.mapping_id,
+                    ClusterMappingNode.node_id == identity.node_id,
                 )
-            document = revision.document
-            parameters = mapping.parameters
-            try:
-                resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError as error:
-                detail = {
-                    "runtime distribution does not implement harness": (
-                        "recipe specification distribution-harness binding is invalid"
-                    ),
-                    "patch bundle does not apply to distribution": (
-                        "recipe specification patch-distribution binding is invalid"
-                    ),
-                }.get(str(error), "recipe specification dependencies are stale")
+            )
+            if installation.state not in {"installing", "installed", "partial"}:
                 raise HTTPException(
                     status_code=409,
-                    detail=detail,
+                    detail="recipe specification installation is not ready",
+                )
+            if (
+                revision is None
+                or revision.kind != "recipe"
+                or revision.schema_version != 2
+                or revision.state != "active"
+                or mapping is None
+                or mapping_node is None
+                or mapping.state != "ready"
+                or mapping.generation != installation.mapping_generation
+                or placement.rank != mapping_node.rank
+                or placement.role != mapping_node.role
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                )
+            try:
+                recipe = RecipeDefinition.model_validate(revision.document)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
                 ) from None
-        validate_recipe(document)
-        if recipe_content_sha256(document) != revision.content_sha256:
-            raise HTTPException(
-                status_code=409, detail="recipe specification digest changed"
+            if content_sha256(recipe) != revision.content_digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                )
+            if not isinstance(installation.plan, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate = compiled_plans.get(identity.node_id)
+            if not isinstance(candidate, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate_identity = candidate.get("identity")
+            candidate_runtime_image = candidate.get("runtime_image")
+            effective_execution_key = (
+                candidate_identity.get("execution_sha256")
+                if isinstance(candidate_identity, Mapping)
+                else None
             )
+            authorizations = (
+                session.scalars(
+                    select(RuntimeImageAuthorization).where(
+                        RuntimeImageAuthorization.recipe_revision_id
+                        == installation.recipe_revision_id,
+                        RuntimeImageAuthorization.effective_execution_key
+                        == effective_execution_key,
+                        RuntimeImageAuthorization.state == "authorized",
+                    )
+                ).all()
+                if isinstance(effective_execution_key, str)
+                else []
+            )
+            authorization_by_receipt = {
+                authorization.receipt_id: authorization
+                for authorization in authorizations
+            }
+            receipts = (
+                session.scalars(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.id.in_(authorization_by_receipt),
+                        RuntimeImageReceipt.state == "verified",
+                    )
+                ).all()
+                if authorization_by_receipt
+                else []
+            )
+            candidate_source = (
+                candidate_runtime_image.get("source")
+                if isinstance(candidate_runtime_image, Mapping)
+                else None
+            )
+            candidate_build_id = (
+                candidate_runtime_image.get("build_id")
+                if isinstance(candidate_runtime_image, Mapping)
+                else None
+            )
+            build = (
+                session.get(RecipeBuild, candidate_build_id)
+                if candidate_source == "controller-build"
+                and isinstance(candidate_build_id, str)
+                else None
+            )
+            build_id = build.id if build is not None else None
+            build_state = build.state if build is not None else None
+            build_recipe_revision_id = (
+                build.recipe_revision_id if build is not None else None
+            )
+            build_image_digest = build.image_digest if build is not None else None
+            build_oci_layout_sha256 = (
+                build.oci_layout_sha256 if build is not None else None
+            )
+            build_image_bytes = build.image_bytes if build is not None else None
+            build_input_sha256 = (
+                build.build_input_sha256 if build is not None else None
+            )
+            installation_recipe_build_id = installation.recipe_build_id
+            revision_id = revision.id
+            revision_content_digest = revision.content_digest
+            installation_image_digest = installation.image_digest
         try:
-            spec = compile_runtime_spec(
-                document,
-                resolved_entities=resolved_entities,
-                parameters=parameters,
-                role=placement.role,
-                rank=placement.rank,
-                recipe_build_id=build.id,
-                image_digest=build.image_digest,
+            spec = validate_compiled_launch_payload(candidate)
+        except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"recipe specification compiled execution plan is invalid: {error}",
+            ) from None
+        topology = spec.get("topology")
+        if not isinstance(topology, Mapping) or (
+            topology.get("rank") != placement.rank
+            or topology.get("role") != placement.role
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification placement does not match the installation",
             )
-        except RecipeRuntimeSpecError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        return _json_response(spec)
+        identity_document = spec.get("identity")
+        runtime_image = spec.get("runtime_image")
+        if not isinstance(identity_document, Mapping) or not isinstance(
+            runtime_image, Mapping
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        if identity_document.get("recipe_revision_sha256") != revision_content_digest:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        matching_receipts = [
+            receipt
+            for receipt in receipts
+            if _runtime_image_receipt_matches(
+                runtime_image,
+                identity_document,
+                receipt,
+                revision_id=revision_id,
+                revision_digest=revision_content_digest,
+                installation_image_digest=installation_image_digest,
+                installation_recipe_build_id=installation_recipe_build_id,
+                authorization=authorization_by_receipt.get(receipt.id),
+            )
+        ]
+        if len(matching_receipts) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        receipt = matching_receipts[0]
+        if runtime_image.get("source") == "controller-build":
+            if (
+                build_id != getattr(receipt, "build_id", None)
+                or build_id != installation_recipe_build_id
+                or build_state != "succeeded"
+                or build_recipe_revision_id != revision_id
+                or build_image_digest != installation_image_digest
+                or build_oci_layout_sha256
+                != getattr(receipt, "oci_archive_sha256", None)
+                or build_image_bytes != getattr(receipt, "image_bytes", None)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification execution receipts are stale",
+                )
+            build_input = identity_document.get("build_input_sha256")
+            if build_input is not None and build_input != build_input_sha256:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification execution receipts are stale",
+                )
+        encoded_spec = canonical_message(spec)
+        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification compiled execution plan is too large",
+            )
+        return Response(
+            content=encoded_spec,
+            media_type="application/json",
+        )
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:
         required = services.workload_helper_authority if services is not None else None
@@ -2103,66 +2472,76 @@ def install_agent_routes(
         return required
 
     @agent.post("/host-runtime/grant")
-    def host_runtime_grant(body: dict[str, object], request: Request) -> Response:
+    def host_runtime_grant(
+        body: HostRuntimeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                action=ContainerRuntimeAction(body["action"]),
-                request_sha256=body["request_sha256"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                action=ContainerRuntimeAction(body.action),
+                request_sha256=body.request_sha256,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                _host_grant_response(grant)
+            )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
 
     @agent.post("/agent-upgrade/grant")
-    def agent_upgrade_grant(body: dict[str, object], request: Request) -> Response:
+    def agent_upgrade_grant(
+        body: AgentUpgradeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                package_sha256=body["package_sha256"],
-                package_signature=body["package_signature"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                package_sha256=body.package_sha256,
+                package_signature=body.package_signature,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                _host_grant_response(grant)
+            )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
     @agent.post("/package-helper/receipts")
-    def package_helper_receipts(body: dict[str, object], request: Request) -> Response:
+    def package_helper_receipts(
+        body: PackageHelperReceiptsRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
             receipts = required.issue_receipts(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                objects=body["objects"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                objects=[item.model_dump() for item in body.objects],
                 certificate_serial=identity.certificate_serial,
             )
             return _json_response(
-                {"receipts": [item.to_mapping() for item in receipts]}
+                _package_receipts_response(receipts)
             )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
@@ -2170,26 +2549,29 @@ def install_agent_routes(
             ) from None
 
     @agent.post("/package-helper/grant")
-    def package_helper_grant(body: dict[str, object], request: Request) -> Response:
+    def package_helper_grant(
+        body: PackageHelperGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
-            operation = PackageHelperOperation(body["operation"])
             grant = required.issue_grant(
-                request_id=body["request_id"],
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                generation=body["generation"],
-                operation=operation,
-                request_digest=body["request_digest"],
+                request_id=body.request_id,
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                generation=body.generation,
+                operation=PackageHelperOperation(body.operation),
+                request_digest=body.request_digest,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                _package_grant_response(grant)
+            )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
@@ -2244,7 +2626,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/renew")
+    @agent.post("/renew", response_model=IssuedCertificateResponse)
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2326,7 +2708,7 @@ def install_agent_routes(
                 )
         descriptor, temporary = await asyncio.to_thread(
             _prepare_recipe_image_upload,
-            required.artifact_root,
+            required.artifact_root / IMAGE_CACHE_DIRECTORY,
             layout_sha256,
         )
         digest = hashlib.sha256()
@@ -2349,7 +2731,7 @@ def install_agent_routes(
                 await asyncio.to_thread(_flush_and_sync, stream)
             finally:
                 await asyncio.to_thread(stream.close)
-            destination = required.artifact_root / layout_sha256
+            destination = required.artifact_root / IMAGE_CACHE_DIRECTORY / layout_sha256
             await asyncio.to_thread(
                 _commit_recipe_image_upload,
                 temporary,
@@ -2399,7 +2781,11 @@ def install_agent_routes(
                 status.HTTP_206_PARTIAL_CONTENT,
             )
         length = end - start + 1
-        headers = {"Accept-Ranges": "bytes", "Content-Length": str(length)}
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "ETag": f'"sha256:{sha256}"',
+        }
         if code == status.HTTP_206_PARTIAL_CONTENT:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
         if recipe_image:
@@ -2420,6 +2806,111 @@ def install_agent_routes(
             snapshot,
             start,
             length,
+            status_code=code,
+            headers=headers,
+            media_type="application/octet-stream",
+        )
+
+    def _distribution_error(error: DistributionError) -> HTTPException:
+        if error.code in {
+            "distribution.unassigned",
+            "distribution.wrong_node",
+            "distribution.expired",
+        }:
+            return HTTPException(status_code=403, detail=error.detail)
+        if error.code == "distribution.object_invalid":
+            return HTTPException(status_code=404, detail=error.detail)
+        return HTTPException(status_code=503, detail=error.detail)
+
+    @agent.get(
+        "/distribution/manifests/{plan_digest}",
+        operation_id="getAgentDistributionManifest",
+        response_model=DistributionAssignment,
+    )
+    def distribution_manifest(
+        plan_digest: str, request: Request, response: Response
+    ) -> DistributionAssignment:
+        """Return the exact model plus OCI object set authorized for this node."""
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        if required.distribution is None:
+            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+        try:
+            assignment = required.distribution.authorize(
+                node_id=identity.node_id,
+                plan_digest=plan_digest,
+            )
+        except DistributionError as error:
+            raise _distribution_error(error) from None
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["ETag"] = f'"plan:{plan_digest}"'
+        return assignment
+
+    @agent.get(
+        "/distribution/objects/{sha256}",
+        operation_id="downloadAgentDistributionObject",
+    )
+    def distribution_object(sha256: str, request: Request) -> Response:
+        """Stream one assigned immutable object with safe single-range resume."""
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        if required.distribution is None:
+            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+        plan_digest = request.query_params.get("plan_digest")
+        if plan_digest is None:
+            raise HTTPException(status_code=403, detail="assignment is required")
+        try:
+            _assignment, object_spec, opened = required.distribution.open_object(
+                node_id=identity.node_id,
+                plan_digest=plan_digest,
+                digest=sha256,
+            )
+        except DistributionError as error:
+            raise _distribution_error(error) from None
+        etag = f'"sha256:{object_spec.sha256}"'
+        if_range = request.headers.get("if-range")
+        requested_range = request.headers.get("range")
+        # A mismatched If-Range deliberately degrades to a complete response,
+        # allowing a client with an old checkpoint to safely restart.
+        if requested_range is not None and if_range not in {None, etag, f"sha256:{object_spec.sha256}"}:
+            requested_range = None
+        try:
+            selected = _range(requested_range, opened.size, required.max_range_bytes)
+        except HTTPException:
+            opened.stream.close()
+            raise
+        if selected is None:
+            start, length, code = 0, opened.size, status.HTTP_200_OK
+        else:
+            start, end = selected
+            length, code = end - start + 1, status.HTTP_206_PARTIAL_CONTENT
+        if start:
+            opened.stream.seek(start)
+
+        def chunks():
+            remaining = length
+            try:
+                while remaining:
+                    chunk = opened.stream.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        raise RuntimeError("verified object was truncated during transfer")
+                    remaining -= len(chunk)
+                    yield chunk
+            finally:
+                opened.stream.close()
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+            "Content-Length": str(length),
+            "ETag": etag,
+        }
+        if code == status.HTTP_206_PARTIAL_CONTENT:
+            headers["Content-Range"] = f"bytes {start}-{start + length - 1}/{opened.size}"
+        return StreamingResponse(
+            chunks(),
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",

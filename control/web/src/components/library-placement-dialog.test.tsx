@@ -241,7 +241,7 @@ test("offers a fresh recovery review after a failed durable placement", async ()
 
   fireEvent.click(await enabledApplyButton());
   expect(await screen.findByRole("alert")).toHaveTextContent("The worker did not become ready.");
-  expect(onRefresh).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
   fireEvent.click(screen.getByRole("button", {name: "Review recovery plan"}));
 
   await waitFor(() => expect(previewLibraryPlacement).toHaveBeenCalledTimes(2));

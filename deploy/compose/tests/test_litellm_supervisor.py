@@ -64,6 +64,63 @@ def test_supervisor_prepares_the_non_root_prisma_query_engine(
     assert module._PRISMA_QUERY_ENGINE_ENV not in calls[0]["env"]
 
 
+def test_supervisor_accepts_an_immutable_root_owned_query_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cache = tmp_path / "prisma-cache"
+    engine = cache / "query-engine"
+    cache.mkdir()
+    engine.write_bytes(b"query-engine")
+    engine.chmod(0o555)
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", cache)
+    monkeypatch.setenv(module._PRISMA_QUERY_ENGINE_ENV, str(engine))
+    real_stat = Path.stat
+
+    def root_owned_stat(path: Path, *, follow_symlinks: bool = True):
+        metadata = real_stat(path, follow_symlinks=follow_symlinks)
+        return types.SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_nlink=metadata.st_nlink,
+            st_uid=0,
+            st_size=metadata.st_size,
+        )
+
+    monkeypatch.setattr(Path, "stat", root_owned_stat)
+
+    module._prepare_query_engine()
+
+
+def test_supervisor_rejects_a_root_owned_writable_query_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cache = tmp_path / "prisma-cache"
+    engine = cache / "query-engine"
+    cache.mkdir()
+    engine.write_bytes(b"query-engine")
+    engine.chmod(0o575)
+    monkeypatch.setattr(module, "_PRISMA_CACHE_ROOT", cache)
+    monkeypatch.setenv(module._PRISMA_QUERY_ENGINE_ENV, str(engine))
+    real_stat = Path.stat
+
+    def root_owned_stat(path: Path, *, follow_symlinks: bool = True):
+        metadata = real_stat(path, follow_symlinks=follow_symlinks)
+        return types.SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_nlink=metadata.st_nlink,
+            st_uid=0,
+            st_size=metadata.st_size,
+        )
+
+    monkeypatch.setattr(Path, "stat", root_owned_stat)
+
+    with pytest.raises(RuntimeError, match="cache is unsafe"):
+        module._prepare_query_engine()
+
+
 def test_supervisor_selects_the_single_native_prisma_query_engine(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

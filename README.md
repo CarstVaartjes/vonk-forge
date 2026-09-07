@@ -160,7 +160,12 @@ The public website and catalog implementation live in
 Required tools are Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Rust,
 Node.js, and Docker for integration tests.
 
+Catalog tests consume the real recipe repository. Set
+`VONK_RECIPE_LIBRARY_ROOT` to your checkout; CI checks out and records an exact
+revision. The examples below use the standard `/opt/vonk-forge-recipes` path.
+
 ```bash
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 uv sync --dev
 uv run --frozen pytest -q
 uv run --project control --frozen --with-editable . pytest -q control/tests

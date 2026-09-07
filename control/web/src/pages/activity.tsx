@@ -35,8 +35,6 @@ const ACTION_LABELS: Record<string, string> = {
   "catalog.recipe_library.import": "Imported recipe library",
   "catalog.source_bundle.upload": "Uploaded source bundle",
   "catalog.test_report.attach": "Attached validation report",
-  "catalog.workload_run.import": "Imported workload recipe",
-  "catalog.workload_run.resolve": "Resolved workload recipe",
   "fleet.revoke": "Revoked Spark access",
   "job.resume": "Resumed operation",
   "recipe.build": "Built recipe image",
@@ -275,7 +273,7 @@ function AgentUpgradeDiagnostics({detail, targetNames}: {detail: JobDetail; targ
       <dl><div><dt>Observed version</dt><dd>{target.observed_identity.version || "Not reported"}</dd></div><CopyableValue label="Observed binary digest" value={target.observed_identity.binary_digest}/><CopyableValue label="Observed build digest" value={target.observed_identity.build_digest}/>{target.retry_not_before && <div><dt>{target.retry_queued ? "Controller retry not before" : "Retry not before"}</dt><dd><time dateTime={target.retry_not_before}>{exactTime(target.retry_not_before) || target.retry_not_before}</time></dd></div>}</dl>
       {target.raw_reason && <details><summary>Raw helper evidence</summary><code>{target.raw_reason}</code></details>}
     </li>)}</ul>
-    {diagnostics.legacy_generic_ambiguous && <p className="activity-upgrade-ambiguity"><strong>Legacy helper response is ambiguous.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
+    {diagnostics.failure_details_unavailable && <p className="activity-upgrade-ambiguity"><strong>Helper did not report the failed stage.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
   </section>;
 }
 
@@ -408,10 +406,13 @@ function targetNameLookup(fleet: VisualFleetSnapshot | null, library: LibrarySna
     ...(library?.unlinked_recipes ?? []),
   ];
   for (const recipe of recipes) {
-    const title = recipe.title.trim() && recipe.title.trim() !== recipe.recipe_id ? recipe.title.trim() : "Unnamed recipe";
+    const title = recipe.recipe_document.metadata.title.trim() && recipe.recipe_document.metadata.title.trim() !== recipe.recipe_id ? recipe.recipe_document.metadata.title.trim() : "Unnamed recipe";
     names.set(recipe.recipe_id, title);
-    if (recipe.selected_revision) names.set(recipe.selected_revision.id, `${title} revision ${recipe.selected_revision.revision_number}`);
-    recipe.installations.forEach((installation, index) => names.set(installation.installation_id, `${title} installation ${index + 1}`));
+    names.set(recipe.content_sha256, `${title} revision ${recipe.recipe_document.release.version}`);
+    recipe.installations.forEach((installation, index) => {
+      names.set(installation.recipe_revision_id, `${title} revision ${recipe.recipe_document.release.version}`);
+      names.set(installation.installation_id, `${title} installation ${index + 1}`);
+    });
     recipe.runs.forEach((run, index) => names.set(run.run_id, `${title} run ${index + 1}`));
   }
   return names;

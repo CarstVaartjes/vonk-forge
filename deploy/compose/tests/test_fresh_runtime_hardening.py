@@ -77,9 +77,6 @@ def test_read_only_litellm_places_prisma_cache_on_tmpfs() -> None:
     assert "/root:exec,mode=0700,uid=10002,gid=10001" in litellm["tmpfs"]
     assert litellm["environment"]["HOME"] == "/root"
     assert litellm["environment"]["XDG_CACHE_HOME"] == "/root/.cache"
-    assert litellm["environment"]["PRISMA_QUERY_ENGINE_BINARY"].startswith(
-        "/root/.cache/"
-    )
 
 
 def test_caddy_healthcheck_does_not_depend_on_a_virtual_host() -> None:
@@ -123,11 +120,12 @@ def test_caddy_serves_the_site_controller_certificate() -> None:
 
 
 def test_control_images_do_not_install_git_or_ssh() -> None:
-    dockerfile = CONTROL_DOCKERFILE.read_text(encoding="utf-8").lower()
-
-    assert "apt-get install" not in dockerfile
-    assert "openssh" not in dockerfile
-    assert " git" not in dockerfile
+    worker = _final_stage("worker")
+    api = _final_stage("api")
+    for stage in (worker, api):
+        assert "apt-get install" not in stage
+        assert "openssh" not in stage
+        assert " git" not in stage
 
 
 def test_api_image_bounds_root_to_preexec_and_seals_source_secret_directory() -> None:

@@ -1,7 +1,6 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ArtifactJob, LibraryApi, LibraryRecipeDetail} from "../api/types";
-import {fullLibraryDetail} from "../test-fixtures/library";
+import type {ArtifactJob, LibraryApi, LibraryRecipeDetail, RecipeDefinition} from "../api/types";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {hashArtifactBlob} from "./artifact-hash";
 
@@ -23,32 +22,53 @@ const run = {
 };
 
 function detail(running = true): LibraryRecipeDetail {
+  const definition = canonicalDefinition([canonicalImageInterface()]);
   return {
-    ...fullLibraryDetail,
-    visual_recipe: ({
-      ...fullLibraryDetail.visual_recipe!,
-      interfaces: [{
-        adapter: "image-job",
-        path: "/outputs",
-        input: {path: "/inputs", required: true, media_types: ["text/plain", "image/png"], max_bytes: 16_384, slots: [
-          {id: "prompt", label: "Prompt", description: "A UTF-8 generation prompt.", media_types: ["text/plain"], extensions: [".txt"], min_files: 1, max_files: 1, max_file_bytes: 16_384, max_total_bytes: 16_384},
-          {id: "reference", label: "Reference image", description: "An optional visual reference.", media_types: ["image/png"], extensions: [".png"], min_files: 0, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
-        ]},
-        output: {path: "/outputs", allowed_media_types: ["image/png", "application/json"], max_total_bytes: 25_165_824, slots: [
-          {id: "images", label: "Generated images", description: "Rendered image results.", media_types: ["image/png"], extensions: [".png"], min_files: 1, max_files: 2, max_file_bytes: 8_388_608, max_total_bytes: 16_777_216},
-          {id: "metadata", label: "Metadata", description: "Generation metadata.", media_types: ["application/json"], extensions: [".json"], min_files: 0, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
-        ]},
-      }],
-      parameters: [{
-        name: "steps", description: "Number of denoising steps.", type: "integer", default: 24,
-        minimum: 1, maximum: 50, allowed_values: [], pattern: null, change_effect: "restart",
-      }, {
-        name: "negative_prompt", description: "Optional concepts to avoid.", type: "string", default: null,
-        pattern: null, change_effect: "restart",
-      }],
-    } as unknown as LibraryRecipeDetail["visual_recipe"]),
-    operational_state: {...fullLibraryDetail.operational_state, runs: running ? [run] : []},
+    schema_version: 2,
+    generated_at: "2026-08-28T12:00:00Z",
+    recipe: {recipe_id: "recipe-chat", publisher: "local", slug: "qwen-chat", title: "Qwen Chat", description: "Fast distributed chat model.", content_sha256: "a".repeat(64)},
+    definition,
+    topology: definition.topology,
+    model_documents: [],
+    model_capabilities: {schema_version: 2, state: "unknown", facts: [], provenance: null, reasons: []},
+    recipe_capabilities: {schema_version: 2, state: "unknown", facts: [], provenance: null, reasons: []},
+    operational_state: {builds: [], mappings: [], installations: [], runs: running ? [run] : []},
+    placement: [],
+    reasons: [],
+  } as unknown as LibraryRecipeDetail;
+}
+
+function canonicalImageInterface() {
+  return {
+    adapter: "image-job" as const,
+    path: "/outputs" as const,
+    input: {path: "/inputs" as const, required: true, media_types: ["text/plain", "image/png"], max_bytes: 16_384, slots: [
+      {id: "prompt", label: "Prompt", description: "A UTF-8 generation prompt.", media_types: ["text/plain"], extensions: [".txt"], min_files: 1, max_files: 1, max_file_bytes: 16_384, max_total_bytes: 16_384},
+      {id: "reference", label: "Reference image", description: "An optional visual reference.", media_types: ["image/png"], extensions: [".png"], min_files: 0, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
+    ]},
+    output: {path: "/outputs" as const, max_total_bytes: 25_165_824, slots: [
+      {id: "images", label: "Generated images", description: "Rendered image results.", media_types: ["image/png"], extensions: [".png"], min_files: 1, max_files: 2, max_file_bytes: 8_388_608, max_total_bytes: 16_777_216},
+      {id: "metadata", label: "Metadata", description: "Generation metadata.", media_types: ["application/json"], extensions: [".json"], min_files: 0, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
+    ]},
   };
+}
+
+function canonicalDefinition(interfaces: unknown[]): RecipeDefinition {
+  return {
+    schema_version: 2,
+    kind: "recipe",
+    identity: {publisher: "local", slug: "qwen-chat"},
+    metadata: {title: "Qwen Chat", description: "Fast distributed chat model.", tags: ["chat"]},
+    models: [],
+    execution: {mode: "image", image: {repository: "example/qwen", digest: `sha256:${"b".repeat(64)}`, platform: "linux/arm64"}},
+    runtime: {engine: "vllm", entrypoint: ["serve"], arguments: [], environment: [], lifecycle: {pre_start: [], post_stop: [], stop_timeout_seconds: 30}},
+    settings: {kind: "job", knobs: {steps: {value: 24, change_effect: "restart"}, negative_prompt: {value: "", change_effect: "restart"}}},
+    topology: {name: "solo", mode: "single", node_count: 1, parallelism: {world_size: 1, tensor: 1, pipeline: 1, data: 1, backend: "local"}, fabric: {connectivity: "none", minimum_bandwidth_mbps: 0}, roles: [{name: "entrypoint", count: 1, endpoint_owner: true, resources: {disk: {image_bytes: 1, artifact_bytes: 1, staging_bytes: 1, cache_bytes: 0, rollback_bytes: 0, safety_margin_bytes: 1}, memory: {kind: "host", startup_peak_bytes: 1, steady_state_bytes: 1, runtime_growth_bytes: 0, system_reserve_bytes: 1}}}], start_order: ["entrypoint"], stop_order: ["entrypoint"]},
+    interfaces,
+    validation: {benchmarks: [], serving: {interface: "image-job", checks: []}},
+    provenance: {source_kind: "local", source_reference: null, attribution: []},
+    release: {version: "3", released_at: "2026-08-28T12:00:00Z", history: []},
+  } as unknown as RecipeDefinition;
 }
 
 function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
@@ -121,7 +141,7 @@ test("derives prompt, parameter, and input constraints from the running recipe a
     output_limits: {max_files: 3, max_file_bytes: 8_388_608, max_total_bytes: 25_165_824, allowed_media_types: ["image/png", "application/json"]},
     timeout_seconds: 3600,
   });
-  expect(create[1].parameters).toEqual({steps: 24});
+  expect(create[1].parameters).toEqual({steps: 24, negative_prompt: ""});
   expect(create[1].inputs).toEqual([
     expect.objectContaining({slot: "reference", name: "source.png", media_type: "image/png", size_bytes: 8}),
     expect.objectContaining({slot: "prompt", name: "prompt.txt", media_type: "text/plain", size_bytes: 23}),
@@ -141,23 +161,19 @@ test("infers recipe-declared mesh and video media types when the browser omits t
   const user = userEvent.setup();
   const client = api();
   const fallbackDetail = detail();
-  fallbackDetail.visual_recipe = {
-    ...fallbackDetail.visual_recipe!,
-    interfaces: [{
+  fallbackDetail.definition = canonicalDefinition([{
       adapter: "artifact-job",
       path: "/outputs",
-      input: {path: "/inputs", required: true, media_types: ["model/obj", "model/ply", "video/quicktime", "video/x-matroska"], max_bytes: 16_384, min_files: 4, max_files: 4, slots: [
+      input: {path: "/inputs", required: true, media_types: ["model/obj", "model/ply", "video/quicktime", "video/x-matroska"], max_bytes: 16_384, slots: [
         {id: "obj", label: "OBJ mesh", description: "Wavefront mesh.", media_types: ["model/obj"], extensions: [".obj"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
         {id: "ply", label: "PLY mesh", description: "Polygon mesh.", media_types: ["model/ply"], extensions: [".ply"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
         {id: "mov", label: "MOV video", description: "QuickTime video.", media_types: ["video/quicktime"], extensions: [".mov"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
         {id: "mkv", label: "MKV video", description: "Matroska video.", media_types: ["video/x-matroska"], extensions: [".mkv"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
       ]},
-      output: {path: "/outputs", allowed_media_types: ["application/json"], max_total_bytes: 4096, slots: [
+      output: {path: "/outputs", max_total_bytes: 4096, slots: [
         {id: "result", label: "Result", description: "Job result.", media_types: ["application/json"], extensions: [".json"], min_files: 1, max_files: 1, max_file_bytes: 4096, max_total_bytes: 4096},
       ]},
-    }],
-    parameters: [],
-  } as unknown as LibraryRecipeDetail["visual_recipe"];
+    }]);
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={fallbackDetail}/>);
 
   await screen.findByText("No artifact jobs yet");
@@ -182,22 +198,22 @@ test("renders every declared job interface as a native bounded form and clears l
   const user = userEvent.setup();
   const client = api();
   const imageDetail = detail(false);
-  const imageInterface = imageDetail.visual_recipe!.interfaces[0]!;
+  const imageInterface = imageDetail.definition.interfaces[0]!;
   const multiple = {
     ...imageDetail,
-    visual_recipe: {
-      ...imageDetail.visual_recipe!,
+    definition: {
+      ...imageDetail.definition,
       interfaces: [imageInterface, {
         adapter: "video-job",
         path: "/outputs",
         input: {path: "/inputs", required: true, media_types: ["video/mp4"], max_bytes: 4_194_304, min_files: 1, max_files: 1, slots: [
           {id: "source", label: "Source clip", description: "A bounded source video.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 4_194_304, max_total_bytes: 4_194_304},
         ]},
-        output: {path: "/outputs", allowed_media_types: ["video/mp4"], max_total_bytes: 8_388_608, slots: [
+        output: {path: "/outputs", max_total_bytes: 8_388_608, slots: [
           {id: "video", label: "Generated video", description: "Rendered video result.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 8_388_608, max_total_bytes: 8_388_608},
         ]},
       }],
-    } as unknown as LibraryRecipeDetail["visual_recipe"],
+    } as RecipeDefinition,
   };
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={multiple}/>);
 

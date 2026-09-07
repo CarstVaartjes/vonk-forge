@@ -506,6 +506,61 @@ fn upgrade_renews_controller_leaf_with_29_days_remaining_and_preserves_authority
 }
 
 #[test]
+fn upgrade_reissues_only_the_controller_leaf_when_hostnames_change() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let environment_before =
+        std::fs::read_to_string(bundle.join(".env")).expect("environment before hostname change");
+    let environment_after = environment_before
+        .replace("enroll.example.test", "enroll.changed.example.test")
+        .replace("agents.example.test", "agents.changed.example.test")
+        .replace("registry.example.test", "registry.changed.example.test");
+    std::fs::write(bundle.join(".env"), &environment_after).expect("write changed hostnames");
+    let certificate_before =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert before");
+    let key_before = std::fs::read(secrets.join("controller-server-key")).expect("key before");
+    let authority_before = authority_snapshot(&secrets);
+
+    upgrade_pki_bundle(temporary.path()).expect("hostname change renews controller leaf");
+
+    let certificate_after =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert after");
+    assert_ne!(certificate_after, certificate_before);
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-key")).expect("key after"),
+        key_before
+    );
+    assert_eq!(authority_snapshot(&secrets), authority_before);
+    assert_eq!(
+        std::fs::read_to_string(bundle.join(".env")).expect("environment after"),
+        environment_after
+    );
+    let certificate = parse_certificate(&certificate_after);
+    let hostnames = certificate
+        .subject_alternative_name()
+        .expect("valid SAN extension")
+        .expect("SAN extension")
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        hostnames,
+        [
+            "control.example.test",
+            "enroll.changed.example.test",
+            "agents.changed.example.test",
+            "registry.changed.example.test",
+        ]
+    );
+}
+
+#[test]
 fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
     let temporary = tempdir().expect("temporary directory");
     let bundle = clone_pki_bundle(temporary.path());
@@ -529,6 +584,62 @@ fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
     assert_eq!(
         std::fs::read(secrets.join("controller-server-key")).expect("key after"),
         key_before
+    );
+}
+
+#[test]
+fn upgrade_renews_controller_leaf_when_preserved_hostnames_change() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let old_certificate =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("old cert");
+    let old_key = std::fs::read(secrets.join("controller-server-key")).expect("old key");
+    let authority_before = authority_snapshot(&secrets);
+    let environment_path = bundle.join(".env");
+    let environment = std::fs::read_to_string(&environment_path).expect("environment");
+    let updated_environment = environment
+        .replace("control.example.test", "control.renamed.example.test")
+        .replace("enroll.example.test", "enroll.renamed.example.test")
+        .replace("agents.example.test", "agents.renamed.example.test")
+        .replace("registry.example.test", "registry.renamed.example.test");
+    std::fs::write(&environment_path, updated_environment).expect("update environment");
+
+    upgrade_pki_bundle(temporary.path()).expect("hostname change renews controller leaf");
+
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("renewed cert"),
+        old_certificate
+    );
+    assert_ne!(
+        std::fs::read(secrets.join("controller-server-key")).expect("renewed key"),
+        old_key
+    );
+    assert_eq!(authority_snapshot(&secrets), authority_before);
+
+    let certificate_bytes =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("controller cert");
+    let certificate = parse_certificate(&certificate_bytes);
+    let sans = certificate
+        .subject_alternative_name()
+        .expect("SAN extension")
+        .expect("SAN present")
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sans,
+        [
+            "control.renamed.example.test",
+            "enroll.renamed.example.test",
+            "agents.renamed.example.test",
+            "registry.renamed.example.test"
+        ]
     );
 }
 

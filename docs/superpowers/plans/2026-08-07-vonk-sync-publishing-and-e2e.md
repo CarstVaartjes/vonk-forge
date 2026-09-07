@@ -1,4 +1,7 @@
-# Vonk Sync, Publishing, and End-to-End Implementation Plan
+# Retired: Vonk Sync, Publishing, and End-to-End Implementation Plan
+
+> Historical plan retained for provenance. Local authoring and WorkloadRun
+> import scenarios described here are no longer active.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

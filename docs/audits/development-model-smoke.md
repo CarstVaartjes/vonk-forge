@@ -37,7 +37,9 @@ are offline after installation.
 ## Qualification behavior
 
 Structural qualification is portable and resolves the model entities and
-build context from the separate standard recipe library:
+build context from an exact checkout of the canonical recipe repository. This
+checkout is a dev/CI qualification input only; the production Controller
+follows automatically refreshed global repository metadata:
 
 ```bash
 scripts/qualify-recipe \
@@ -48,43 +50,24 @@ scripts/qualify-recipe \
   > .state/development-acceptance/ds4-structural.json
 ```
 
-The full container and Spark acceptance path is the controller-backed runner
-documented in [Development agent workload acceptance](../runbooks/development-agent-workloads.md).
-It receives the exact external recipe and library explicitly:
-
-```bash
-scripts/run-development-slices \
-  --phase model-single \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --library-root ../vonk-forge-recipes \
-  --qualification-file .state/development-acceptance/ds4-structural.json \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
-  --builder-node '<SPARK_NODE_ID>' \
-  --target-node '<SPARK_NODE_ID>' \
-  --evidence-file .state/development-acceptance/ds4-container.json \
-  --timeout-seconds 1800 \
-  --stop-after inference-ok
-```
-
-Evidence is canonical JSON written atomically with mode `0600`. The runner
-fails closed on unsupported architecture, mutable image resolution, contract
-failure, engine failure, unhealthy service, invocation failure, or cleanup
-failure. Resume with the identical command after the documented restart and
-cleanup checkpoints.
+Execute Spark acceptance through Controller Run/Switch as documented in
+[Development workload acceptance](../runbooks/development-agent-workloads.md).
+Retain the Controller plan digest, operation state, exact artifact receipts,
+route transitions, restart observations, and cleanup result separately from
+the qualifier output. Run the declared serving checks with the qualifier's
+`--serving-url` and `--evidence-ledger` options after the route is active.
 
 ## Current publication gate
 
-The x86_64 development host can execute structural qualification and the
-bounded fake-engine behavior suite. It cannot claim the container or Spark
-gate because these recipes require linux/arm64 and NVIDIA hardware. That is an
-environment statement, not successful container qualification.
+The development host can execute structural qualification and the bounded
+fake-engine behavior suite. The qualifier's container level is currently
+unavailable pending production `CompiledExecutionPlan` materializer linkage;
+its `environment-limited` result is not successful container qualification.
 
 ## Spark acceptance still required
 
-The real container path must run on DGX Spark hardware and retain GPU, memory,
-latency, restart, and cleanup evidence before this recipe can move from
+The production materializer must first make the real container path executable.
+That path must then run on DGX Spark hardware and retain GPU, memory, latency,
+restart, and cleanup evidence before this recipe can move from
 candidate/structurally-verified to `spark-accepted` and then `default`. This
 audit does not claim physical ARM64/GPU acceptance.

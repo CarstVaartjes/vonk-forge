@@ -53,8 +53,6 @@ class _RoutineControlClient(Protocol):
 def _runs_without_controller(args: argparse.Namespace) -> bool:
     if args.command == "admin" and args.admin_command == "deploy":
         return not args.apply
-    if args.command == "library" and args.library_command == "template":
-        return True
     if (
         args.command == "library"
         and args.library_command == "job"
@@ -230,9 +228,6 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
     recipes = payload.get("recipes")
     if isinstance(recipes, list):
         recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
-        identity = (
-            "uri" if any("uri" in recipe for recipe in recipe_rows) else "recipe_id"
-        )
         if recipe_rows:
             _print_table(
                 recipe_rows,
@@ -241,7 +236,7 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
                     ("qualification", "QUALIFICATION"),
                     ("execution_readiness", "READINESS"),
                     ("node_count", "SPARKS"),
-                    (identity, "URI" if identity == "uri" else "RECIPE ID"),
+                    ("recipe_id", "RECIPE ID"),
                 ),
             )
         else:
@@ -359,9 +354,9 @@ def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
                 print(
                     f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
                 )
-    if diagnostics.get("legacy_generic_ambiguous") is True:
+    if diagnostics.get("failure_details_unavailable") is True:
         print(
-            "diagnosis: legacy helper response is ambiguous; the exact target "
+            "diagnosis: helper did not report the failed stage; the exact target "
             "identity remains the success gate"
         )
     if diagnostics.get("next_action"):
@@ -379,12 +374,6 @@ def _emit(
     assert isinstance(safe, dict)
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
-        return
-    if (
-        getattr(args, "command", None) == "library"
-        and getattr(args, "library_command", None) == "template"
-    ):
-        print(json.dumps(safe, sort_keys=True, indent=2))
         return
     if _emit_agent_upgrade_detail(safe):
         return
@@ -425,12 +414,41 @@ def _admin_payload(result: object) -> dict[str, object]:
     return _model_payload(result)  # type: ignore[arg-type]
 
 
-def _control_error(error: BaseException) -> dict[str, object]:
+def _control_error(
+    error: BaseException, args: argparse.Namespace | None = None
+) -> dict[str, object]:
     if isinstance(error, (ControlUnavailable, ControlTransportError, OSError)):
         message = "control API unavailable"
     else:
         message = _sanitize_text(error)
-    return {"error": message, "error_type": "control_api"}
+    result: dict[str, object] = {
+        "error": message,
+        "error_type": "control_api",
+        "code": getattr(error, "code", None) or "control.api_error",
+        "detail": getattr(error, "detail", message),
+        "recovery_actions": list(getattr(error, "recovery", ()) or ()),
+        "retryable": getattr(error, "retryable", False) is True,
+        "retry_time": getattr(error, "retry_time", None),
+        "retry_after_seconds": getattr(error, "retry_after_seconds", None),
+        "preserved": getattr(error, "preserved", None),
+        "required_bytes": getattr(error, "required_bytes", None),
+        "free_bytes": getattr(error, "free_bytes", None),
+        "shortfall_bytes": getattr(error, "shortfall_bytes", None),
+        "log_excerpt": getattr(error, "log_excerpt", None),
+    }
+    result = {key: value for key, value in result.items() if value is not None}
+    request_key = getattr(args, "request_key", None) if args is not None else None
+    operation_id = getattr(args, "operation_id", None) if args is not None else None
+    if isinstance(request_key, str) and request_key:
+        result["request_key"] = request_key
+        result["reconcile"] = {
+            "operation": "inspect the durable operation with the same request key",
+            "request_key": request_key,
+        }
+        if isinstance(operation_id, str) and operation_id:
+            result["operation_id"] = operation_id
+            result["reconcile"]["operation_id"] = operation_id
+    return result
 
 
 def _admin(
@@ -513,7 +531,16 @@ def main(
                 client,
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
-        elif args.command in {"fleet", "library", "activity"}:
+        elif args.command in {
+            "fleet",
+            "library",
+            "activity",
+            "models",
+            "recipes",
+            "cache",
+            "profiles",
+            "operations",
+        }:
             result = run_controller(
                 args,
                 client,  # type: ignore[arg-type]
@@ -529,7 +556,7 @@ def main(
             result,
             args,
             exact_structure=args.command
-            not in {"admin", "fleet", "library", "activity"},
+            not in {"admin", "fleet", "library", "activity", "recipes"},
         )
         return 0
     except (
@@ -539,5 +566,8 @@ def main(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        _emit(_control_error(error), args)
+        _emit(_control_error(error, args), args)
         return 2
+    except KeyboardInterrupt:
+        _emit(_control_error(ControlClientError("operation interrupted"), args), args)
+        return 130

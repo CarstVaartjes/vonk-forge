@@ -64,6 +64,7 @@ export function AdminMenu({
       className="operator-summary"
       aria-controls={menuId}
       aria-expanded={menuOpen}
+      aria-label={`${subject}, ${role}. Open operator actions`}
       disabled={navigationLocked}
       title={navigationLocked ? "Operator actions are unavailable while a change is applying" : undefined}
       onClick={() => setMenuOpen(open => !open)}

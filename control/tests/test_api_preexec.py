@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -24,7 +25,6 @@ def test_privilege_drop_clears_groups_and_saved_root_ids_before_exec(
     from vonk_control import api_preexec
 
     events: list[object] = []
-    monkeypatch.setattr(api_preexec.os, "geteuid", lambda: 0)
     identity = {
         "groups": [0, 10001],
         "gid": (0, 0, 0),
@@ -53,12 +53,27 @@ def test_privilege_drop_clears_groups_and_saved_root_ids_before_exec(
         events.append(("exec", command))
         raise _ExecCalled
 
-    monkeypatch.setattr(api_preexec.os, "setgroups", setgroups)
-    monkeypatch.setattr(api_preexec.os, "setresgid", setresgid)
-    monkeypatch.setattr(api_preexec.os, "setresuid", setresuid)
-    monkeypatch.setattr(api_preexec.os, "getgroups", lambda: identity["groups"])
-    monkeypatch.setattr(api_preexec.os, "getresgid", lambda: identity["gid"])
-    monkeypatch.setattr(api_preexec.os, "getresuid", lambda: identity["uid"])
+    # Linux exposes these calls on the real ``os`` module; retain that patch
+    # path there. macOS does not expose setresgid/setresuid, so inject the
+    # smallest equivalent boundary instead of skipping the security test.
+    if hasattr(api_preexec.os, "setresgid") and hasattr(api_preexec.os, "setresuid"):
+        privilege_os = api_preexec.os
+        monkeypatch.setattr(privilege_os, "setgroups", setgroups)
+        monkeypatch.setattr(privilege_os, "setresgid", setresgid)
+        monkeypatch.setattr(privilege_os, "setresuid", setresuid)
+        monkeypatch.setattr(privilege_os, "getgroups", lambda: identity["groups"])
+        monkeypatch.setattr(privilege_os, "getresgid", lambda: identity["gid"])
+        monkeypatch.setattr(privilege_os, "getresuid", lambda: identity["uid"])
+    else:
+        privilege_os = SimpleNamespace(
+            setgroups=setgroups,
+            setresgid=setresgid,
+            setresuid=setresuid,
+            getgroups=lambda: identity["groups"],
+            getresgid=lambda: identity["gid"],
+            getresuid=lambda: identity["uid"],
+        )
+        monkeypatch.setattr(api_preexec, "os", privilege_os)
 
     with pytest.raises(_ExecCalled):
         api_preexec.drop_privileges_and_exec(

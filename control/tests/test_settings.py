@@ -10,35 +10,48 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(secret))
     settings = Settings.from_env_and_secrets()
     assert settings.database_host == "postgres"
-    assert settings.global_catalog_url == "https://vonkforge.ai"
     assert settings.recipe_library_api_url == "https://api.github.com"
     assert settings.recipe_library_sync_interval_seconds == 900
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
-    assert settings.operator_jurisdiction is None
 
 
-def test_operator_jurisdiction_is_explicit_and_strict(monkeypatch) -> None:
+def test_optional_huggingface_token_uses_file_path_without_exposing_value(
+    tmp_path: Path, monkeypatch
+) -> None:
+    token = tmp_path / "hf-token"
+    token.write_text("hf_test_secret\n")
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", "NL")
-    assert Settings.from_env_and_secrets().operator_jurisdiction == "NL"
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(token))
 
-    for invalid in ("nl", "NLD", " NL", "N1", "ZZ"):
-        monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", invalid)
-        with pytest.raises(SettingsError, match="VONK_OPERATOR_JURISDICTION"):
-            Settings.from_env_and_secrets()
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.huggingface_token_path == token
+    assert "hf_test_secret" not in repr(settings)
 
 
-def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> None:
+def test_optional_huggingface_token_allows_missing_or_empty_normalized_secret(
+    tmp_path: Path, monkeypatch
+) -> None:
+    missing = tmp_path / "missing-hf-token"
+    empty = tmp_path / "empty-hf-token"
+    empty.touch()
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "http://127.0.0.1:9000")
-    assert Settings.from_env_and_secrets().global_catalog_url == "http://127.0.0.1:9000"
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(missing))
+    assert Settings.from_env_and_secrets().huggingface_token_path is None
 
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "http://catalog.example")
-    with pytest.raises(SettingsError, match="global catalog URL"):
-        Settings.from_env_and_secrets()
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(empty))
+    assert Settings.from_env_and_secrets().huggingface_token_path is None
 
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "https://user:secret@catalog.example")
-    with pytest.raises(SettingsError, match="global catalog URL"):
+
+def test_optional_huggingface_token_rejects_symlink(tmp_path: Path, monkeypatch) -> None:
+    token = tmp_path / "hf-token"
+    token.write_text("hf_test_secret")
+    link = tmp_path / "hf-token-link"
+    link.symlink_to(token)
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(link))
+
+    with pytest.raises(SettingsError, match="regular non-symlink"):
         Settings.from_env_and_secrets()
 
 
@@ -60,6 +73,19 @@ def test_recipe_library_sync_interval_is_bounded(monkeypatch) -> None:
 
     monkeypatch.setenv("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "59")
     with pytest.raises(SettingsError, match="recipe library sync interval"):
+        Settings.from_env_and_secrets()
+
+
+def test_recipe_build_parallel_preparations_defaults_and_bounds(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
+    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 2
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
+    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 3
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
+    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
         Settings.from_env_and_secrets()
 
 
@@ -576,3 +602,25 @@ def test_production_worker_settings_can_explicitly_disable_agent_runtime(
 
     assert settings.internal_api_token == b"w" * 32
     assert settings.management_cidrs == "10.0.0.0/24"
+
+
+def test_worker_recipe_build_parallel_preparations_defaults_and_bounds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "database-url"
+    token = tmp_path / "worker-api-token"
+    database.write_text("postgresql://control:test@postgres/control")
+    token.write_text("w" * 32)
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
+    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
+    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
+    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 2
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
+    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 3
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
+    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
+        WorkerSettings.from_env_and_secrets()

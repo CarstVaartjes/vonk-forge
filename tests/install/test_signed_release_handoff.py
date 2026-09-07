@@ -7,6 +7,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -20,8 +22,15 @@ def _sign(private_key: Path, source: Path, destination: Path) -> None:
     destination.write_bytes(base64.b64encode(raw.read_bytes()) + b"\n")
 
 
-def test_channel_passes_the_verified_immutable_release_to_spark_setup(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("kind", "arguments"),
+    (
+        ("spark", ("--enroll",)),
+        ("nas", ("--answers-file", "answers.txt", "--disable-hermes")),
+    ),
+)
+def test_channel_passes_the_verified_immutable_release_to_setup(
+    tmp_path: Path, kind: str, arguments: tuple[str, ...]
 ) -> None:
     private_key = tmp_path / "private.pem"
     public_key = tmp_path / "public.pem"
@@ -49,14 +58,16 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     prefix = Path("artifacts/stable/releases") / generation
     release = public / prefix / "release.json"
     signature = public / prefix / "release.sig"
-    bootstrap = public / prefix / "bootstraps/spark"
+    spark = public / prefix / "bootstraps/spark"
     nas = public / prefix / "bootstraps/nas"
-    for path in (release, signature, bootstrap, nas):
+    for path in (release, signature, spark, nas):
         path.parent.mkdir(parents=True, exist_ok=True)
     release.write_text('{"schema_version":2,"signed":"immutable"}\n')
     _sign(private_key, release, signature)
     receipt = tmp_path / "receipt"
-    bootstrap.write_text(
+    selected = {"nas": nas, "spark": spark}[kind]
+    unselected = {"nas": spark, "spark": nas}[kind]
+    selected.write_text(
         "#!/bin/sh\nset -eu\n"
         'cat "$VONK_INSTALL_RELEASE_MANIFEST" > "$VONK_TEST_RECEIPT"\n'
         'cat "$VONK_INSTALL_RELEASE_SIGNATURE" >> "$VONK_TEST_RECEIPT"\n'
@@ -64,7 +75,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         'printf "%s\\n" "$VONK_CONTROLLER_ADDRESS" >> "$VONK_TEST_RECEIPT"\n'
         'printf "arguments=%s\\n" "$*" >> "$VONK_TEST_RECEIPT"\n'
     )
-    nas.write_text("unused\n")
+    unselected.write_text("unused\n")
     claims = public / "artifacts/stable/current.claims"
     claims.parent.mkdir(parents=True, exist_ok=True)
     claims.write_text(
@@ -81,7 +92,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         f"nas_path={prefix}/bootstraps/nas\n"
         f"nas_sha256={hashlib.sha256(nas.read_bytes()).hexdigest()}\n"
         f"spark_path={prefix}/bootstraps/spark\n"
-        f"spark_sha256={hashlib.sha256(bootstrap.read_bytes()).hexdigest()}\n"
+        f"spark_sha256={hashlib.sha256(spark.read_bytes()).hexdigest()}\n"
     )
     pointer_signature = tmp_path / "pointer.sig"
     _sign(private_key, claims, pointer_signature)
@@ -91,11 +102,11 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         + pointer_signature.read_bytes().strip()
         + b"\n"
     )
-    rendered = tmp_path / "spark"
+    rendered = tmp_path / kind
     rendered.write_text(
         (ROOT / "install/channel")
         .read_text()
-        .replace("@VONK_KIND@", "spark")
+        .replace("@VONK_KIND@", kind)
         .replace("@VONK_CHANNEL@", "stable")
         .replace("@VONK_ORIGIN@", "https://install.example.test")
         .replace("@VONK_PUBLIC_KEY_PEM@", public_key.read_text())
@@ -111,7 +122,7 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
     curl.chmod(0o700)
 
     result = subprocess.run(
-        ["sh", rendered, "--enroll"],
+        ["sh", rendered, *arguments],
         cwd=tmp_path,
         env={
             **os.environ,
@@ -131,5 +142,5 @@ def test_channel_passes_the_verified_immutable_release_to_spark_setup(
         + signature.read_bytes()
         + f"https://install.example.test/{prefix}\n".encode()
         + b"192.168.1.231\n"
-        + b"arguments=--enroll\n"
+        + f"arguments={' '.join(arguments)}\n".encode()
     )

@@ -218,7 +218,15 @@ def verify(
             )
     elif PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
-    for dependency in ("acl", "iproute2", "iptables", "podman", "uidmap"):
+    for dependency in (
+        "acl",
+        "apparmor",
+        "crun",
+        "iproute2",
+        "iptables",
+        "podman",
+        "uidmap",
+    ):
         if (
             re.search(
                 rf"(?:^|,\s*){dependency}(?:\s*\([^)]*\))?(?:,|$)",
@@ -711,6 +719,8 @@ def _verify_payload(
         not in units["vonk-forge-agent.service"]
         or "AmbientCapabilities=" not in units["vonk-forge-agent.service"]
         or "ProtectProc=default" not in units["vonk-forge-agent.service"]
+        or "XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config"
+        not in units["vonk-forge-agent.service"]
         or "CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
         not in units["vonk-forge-agent.service"]
         or "RestrictNamespaces=user mnt pid ipc uts cgroup net"

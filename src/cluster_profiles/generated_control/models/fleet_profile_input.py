@@ -13,6 +13,7 @@ from typing import cast
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_scope import FleetProfileScope
   from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
   from ..models.fleet_profile_input_labels import FleetProfileInputLabels
 
@@ -29,6 +30,10 @@ class FleetProfileInput:
     """
         Attributes:
             name (str):
+            scope (FleetProfileScope): The complete set of Sparks reconciled by a profile.
+
+                Scope is deliberately independent from assignments.  A member with no
+                assignment is an intentional idle outcome when the profile is applied.
             assignments (Union[Unset, list['FleetProfileAssignmentInput']]):
             description (Union[Unset, str]):  Default: ''.
             favorite (Union[Unset, bool]):  Default: False.
@@ -37,6 +42,7 @@ class FleetProfileInput:
      """
 
     name: str
+    scope: 'FleetProfileScope'
     assignments: Union[Unset, list['FleetProfileAssignmentInput']] = UNSET
     description: Union[Unset, str] = ''
     favorite: Union[Unset, bool] = False
@@ -48,9 +54,12 @@ class FleetProfileInput:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
         from ..models.fleet_profile_input_labels import FleetProfileInputLabels
         name = self.name
+
+        scope = self.scope.to_dict()
 
         assignments: Union[Unset, list[dict[str, Any]]] = UNSET
         if not isinstance(self.assignments, Unset):
@@ -79,6 +88,7 @@ class FleetProfileInput:
 
         field_dict.update({
             "name": name,
+            "scope": scope,
         })
         if assignments is not UNSET:
             field_dict["assignments"] = assignments
@@ -97,10 +107,16 @@ class FleetProfileInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
         from ..models.fleet_profile_input_labels import FleetProfileInputLabels
         d = dict(src_dict)
         name = d.pop("name")
+
+        scope = FleetProfileScope.from_dict(d.pop("scope"))
+
+
+
 
         assignments = []
         _assignments = d.pop("assignments", UNSET)
@@ -138,6 +154,7 @@ class FleetProfileInput:
 
         fleet_profile_input = cls(
             name=name,
+            scope=scope,
             assignments=assignments,
             description=description,
             favorite=favorite,

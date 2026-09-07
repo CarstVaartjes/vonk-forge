@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -10,15 +12,15 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .agent_upgrade_status import (
-    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
@@ -36,7 +38,20 @@ from .models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from .operation_contract import (
+    OperationCheckpoint,
+    OperationEvidenceDownload,
+    OperationEvidenceProvenance,
+    OperationFailureEvidence,
+    OperationMemberProgress,
+    OperationRecovery,
+    OperationRecoveryAction,
+    normalize_operation_progress,
+    recovery_for_operation,
+    sanitize_failure_evidence,
+)
 from .route_runtime import verify_active_route_bundle
+from .strict_json import StrictJSONModel
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -94,45 +109,45 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/v1/nodes/{node_id}/telemetry",
     ): "getNodeTelemetryHistory",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/current",
+    ): "getNodeTelemetryCurrent",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/capabilities",
+    ): "getNodeTelemetryCapabilities",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/workloads",
+    ): "listNodeTelemetryWorkloads",
     ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/v1/agents"): "listAgents",
     ("get", "/api/v1/authority"): "getAuthority",
     ("post", "/api/v1/proposals"): "previewProposal",
     ("post", "/api/v1/changes"): "submitChange",
     ("get", "/api/v1/jobs"): "listJobs",
+    ("get", "/api/v1/operations"): "listOperations",
     ("get", "/api/v1/audit"): "listAuditEvents",
     ("get", "/api/v1/identity-history"): "listIdentityHistory",
     ("get", "/api/v1/jobs/{job_id}"): "getJob",
+    ("get", "/api/v1/operations/{operation_id}"): "getOperation",
     ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
     ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
-    ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
-    ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
-    ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
-    ("put", "/api/v1/catalog/recipes/{recipe_id}/draft"): "updateLocalRecipeDraft",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/resolve"): "resolveLocalRecipe",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/fork"): "forkLocalRecipe",
-    (
-        "post",
-        "/api/v1/catalog/imports/workload_run/preview",
-    ): "previewWorkloadRunImport",
-    ("post", "/api/v1/catalog/imports/workload_run"): "applyWorkloadRunImport",
-    (
-        "post",
-        "/api/v1/catalog/recipes/{recipe_id}/resolve-import",
-    ): "resolveWorkloadRunImport",
 }
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
 NodeIdentifier = Annotated[str, Field(pattern=NODE_PATTERN)]
+DigestIdentifier = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 class OperationProjectionError(RuntimeError):
     """Durable operation state cannot be safely projected."""
 
 
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class StrictModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class EmptyBody(StrictModel):
@@ -141,6 +156,78 @@ class EmptyBody(StrictModel):
 
 class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
+
+
+class HealthzResponse(StrictModel):
+    status: Literal["ok"]
+
+
+class ReadyzResponse(StrictModel):
+    status: Literal["ready"]
+
+
+class AuthorityResponse(StrictModel):
+    revision: str = Field(pattern=DIGEST_PATTERN)
+    documents: dict[str, str] = Field(max_length=256)
+    dependencies: dict[str, list[str]] = Field(max_length=256)
+
+
+class ProposalPreviewResponse(StrictModel):
+    base_revision: str = Field(pattern=DIGEST_PATTERN)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+    patch: str = Field(min_length=1, max_length=16 * 1024 * 1024)
+    affected_documents: list[str] = Field(min_length=1, max_length=32)
+    validation_results: list[str] = Field(max_length=32)
+
+    @field_validator("patch")
+    @classmethod
+    def patch_is_canonical_base64(cls, value: str) -> str:
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("patch must be base64") from None
+        if base64.b64encode(decoded).decode("ascii") != value:
+            raise ValueError("patch must be canonical base64")
+        return value
+
+
+class ChangeResponse(StrictModel):
+    proposal_digest: str = Field(pattern=DIGEST_PATTERN)
+    previous_revision: str = Field(pattern=DIGEST_PATTERN)
+    authority_revision: str = Field(pattern=DIGEST_PATTERN)
+    mode: Literal["database"]
+
+
+class JobResponse(StrictModel):
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=80)
+
+
+class AuditEventResponse(StrictModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=128)
+    authority_revision: str | None = Field(default=None, max_length=128)
+    targets: list[BoundedIdentifier] = Field(max_length=64)
+    occurred_at: str | None = Field(default=None, max_length=64)
+
+
+class AuditResponse(StrictModel):
+    events: list[AuditEventResponse] = Field(max_length=100)
+
+
+class IdentityHistoryItem(StrictModel):
+    node_id: str = Field(pattern=NODE_PATTERN)
+    agent_state: str = Field(min_length=1, max_length=80)
+    certificate_serial: str | None = Field(default=None, max_length=256)
+    certificate_fingerprint: str | None = Field(default=None, max_length=256)
+    certificate_generation: int | None = Field(default=None, ge=0)
+    enrolled_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class IdentityHistoryResponse(StrictModel):
+    identities: list[IdentityHistoryItem] = Field(max_length=100)
 
 
 def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
@@ -152,19 +239,19 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 
 class EndpointResponse(StrictModel):
-    alias: str = Field(pattern=IDENTIFIER_PATTERN)
-    api_base: str
-    expires_at: str
+    alias: str = Field(pattern=IDENTIFIER_PATTERN, max_length=63)
+    api_base: str = Field(min_length=1, max_length=512)
+    expires_at: str = Field(min_length=1, max_length=64)
     generation: int = Field(ge=1)
     node_id: str = Field(pattern=NODE_PATTERN)
-    observed_at: str
+    observed_at: str = Field(min_length=1, max_length=64)
     plan_digest: str = Field(pattern=DIGEST_PATTERN)
     state: str = Field(pattern=r"^published$")
 
 
 class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
-    state: str
+    state: str = Field(min_length=1, max_length=80)
     protocol_version: int | None = Field(default=None, ge=1)
     semantic_version: str | None = Field(
         default=None,
@@ -172,11 +259,11 @@ class AgentSummary(StrictModel):
     )
     build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    capabilities: list[str]
-    last_seen_at: str | None
+    capabilities: list[str] = Field(max_length=128)
+    last_seen_at: str | None = Field(default=None, max_length=64)
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
     stale: bool
-    certificate_expires_at: str | None
+    certificate_expires_at: str | None = Field(default=None, max_length=64)
 
 
 class AgentsResponse(StrictModel):
@@ -185,6 +272,25 @@ class AgentsResponse(StrictModel):
 
 class JobOperationProgress(StrictModel):
     phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    completed_bytes: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
+    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
+    total_bytes_known: bool | None = None
+    checkpoint: OperationCheckpoint | None = None
+    members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_contract_fields(self, handler):
+        document = handler(self)
+        # Keep old phase-only status responses byte-for-byte stable.
+        return {
+            key: value
+            for key, value in document.items()
+            if value is not None and value != []
+        }
 
 
 class JobOperationResponse(StrictModel):
@@ -196,6 +302,50 @@ class JobOperationResponse(StrictModel):
     attempt: int = Field(ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
+    failure: OperationFailureEvidence | None = None
+    provenance: OperationEvidenceProvenance | None = None
+    evidence_download: OperationEvidenceDownload | None = None
+    recovery: OperationRecovery | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_evidence(self, handler):
+        document = handler(self)
+        for key in ("failure", "provenance", "evidence_download", "recovery"):
+            if document.get(key) is None:
+                document.pop(key, None)
+        return document
+
+
+class OperationDetailResponse(StrictModel):
+    schema_version: Literal[2] = 2
+    id: str = Field(min_length=1, max_length=128)
+    parent_id: str | None = Field(default=None, max_length=128)
+    node_ids: list[NodeIdentifier] = Field(max_length=1024)
+    kind: str = Field(min_length=1, max_length=80)
+    state: str = Field(min_length=1, max_length=80)
+    attempt: int = Field(ge=0)
+    progress: JobOperationProgress | None = None
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str | None = None
+    failure: OperationFailureEvidence | None = None
+    provenance: OperationEvidenceProvenance | None = None
+    evidence_download: OperationEvidenceDownload | None = None
+    recovery: OperationRecovery | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_evidence(self, handler):
+        document = handler(self)
+        for key in ("failure", "provenance", "evidence_download", "recovery"):
+            if document.get(key) is None:
+                document.pop(key, None)
+        return document
+
+
+class OperationsResponse(StrictModel):
+    schema_version: Literal[2] = 2
+    operations: list[OperationDetailResponse] = Field(max_length=100)
+    next_cursor: str | None = Field(default=None, max_length=512)
+    total: int = Field(ge=0)
 
 
 class JobProgress(StrictModel):
@@ -225,7 +375,7 @@ class AgentUpgradeTargetDiagnosticsResponse(StrictModel):
 class AgentUpgradeDiagnosticsResponse(StrictModel):
     expected_identity: AgentUpgradeIdentityResponse
     targets: list[AgentUpgradeTargetDiagnosticsResponse] = Field(max_length=64)
-    legacy_generic_ambiguous: bool
+    failure_details_unavailable: bool
     next_action: str | None = Field(default=None, max_length=512)
     operator_summary: str | None = Field(default=None, max_length=1024)
 
@@ -249,7 +399,7 @@ class JobDetailResponse(StrictModel):
 
 
 class JobResumeResponse(StrictModel):
-    id: str
+    id: str = Field(min_length=1, max_length=128)
     state: str = Field(pattern=r"^queued$")
 
 
@@ -267,8 +417,8 @@ class JobsResponse(StrictModel):
 
 
 class JobLogsResponse(StrictModel):
-    job_id: str
-    digests: list[str]
+    job_id: str = Field(min_length=1, max_length=128)
+    digests: list[DigestIdentifier] = Field(max_length=100)
 
 
 @dataclass(frozen=True)
@@ -279,6 +429,12 @@ class OperationApiServices:
     agents: Callable[[], Sequence[Mapping[str, object]]]
     job_operations: Callable[[str, str | None, int], OperationPage]
     resume_job: Callable[[str], None]
+    list_operations: (
+        Callable[[str | None, int, str | None, str | None], OperationListPage] | None
+    ) = None
+    get_operation: Callable[[str], Mapping[str, object]] | None = None
+    operation_providers: tuple[OperationProvider, ...] = ()
+    cursor_codec: CursorCodec | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +443,174 @@ class OperationPage:
     next_cursor: str | None
     progress: JobProgress
     agent_upgrade_diagnostics: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class OperationListPage:
+    items: Sequence[Mapping[str, object]]
+    next_cursor: str | None
+    total: int
+
+
+@dataclass(frozen=True)
+class OperationQuery:
+    """Shared boundary query understood by every global activity provider."""
+
+    after: tuple[datetime, str] | None
+    limit: int
+    state: str | None
+    node_id: str | None
+
+
+@dataclass(frozen=True)
+class OperationProvider:
+    """Composable typed operation family for the global activity projection."""
+
+    family: str
+    list_operations: Callable[[OperationQuery], OperationListPage]
+    get_operation: Callable[[str], Mapping[str, object]]
+
+
+def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
+    created_at = item.get("created_at")
+    if not isinstance(created_at, str):
+        raise OperationProjectionError("operation created_at is invalid")
+    try:
+        parsed = datetime.fromisoformat(created_at)
+    except ValueError:
+        raise OperationProjectionError("operation created_at is invalid") from None
+    operation_id = item.get("id")
+    if not isinstance(operation_id, str) or not operation_id:
+        raise OperationProjectionError("operation id is invalid")
+    return _aware(parsed), operation_id
+
+
+def merge_operation_providers(
+    providers: Sequence[OperationProvider],
+    *,
+    cursor: str | None,
+    limit: int,
+    state: str | None,
+    node_id: str | None,
+    cursors: CursorCodec,
+) -> OperationListPage:
+    """Merge provider rows using one deterministic newest-first cursor."""
+
+    if not 1 <= limit <= 100:
+        raise ValueError("operation page limit is invalid")
+    context = {"state": state, "node_id": node_id}
+    after: tuple[datetime, str] | None = None
+    if cursor is not None:
+        try:
+            decoded = cursors.decode(
+                cursor,
+                resource="operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+            )
+            if (
+                not isinstance(decoded, list)
+                or len(decoded) != 2
+                or not all(isinstance(item, str) for item in decoded)
+            ):
+                raise ValueError
+            after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
+        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            raise ValueError("operation cursor is invalid") from None
+    query = OperationQuery(after=after, limit=limit + 1, state=state, node_id=node_id)
+    rows: list[Mapping[str, object]] = []
+    total = 0
+    seen: set[str] = set()
+    for provider in providers:
+        page = provider.list_operations(query)
+        total += page.total
+        for item in page.items:
+            node_ids = item.get("node_ids")
+            if not isinstance(node_ids, (list, tuple)) or not all(
+                isinstance(node, str) and re.fullmatch(NODE_PATTERN, node)
+                for node in node_ids
+            ):
+                raise OperationProjectionError(
+                    f"{provider.family} provider returned invalid node_ids"
+                )
+            if node_id is not None and node_id not in node_ids:
+                continue
+            boundary = _operation_boundary(item)
+            if after is not None and boundary >= after:
+                raise OperationProjectionError(
+                    f"{provider.family} provider returned a stale operation row"
+                )
+            operation_id = boundary[1]
+            if operation_id in seen:
+                raise OperationProjectionError("operation ids are not globally unique")
+            seen.add(operation_id)
+            rows.append(item)
+    rows.sort(key=_operation_boundary, reverse=True)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        created_at, operation_id = _operation_boundary(rows[-1])
+        next_cursor = cursors.encode(
+            resource="operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at.isoformat(), operation_id],
+        )
+    return OperationListPage(items=rows, next_cursor=next_cursor, total=total)
+
+
+def get_operation_from_providers(
+    providers: Sequence[OperationProvider], operation_id: str
+) -> Mapping[str, object]:
+    """Resolve one operation without coupling the Controller to provider modules."""
+
+    match: Mapping[str, object] | None = None
+    for provider in providers:
+        try:
+            item = provider.get_operation(operation_id)
+        except KeyError:
+            continue
+        if match is not None:
+            raise OperationProjectionError("operation ids are not globally unique")
+        match = item
+    if match is None:
+        raise KeyError(operation_id)
+    _operation_boundary(match)
+    return match
+
+
+def _global_list_operations(
+    services: OperationApiServices,
+    cursor: str | None,
+    limit: int,
+    state: str | None,
+    node_id: str | None,
+) -> OperationListPage:
+    if services.operation_providers:
+        if services.cursor_codec is None:
+            raise OperationProjectionError("operation cursor projection unavailable")
+        return merge_operation_providers(
+            services.operation_providers,
+            cursor=cursor,
+            limit=limit,
+            state=state,
+            node_id=node_id,
+            cursors=services.cursor_codec,
+        )
+    if services.list_operations is None:
+        raise OperationProjectionError("operation projection unavailable")
+    return services.list_operations(cursor, limit, state, node_id)
+
+
+def _global_get_operation(
+    services: OperationApiServices, operation_id: str
+) -> Mapping[str, object]:
+    if services.operation_providers:
+        return get_operation_from_providers(services.operation_providers, operation_id)
+    if services.get_operation is None:
+        raise OperationProjectionError("operation projection unavailable")
+    return services.get_operation(operation_id)
 
 
 def job_response(
@@ -299,19 +623,27 @@ def job_response(
 ) -> JobDetailResponse:
     projected = [
         JobOperationResponse(
-            id=str(item["id"]),
-            graph_operation_id=(
-                None
-                if item.get("graph_operation_id") is None
-                else str(item["graph_operation_id"])
-            ),
-            node_id=str(item["node_id"]),
-            kind=str(item["kind"]),
-            state=str(item["state"]),
-            attempt=int(item["attempt"]),
+            id=item["id"],
+            graph_operation_id=item.get("graph_operation_id"),
+            node_id=item["node_id"],
+            kind=item["kind"],
+            state=item["state"],
+            attempt=item["attempt"],
             progress=_progress_projection(item.get("progress")),
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
+            ),
+            failure=_failure_projection(item.get("result")),
+            provenance=_provenance_projection(item.get("result")),
+            evidence_download=_evidence_download_projection(item.get("result")),
+            recovery=recovery_for_operation(
+                item["state"],
+                supported_actions=item.get("supported_actions"),
+                available_actions=(OperationRecoveryAction.RESUME,),
+                uncertain=bool(
+                    isinstance(item.get("result"), Mapping)
+                    and item["result"].get("uncertain") is True
+                ),
             ),
         )
         for item in operation_page.items
@@ -328,14 +660,14 @@ def job_response(
         else None
     )
     return JobDetailResponse(
-        id=str(job.id),
-        state=str(job.state),
-        kind=str(job.kind),
-        authority_revision=str(job.authority_revision),
+        id=job.id,
+        state=job.state,
+        kind=job.kind,
+        authority_revision=job.authority_revision,
         targets=visible_targets,
         target_next_cursor=target_next_cursor,
         target_total=len(targets),
-        current_attempt=int(job.current_attempt),
+        current_attempt=job.current_attempt,
         status_reason=(
             operation_page.agent_upgrade_diagnostics.get("operator_summary")
             if (
@@ -390,10 +722,137 @@ def decode_offset(
 def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
-    phase = value.get("phase")
-    if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
+    try:
+        normalized = normalize_operation_progress(value)
+    except (TypeError, ValueError):
         return None
-    return JobOperationProgress(phase=phase)
+    try:
+        return JobOperationProgress.model_validate(normalized, strict=True)
+    except (TypeError, ValueError):
+        return None
+
+
+def _failure_projection(value: object) -> OperationFailureEvidence | None:
+    if not isinstance(value, Mapping):
+        return None
+    raw = value.get("failure", value)
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        safe = sanitize_failure_evidence(raw)
+        error_code = safe.get("error_code")
+        if not isinstance(error_code, str) or not re.fullmatch(
+            r"[a-z][a-z0-9_]{0,63}", error_code
+        ):
+            return None
+        summary = safe.get("summary") or safe.get("reason") or error_code
+        if not isinstance(summary, str) or not summary.strip():
+            return None
+        detail = safe.get("detail")
+        return OperationFailureEvidence(
+            error_code=error_code,
+            summary=summary,
+            detail=detail if isinstance(detail, str) else None,
+            retryable=(
+                safe.get("retryable", False)
+                if isinstance(safe.get("retryable", False), bool)
+                else None
+            ),
+            uncertain=(
+                safe.get("uncertain", False)
+                if isinstance(safe.get("uncertain", False), bool)
+                else None
+            ),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
+    if not isinstance(value, Mapping) or not isinstance(
+        value.get("provenance"), Mapping
+    ):
+        return None
+    try:
+        return OperationEvidenceProvenance.model_validate(
+            value["provenance"], strict=True
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _evidence_download_projection(value: object) -> OperationEvidenceDownload | None:
+    if not isinstance(value, Mapping) or not isinstance(
+        value.get("evidence_download"), Mapping
+    ):
+        return None
+    try:
+        return OperationEvidenceDownload.model_validate(
+            value["evidence_download"], strict=True
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _operation_item(
+    operation: AgentOperation, attempt: AgentOperationAttempt | None
+) -> dict[str, object]:
+    """Project one durable operation without exposing its unbounded payload."""
+
+    progress = None
+    result = None
+    if attempt is not None:
+        projected = _progress_projection(attempt.progress)
+        progress = None if projected is None else projected.model_dump(mode="json")
+        result = attempt.result
+    return {
+        "attempt": operation.current_attempt,
+        "id": operation.id,
+        "kind": operation.kind,
+        "node_ids": [operation.node_id],
+        "parent_id": operation.parent_job_id,
+        "progress": progress,
+        "result": result,
+        "supported_actions": (
+            operation.payload.get("supported_actions")
+            if isinstance(operation.payload, Mapping)
+            else None
+        ),
+        "state": operation.state,
+        "updated_at": _aware(operation.updated_at).isoformat(),
+    }
+
+
+def operation_detail_response(
+    item: Mapping[str, object], *, available_actions: object = ()
+) -> OperationDetailResponse:
+    """Build the bounded generic read representation from a durable projection."""
+
+    return OperationDetailResponse(
+        id=item["id"],
+        parent_id=item.get("parent_id"),
+        node_ids=item["node_ids"],
+        kind=item["kind"],
+        state=item["state"],
+        attempt=item["attempt"],
+        progress=_progress_projection(item.get("progress")),
+        created_at=str(item["created_at"]),
+        updated_at=(
+            None if item.get("updated_at") is None else item["updated_at"]
+        ),
+        failure=_failure_projection(item.get("result")),
+        provenance=_provenance_projection(item.get("result")),
+        evidence_download=_evidence_download_projection(item.get("result")),
+        recovery=recovery_for_operation(
+            item["state"],
+            supported_actions=item.get("supported_actions"),
+            available_actions=available_actions,
+            uncertain=bool(
+                isinstance(item.get("result"), Mapping)
+                and item["result"].get("uncertain") is True
+            ),
+        ),
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -446,7 +905,7 @@ def _agent_upgrade_diagnostics(
     expected_binary = package.get("target_binary_digest")
     expected_build = package.get("target_build_digest")
     targets: list[dict[str, object]] = []
-    legacy_generic_ambiguous = False
+    failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
     for node_id in job.targets:
@@ -467,9 +926,9 @@ def _agent_upgrade_diagnostics(
         # the success gate and must never be projected as proof here.
         target_proven = bool(operation is not None and operation.state == "succeeded")
         unresolved_generic = bool(
-            not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
+            not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
-        legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
+        failure_details_unavailable = failure_details_unavailable or unresolved_generic
         retry_queued = bool(
             operation is not None
             and operation.retry_disposition == "retry"
@@ -517,7 +976,7 @@ def _agent_upgrade_diagnostics(
             "build_digest": expected_build,
         },
         "targets": targets,
-        "legacy_generic_ambiguous": legacy_generic_ambiguous,
+        "failure_details_unavailable": failure_details_unavailable,
         "next_action": (
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(
@@ -819,6 +1278,16 @@ class _DurableOperationProjection:
                         ).model_dump(mode="json")
                     )
                 ),
+                "result": (
+                    None
+                    if attempts.get(operation.id) is None
+                    else attempts[operation.id].result
+                ),
+                "supported_actions": (
+                    operation.payload.get("supported_actions")
+                    if isinstance(operation.payload, Mapping)
+                    else None
+                ),
                 "state": operation.state,
                 "updated_at": _aware(operation.updated_at).isoformat(),
             }
@@ -847,6 +1316,194 @@ class _DurableOperationProjection:
             ),
             agent_upgrade_diagnostics=agent_upgrade_diagnostics,
         )
+
+    def list_operations(
+        self,
+        cursor: str | None,
+        limit: int,
+        state: str | None,
+        node_id: str | None,
+    ) -> OperationListPage:
+        """List the same durable AgentOperation authority globally."""
+
+        if not 1 <= limit <= 100:
+            raise ValueError("operation page limit is invalid")
+        context = {"state": state, "node_id": node_id}
+        boundary: tuple[datetime, str] | None = None
+        if cursor is not None:
+            try:
+                decoded = self._cursors.decode(
+                    cursor,
+                    resource="operations",
+                    order="created-at-desc/id-desc/v1",
+                    context=context,
+                )
+                if (
+                    not isinstance(decoded, list)
+                    or len(decoded) != 2
+                    or not all(isinstance(item, str) for item in decoded)
+                ):
+                    raise ValueError
+                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
+            except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+                raise ValueError("operation cursor is invalid") from None
+        with self._sessions() as session:
+            filters = []
+            if state is not None:
+                filters.append(AgentOperation.state == state)
+            if node_id is not None:
+                filters.append(AgentOperation.node_id == node_id)
+            if boundary is not None:
+                created_at, operation_id = boundary
+                filters.append(
+                    or_(
+                        AgentOperation.created_at < created_at,
+                        (AgentOperation.created_at == created_at)
+                        & (AgentOperation.id < operation_id),
+                    )
+                )
+            rows = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(*filters)
+                    .order_by(
+                        AgentOperation.created_at.desc(), AgentOperation.id.desc()
+                    )
+                    .limit(limit + 1)
+                )
+            )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            total_filters = []
+            if state is not None:
+                total_filters.append(AgentOperation.state == state)
+            if node_id is not None:
+                total_filters.append(AgentOperation.node_id == node_id)
+            total = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(*total_filters)
+                )
+                or 0
+            )
+            attempts = {
+                attempt.operation_id: attempt
+                for attempt in session.scalars(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id.in_([row.id for row in rows])
+                    )
+                )
+                if any(
+                    row.id == attempt.operation_id
+                    and row.current_attempt == attempt.attempt
+                    for row in rows
+                )
+            }
+        items = [
+            {
+                **_operation_item(row, attempts.get(row.id)),
+                "created_at": _aware(row.created_at).isoformat(),
+                "job_id": row.parent_job_id,
+            }
+            for row in rows
+        ]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = self._cursors.encode(
+                resource="operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+                boundary=[_aware(last.created_at).isoformat(), last.id],
+            )
+        return OperationListPage(items=items, next_cursor=next_cursor, total=total)
+
+    def list_operation_provider(self, query: OperationQuery) -> OperationListPage:
+        """Return AgentOperation rows after the shared global boundary."""
+
+        if not 1 <= query.limit <= 101:
+            raise ValueError("operation provider page limit is invalid")
+        filters = []
+        if query.state is not None:
+            filters.append(AgentOperation.state == query.state)
+        if query.node_id is not None:
+            filters.append(AgentOperation.node_id == query.node_id)
+        if query.after is not None:
+            created_at, operation_id = query.after
+            filters.append(
+                or_(
+                    AgentOperation.created_at < created_at,
+                    (AgentOperation.created_at == created_at)
+                    & (AgentOperation.id < operation_id),
+                )
+            )
+        with self._sessions() as session:
+            rows = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(*filters)
+                    .order_by(
+                        AgentOperation.created_at.desc(), AgentOperation.id.desc()
+                    )
+                    .limit(query.limit)
+                )
+            )
+            total_filters = []
+            if query.state is not None:
+                total_filters.append(AgentOperation.state == query.state)
+            if query.node_id is not None:
+                total_filters.append(AgentOperation.node_id == query.node_id)
+            total = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(*total_filters)
+                )
+                or 0
+            )
+            attempts = {
+                attempt.operation_id: attempt
+                for attempt in session.scalars(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id.in_([row.id for row in rows])
+                    )
+                )
+                if any(
+                    row.id == attempt.operation_id
+                    and row.current_attempt == attempt.attempt
+                    for row in rows
+                )
+            }
+        return OperationListPage(
+            items=[
+                {
+                    **_operation_item(row, attempts.get(row.id)),
+                    "created_at": _aware(row.created_at).isoformat(),
+                    "job_id": row.parent_job_id,
+                }
+                for row in rows
+            ],
+            next_cursor=None,
+            total=total,
+        )
+
+    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+        with self._sessions() as session:
+            operation = session.get(AgentOperation, operation_id)
+            if operation is None:
+                raise KeyError(operation_id)
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            return {
+                **_operation_item(operation, attempt),
+                "created_at": _aware(operation.created_at).isoformat(),
+                "job_id": operation.parent_job_id,
+            }
 
     def resume_job(self, job_id: str) -> None:
         with self._sessions.begin() as session:
@@ -885,6 +1542,7 @@ def durable_operation_services(
     cursors: CursorCodec,
     stale_after_seconds: int = 150,
     resume_agent_upgrade: Callable[[str], None] | None = None,
+    operation_providers: Sequence[OperationProvider] = (),
 ) -> OperationApiServices:
     """Build bounded projections over database state and the active route bundle."""
 
@@ -914,6 +1572,17 @@ def durable_operation_services(
         agents=projection.agents,
         job_operations=projection.job_operations,
         resume_job=resume_job,
+        list_operations=projection.list_operations,
+        get_operation=projection.get_operation,
+        operation_providers=(
+            OperationProvider(
+                family="agent",
+                list_operations=projection.list_operation_provider,
+                get_operation=projection.get_operation,
+            ),
+            *operation_providers,
+        ),
+        cursor_codec=cursors,
     )
 
 
@@ -1010,15 +1679,7 @@ class NodeStatus(StrictModel):
             "use Fleet connection, inventory, and telemetry fields for live readiness."
         )
     )
-    stale: bool = Field(
-        deprecated=True,
-        description=(
-            "Deprecated compatibility alias for health_probe_stale; this does not "
-            "represent aggregate node readiness."
-        ),
-    )
     labels: dict[str, str]
-    profile: str | None
     memory_available_bytes: int = Field(ge=0)
     disk_available_bytes: int = Field(ge=0)
     probe_age_seconds: float | None = Field(

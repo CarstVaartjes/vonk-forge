@@ -10,14 +10,13 @@ type FixtureMode = "normal" | "empty" | "failed";
 const fixtureStates = new WeakMap<Page, {mode: FixtureMode}>();
 
 function artifactDetail() {
-  const detail = structuredClone(fullLibraryDetail) as typeof fullLibraryDetail & {visual_recipe: Record<string, unknown> & {interfaces: unknown[]}};
+  const detail = structuredClone(fullLibraryDetail);
   detail.recipe.title = "Aurora media workcell";
   detail.recipe.description = "A bounded artifact workflow with durable controller evidence.";
-  detail.visual_recipe = {
-    ...detail.visual_recipe,
+  detail.definition = {
+    ...detail.definition,
     metadata: {title: detail.recipe.title, description: detail.recipe.description, tags: ["artifact", "media"]},
-    model_license: null,
-    parameters: [{name: "seed", description: "Reproducible generation seed.", type: "integer", default: 42, minimum: 0, maximum: 2_147_483_647, allowed_values: [], pattern: null, change_effect: "restart"}],
+    settings: {kind: "job", knobs: {seed: {value: 42, change_effect: "restart"}}},
     interfaces: [{
       adapter: "artifact-job", path: "/outputs", timeout_seconds: 3600,
       input: {
@@ -50,7 +49,7 @@ function artifactDetail() {
         ],
       },
     }],
-  };
+  } as typeof detail.definition;
   detail.operational_state.runs = [{
     installation_id: "installation-chat", mapping_id: "mapping-chat", node_ids: ["node-alpha", "node-beta"], recipe_revision_id: "revision-chat",
     route_state: "published", run_id: runId, state: "running",
@@ -93,7 +92,6 @@ async function installArtifactFixture(page: Page) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
-    if (path === "/api/v1/catalog/public-recipes") return route.fulfill({json: {repository: "fixture", commit: "a".repeat(40), recipes: []}});
     if (path === "/api/v1/library") return route.fulfill({json: librarySnapshot});
     if (path === "/api/v1/library/recipes/recipe-chat") return route.fulfill({json: detail});
     if (path === "/api/v1/artifact-jobs/capabilities") return route.fulfill({json: {
@@ -126,9 +124,8 @@ test("renders the real artifact workcell with durable active and multi-output hi
   const workcell = page.getByRole("region", {name: "Create artifacts"});
   await expect(workcell).toBeVisible();
   await expect(workcell.getByText("Run ready for jobs")).toBeVisible();
-  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
-  await expect(fit.getByText("Comfortable")).toBeVisible();
-  await expect(fit).toContainText("2 Sparks");
+  const fit = page.getByRole("region", {name: "Model and memory fit"});
+  await expect(fit.getByText("Unknown")).toBeVisible();
   const interfaceSelector = workcell.getByRole("combobox", {name: "Job interface"});
   await interfaceSelector.selectOption({label: "Video Job · 1 bounded slot"});
   await expect(workcell.getByLabel("Source clip")).toHaveAttribute("accept", "video/mp4,.mp4");
@@ -183,7 +180,7 @@ test("exposes explicit empty and failed retry recovery states", async ({page}) =
 test("keeps variant evidence and native input contracts accessible without phone overflow", async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await page.goto("/library/recipes/recipe-chat");
-  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
+  const fit = page.getByRole("region", {name: "Model and memory fit"});
   await expect(fit).toBeVisible();
   const rows = await fit.locator(":scope > div").evaluateAll(elements => elements.map(element => ({
     left: Math.round(element.getBoundingClientRect().left),
@@ -233,7 +230,7 @@ test("captures the artifact workcell review surfaces", async ({page}) => {
   await mobileWorkcell.getByRole("textbox", {name: "Prompt"}).fill("An aurora-lit product scene with precise titanium geometry and a restrained ambient score.");
   await expect(skipLink).toHaveCSS("clip-path", "inset(50%)");
   await expect.poll(() => skipLink.evaluate(element => ({height: element.clientHeight, width: element.clientWidth}))).toEqual({height: 1, width: 1});
-  await expect(page.locator(".recipe-qualification-disclosure")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".recipe-execution-disclosure")).not.toHaveAttribute("open", "");
   await expect(page.locator(".artifact-job-archive")).not.toHaveAttribute("open", "");
   const failedBadge = page.locator(".artifact-job-archive > summary .status-pill", {hasText: "Failed"});
   await expect(failedBadge).toHaveCSS("white-space", "nowrap");

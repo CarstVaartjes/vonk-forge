@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -68,12 +69,15 @@ def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
     assert persisted.current_attempt == 0
 
 
-def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> None:
+@pytest.mark.parametrize("coordinator", ["fleet_profiles", "run_switches", "recoveries"])
+def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, coordinator) -> None:
     calls: list[str] = []
+    engine = create_engine(f"sqlite:///{tmp_path / 'fair-worker.sqlite'}")
+    Base.metadata.create_all(engine)
 
-    class Profiles:
+    class Coordinator:
         def tick(self) -> bool:
-            calls.append("profiles")
+            calls.append(coordinator)
             return True
 
     class Routes:
@@ -82,14 +86,14 @@ def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> Non
             return False
 
     worker = RecipeOperationWorker(
-        None,
+        sessionmaker(engine, expire_on_commit=False),
         Routes(),
         clock=lambda: datetime(2026, 8, 6, tzinfo=UTC),
-        fleet_profiles=Profiles(),
+        **{coordinator: Coordinator()},
     )
 
     assert worker.tick() is True
-    assert calls == ["profiles"]
+    assert calls == [coordinator, "routes"]
 
 
 def test_production_builder_wires_reconciliation_and_housekeeping(
@@ -143,6 +147,9 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
         artifact_job_reconcile_interval_seconds=3600,
         artifact_job_reconcile_batch_limit=1000,
+        model_cache=object(),
+        agent_artifact_root=tmp_path / "agent-artifacts",
+        recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
 
     assert not hasattr(worker, "_updates")
@@ -169,6 +176,13 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     assert maintenance_state["last_success_at"] == current.isoformat()
     assert worker._recipes._fleet_profiles is not None
     assert worker._recipes._fleet_profiles._recipe_operations is not None
+    assert worker._recipes._run_switches._artifact_phase_executor is not None
+    assert len(worker._background_services) == 1
+    image_production = worker._background_closers[0].__self__
+    assert image_production.scheduler is not None
+    scheduler = image_production.scheduler
+    worker.close()
+    assert scheduler.executor._shutdown is True
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(
@@ -192,6 +206,7 @@ def test_production_worker_settings_load_only_worker_authority_secrets(
     assert settings.internal_api_token == b"w" * 32
     assert settings.internal_api_url == "http://control-api:8000"
     assert settings.state_path == tmp_path / "state"
+    assert settings.agent_artifact_root == Path("/state/agent-artifacts")
     assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
     assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
     assert settings.artifact_job_reconcile_interval_seconds == 3600

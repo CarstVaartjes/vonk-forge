@@ -2,8 +2,7 @@
 
 Date: 2026-08-07
 
-Status: approved architecture recorded for user review before implementation
-planning
+Status: Retired historical design; implementation assumptions are not active.
 
 ## Purpose
 

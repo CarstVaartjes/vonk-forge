@@ -42,7 +42,7 @@ x-hermes-service: &hermes-service
 
 services:
   hermes-litellm-key-provisioner:
-    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
+    image: ${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}
     profiles: [hermes]
     restart: unless-stopped
     logging:

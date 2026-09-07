@@ -17,6 +17,7 @@ def _rendered() -> dict:
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "DATABASE_URL_FILE": "/dev/null",
+        "HF_TOKEN_FILE": "/dev/null",
         "ADMIN_PASSWORD_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
@@ -122,7 +123,13 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "registry-edge",
         "registry-publisher",
     }
-    assert set(services["control-worker"]["networks"]) == {"data", "worker-authority"}
+    assert set(services["control-worker"]["networks"]) == {"data", "worker-authority", "artifact-egress"}
+    assert not services["control-worker"].get("ports")
+    assert not rendered["networks"]["artifact-egress"].get("internal", False)
+    assert {
+        name for name, service in services.items()
+        if "artifact-egress" in service.get("networks", {})
+    } == {"control-worker"}
     assert set(services["control-api"]["networks"]) == {
         "agent-proxy",
         "application",
@@ -217,6 +224,7 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/routes",
         "/supervisor",
         "/state",
+        "/state/agent-artifacts",
         "/run/vonk-normalized-secrets",
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
@@ -274,6 +282,7 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
         "package-helper-receipt-private-key",
         "host-runtime-grant-private-key",
         "database-url",
+        "hf-token",
     } <= api_secrets
     normalized = {volume["target"]: volume for volume in api["volumes"]}
     assert normalized["/normalized"].get("read_only") is not True
@@ -290,6 +299,7 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
         ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
         ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
         ("VONK_WORKER_API_TOKEN_FILE", "worker-api-token"),
+        ("VONK_HF_TOKEN_FILE", "hf-token"),
     ):
         assert api["environment"][variable] == f"/run/vonk-normalized-secrets/{name}"
     assert worker["environment"]["VONK_DATABASE_URL_FILE"] == (
@@ -297,6 +307,9 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
     )
     assert worker["environment"]["VONK_WORKER_API_TOKEN_FILE"] == (
         "/run/vonk-normalized-secrets/worker-api-token"
+    )
+    assert worker["environment"]["VONK_HF_TOKEN_FILE"] == (
+        "/run/vonk-normalized-secrets/hf-token"
     )
 
 
@@ -334,6 +347,25 @@ def test_caddy_has_readiness_checks() -> None:
     ]
 
 
+def test_recipe_images_use_a_dedicated_persistent_volume() -> None:
+    rendered = _rendered()
+    api = rendered["services"]["control-api"]
+    worker = rendered["services"]["control-worker"]
+    api_volumes = {volume["target"]: volume for volume in api["volumes"]}
+    worker_volumes = {volume["target"]: volume for volume in worker["volumes"]}
+
+    assert api["tmpfs"] == ["/tmp"]
+    expected_artifact_volume = {
+        "type": "volume",
+        "source": "agent-artifacts",
+        "target": "/state/agent-artifacts",
+        "volume": {},
+    }
+    assert api_volumes["/state/agent-artifacts"] == expected_artifact_volume
+    assert worker_volumes["/state/agent-artifacts"] == expected_artifact_volume
+    assert "agent-artifacts" in rendered["volumes"]
+
+
 def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     services = _rendered()["services"]
     worker_volumes = {
@@ -342,8 +374,6 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     api_volumes = {
         volume["target"]: volume for volume in services["control-api"]["volumes"]
     }
-    assert "/state/agent-artifacts" in services["control-api"]["tmpfs"]
-    assert "/state/agent-artifacts" not in api_volumes
     litellm_volumes = {
         volume["target"]: volume for volume in services["litellm"]["volumes"]
     }

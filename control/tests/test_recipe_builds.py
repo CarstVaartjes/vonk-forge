@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 
 import pytest
 import vonk_control.recipe_builds as recipe_builds_module
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -19,8 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService, RecipeDraftInput
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -29,8 +30,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Base,
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     Job,
@@ -46,8 +46,7 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-
-from .test_catalog_service import _seed_recipe_dependencies
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 
 class RecordingQueue:
@@ -82,6 +81,11 @@ class RecordingQueue:
         pass
 
 
+def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
+    assert recipe_builds_module._build_disk_reserve(100 * 1024**3) == 4 * 1024**3
+    assert recipe_builds_module._build_disk_reserve(4 * 1024**4) == 64 * 1024**3
+
+
 def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     engine = create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
     Base.metadata.create_all(engine)
@@ -98,22 +102,16 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     bundles = SourceBundleStore(tmp_path / "bundles")
     stored = bundles.put(bundle.sha256, io.BytesIO(bundle.archive))
     document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
     )
-    document["build"]["network"] = network or {"mode": "none", "hosts": []}
-    document["build"]["context"]["sha256"] = bundle.sha256
-    document["build"]["context"]["expected_bytes"] = len(bundle.archive)
-    document["identity"]["slug"] = "qwen3-vllm"
-    document["build"]["target"] = "runtime"
-    document["build"]["security"] = {"capabilities": ["DAC_OVERRIDE"]}
-    document["build"]["resources"] = {
-        "cpu_cores": 6,
-        "download_bytes": 100,
-        "temporary_bytes": 200,
-        "memory_bytes": 300,
-        "processes": 2048,
-        "timeout_seconds": 600,
+    document["execution"]["build"]["network"] = network or {
+        "mode": "none",
+        "hosts": [],
     }
+    document["identity"]["slug"] = "qwen3-vllm"
+    document["execution"]["build"]["target"] = "runtime"
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -148,8 +146,8 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
         InventorySnapshotInput(
             node_id,
             now,
-            8 * 1024 * 1024 * 1024,
-            7 * 1024 * 1024 * 1024,
+            2 * 1024**4,
+            1 * 1024**4,
             100_000,
             80_000,
             100_000,
@@ -163,14 +161,63 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
             ),
         )
     )
-    catalog = CatalogService(
-        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    catalog = CatalogEntityService(sessions, clock=lambda: now)
+    model = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
     )
-    _seed_recipe_dependencies(catalog, document)
-    draft = catalog.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
-    )
-    revision = catalog.resolve(draft.recipe_id, 1, "admin")
+    model_draft = catalog.create_draft(model, actor="admin")
+    catalog.resolve(model_draft.id, actor="admin")
+    recipe_draft = catalog.create_draft(document, actor="admin")
+    with sessions.begin() as session:
+        stored_revision = session.get(CatalogDocumentRevision, recipe_draft.id)
+        assert stored_revision is not None
+        stored_revision.projected = {
+            **stored_revision.projected,
+            "source_bundle_sha256": bundle.sha256,
+            "build_resources": {
+                "cpu_cores": 6,
+                "download_bytes": 100,
+                "temporary_bytes": 200,
+                "memory_bytes": 300,
+                "processes": 2048,
+                "timeout_seconds": 600,
+            },
+            "build_security": {"capabilities": ["DAC_OVERRIDE"]},
+            "build_options": {
+                "additional_contexts": [],
+                "annotations": [],
+                "environment": [],
+                "format": "oci",
+                "identity_label": True,
+                "ignorefile": None,
+                "jobs": 1,
+                "labels": [],
+                "layer_compression": "disabled",
+                "layer_labels": [],
+                "layers": True,
+                "no_hostname": False,
+                "no_hosts": False,
+                "omit_history": False,
+                "os_features": [],
+                "os_version": None,
+                "shm_bytes": 67108864,
+                "skip_unused_stages": True,
+                "squash": "none",
+                "timestamp": None,
+                "unset_environment": [],
+                "unset_labels": [],
+            },
+            "build_model_artifacts": [
+                {
+                    "path": "model.safetensors",
+                    "sha256": "c" * 64,
+                    "size_bytes": 1024,
+                }
+            ],
+        }
+    revision = catalog.resolve(recipe_draft.id, actor="admin")
     return sessions, bundles, now, node_id, revision
 
 
@@ -197,25 +244,11 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert plan.agent_payload["base_image_storage_bytes"] == 100
     assert (
         plan.agent_payload["source_bundle_sha256"]
-        == revision.document["build"]["context"]["sha256"]
+        == revision.projected["source_bundle_sha256"]
     )
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
-
-
-def test_build_plan_rejects_missing_exact_recipe_dependency(tmp_path: Path) -> None:
-    sessions, bundles, now, node_id, revision = setup(tmp_path)
-    with sessions.begin() as session:
-        session.execute(delete(CatalogEntityRevision))
-        session.execute(delete(CatalogEntity))
-
-    with pytest.raises(RecipeBuildError) as caught:
-        RecipeBuildService(sessions, bundles=bundles).plan(
-            revision.id, node_id, now=now
-        )
-
-    assert caught.value.code == "build.dependencies_stale"
 
 
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
@@ -231,6 +264,206 @@ def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> 
 
     assert second.build_id != first.build_id
     assert second.build_input_sha256 != first.build_input_sha256
+
+
+def test_build_resolution_reuses_exact_receipt_without_builder_admission(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.state = "revoked"
+        node.binary_digest = None
+
+    resolution = service.resolve(revision.id)
+
+    assert resolution.cached
+    assert resolution.build_id == plan.build_id
+    assert resolution.build_input_sha256 == plan.build_input_sha256
+    assert resolution.builder_binary_digest == "1" * 64
+    assert resolution.image_digest == "sha256:" + "b" * 64
+
+
+def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, revision.id)
+        assert current is not None
+        document = copy.deepcopy(current.document)
+        document["metadata"]["title"] = "Editorially renamed recipe"
+        canonical = RecipeDefinition.model_validate(document)
+        document = canonical.model_dump(mode="json")
+        content_digest = content_sha256(canonical)
+        newer_revision = CatalogDocumentRevision(
+            id="notes-revision-" + "1" * 19,
+            document_id=current.document_id,
+            kind=current.kind,
+            publisher=current.publisher,
+            slug=current.slug,
+            revision_number=current.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=document,
+            content_digest=content_digest,
+            artifact_key="e" * 64,
+            execution_key="f" * 64,
+            projected=copy.deepcopy(current.projected),
+            created_by="test",
+            created_at=now,
+        )
+        session.add(newer_revision)
+
+    resolution = service.resolve(newer_revision.id)
+
+    assert resolution.cached
+    assert resolution.build_id == plan.build_id
+    assert resolution.build_input_sha256 == plan.build_input_sha256
+
+
+def test_build_resolution_without_cache_returns_durable_intent_identity(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, _now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.state = "revoked"
+        node.binary_digest = None
+
+    resolution = service.resolve(revision.id)
+
+    assert not resolution.cached
+    assert resolution.build_id is None
+    assert resolution.build_input_sha256 is None
+    assert len(resolution.input_intent_sha256) == 64
+    assert "builder_binary_digest" not in resolution.input_intent
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("build_input_sha256", "0" * 64),
+        ("image_digest", None),
+        ("oci_layout_sha256", None),
+        ("image_bytes", None),
+        ("builder_binary_digest", "2" * 64),
+    ],
+)
+def test_build_resolution_rejects_incomplete_or_mismatched_cache_receipts(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        if field == "builder_binary_digest":
+            build.policy_report = dict(build.policy_report) | {field: value}
+        else:
+            setattr(build, field, value)
+
+    resolution = service.resolve(revision.id)
+
+    assert not resolution.cached
+    assert resolution.build_input_sha256 is None
+    assert resolution.build_id is None
+
+
+def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    resolution = service.resolve(revision.id)
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, revision.id)
+        assert current is not None
+        document = copy.deepcopy(current.document)
+        document["execution"]["build"]["arguments"] = [{"name": "changed", "value": "yes"}]
+        canonical = RecipeDefinition.model_validate(document)
+        document = canonical.model_dump(mode="json")
+        content_digest = content_sha256(canonical)
+        newer_revision = CatalogDocumentRevision(
+            id="new-revision-" + "1" * 25,
+            document_id=current.document_id,
+            kind=current.kind,
+            publisher=current.publisher,
+            slug=current.slug,
+            revision_number=current.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=document,
+            content_digest=content_digest,
+            artifact_key="e" * 64,
+            execution_key="f" * 64,
+            projected=copy.deepcopy(current.projected),
+            created_by="test",
+            created_at=now,
+        )
+        session.add(newer_revision)
+
+    with pytest.raises(RecipeBuildError, match="immutable build resolution"):
+        service.plan(newer_revision.id, node_id, now=now, resolution=resolution)
+
+
+def test_build_plan_from_intent_rechecks_selected_builder_capacity(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    resolution = service.resolve(revision.id)
+    newer = now + timedelta(seconds=1)
+    InventoryRepository(sessions, clock=lambda: newer).record(
+        InventorySnapshotInput(
+            node_id,
+            newer,
+            2 * 1024**4,
+            1,
+            100_000,
+            80_000,
+            100_000,
+            80_000,
+            1,
+            False,
+            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+        )
+    )
+
+    with pytest.raises(RecipeBuildError, match="temporary disk capacity"):
+        service.plan(revision.id, node_id, now=newer, resolution=resolution)
 
 
 def test_build_identity_changes_when_archive_format_changes(
@@ -293,7 +526,7 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
         fence="00000000-0000-4000-8000-000000000003",
         node_id=node_id,
         operation=ProtocolOperation.RECIPE_BUILD,
-        authority_revision="a"  * 64,
+        authority_revision="a" * 64,
         payload_digest=payload_digest,
         payload=plan.agent_payload,
         deadline=now,
@@ -339,10 +572,12 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
     assert [(item.kind, item.amount_bytes) for item in reservations] == [
         (
             "disk",
-            plan.agent_payload["limits"]["temporary_bytes"]
-            + plan.agent_payload["source_bundle_bytes"]
-            + plan.agent_payload["limits"]["output_bytes"]
-            + plan.agent_payload["base_image_storage_bytes"],
+            max(
+                plan.agent_payload["limits"]["temporary_bytes"],
+                plan.agent_payload["source_bundle_bytes"]
+                + plan.agent_payload["limits"]["output_bytes"]
+                + plan.agent_payload["base_image_storage_bytes"],
+            ),
         ),
         ("host-memory", plan.agent_payload["limits"]["memory_bytes"]),
     ]
@@ -573,23 +808,28 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     source_bytes = len(
-        bundles.get(revision.document["build"]["context"]["sha256"]).archive
+        bundles.get(revision.projected["source_bundle_sha256"]).archive
     )
-    temporary_bytes = revision.document["build"]["resources"]["temporary_bytes"]
+    temporary_bytes = revision.projected["build_resources"]["temporary_bytes"]
     output_bytes = max(
         role["resources"]["disk"]["image_bytes"]
         for role in revision.document["topology"]["roles"]
     )
-    peak_bytes = temporary_bytes + source_bytes + output_bytes
-    # This inventory has enough capacity for staging + source, but not for the
-    # simultaneous OCI export that the builder retains before promotion.
+    base_image_bytes = revision.projected["build_resources"]["download_bytes"]
+    peak_bytes = max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
+    disk_total_bytes = 2 * 1024**4
+    required_bytes = peak_bytes + recipe_builds_module._build_disk_reserve(
+        disk_total_bytes
+    )
+    # The envelope itself fits, but accepting it would violate the filesystem
+    # reserve retained for the Spark host.
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
         InventorySnapshotInput(
             node_id,
             newer,
-            peak_bytes,
-            peak_bytes - 1,
+            disk_total_bytes,
+            required_bytes - 1,
             100_000,
             80_000,
             100_000,
@@ -642,8 +882,8 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
         InventorySnapshotInput(
             node_id,
             newer,
-            8 * 1024 * 1024 * 1024,
-            7 * 1024 * 1024 * 1024,
+            2 * 1024**4,
+            1 * 1024**4,
             100_000,
             80_000,
             100_000,

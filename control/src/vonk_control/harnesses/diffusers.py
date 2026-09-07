@@ -87,6 +87,7 @@ class DiffusersHarnessCompiler:
             recipe,
             distribution,
             frozenset({"HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"}),
+            engine_slug=self.slug,
         )
         return projection(
             slug=self.slug,

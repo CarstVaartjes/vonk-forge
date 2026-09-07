@@ -37,7 +37,7 @@ def metadata(arguments: Sequence[str]) -> list[str]:
     return [
         *(f"{name}={value}" for name, value in authority.items()),
         f"snapshot={channel}-{version}",
-        f"state_prefix=versions/{version}",
+        f"state_prefix=arm64/versions/{version}",
     ]
 
 

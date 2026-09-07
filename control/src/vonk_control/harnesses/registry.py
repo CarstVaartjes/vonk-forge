@@ -383,7 +383,7 @@ class HarnessRegistry:
             projection,
             binding=HarnessBinding(
                 harness_content_sha256=harness_digest,
-                distribution_content_sha256=distribution_digest,
+                execution_content_sha256=distribution_digest,
                 topology_node_count=node_count,
                 role=role,
                 rank=rank,

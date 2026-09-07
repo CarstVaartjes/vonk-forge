@@ -24,12 +24,12 @@ crash_phase=${REPAIR_CRASH_PHASE:-none}
 standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
-installed_version=0.1.0~dev.335+g2eaaf4d9b2b5
+installed_version=0.1.1~dev.335+g2eaaf4d9b2b5
 packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
 binary_revision=$packaging_revision
-source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}
+source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}
 repair_version=${source_version}+repair.spk${node_suffix}.1
-ordinary_version=0.1.0~dev.1788260441+g0123456789ab
+ordinary_version=0.1.1~dev.1788260441+g0123456789ab
 epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
@@ -488,9 +488,9 @@ test -x "$build_egress_fixture"
 
 for generation in old target next; do
   case "$generation" in
-    old) digest=$build_digest_old; marker=old; semantic=0.1.0 ;;
-    target) digest=$build_digest_target; marker=target; semantic=0.1.0 ;;
-    next) digest=$build_digest_next; marker=next; semantic=0.1.0 ;;
+    old) digest=$build_digest_old; marker=old; semantic=0.1.1 ;;
+    target) digest=$build_digest_target; marker=target; semantic=0.1.1 ;;
+    next) digest=$build_digest_next; marker=next; semantic=0.1.1 ;;
   esac
   build_agent "$test_root/$generation-bin/vonk-agent" "$semantic" "$digest" "$marker"
   build_helper "$test_root/$generation-bin/vonk-agent-helper" "$marker"
@@ -1922,7 +1922,7 @@ test "$target_agent_pid" != "$old_agent_pid"
 test "$target_helper_pid" != "$old_helper_pid"
 self_test="$(/usr/lib/vonk-forge/vonk-agent --config \
   /etc/vonk-forge-agent/agent.toml self-test)"
-grep -F '"semantic_version":"0.1.0"' <<< "$self_test" >/dev/null
+grep -F '"semantic_version":"0.1.1"' <<< "$self_test" >/dev/null
 grep -F '"build_digest":"'"$build_digest_target"'"' <<< "$self_test" >/dev/null
 grep -F '"binary_digest":"'"$source_agent_sha"'"' <<< "$self_test" >/dev/null
 grep -F '"architecture":"linux-arm64"' <<< "$self_test" >/dev/null

@@ -1,5 +1,8 @@
 # Source-First Recipes and Cluster Mapping Implementation Plan
 
+> Retired historical plan. The authoring/import portions are preserved for
+> provenance only; the active platform uses the canonical managed library.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the unreleased image-first recipe draft with one source-first v1 contract, build each workload once on a GPU node, distribute that exact OCI result, and bind portable deployment profiles to first-class local cluster mappings.
