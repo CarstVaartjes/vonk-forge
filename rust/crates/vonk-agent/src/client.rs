@@ -2235,6 +2235,20 @@ mod tests {
         );
         assert!(archive_root.join(&archive_sha256).is_file());
 
+        let before_reinstall = crate::oci::test_sha256_open_file_call_count();
+        runtime
+            .install(
+                &plan,
+                first_installation,
+                &plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::oci::test_sha256_open_file_call_count(),
+            before_reinstall,
+            "reinstall reuses the receipt-bound destination without rereading the source"
+        );
+
         let mut second_assignment = assignment.clone();
         second_assignment.plan_digest = "f".repeat(64);
         let (second_client, second_server) = distribution_fixture_server(

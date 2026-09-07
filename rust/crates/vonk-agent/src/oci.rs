@@ -1347,9 +1347,35 @@ fn sync_parent(parent: &Path) -> Result<(), OciError> {
     Ok(())
 }
 
+struct TemporaryArtifact {
+    path: PathBuf,
+    retained: bool,
+}
+
+impl TemporaryArtifact {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            retained: false,
+        }
+    }
+
+    fn retain(&mut self) {
+        self.retained = true;
+    }
+}
+
+impl Drop for TemporaryArtifact {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 fn sha256_open_file(file: &mut File, before: &fs::Metadata) -> Result<String, OciError> {
     #[cfg(test)]
-    SHA256_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
     file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -1379,7 +1405,12 @@ fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 thread_local! {
-    static SHA256_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SHA256_OPEN_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn test_sha256_open_file_call_count() -> usize {
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.get())
 }
 
 fn write_installation_metadata(
@@ -1680,16 +1711,6 @@ fn materialize_compiled_models(
             // second OCI mount intent.
             continue;
         }
-        let source = scoped_root.join(&artifact.sha256);
-        if !source.starts_with(&scoped_root) {
-            return Err(OciError::Artifact);
-        }
-        let (mut source_file, source_metadata) =
-            open_trusted_model_file(&source, artifact.size_bytes)?;
-        if sha256_open_file(&mut source_file, &source_metadata)? != artifact.sha256 {
-            return Err(OciError::Artifact);
-        }
-
         if !destination.starts_with(&destination_root) {
             return Err(OciError::Artifact);
         }
@@ -1709,20 +1730,28 @@ fn materialize_compiled_models(
                 let (_, opened_metadata) =
                     open_trusted_model_file(&destination, artifact.size_bytes)?;
                 if metadata_matches_receipt(&opened_metadata, entry) {
+                    physical_by_path.insert(physical_key, (destination.clone(), physical));
                     materialized.push(destination);
                     continue;
                 }
             }
         }
-        source_file.seek(SeekFrom::Start(0))?;
-        let temporary = destination.with_extension(format!(
-            "{}.{}.partial",
-            std::process::id(),
-            artifact.file_id
-        ));
-        if temporary.exists() {
+        let source = scoped_root.join(&artifact.sha256);
+        if !source.starts_with(&scoped_root) {
             return Err(OciError::Artifact);
         }
+        let (mut source_file, source_metadata) =
+            open_trusted_model_file(&source, artifact.size_bytes)?;
+        if sha256_open_file(&mut source_file, &source_metadata)? != artifact.sha256 {
+            return Err(OciError::Artifact);
+        }
+        source_file.seek(SeekFrom::Start(0))?;
+        let temporary = destination.with_extension(format!(
+            "{}.{}.{}.partial",
+            std::process::id(),
+            uuid::Uuid::new_v4(),
+            artifact.file_id
+        ));
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -1731,6 +1760,7 @@ fn materialize_compiled_models(
                 (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
             )
             .open(&temporary)?;
+        let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
         let copied = std::io::copy(&mut source_file, &mut output)?;
         output.sync_all()?;
         let source_after = source_file.metadata()?;
@@ -1746,6 +1776,7 @@ fn materialize_compiled_models(
         }
         drop(output);
         fs::rename(&temporary, &destination)?;
+        temporary_guard.retain();
         sync_parent(parent)?;
         physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
@@ -1869,7 +1900,7 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OciError, OciRuntime, SHA256_FILE_CALLS, materialize_compiled_models,
+        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
         read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
         write_installation_metadata,
     };
@@ -2086,11 +2117,11 @@ mod tests {
         let (installation_id, _, _) = persisted_installation(data.path());
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
     }
 
@@ -2121,16 +2152,16 @@ mod tests {
 
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         std::thread::sleep(Duration::from_millis(2));
         fs::write(installation.join("models/primary/config.json"), b"primary").unwrap();
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
     }
 
     #[test]
@@ -2144,11 +2175,11 @@ mod tests {
         );
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
     }
 
@@ -2160,9 +2191,9 @@ mod tests {
         let primary = installation.join("models/primary/config.json");
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
         apply_acl(
             &primary,
@@ -2175,11 +2206,11 @@ mod tests {
             ],
         );
         runtime.verify_installation(&installation_id).unwrap();
-        let after_acl = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after_acl = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after_acl, before + 1);
 
         runtime.verify_installation(&installation_id).unwrap();
-        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), after_acl);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), after_acl);
     }
 
     #[test]
@@ -2240,14 +2271,14 @@ mod tests {
         fs::write(&primary, b"mutated").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         assert!(matches!(
             runtime.verify_installation(&installation_id),
             Err(OciError::Artifact)
         ));
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before + 1);
     }
 
@@ -2260,14 +2291,14 @@ mod tests {
         fs::write(&primary, b"primary").unwrap();
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
-        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
 
         runtime.verify_installation(&installation_id).unwrap();
 
-        let after = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before + 1);
         runtime.verify_installation(&installation_id).unwrap();
-        let final_count = SHA256_FILE_CALLS.with(|calls| calls.get());
+        let final_count = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(final_count, after);
     }
 
@@ -2346,6 +2377,24 @@ mod tests {
             Err(OciError::Artifact)
         ));
         assert!(target.is_dir());
+    }
+
+    #[test]
+    fn model_materialization_temp_cleanup_is_task_owned() {
+        let data = tempdir().unwrap();
+        let temporary = data.path().join("model.partial");
+        fs::write(&temporary, b"incomplete").unwrap();
+        {
+            let _guard = super::TemporaryArtifact::new(temporary.clone());
+        }
+        assert!(!temporary.exists());
+
+        fs::write(&temporary, b"published").unwrap();
+        {
+            let mut guard = super::TemporaryArtifact::new(temporary.clone());
+            guard.retain();
+        }
+        assert_eq!(fs::read(temporary).unwrap(), b"published");
     }
 
     #[test]
@@ -2468,5 +2517,16 @@ mod tests {
                 "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
             )
         );
+        let installation = data
+            .path()
+            .join("installations/cb555393-764b-4eb6-8f15-b416d289428f");
+        write_installation_metadata(&installation, &plan).unwrap();
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        let repeated =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(plan.artifacts.len(), 2);
     }
 }
