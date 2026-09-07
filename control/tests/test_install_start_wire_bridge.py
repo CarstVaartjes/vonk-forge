@@ -401,17 +401,20 @@ def test_controller_tensor_parallel_result_uses_shared_rust_evidence_contract(
         actor="admin",
         request_id="wire-bridge-tensor-start",
     )
-    rows = _queued_children(sessions, start_operation.id)
-    assert len(rows) == 2
-    assert {row.payload.get("phase") for row in rows} == {None}
+    seen_roles: list[str] = []
+    while rows := _queued_children(sessions, start_operation.id):
+        assert len(rows) == 1
+        row = rows[0]
+        seen_roles.append(row.payload["role"])
+        assert row.payload.get("phase") is None
+        results = _bridge(install_start_wire_probe, rows)
+        for result in results:
+            envelope = RecipeStartResult.model_validate(result.result)
+            assert isinstance(envelope.evidence, TensorParallelStartEvidence)
+            assert envelope.evidence.run_generation == 1
+        _project(service, sessions, rows, results)
 
-    results = _bridge(install_start_wire_probe, rows)
-    for result in results:
-        envelope = RecipeStartResult.model_validate(result.result)
-        assert isinstance(envelope.evidence, TensorParallelStartEvidence)
-        assert envelope.evidence.run_generation == 1
-
-    _project(service, sessions, rows, results)
+    assert seen_roles == ["worker", "entrypoint"]
     assert service.get(start_operation.id).state == "succeeded"
 
 
