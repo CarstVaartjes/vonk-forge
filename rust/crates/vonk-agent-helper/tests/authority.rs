@@ -24,6 +24,28 @@ fn fixtures() -> PathBuf {
 }
 
 #[test]
+fn python_issuer_fixture_is_verified_by_the_rust_helper() {
+    let raw = fs::read(fixtures().join("host-helper-grant-python-issued.json")).unwrap();
+    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+    let request = parse_request(raw).unwrap();
+    assert_eq!(vonk_agent_protocol::canonical_json(&request).unwrap(), raw);
+    let public_key =
+        hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633").unwrap();
+    GrantVerifier::new(&public_key, 971)
+        .unwrap()
+        .authorize(
+            &request,
+            &PeerIdentity {
+                uid: 1001,
+                primary_gid: 971,
+                supplementary_gids: Vec::new(),
+            },
+            2_100_000_000,
+        )
+        .unwrap();
+}
+
+#[test]
 fn python_fixture_is_the_same_strict_canonical_grant() {
     let raw = fs::read(fixtures().join("host-helper-grant.json")).unwrap();
     let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
@@ -570,10 +592,21 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
         &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
     )
     .unwrap();
+    let archive_metadata = fs::metadata(&archive).unwrap();
     assert_eq!(
         receipt,
         serde_json::json!({
+            "archive_identity": {
+                "bytes": body.len(),
+                "changed_nanoseconds": archive_metadata.ctime_nsec(),
+                "changed_seconds": archive_metadata.ctime(),
+                "device": archive_metadata.dev(),
+                "inode": archive_metadata.ino(),
+                "modified_nanoseconds": archive_metadata.mtime_nsec(),
+                "modified_seconds": archive_metadata.mtime(),
+            },
             "archive_bytes": body.len(),
+            "archive_config_id": config_id,
             "archive_sha256": archive_sha256,
             "image_config_id": config_id,
             "local_image_reference": image_reference,
@@ -639,6 +672,7 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_sour
     assert_eq!(receipt["schema_version"], 2);
     assert_eq!(receipt["archive_sha256"], archive_sha256);
     assert_eq!(receipt["archive_bytes"], body.len());
+    assert_eq!(receipt["archive_config_id"], config_id);
     assert_eq!(
         receipt["platform_manifest_digest"],
         platform_manifest_digest
@@ -674,12 +708,12 @@ fn accepted_docker_archive_does_not_depend_on_load_output_format() {
 fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let (_temp, roots, runner, release) = fixture();
     let run_id = "40000000-0000-4000-8000-000000000004";
-    let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
     let registry_index_digest = format!("sha256:{}", "a".repeat(64));
     let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-    let image_reference = format!("{image}@{platform_manifest_digest}");
     let (archive_body, image_id) = runtime_image_archive();
     let archive_sha256 = hex_sha256(&archive_body);
+    let image = format!("localhost/vonk/compiled-runtime-{archive_sha256}");
+    let image_reference = format!("{image}@{platform_manifest_digest}");
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
@@ -688,11 +722,12 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         .join("installations")
         .join("installation-1")
         .join("models")
-        .join("sha256")
-        .join("a".repeat(64));
+        .join("primary")
+        .join("artifact-a.bin");
     fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
-    fs::create_dir_all(&model).unwrap();
+    fs::create_dir_all(model.parent().unwrap()).unwrap();
+    fs::write(&model, b"model artifact").unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
@@ -700,14 +735,25 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     fs::write(&archive, &archive_body).unwrap();
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
+    let archive_metadata = fs::metadata(&archive).unwrap();
     fs::write(
         roots.runtime_image_receipts.join(&archive_sha256),
         serde_json::to_vec(&serde_json::json!({
+            "archive_identity": {
+                "bytes": archive_body.len(),
+                "changed_nanoseconds": archive_metadata.ctime_nsec(),
+                "changed_seconds": archive_metadata.ctime(),
+                "device": archive_metadata.dev(),
+                "inode": archive_metadata.ino(),
+                "modified_nanoseconds": archive_metadata.mtime_nsec(),
+                "modified_seconds": archive_metadata.mtime(),
+            },
             "schema_version": 2,
             "registry_index_digest": registry_index_digest,
             "platform_manifest_digest": platform_manifest_digest,
             "archive_sha256": archive_sha256,
             "archive_bytes": archive_body.len(),
+            "archive_config_id": image_id,
             "image_config_id": image_id,
             "local_image_reference": image_reference,
         }))
@@ -762,7 +808,10 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--publish".to_owned(),
         "192.168.1.211:8101:8000".to_owned(),
         "--mount".to_owned(),
-        format!("type=bind,src={},dst=/models,readonly", model.display()),
+        format!(
+            "type=bind,src={},dst=/models/artifact-a.bin,readonly",
+            model.display()
+        ),
         "--mount".to_owned(),
         format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),

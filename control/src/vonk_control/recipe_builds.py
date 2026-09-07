@@ -24,7 +24,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
-from .recipe_contract import RecipeContractError, recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
@@ -1116,7 +1116,7 @@ def _declared_image_bytes(document: dict[str, object]) -> int:
     values: list[int] = []
     try:
         topology = recipe_topology(document)
-    except RecipeContractError:
+    except RecipeRuntimeSpecError:
         topology = {}
     roles = topology.get("roles")
     if isinstance(roles, list):

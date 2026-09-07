@@ -12,7 +12,7 @@ def test_run_switch_requires_the_controller_model_cache_manifest_provider() -> N
     with pytest.raises(RuntimeError, match="model-cache manifest provider"):
         inspector.inspect(
             None,  # type: ignore[arg-type]
-            model_version_sha256="a" * 64,
+            model_content_sha256="a" * 64,
             recipe_revision_id="recipe-revision",
             node_ids=("spk_" + "b" * 32,),
             retention="retain",

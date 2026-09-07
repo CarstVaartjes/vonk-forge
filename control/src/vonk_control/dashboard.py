@@ -212,17 +212,11 @@ class DashboardService:
                     else None
                 ),
                 "health_probe_stale": health_probe_stale,
-                # Retain the legacy wire field as an exact compatibility alias.
-                "stale": health_probe_stale,
                 "labels": (
                     {}
                     if profile is None or not isinstance(profile.labels, Mapping)
                     else dict(profile.labels)
                 ),
-                # Fleet profiles can span several assignments and do not expose a
-                # singular active profile per node. Keep the legacy node-status
-                # field explicit and truthful instead of inferring one.
-                "profile": None,
                 "memory_available_bytes": health.get(
                     "memory_available_bytes",
                     0 if inventory is None else inventory.host_memory_free_bytes,

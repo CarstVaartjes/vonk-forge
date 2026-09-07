@@ -118,10 +118,10 @@ def _rich_series_metrics(
     values: dict[str, tuple[TelemetrySeries, list[float]]] = {}
     for row in rows:
         try:
-            payload = TelemetryMetrics.model_validate(row.metrics or {})
+            payload = TelemetryMetrics.model_validate(row.metrics)
         except (TypeError, ValueError):
-            # A historical scalar-only row or a malformed pre-contract row
-            # must not make maintenance suppress the valid scalar metrics.
+            # A malformed row must not suppress valid scalar metrics from
+            # neighboring current rich samples.
             continue
         for series in payload.series:
             if series.support_status != "available":
@@ -201,7 +201,7 @@ def _scalar_metric(
         ),
     }
     unit, source, measurement_kind = metadata.get(
-        name, ("unknown", "legacy", "measured")
+        name, ("unknown", "controller-derived", "measured")
     )
     return _MetricAggregate(
         name=name,

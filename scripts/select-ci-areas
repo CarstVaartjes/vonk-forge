@@ -53,7 +53,19 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             selected["repository"] = True
         if _matches(
             path,
-            ("control/", "agent_protocol/", "tests/control/"),
+            (
+                "control/",
+                "agent_protocol/",
+                "tests/control/",
+                "src/cluster_profiles/",
+                "config/execution-harnesses/",
+                "inventory/wheels/",
+            ),
+            (
+                "tests/acceptance/recipe-library-revision.txt",
+                "scripts/tests/check_recipe_launch_contracts.py",
+                "scripts/tests/run_agent_wire_contracts.py",
+            ),
         ):
             selected["control"] = True
         if _matches(path, ("control/web/",)):

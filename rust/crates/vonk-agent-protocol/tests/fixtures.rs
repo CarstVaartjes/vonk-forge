@@ -44,7 +44,24 @@ fn strict_rust_types_parse_shared_messages() {
     result.validate().unwrap();
     let enrollment: EnrollmentRequest =
         parse_strict(&fs::read(root.join("enrollment-request.json")).unwrap()).unwrap();
+    enrollment.evidence.validate().unwrap();
     assert_eq!(enrollment.evidence.node_id, claim.node_id);
+}
+
+#[test]
+fn enrollment_evidence_rejects_invalid_observation_receipt_public_key() {
+    let root = fixtures();
+    let mut value: Value =
+        serde_json::from_slice(&fs::read(root.join("enrollment-request.json")).unwrap()).unwrap();
+    let mut missing = value.clone();
+    missing["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("observation_receipt_public_key");
+    assert!(parse_strict::<EnrollmentRequest>(&canonical_json(&missing).unwrap()).is_err());
+    value["evidence"]["observation_receipt_public_key"] = Value::String("A".repeat(64));
+    let enrollment: EnrollmentRequest = parse_strict(&canonical_json(&value).unwrap()).unwrap();
+    assert!(enrollment.evidence.validate().is_err());
 }
 
 #[test]

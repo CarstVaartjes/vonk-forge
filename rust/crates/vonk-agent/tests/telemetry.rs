@@ -160,7 +160,11 @@ fn rich_number(sample: &vonk_agent::telemetry::TelemetrySample, key: &str) -> Op
 }
 
 fn claim() -> AgentClaim {
-    let payload = json!({"run_id": "telemetry-lock-isolation"});
+    let payload = json!({
+        "plan_digest": "a".repeat(64),
+        "run_id": "00000000-0000-4000-8000-000000000003",
+        "schema_version": 1,
+    });
     AgentClaim {
         attempt: 1,
         authority_revision: "b".repeat(64),
@@ -168,7 +172,7 @@ fn claim() -> AgentClaim {
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
         node_id: NODE_ID.to_owned(),
-        operation: "recipe.install".to_owned(),
+        operation: "recipe.stop".to_owned(),
         operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
         payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
         payload,
@@ -987,6 +991,97 @@ fn malformed_or_oversized_optional_evidence_is_bounded_to_null_metrics() {
     assert_eq!(sample.network_receive_bytes_per_second, None);
     assert_eq!(sample.gpu_utilization_percent, None);
     assert_eq!(sample.details.accelerator_name, None);
+}
+
+#[test]
+fn queue_splits_encoded_batches_without_dropping_or_reordering_metrics() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"NVIDIA GB10, 25, [N/A], [N/A], 45.5, 17.25, P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let started = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+    let mut queue = TelemetryQueue::new();
+    let mut expected = Vec::new();
+    for offset in 0..15 {
+        let mut sample = collector
+            .sample_at(None, started + chrono::Duration::seconds(offset * 2))
+            .unwrap();
+        let template = sample.metrics.series[0].clone();
+        sample.metrics.series = (0..512)
+            .map(|index| {
+                let mut series = template.clone();
+                series.key = format!("test.metric_{index}");
+                series.value = json!("value".repeat(30));
+                series
+            })
+            .collect();
+        expected.push(sample.clone());
+        queue.push(sample);
+    }
+    let mut received = Vec::new();
+    let mut batches = 0;
+    while !queue.is_empty() {
+        let batch = queue.batch();
+        assert!(!batch.is_empty());
+        let wire = serde_json::to_vec(&json!({"schema_version":1,"samples":&batch})).unwrap();
+        assert!(wire.len() <= 1024 * 1024);
+        assert_eq!(
+            queue.batch(),
+            batch,
+            "retry must preserve unacknowledged samples"
+        );
+        queue.acknowledge_prefix(batch.len()).unwrap();
+        received.extend(batch);
+        batches += 1;
+    }
+    assert!(batches > 1);
+    assert_eq!(received, expected);
+}
+
+#[test]
+fn queue_sends_large_unicode_sample_alone_without_truncation() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"NVIDIA GB10, 25, [N/A], [N/A], 45.5, 17.25, P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let mut sample = collector.sample(None).unwrap();
+    let template = sample.metrics.series[0].clone();
+    sample.metrics.series = (0..512)
+        .map(|index| {
+            let mut series = template.clone();
+            series.key = format!("test.metric_{index}");
+            series.process_name = Some("測".repeat(128));
+            series.value = json!("測".repeat(256));
+            series.support_status = "unavailable".into();
+            series.reason = Some("測".repeat(256));
+            series
+        })
+        .collect();
+    let mut queue = TelemetryQueue::new();
+    queue.push(sample.clone());
+    let batch = queue.batch();
+    assert_eq!(batch, vec![sample]);
+    let wire = serde_json::to_vec(&json!({"schema_version":1,"samples":&batch})).unwrap();
+    assert!(wire.len() > 1024 * 1024);
+    assert!(wire.len() < 16 * 1024 * 1024);
 }
 
 #[test]

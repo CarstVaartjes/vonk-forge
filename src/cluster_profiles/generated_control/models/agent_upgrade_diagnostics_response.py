@@ -28,14 +28,14 @@ class AgentUpgradeDiagnosticsResponse:
     """
         Attributes:
             expected_identity (AgentUpgradeIdentityResponse):
-            legacy_generic_ambiguous (bool):
+            failure_details_unavailable (bool):
             targets (list['AgentUpgradeTargetDiagnosticsResponse']):
             next_action (Union[None, Unset, str]):
             operator_summary (Union[None, Unset, str]):
      """
 
     expected_identity: 'AgentUpgradeIdentityResponse'
-    legacy_generic_ambiguous: bool
+    failure_details_unavailable: bool
     targets: list['AgentUpgradeTargetDiagnosticsResponse']
     next_action: Union[None, Unset, str] = UNSET
     operator_summary: Union[None, Unset, str] = UNSET
@@ -49,7 +49,7 @@ class AgentUpgradeDiagnosticsResponse:
         from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
         expected_identity = self.expected_identity.to_dict()
 
-        legacy_generic_ambiguous = self.legacy_generic_ambiguous
+        failure_details_unavailable = self.failure_details_unavailable
 
         targets = []
         for targets_item_data in self.targets:
@@ -75,7 +75,7 @@ class AgentUpgradeDiagnosticsResponse:
 
         field_dict.update({
             "expected_identity": expected_identity,
-            "legacy_generic_ambiguous": legacy_generic_ambiguous,
+            "failure_details_unavailable": failure_details_unavailable,
             "targets": targets,
         })
         if next_action is not UNSET:
@@ -97,7 +97,7 @@ class AgentUpgradeDiagnosticsResponse:
 
 
 
-        legacy_generic_ambiguous = d.pop("legacy_generic_ambiguous")
+        failure_details_unavailable = d.pop("failure_details_unavailable")
 
         targets = []
         _targets = d.pop("targets")
@@ -131,7 +131,7 @@ class AgentUpgradeDiagnosticsResponse:
 
         agent_upgrade_diagnostics_response = cls(
             expected_identity=expected_identity,
-            legacy_generic_ambiguous=legacy_generic_ambiguous,
+            failure_details_unavailable=failure_details_unavailable,
             targets=targets,
             next_action=next_action,
             operator_summary=operator_summary,

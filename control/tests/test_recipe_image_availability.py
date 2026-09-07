@@ -565,7 +565,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
             return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
-            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
 
         def list_operations(self, *, limit: int) -> tuple[object, ...]:
             return (child,) if self.start_calls else ()
@@ -604,6 +604,11 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
     assert completed.state == "succeeded"
     assert completed.result is not None
     assert completed.result["model_child"]["id"] == child.id
+    from vonk_control.recipe_image_availability_api import _view_document
+
+    response = _view_document(completed)
+    assert response.result.model_content_digests == ["d" * 64]
+    assert response.children[0].model_content_digests == ["d" * 64]
 
 
 def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path: Path) -> None:
@@ -628,7 +633,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
             return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
-            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
             return ()
@@ -770,7 +775,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
                 digest="c" * 64,
-                document=lambda: {"model_versions": [], "artifacts": []},
+                document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []},
             )
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
@@ -903,6 +908,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
         "model_child": {
             "id": "model-child",
             "state": model_state,
+            "model_content_digests": ["d" * 64],
             "progress": {
                 "phase": "download",
                 "downloaded_bytes": 40,
