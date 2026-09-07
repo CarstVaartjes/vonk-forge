@@ -361,6 +361,34 @@ mod receipt_tests {
     };
 
     #[test]
+    fn python_signed_receipt_fixture_verifies_with_the_shared_canonical_bytes() {
+        let raw = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../agent_protocol/fixtures/recipe-run-observation-receipt.json"
+        ))
+        .unwrap();
+        let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+        let receipt: vonk_agent_protocol::RecipeRunObservationReceipt =
+            serde_json::from_slice(raw).unwrap();
+        receipt.validate().unwrap();
+        assert_eq!(vonk_agent_protocol::canonical_json(&receipt).unwrap(), raw);
+        assert_eq!(
+            receipt.signature.key_id,
+            "56fae12f7716462746a3a802817ca762f4e6217028b66e1a70a2a6a2e71b7fc7"
+        );
+        let public_key =
+            hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633")
+                .unwrap();
+        let signature = hex::decode(&receipt.signature.value).unwrap();
+        UnparsedPublicKey::new(&ring::signature::ED25519, &public_key)
+            .verify(
+                &recipe_run_observation_receipt_signing_bytes(&receipt.claims).unwrap(),
+                &signature,
+            )
+            .unwrap();
+    }
+
+    #[test]
     fn signed_receipt_fixture_verifies_and_every_claim_is_covered() {
         let signer = Ed25519KeyPair::from_seed_unchecked(&[19; 32]).unwrap();
         let request_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();

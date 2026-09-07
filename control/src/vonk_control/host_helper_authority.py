@@ -384,10 +384,10 @@ class HostRuntimeAuthorityService:
             "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
             "action": ContainerRuntimeAction.RUN_INSPECT.value,
             "job_id": identity["run_id"],
-            "operation_id": grant.claims.operation.values.get("operation_id"),
+            "operation_id": grant.claims.operation.values["operation_id"],
             "attempt": identity["run_generation"],
-            "fence": grant.claims.operation.values.get("fence"),
-            "request_sha256": grant.claims.operation.values.get("request_sha256"),
+            "fence": grant.claims.operation.values["fence"],
+            "request_sha256": grant.claims.operation.values["request_sha256"],
             "observation_identity_sha256": observation_identity,
         }
         observed_epoch = int(_aware(observed_at).timestamp())
@@ -400,7 +400,7 @@ class HostRuntimeAuthorityService:
             or receipt.claims.node_id != node_id
             or receipt.claims.request_id != grant.claims.request_id
             or receipt.claims.request_sha256
-            != grant.claims.operation.values.get("request_sha256")
+            != grant.claims.operation.values["request_sha256"]
             or receipt.claims.observation_identity_sha256 != observation_identity
             or receipt.claims.observed_at != observed_epoch
             or not grant.claims.issued_at
