@@ -12,7 +12,10 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from vonk_control.models import AgentOperation, RecipeRun
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
+from vonk_control.run_switch_contract import (
+    RunSwitchApplyRequest,
+    RunSwitchFinalVerifyResult,
+)
 
 from .test_recipe_operations import (
     NOW,
@@ -92,14 +95,18 @@ def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(tmp_path,
         RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())), actor="admin"
     )
     service.tick()
-    child_id = service.get(operation.operation_id).result["child_operation_id"]
+    persisted = service.get(operation.operation_id)
+    assert persisted.result is not None
+    child_id = persisted.result.child_operation_id
+    assert child_id is not None
     artifacts.children[child_id].state = "succeeded"
     artifacts.children[child_id].result = None
     service.tick()
     failed = service.get(operation.operation_id)
     assert failed.state == "failed"
     assert failed.status_reason == "run-switch.transfer-returned-invalid-evidence"
-    assert failed.result["retryable"] is False
+    assert failed.result is not None
+    assert failed.result.retryable is False
 
 
 def _awaiting_final_verification(tmp_path, engine):
@@ -117,7 +124,8 @@ def _awaiting_final_verification(tmp_path, engine):
         service.tick()
         current = service.get(operation.operation_id)
         assert current.state in {"queued", "running"}, current.status_reason
-        child_id = current.result.get("child_operation_id")
+        assert current.result is not None
+        child_id = current.result.child_operation_id
         if child_id:
             with sessions() as session:
                 children = tuple(session.scalars(select(AgentOperation).where(
@@ -142,7 +150,10 @@ def _awaiting_final_verification(tmp_path, engine):
     service.tick()
     waiting = service.get(operation.operation_id)
     assert waiting.state == "running"
-    assert waiting.result["final_observation"]["final_verified"] is False
+    assert waiting.result is not None
+    assert waiting.result.final_observation is not None
+    assert isinstance(waiting.result.final_observation, RunSwitchFinalVerifyResult)
+    assert waiting.result.final_observation.final_verified is False
     return sessions, lifecycle, routes, publisher, service, operation
 
 
@@ -155,15 +166,23 @@ def test_postgres_running_switch_allows_route_publication_and_survives_restart(t
     result = restarted.get(operation.operation_id)
     assert result.state == "succeeded", result.status_reason
     assert publisher.aliases[-1] == ("qwen",)
-    assert any(item.get("final_verified") is True for item in result.result["phase_results"])
+    assert result.result is not None
+    assert any(
+        isinstance(item, RunSwitchFinalVerifyResult) and item.final_verified is True
+        for item in result.result.phase_results
+    )
 
 
 def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engine):
     sessions, lifecycle, _, _, service, operation = _awaiting_final_verification(tmp_path, migrated_engine)
-    before = service.get(operation.operation_id).result
+    before_operation = service.get(operation.operation_id)
+    assert before_operation.result is not None
+    before = before_operation.result
     for _ in range(3):
         service.tick()
-    assert service.get(operation.operation_id).result["phase_results"] == before["phase_results"]
+    current = service.get(operation.operation_id)
+    assert current.result is not None
+    assert current.result.phase_results == before.phase_results
     restarted = _service(sessions, NOW + timedelta(seconds=300), lifecycle, RecordingArtifactExecutor())
     restarted.tick()
     failed = restarted.get(operation.operation_id)
