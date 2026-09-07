@@ -109,6 +109,9 @@ impl HelperRejection {
             OperationError::InvalidArtifact if package_install => {
                 ("package_verification_failed", None)
             }
+            OperationError::PackagePreflightFailed if package_install => {
+                ("package_preflight_failed", None)
+            }
             OperationError::PackageMetadataInvalid if package_install => {
                 ("package_metadata_failed", None)
             }
@@ -148,6 +151,20 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    if let [operation, version, agent, helper] = arguments.as_slice() {
+        if operation == "--validate-package-rollback" {
+            return vonk_agent_helper::package_rollback::Store::system()
+                .validate_maintainer_rollback(version, agent, helper);
+        }
+    }
+    if arguments == ["--package-rollback-watchdog"] {
+        return vonk_agent_helper::package_rollback::Store::system().watch();
+    }
+    if !arguments.is_empty() {
+        return Err("unknown helper operation".into());
+    }
+
     let grant_key = load_root_public_key(Path::new(GRANT_KEY))?;
     let release_key = load_root_public_key(Path::new(RELEASE_KEY))?;
     let group_gid = group_gid(Path::new("/etc/group"), AGENT_GROUP)?;
@@ -642,6 +659,17 @@ mod tests {
     #[test]
     fn package_failures_are_stage_specific_and_exit_codes_are_bounded() {
         let operation = HostOperation::InstallVonkDeb {
+            rollback: vonk_agent_protocol::PackageRollbackAuthority {
+                source: vonk_agent_protocol::PackageRollbackSource {
+                    package_sha256: "a".repeat(64),
+                    package_signature: "b".repeat(128),
+                    package_version: "0.1.0".into(),
+                    binary_sha256: "c".repeat(64),
+                    helper_sha256: "d".repeat(64),
+                },
+                attempt_nonce: "e".repeat(64),
+                activation_deadline: 2100000000,
+            },
             package_sha256: "a".repeat(64),
             package_signature: "b".repeat(128),
         };

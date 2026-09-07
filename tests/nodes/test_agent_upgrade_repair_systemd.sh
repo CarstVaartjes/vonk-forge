@@ -498,10 +498,12 @@ for generation in old target next; do
     "$test_root/$generation-bin/oras"
   cp -- "$build_egress_fixture" \
     "$test_root/$generation-bin/vonk-build-egress"
+  cp -- "$(dirname "$build_egress_fixture")/vonk-runtime-probe" \
+    "$test_root/$generation-bin/vonk-runtime-probe"
   printf '%s fixture license\n' "$generation" \
     > "$test_root/$generation-bin/oras.LICENSE"
   chmod 0555 \
-    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,oras}
+    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,vonk-runtime-probe,oras}
   fixture_agent=$test_root/$generation-bin/vonk-agent
   fixture_agent_sha=$(sha256sum "$fixture_agent" | cut -d' ' -f1)
   fixture_self_test=$("$fixture_agent" --config /dev/null self-test)
