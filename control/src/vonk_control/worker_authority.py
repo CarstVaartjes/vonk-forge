@@ -15,10 +15,11 @@ from dataclasses import asdict, dataclass
 from typing import Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from .litellm import LiteLlmDeployment, LiteLlmPublisher
 from .route_runtime import PublishedRoute, published_routes_digest
+from .strict_json import StrictJSONModel
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _TOKEN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
@@ -45,7 +46,7 @@ class ReconciliationInput(Protocol):
     ) -> tuple[str, str, tuple[PublishedRoute, ...], str]: ...
 
 
-class _AuthorityContract(BaseModel):
+class _AuthorityContract(StrictJSONModel):
     model_config = ConfigDict(
         extra="forbid",
         strict=True,

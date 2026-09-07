@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .operation_contract import AvailabilityOperationFailure, OperationMemberProgress
+from .strict_json import StrictJSONModel
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
@@ -19,7 +20,7 @@ UUID_PATTERN = (
 Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
-class StrictModel(BaseModel):
+class StrictModel(StrictJSONModel):
     model_config = ConfigDict(
         extra="forbid", strict=True, str_strip_whitespace=True
     )

@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
@@ -38,6 +37,8 @@ from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     canonical_message,
 )
+
+from .strict_json import StrictJSONModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -53,7 +54,7 @@ class CompiledExecutionPlanError(ValueError):
     """The canonical runtime and verified delivery receipts cannot be bound."""
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
