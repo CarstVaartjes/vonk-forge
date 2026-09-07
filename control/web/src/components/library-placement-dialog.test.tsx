@@ -229,24 +229,62 @@ test("renders durable queued, running, waiting, and succeeded progress with term
   expect(libraryPlacement).toHaveBeenCalledTimes(3);
 });
 
-test("offers a fresh recovery review after a failed durable placement", async () => {
+test("retries remaining work and follows the linked placement while retaining earlier evidence", async () => {
   const previewLibraryPlacement = vi.fn(async () => placementPreview());
-  const onRefresh = vi.fn(async () => undefined);
+  const nextId = "00000000-0000-4000-8000-000000000009";
+  let resolveRetry!: (value: LibraryPlacementApplication) => void;
+  const retryLibraryPlacement = vi.fn(() => new Promise<LibraryPlacementApplication>(resolve => { resolveRetry = resolve; }));
+  const libraryPlacement = vi.fn(async () => placementApplication("succeeded", {id: nextId}));
   const api = {
     previewLibraryPlacement,
-    applyLibraryPlacement: vi.fn(async () => placementApplication("failed", {status_reason: "The worker did not become ready."})),
-    libraryPlacement: vi.fn(),
+    applyLibraryPlacement: vi.fn(async () => placementApplication("failed", {status_reason: "The worker did not become ready.", progress: {completed_steps: 1}})),
+    retryLibraryPlacement,
+    libraryPlacement,
   } as unknown as LibraryApi;
-  renderDialog(api, {onRefresh});
-
+  renderDialog(api);
   fireEvent.click(await enabledApplyButton());
   expect(await screen.findByRole("alert")).toHaveTextContent("The worker did not become ready.");
-  await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
-  fireEvent.click(screen.getByRole("button", {name: "Review recovery plan"}));
+  fireEvent.click(screen.getByRole("button", {name: "Retry remaining work"}));
+  expect(screen.getByRole("button", {name: "Retrying remaining work…"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Done"})).toBeDisabled();
+  expect(retryLibraryPlacement).toHaveBeenCalledExactlyOnceWith(PLACEMENT_ID, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)}, expect.any(AbortSignal));
+  await act(async () => { resolveRetry(placementApplication("queued", {id: nextId})); });
+  fireEvent.click(screen.getByText("Previous attempts (1)"));
+  expect(screen.getByText("The worker did not become ready.")).toBeVisible();
+  expect(screen.getByText("1 of 3 steps complete")).toBeVisible();
+  expect(await screen.findByText("Succeeded", {}, {timeout: 2500})).toBeVisible();
+  expect(libraryPlacement).toHaveBeenCalledWith(nextId, expect.any(AbortSignal));
+  expect(previewLibraryPlacement).toHaveBeenCalledTimes(1);
+});
 
-  await waitFor(() => expect(previewLibraryPlacement).toHaveBeenCalledTimes(2));
-  expect(await screen.findByText("Install Qwen Chat")).toBeVisible();
-  expect(screen.getByRole("button", {name: "Install on selected Sparks"})).toBeEnabled();
+test("keeps one retry key across ambiguous failures without losing placement evidence", async () => {
+  const retryLibraryPlacement = vi.fn().mockRejectedValue(new Error("Retry connection interrupted"));
+  const api = {
+    previewLibraryPlacement: vi.fn(async () => placementPreview()),
+    applyLibraryPlacement: vi.fn(async () => placementApplication("failed", {status_reason: "Worker unavailable"})),
+    retryLibraryPlacement,
+  } as unknown as LibraryApi;
+  renderDialog(api);
+  fireEvent.click(await enabledApplyButton());
+  fireEvent.click(await screen.findByRole("button", {name: "Retry remaining work"}));
+  expect(await screen.findByText("Retry connection interrupted")).toBeVisible();
+  expect(screen.getByText("Worker unavailable")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "Retry remaining work"}));
+  await waitFor(() => expect(retryLibraryPlacement).toHaveBeenCalledTimes(2));
+  expect(retryLibraryPlacement.mock.calls[1].slice(0, 2)).toEqual(retryLibraryPlacement.mock.calls[0].slice(0, 2));
+});
+
+test.each(["waiting-for-operator", "cancelled"] as const)("offers only supported recovery for %s placements", async state => {
+  const api = {
+    previewLibraryPlacement: vi.fn(async () => placementPreview()),
+    applyLibraryPlacement: vi.fn(async () => placementApplication(state)),
+    libraryPlacement: vi.fn(() => new Promise(() => undefined)),
+  } as unknown as LibraryApi;
+  renderDialog(api);
+  fireEvent.click(await enabledApplyButton());
+  expect(await screen.findByText(state === "cancelled" ? "Cancelled" : "Waiting for operator")).toBeVisible();
+  if (state === "cancelled") expect(screen.queryByRole("button", {name: "Retry remaining work"})).not.toBeInTheDocument();
+  else expect(screen.getByRole("button", {name: "Retry remaining work"})).toBeEnabled();
 });
 
 test("keeps last-known progress through a poll error and retries in place", async () => {
@@ -383,4 +421,22 @@ test("aborts preview, apply, progress, and terminal refresh requests on unmount"
   await waitFor(() => expect(refreshSignal).toBeInstanceOf(AbortSignal));
   refreshRender.unmount();
   expect(refreshSignal?.aborted).toBe(true);
+});
+
+test("aborts an in-flight recovery request when the dialog unmounts", async () => {
+  let retrySignal: AbortSignal | undefined;
+  const api = {
+    previewLibraryPlacement: vi.fn(async () => placementPreview()),
+    applyLibraryPlacement: vi.fn(async () => placementApplication("failed")),
+    retryLibraryPlacement: vi.fn((_id: string, _input: unknown, signal?: AbortSignal) => {
+      retrySignal = signal;
+      return new Promise<LibraryPlacementApplication>(() => undefined);
+    }),
+  } as unknown as LibraryApi;
+  const view = renderDialog(api);
+  fireEvent.click(await enabledApplyButton());
+  fireEvent.click(await screen.findByRole("button", {name: "Retry remaining work"}));
+  expect(retrySignal).toBeInstanceOf(AbortSignal);
+  view.unmount();
+  expect(retrySignal?.aborted).toBe(true);
 });

@@ -91,6 +91,9 @@ export function LibraryPlacementDialog({api, invocation, nodeIds, nodeNames, onB
   const [application, setApplication] = useState<LibraryPlacementApplication>();
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
+  const [retryError, setRetryError] = useState("");
+  const [previousApplications, setPreviousApplications] = useState<LibraryPlacementApplication[]>([]);
+  const retryRequest = useRef<{applicationId: string; key: string} | undefined>(undefined);
   const [previewError, setPreviewError] = useState("");
   const [applyError, setApplyError] = useState("");
   const [progressError, setProgressError] = useState("");
@@ -228,9 +231,31 @@ export function LibraryPlacementDialog({api, invocation, nodeIds, nodeNames, onB
     }
   }
 
-  function reviewFresh() {
-    setApplication(undefined);
-    setPreviewAttempt(value => value + 1);
+  async function retryRemaining() {
+    if (!application || !["failed", "waiting-for-operator"].includes(application.state) || applying) return;
+    const previous = application;
+    if (retryRequest.current?.applicationId !== previous.id) {
+      retryRequest.current = {applicationId: previous.id, key: crypto.randomUUID()};
+    }
+    const controller = new AbortController();
+    applyController.current?.abort();
+    applyController.current = controller;
+    setApplying(true);
+    setRetryError("");
+    try {
+      const next = await api.retryLibraryPlacement(previous.id, {request_key: retryRequest.current.key}, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
+      setPreviousApplications(current => [...current, previous]);
+      setApplication(next);
+      setProgressError("");
+      setRefreshError("");
+      retryRequest.current = undefined;
+    } catch (value) {
+      if (mounted.current && !controller.signal.aborted) setRetryError(errorMessage(value));
+    } finally {
+      if (mounted.current && !controller.signal.aborted) setApplying(false);
+      if (applyController.current === controller) applyController.current = undefined;
+    }
   }
 
   const operationActive = Boolean(application && !terminal(application.state));
@@ -248,14 +273,16 @@ export function LibraryPlacementDialog({api, invocation, nodeIds, nodeNames, onB
         {!application && previewError && <div className="fleet-error" role="alert"><p>{previewError}</p><button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry placement preview</button></div>}
         {!application && plan && <PlacementPlan nodeNames={nodeNames} plan={plan}/>} 
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p><p>{stale ? "Spark or recipe authority changed. Review a fresh plan before applying." : "The request may have reached the Controller. Retry uses the same request key and cannot create a duplicate placement."}</p>{stale && <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh plan</button>}</div>}
+        {previousApplications.length > 0 && <details className="library-placement-history"><summary>Previous attempts ({previousApplications.length})</summary><ul>{previousApplications.map(previous => <li key={previous.id}><strong>{stateLabel(previous.state)}</strong><p>{previous.status_reason || "No failure detail reported."}</p><p>{completedSteps(previous)} of {previous.total_steps} steps complete</p><TechnicalDetails items={[{label: "Placement operation", value: previous.id}]}/></li>)}</ul></details>}
+        {retryError && <div className="fleet-error" role="alert"><p>{retryError}</p><p>The retry may have reached the Controller. Retry again to check the same request; completed work remains recorded.</p></div>}
         {application && <PlacementProgress application={application} nodeNames={nodeNames}/>} 
         {progressError && <div className="fleet-error" role="alert"><p>Progress is temporarily unavailable: {progressError}</p><button type="button" onClick={() => setProgressAttempt(value => value + 1)}>Retry progress</button></div>}
         {refreshError && <div className="fleet-error" role="alert"><p>Placement finished, but Library and Spark state could not be refreshed: {refreshError}</p><button type="button" onClick={() => setRefreshAttempt(value => value + 1)}>Retry Library refresh</button></div>}
       </div>
       <footer>
         {application ? <>
-          {(application.state === "failed" || application.state === "cancelled") && <button type="button" className="button secondary" onClick={reviewFresh}>Review recovery plan</button>}
-          <button type="button" className="button" onClick={onClose}>{operationActive ? "Continue in background" : "Done"}</button>
+          {(application.state === "failed" || application.state === "waiting-for-operator") && <button type="button" className="button secondary" disabled={applying} onClick={() => void retryRemaining()}>{applying ? "Retrying remaining work…" : "Retry remaining work"}</button>}
+          <button type="button" className="button" disabled={applying} onClick={onClose}>{operationActive ? "Continue in background" : "Done"}</button>
         </> : <>
           <button type="button" className="button secondary" disabled={applying} onClick={onClose}>Cancel</button>
           <button type="button" className="button" disabled={!plan?.allowed || applying || stale || (desiredState === "running" && !validAlias)} onClick={() => void applyPlan()}>{applying ? "Starting placement…" : desiredState === "running" ? "Install and run" : "Install on selected Sparks"}</button>
