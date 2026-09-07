@@ -7,7 +7,19 @@ Controller/Spark contract and trusted-cache corrections. Local checks,
 publication, Controller deployment and physical Spark execution remain
 separate results.
 
-## Current checkpoint
+## Consolidation checkpoint
+
+[The consolidation ledger](launch-consolidation-2026-09-07.md) accounts for the
+existing worker branches and original checkout changes. Completed branches are
+merged whole into PR614; no new worktrees were created. Current route authority,
+queue locking, canonical compiler metadata and browser telemetry are integrated.
+The browser production build and 216 tests pass; CLI/generated contracts pass
+245 tests and 45 subtests. The final full Controller check is in progress.
+The remaining catalog validator/packaging cleanup is explicitly recorded in the
+ledger. This is source integration; deployment and physical acceptance remain
+separate.
+
+## Earlier checkpoint evidence
 
 - Platform work is on the integration branch, not yet published or deployed.
   Earlier CI runs do not cover its subsequent commits.

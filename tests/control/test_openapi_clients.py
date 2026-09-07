@@ -629,14 +629,17 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
 
 def test_generated_telemetry_models_consume_current_pydantic_documents() -> None:
+    from vonk_control.fleet_projection import (
+        TelemetryHistoryResponse as HistoryProducer,
+    )
+    from vonk_control.fleet_projection import (
+        TelemetryPoint as PointProducer,
+    )
+
     from cluster_profiles.generated_control.models.telemetry_history_response import (
         TelemetryHistoryResponse,
     )
     from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
-    from vonk_control.fleet_projection import (
-        TelemetryHistoryResponse as HistoryProducer,
-        TelemetryPoint as PointProducer,
-    )
 
     incomplete_document = {
         "id": "00000000-0000-4000-8000-000000000001",

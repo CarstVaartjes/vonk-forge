@@ -18,6 +18,7 @@ their current contracts; neither requires accepting an older document format.
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
 | Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
+| Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
 
