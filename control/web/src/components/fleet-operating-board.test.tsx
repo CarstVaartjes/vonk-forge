@@ -88,6 +88,7 @@ const preview: FleetProfilePreview = {
 };
 
 const succeeded: FleetProfileApplication = {
+  attempt: 1,
   schema_version: 2,
   id: "00000000-0000-4000-8000-000000000005",
   profile_id: PROFILE_ID,
@@ -97,7 +98,7 @@ const succeeded: FleetProfileApplication = {
   current_operation_id: null,
   current_step: 2,
   total_steps: 2,
-  progress: {completed_steps: 2, total_steps: 2},
+  progress: {attempt: 1, completed_steps: 2, total_steps: 2},
   result: {changed: true, completed_steps: 2},
   status_reason: null,
   created_at: NOW.toISOString(),

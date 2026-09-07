@@ -350,6 +350,13 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [api, application]);
 
+  useEffect(() => {
+    if (!application || !TERMINAL_APPLICATION_STATES.has(application.state)) return;
+    setStatusAttempt(value => value + 1);
+    setPreviewAttempt(value => value + 1);
+    setNotice(application.state === "succeeded" ? "Profile switch completed." : "");
+  }, [application?.id, application?.state]);
+
   function selectProfile(profile: FleetProfile) {
     const next = draftFromProfile(profile);
     setSelectedProfileId(profile.id);
@@ -547,7 +554,6 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
       const next = await profileApi.applyFleetProfile(selectedProfileId, applyInput);
       setApplication(next);
       if (next.state === "succeeded") setRequestKey(undefined);
-      if (TERMINAL_APPLICATION_STATES.has(next.state)) setPreviewAttempt(value => value + 1);
     } catch (value) {
       setError(value instanceof Error ? value.message.slice(0, 256) : "The profile switch could not be started.");
       setNotice("The switch request may have been accepted. Recheck profile status before retrying; the same request key will be reused.");
