@@ -59,6 +59,9 @@ from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     _bind_compiled_execution_plan,
 )
+from vonk_control.runtime_image_preparation import (
+    RuntimeImageReceipt as RuntimeImageReceiptWire,
+)
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.model import ModelFile, ModelReference
@@ -968,26 +971,27 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
 
     def runtime_receipt(
         _document, image_digest: str, _runtime_spec: dict[str, object]
-    ) -> dict[str, object]:
-        return {
-            "image_digest": image_digest,
-            "oci_layout_sha256": "f" * 64,
-            "image_bytes": 4096,
-            "architecture": "linux-arm64",
-            "runtime_interface": "vonk.runtime.v1",
-            "runtime_interface_label": "v1",
-            "source": "controller-build",
-            "build_id": build.id,
-            "platform_manifest_digest": image_digest,
-            "local_image_config_id": "sha256:" + "2" * 64,
-            "local_image_reference": None,
-            "distribution_object": {
-                "name": "image.oci.tar",
-                "sha256": "f" * 64,
-                "bytes": 4096,
-                "kind": "oci-archive",
-            },
-        }
+    ) -> RuntimeImageReceiptWire:
+        return RuntimeImageReceiptWire(
+            schema_version=2,
+            source="controller-build",
+            distribution_publisher=recipe.identity.publisher,
+            distribution_slug=recipe.identity.slug,
+            distribution_content_sha256=recipe_digest,
+            registry_manifest_digest=None,
+            platform_manifest_digest=image_digest,
+            image_digest=image_digest,
+            oci_archive_sha256="f" * 64,
+            image_bytes=4096,
+            local_image_config_id="sha256:" + "2" * 64,
+            local_image_reference=None,
+            architecture="linux-arm64",
+            runtime_interface="vonk.runtime.v1",
+            archive_path="/run/vonk/image-cache/" + "f" * 64,
+            recorded_at="2026-01-01T00:00:00+00:00",
+            build_id=build.id,
+            runtime_interface_label="v1",
+        )
 
     service = ControllerExecutionPlanService(
         Cache(), runtime_image_resolver=runtime_receipt

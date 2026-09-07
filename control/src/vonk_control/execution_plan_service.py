@@ -10,7 +10,6 @@ path as an agent instruction.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
@@ -28,58 +27,19 @@ from .recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from .runtime_image_preparation import RuntimeImageReceipt
 
 
 class ExecutionPlanCompilationError(ValueError):
     """Canonical launch facts and verified Controller receipts cannot agree."""
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeImageReceipt:
-    """The exact Controller-distributed OCI archive for one runtime image."""
-
-    image_digest: str
-    oci_layout_sha256: str
-    image_bytes: int
-    source: str
-    build_id: str | None
-    registry_manifest_digest: str | None
-    platform_manifest_digest: str
-    local_image_config_id: str
-    architecture: str
-    runtime_interface: str
-    runtime_interface_label: str
-    local_image_reference: str | None
-
-    def as_mapping(self) -> dict[str, object]:
-        return {
-            "image_digest": self.image_digest,
-            "oci_layout_sha256": self.oci_layout_sha256,
-            "image_bytes": self.image_bytes,
-            "architecture": self.architecture,
-            "runtime_interface": self.runtime_interface,
-            "runtime_interface_label": self.runtime_interface_label,
-            "source": self.source,
-            "build_id": self.build_id,
-            "registry_manifest_digest": self.registry_manifest_digest,
-            "platform_manifest_digest": self.platform_manifest_digest,
-            "local_image_config_id": self.local_image_config_id,
-            "local_image_reference": self.local_image_reference,
-            "distribution_object": {
-                "name": "image.oci.tar",
-                "sha256": self.oci_layout_sha256,
-                "bytes": self.image_bytes,
-                "kind": "oci-archive",
-            },
-        }
-
-
 RuntimeImageResolver = Callable[
     [Mapping[str, object], str, Mapping[str, object]],
-    Mapping[str, object] | RuntimeImageReceipt,
+    RuntimeImageReceipt,
 ]
 RuntimeImagePreparer = Callable[
-    [Mapping[str, object], Mapping[str, object], RecipeBuild | None], object
+    [Mapping[str, object], Mapping[str, object], RecipeBuild | None], RuntimeImageReceipt
 ]
 
 
@@ -240,37 +200,28 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
     accidental leakage of the storage envelope.
     """
 
-    if isinstance(receipt, RuntimeImageReceipt):
-        return receipt.as_mapping()
-    to_mapping = getattr(receipt, "to_mapping", None)
-    raw = to_mapping() if callable(to_mapping) else receipt
-    if not isinstance(raw, Mapping):
+    if not isinstance(receipt, RuntimeImageReceipt):
         raise ExecutionPlanCompilationError("runtime image receipt is invalid")
-    value = dict(raw)
-    archive_sha256 = value.get("oci_archive_sha256")
-    if "oci_layout_sha256" not in value and isinstance(archive_sha256, str):
-        image_bytes = value.get("image_bytes")
-        value = {
-            "image_digest": value.get("image_digest"),
-            "oci_layout_sha256": archive_sha256,
-            "image_bytes": image_bytes,
-            "architecture": value.get("architecture"),
-            "runtime_interface": value.get("runtime_interface"),
-            "runtime_interface_label": value.get("runtime_interface_label"),
-            "source": value.get("source"),
-            "build_id": value.get("build_id"),
-            "registry_manifest_digest": value.get("registry_manifest_digest"),
-            "platform_manifest_digest": value.get("platform_manifest_digest"),
-            "local_image_config_id": value.get("local_image_config_id"),
-            "local_image_reference": value.get("local_image_reference"),
-            "distribution_object": {
-                "name": "image.oci.tar",
-                "sha256": archive_sha256,
-                "bytes": image_bytes,
-                "kind": "oci-archive",
-            },
-        }
-    return value
+    return {
+        "image_digest": receipt.image_digest,
+        "oci_layout_sha256": receipt.oci_archive_sha256,
+        "image_bytes": receipt.image_bytes,
+        "architecture": receipt.architecture,
+        "runtime_interface": receipt.runtime_interface,
+        "runtime_interface_label": receipt.runtime_interface_label,
+        "source": receipt.source,
+        "build_id": receipt.build_id,
+        "registry_manifest_digest": receipt.registry_manifest_digest,
+        "platform_manifest_digest": receipt.platform_manifest_digest,
+        "local_image_config_id": receipt.local_image_config_id,
+        "local_image_reference": receipt.local_image_reference,
+        "distribution_object": {
+            "name": "image.oci.tar",
+            "sha256": receipt.oci_archive_sha256,
+            "bytes": receipt.image_bytes,
+            "kind": "oci-archive",
+        },
+    }
 
 
 def _canonical_recipe(

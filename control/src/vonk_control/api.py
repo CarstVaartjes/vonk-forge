@@ -1541,6 +1541,7 @@ def production_app() -> FastAPI:
     from .run_admission import RunAdmissionService
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
+        RuntimeImageReceipt,
         SkopeoOCIImageTransport,
         persist_runtime_image_receipt,
         prepare_runtime_image,
@@ -1622,7 +1623,9 @@ def production_app() -> FastAPI:
     )
     runtime_image_transport = SkopeoOCIImageTransport()
 
-    def prepare_runtime_image_receipt(document, runtime_spec, build):
+    def prepare_runtime_image_receipt(
+        document, runtime_spec, build
+    ) -> RuntimeImageReceipt:
         runtime = runtime_spec.get("runtime")
         if not isinstance(runtime, Mapping):
             raise TypeError("compiled runtime projection is unavailable")
@@ -1647,7 +1650,7 @@ def production_app() -> FastAPI:
                 "image_bytes": build.image_bytes,
             }
 
-        def write_receipt(receipt):
+        def write_receipt(receipt: RuntimeImageReceipt) -> None:
             recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
             with sessions.begin() as session:
                 revision = session.scalar(
@@ -1678,7 +1681,9 @@ def production_app() -> FastAPI:
             receipt_writer=write_receipt,
         )
 
-    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
+    def resolve_runtime_image_receipt(
+        document, image_digest, runtime_spec
+    ) -> RuntimeImageReceipt:
         """Read an already prepared OCI receipt without pulling or exporting."""
 
         runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None

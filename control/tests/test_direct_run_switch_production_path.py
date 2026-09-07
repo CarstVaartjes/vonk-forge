@@ -433,26 +433,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
             )
             if row is None:
                 raise RuntimeError("missing durable direct receipt")
-            return {
-                "image_digest": row.platform_manifest_digest,
-                "oci_layout_sha256": row.oci_archive_sha256,
-                "image_bytes": row.image_bytes,
-                "source": row.source,
-                "build_id": row.build_id,
-                "registry_manifest_digest": row.registry_manifest_digest,
-                "platform_manifest_digest": row.platform_manifest_digest,
-                "local_image_config_id": row.local_image_config_id,
-                "architecture": row.architecture,
-                "runtime_interface": row.runtime_interface,
-                "runtime_interface_label": row.runtime_interface_label,
-                "local_image_reference": None,
-                "distribution_object": {
-                    "name": "image.oci.tar",
-                    "sha256": row.oci_archive_sha256,
-                    "bytes": row.image_bytes,
-                    "kind": "oci-archive",
-                },
-            }
+            return storage.read_receipt(row.oci_archive_sha256)
 
     compiler = ControllerExecutionPlanService(
         model_cache,
