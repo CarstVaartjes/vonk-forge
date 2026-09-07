@@ -1410,7 +1410,7 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
             params={"target_cursor": cursor, "limit": 1},
         )
         assert response.status_code == 422
-        assert response.json() == {"detail": "job cursor is invalid"}
+        assert response.json() == {"detail": "job cursor is invalid", "issues": []}
 
 
 def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
