@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .agent_upgrade_status import (
-    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
@@ -903,7 +903,7 @@ def _agent_upgrade_diagnostics(
         # the success gate and must never be projected as proof here.
         target_proven = bool(operation is not None and operation.state == "succeeded")
         unresolved_generic = bool(
-            not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
+            not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
         legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
         retry_queued = bool(
