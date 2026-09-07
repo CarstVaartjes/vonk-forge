@@ -30,7 +30,7 @@ def module():
         ("installer-setups.yml", "scripts/select-pytest-shard-files", False),
         ("installer-setups.yml", "rust/crates/vonk-nas-setup/src/lib.rs", True),
         ("agent-release.yml", "packaging/debian/postinst", True),
-        ("dev-images.yml", "config/execution-harnesses/vllm.json", True),
+        ("dev-images.yml", "control/src/vonk_control/harnesses/canonical_metadata.py", True),
         ("dev-images.yml", "docs/something.md", False),
     ],
 )
