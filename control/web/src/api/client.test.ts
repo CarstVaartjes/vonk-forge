@@ -252,6 +252,19 @@ it("uses distinct digest-bound Library action operations", async () => {
   expect(requests[16].signal.aborted).toBe(true);
 });
 
+it("uses the generated deployment and explicit upstream-check operations", async () => {
+  const urls: URL[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    urls.push(new URL((input as Request).url));
+    return new Response("{}", {headers: {"Content-Type": "application/json"}});
+  });
+  const api = new ApiClient();
+  await api.deploymentProvenance();
+  await api.modelCacheUpdates(undefined, true);
+  expect(urls[0].pathname).toBe("/api/v1/deployment-provenance");
+  expect(urls[1].searchParams.get("check_upstream")).toBe("true");
+});
+
 it("requests bounded node telemetry history through the generated operation", async () => {
   let captured: Request | undefined;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {

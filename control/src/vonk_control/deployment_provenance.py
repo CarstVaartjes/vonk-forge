@@ -18,12 +18,14 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 from .deployment_provenance_contract import (
     AgentDeploymentEvidence,
+    ControllerBuildMetadata,
+    DeploymentModelIdentity,
     DeploymentObservations,
     DeploymentProvenance,
     EvidenceAge,
-    ModelIdentity,
     PhysicalAcceptanceEvidence,
     PlatformBoundary,
+    PlatformObservation,
     RankProvenance,
     RecipeLibraryEvidence,
     WorkloadProvenance,
@@ -44,6 +46,8 @@ from .models import (
     RunNode,
 )
 
+CONTROLLER_BUILD_METADATA = Path("/usr/local/share/vonk-forge/controller-build.json")
+
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
@@ -52,9 +56,20 @@ def _utc(value: datetime) -> datetime:
 def local_deployment_observations() -> DeploymentObservations:
     """No GitHub/network reads; malformed configured evidence fails visibly."""
     path = os.environ.get("VONK_DEPLOYMENT_OBSERVATIONS_FILE")
-    if not path:
-        return DeploymentObservations()
-    return DeploymentObservations.model_validate_json(Path(path).read_bytes())
+    observations = (
+        DeploymentObservations.model_validate_json(Path(path).read_bytes())
+        if path else DeploymentObservations()
+    )
+    if observations.controller is None and CONTROLLER_BUILD_METADATA.is_file():
+        build = ControllerBuildMetadata.model_validate_json(
+            CONTROLLER_BUILD_METADATA.read_bytes()
+        )
+        observations.controller = PlatformObservation(
+            source="Running Controller image build metadata",
+            observed_at=datetime.now(UTC),
+            source_commit=build.source_commit,
+        )
+    return observations
 
 
 class DeploymentProvenanceService:
@@ -253,7 +268,7 @@ class DeploymentProvenanceService:
                     if content_sha256(model) != reference.content_sha256:
                         raise ValueError("Persisted model identity mismatch")
                     models.append(
-                        ModelIdentity(
+                        DeploymentModelIdentity(
                             selection_id=selection.id,
                             publisher=model.identity.publisher,
                             slug=model.identity.slug,

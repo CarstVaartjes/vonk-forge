@@ -927,6 +927,7 @@ class SparkLifecycle:
         *,
         cwd: Path,
         timeout: int = 300,
+        report_failure_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
@@ -947,8 +948,12 @@ class SparkLifecycle:
         except (OSError, subprocess.SubprocessError) as error:
             raise LifecycleError("acceptance command could not execute") from error
         if result.returncode != 0:
+            detail = (
+                "; " + self._redact_diagnostics(result.stderr or result.stdout)
+                if report_failure_output else ""
+            )
             raise LifecycleError(
-                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip()
+                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip() + detail
             )
         return result
 
@@ -1192,11 +1197,13 @@ class SparkLifecycle:
                 self._local_controller_up_command(),
                 cwd=self.bundle,
                 timeout=420,
+                report_failure_output=True,
             )
         except LifecycleError as error:
             diagnostics = self._controller_startup_diagnostics()
             raise LifecycleError(
-                f"candidate controller startup failed; {diagnostics}"
+                "candidate controller startup failed; "
+                f"{self._redact_diagnostics(str(error))}; {diagnostics}"
             ) from error
         status = self._run_command(
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle

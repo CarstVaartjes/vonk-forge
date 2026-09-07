@@ -61,6 +61,7 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/upgrades/preview"): "previewAgentUpgrade",
     ("post", "/api/v1/agents/upgrades"): "applyAgentUpgrade",
     ("get", "/api/v1/fleet"): "getFleetStatus",
+    ("get", "/api/v1/deployment-provenance"): "getDeploymentProvenance",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
     ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
     ("post", "/api/v1/fleet-profiles"): "createFleetProfile",

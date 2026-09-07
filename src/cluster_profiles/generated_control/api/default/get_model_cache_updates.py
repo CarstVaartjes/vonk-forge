@@ -21,6 +21,7 @@ def _get_kwargs(
     *,
     artifact_set_sha256: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
+    check_upstream: Union[Unset, bool] = False,
     cursor: Union[None, Unset, str] = UNSET,
 
 ) -> dict[str, Any]:
@@ -38,6 +39,8 @@ def _get_kwargs(
     params["artifact_set_sha256"] = json_artifact_set_sha256
 
     params["limit"] = limit
+
+    params["check_upstream"] = check_upstream
 
     json_cursor: Union[None, Unset, str]
     if isinstance(cursor, Unset):
@@ -110,6 +113,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     artifact_set_sha256: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
+    check_upstream: Union[Unset, bool] = False,
     cursor: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
@@ -118,6 +122,7 @@ def sync_detailed(
     Args:
         artifact_set_sha256 (Union[None, Unset, str]):
         limit (Union[Unset, int]):  Default: 100.
+        check_upstream (Union[Unset, bool]):  Default: False.
         cursor (Union[None, Unset, str]):
 
     Raises:
@@ -132,6 +137,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         artifact_set_sha256=artifact_set_sha256,
 limit=limit,
+check_upstream=check_upstream,
 cursor=cursor,
 
     )
@@ -147,6 +153,7 @@ def sync(
     client: AuthenticatedClient,
     artifact_set_sha256: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
+    check_upstream: Union[Unset, bool] = False,
     cursor: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
@@ -155,6 +162,7 @@ def sync(
     Args:
         artifact_set_sha256 (Union[None, Unset, str]):
         limit (Union[Unset, int]):  Default: 100.
+        check_upstream (Union[Unset, bool]):  Default: False.
         cursor (Union[None, Unset, str]):
 
     Raises:
@@ -170,6 +178,7 @@ def sync(
         client=client,
 artifact_set_sha256=artifact_set_sha256,
 limit=limit,
+check_upstream=check_upstream,
 cursor=cursor,
 
     ).parsed
@@ -179,6 +188,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     artifact_set_sha256: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
+    check_upstream: Union[Unset, bool] = False,
     cursor: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
@@ -187,6 +197,7 @@ async def asyncio_detailed(
     Args:
         artifact_set_sha256 (Union[None, Unset, str]):
         limit (Union[Unset, int]):  Default: 100.
+        check_upstream (Union[Unset, bool]):  Default: False.
         cursor (Union[None, Unset, str]):
 
     Raises:
@@ -201,6 +212,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         artifact_set_sha256=artifact_set_sha256,
 limit=limit,
+check_upstream=check_upstream,
 cursor=cursor,
 
     )
@@ -216,6 +228,7 @@ async def asyncio(
     client: AuthenticatedClient,
     artifact_set_sha256: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
+    check_upstream: Union[Unset, bool] = False,
     cursor: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
@@ -224,6 +237,7 @@ async def asyncio(
     Args:
         artifact_set_sha256 (Union[None, Unset, str]):
         limit (Union[Unset, int]):  Default: 100.
+        check_upstream (Union[Unset, bool]):  Default: False.
         cursor (Union[None, Unset, str]):
 
     Raises:
@@ -239,6 +253,7 @@ async def asyncio(
         client=client,
 artifact_set_sha256=artifact_set_sha256,
 limit=limit,
+check_upstream=check_upstream,
 cursor=cursor,
 
     )).parsed

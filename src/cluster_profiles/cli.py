@@ -367,6 +367,11 @@ def _emit(
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
+    if getattr(args, "fleet_command", None) == "provenance" and "platform" in safe:
+        from .deployment_provenance_cli import render_deployment_provenance
+
+        print(render_deployment_provenance(safe))
+        return
     if _emit_agent_upgrade_detail(safe):
         return
     if _emit_list_table(safe):

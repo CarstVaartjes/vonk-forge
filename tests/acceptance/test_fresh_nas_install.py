@@ -224,7 +224,6 @@ def nas_responses(
         ("Tailscale OAuth client ID: ", oauth_client_id),
         ("Tailscale OAuth client secret: ", oauth_client_secret),
         ("LiteLLM upstream provider API key: ", upstream_key),
-        ("Hugging Face access token (optional; leave blank for public models): ", ""),
     ]
     for label in (
         "PostgreSQL control password",
@@ -234,7 +233,6 @@ def nas_responses(
         "LiteLLM administrator key",
         "Grafana administrator password",
         "Internal agent proxy token",
-        "Internal worker API token",
         "Hermes API key",
     ):
         responses.append((f"{label} (leave blank to generate): ", ""))

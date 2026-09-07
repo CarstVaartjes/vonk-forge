@@ -1020,6 +1020,19 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     assert ("POST", "/api/v1/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
 
 
+def test_provenance_and_explicit_upstream_check_use_current_routes() -> None:
+    document = {"platform": [], "agents": [], "workloads": []}
+    client = _Client({("GET", "/api/v1/deployment-provenance"): document})
+    result, payload = _invoke(client, "--json", "fleet", "provenance")
+    assert result == 0
+    assert payload == document
+    assert client.calls[-1][0:2] == ("GET", "/api/v1/deployment-provenance")
+    result, _ = _invoke(client, "--json", "cache", "update")
+    assert result == 0
+    assert client.calls[-1][0:2] == ("GET", "/api/v1/model-cache/updates")
+    assert client.calls[-1][3]["check_upstream"] is True
+
+
 def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
     client = _Client(
         {

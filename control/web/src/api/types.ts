@@ -1,6 +1,7 @@
 import type {components} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
+export type DeploymentProvenance = components["schemas"]["DeploymentProvenance"];
 export type FleetTelemetryDetails = components["schemas"]["TelemetryPoint"]["details"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
@@ -212,6 +213,7 @@ export interface LibraryApi {
   artifactJobResultUrl(jobId: string, sha256: string): string;
 }
 export interface ControlApi extends LibraryApi {
+  deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance>;
   fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;
   fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile>;
   createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
@@ -236,7 +238,7 @@ export interface ControlApi extends LibraryApi {
   repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse>;
   evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
-  modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse>;
+  modelCacheUpdates(signal?: AbortSignal, checkUpstream?: boolean): Promise<ModelCacheUpdatesResponse>;
   modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;

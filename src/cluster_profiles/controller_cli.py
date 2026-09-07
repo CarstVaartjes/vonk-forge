@@ -267,6 +267,10 @@ def add_controller_commands(
     """Add the web-controller-equivalent command hierarchy."""
     fleet = commands.add_parser("fleet", help="Fleet nodes, health, and enrollment")
     fleet_commands = _subcommands(fleet, "fleet_command")
+    provenance = fleet_commands.add_parser(
+        "provenance", help="Show deployed code, artifacts, and evidence boundaries"
+    )
+    _add_json(provenance)
 
     fleet_list = fleet_commands.add_parser("list", help="List the visual Fleet")
     fleet_list.add_argument("--search", default="")
@@ -1588,6 +1592,8 @@ def _load_recipe_list(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    if command == "provenance":
+        return client.request("GET", "/api/v1/deployment-provenance")
     def fleet_snapshot() -> dict[str, object]:
         payload = client.fleet().to_dict()
         if not isinstance(payload, dict):
@@ -2880,7 +2886,7 @@ def _run_cache(
         return client.request(
             "GET",
             "/api/v1/model-cache/updates",
-            query=_query(artifact_set_sha256=artifact_set_sha256),
+            query=_query(artifact_set_sha256=artifact_set_sha256, check_upstream=True),
         )
     if command == "operations":
         if args.cache_operations_command == "list":

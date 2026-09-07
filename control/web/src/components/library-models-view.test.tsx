@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {librarySnapshot} from "../test-fixtures/library";
 import {buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS} from "./library-workcell";
 import {LibraryModelsView} from "./library-models-view";
@@ -15,4 +15,20 @@ test("surfaces ambiguous exact model update candidates without switching the pin
   await waitFor(() => expect(screen.getByText("Model update needs a choice")).toBeVisible());
   expect(screen.getByText(/this row stays pinned to/)).toHaveTextContent(model.model.content_sha256);
   expect(screen.getByText(/same-publisher\/same-lineage\/bf16\/safetensors/)).toBeVisible();
+});
+
+test("checks upstream only on request and explains newer revisions without changing downloads", async () => {
+  const model = librarySnapshot.models[0]!;
+  const checks: boolean[] = [];
+  const modelCacheUpdates = async (_signal: AbortSignal, checkUpstream: boolean) => {
+    checks.push(checkUpstream);
+    return {updates: [{model_content_sha256: model.model.content_sha256, upstream_revisions: checkUpstream ? [{repository: "creator/model", status: "update-available", pinned_revision: "a".repeat(40), latest_revision: "b".repeat(40)}] : []}]};
+  };
+  render(<LibraryModelsView api={{modelCacheUpdates} as never} entries={[]} modelInventory={[model]} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} path="/library?view=models" onQueryChange={() => undefined} query=""/>);
+  await waitFor(() => expect(screen.getByRole("button", {name: "Check for updates"})).toBeEnabled());
+  expect(checks).toEqual([false]);
+  fireEvent.click(screen.getByRole("button", {name: "Check for updates"}));
+  await screen.findByText(/New upstream version/);
+  expect(checks).toEqual([false, true]);
+  expect(screen.getByText(/Update the model in the catalog/)).toBeVisible();
 });

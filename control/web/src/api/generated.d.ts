@@ -378,6 +378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment-provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Deployment Provenance */
+        get: operations["getDeploymentProvenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/endpoints/{alias}": {
         parameters: {
             query?: never;
@@ -1730,6 +1747,36 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentDeploymentEvidence */
+        AgentDeploymentEvidence: {
+            /** Binary Sha256 */
+            binary_sha256?: string | null;
+            /**
+             * Boundary
+             * @default agent_deployment
+             * @constant
+             */
+            boundary: "agent_deployment";
+            /** Build Digest */
+            build_digest?: string | null;
+            /**
+             * Connectivity
+             * @enum {string}
+             */
+            connectivity: "recent" | "offline" | "unknown";
+            /** Display Name */
+            display_name: string;
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Node Id */
+            node_id: string;
+            package_evidence: components["schemas"]["EvidenceAge"];
+            /** Package Sha256 */
+            package_sha256?: string | null;
+            /** Semantic Version */
+            semantic_version?: string | null;
+            /** State */
+            state: string;
+        };
         /** AgentFailureResult */
         AgentFailureResult: {
             /** Diagnostic */
@@ -2743,6 +2790,44 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
+        /** DeploymentModelIdentity */
+        DeploymentModelIdentity: {
+            /** Artifact Key */
+            artifact_key?: string | null;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Publisher */
+            publisher: string;
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+            /** Selection Id */
+            selection_id: string;
+            /** Slug */
+            slug: string;
+        };
+        /** DeploymentProvenance */
+        DeploymentProvenance: {
+            /** Agents */
+            agents: components["schemas"]["AgentDeploymentEvidence"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Platform */
+            platform: components["schemas"]["PlatformBoundary"][];
+            recipe_library: components["schemas"]["RecipeLibraryEvidence"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Workloads */
+            workloads: components["schemas"]["WorkloadProvenance"][];
+        };
         /**
          * DistributionAssignment
          * @description Controller authorization for one node, generation and object set.
@@ -2948,6 +3033,21 @@ export interface components {
              * @enum {string}
              */
             type: "enum";
+        };
+        /** EvidenceAge */
+        EvidenceAge: {
+            /** Age Seconds */
+            age_seconds?: number | null;
+            /**
+             * Freshness
+             * @default unknown
+             * @enum {string}
+             */
+            freshness: "current" | "stale" | "unknown";
+            /** Observed At */
+            observed_at?: string | null;
+            /** Source */
+            source: string;
         };
         /**
          * ExecutionMount
@@ -5268,6 +5368,8 @@ export interface components {
             schema_version: 2;
             /** Updated At */
             updated_at?: string | null;
+            /** Upstream Revisions */
+            upstream_revisions?: components["schemas"]["ModelCacheUpstreamRevision"][];
         };
         /** ModelCacheUpdatesResponse */
         ModelCacheUpdatesResponse: {
@@ -5289,6 +5391,24 @@ export interface components {
             total: number;
             /** Updates */
             updates: components["schemas"]["ModelCacheUpdateResponse"][];
+        };
+        /** ModelCacheUpstreamRevision */
+        ModelCacheUpstreamRevision: {
+            /** Checked At */
+            checked_at: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Latest Revision */
+            latest_revision?: string | null;
+            /** Pinned Revision */
+            pinned_revision: string;
+            /** Repository */
+            repository: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "update-available" | "check-failed";
         };
         /** ModelCapabilities */
         ModelCapabilities: {
@@ -5951,6 +6071,23 @@ export interface components {
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
+        /** PhysicalAcceptanceEvidence */
+        PhysicalAcceptanceEvidence: {
+            /**
+             * Boundary
+             * @default physical_acceptance
+             * @constant
+             */
+            boundary: "physical_acceptance";
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Evidence Sha256 */
+            evidence_sha256?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "accepted" | "failed" | "not_qualified" | "identity_mismatch";
+        };
         /** PlacementEvidenceCounts */
         PlacementEvidenceCounts: {
             /** Builds */
@@ -6145,6 +6282,26 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** PlatformBoundary */
+        PlatformBoundary: {
+            /**
+             * Boundary
+             * @enum {string}
+             */
+            boundary: "repository" | "publication" | "controller_deployment";
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Image Digest */
+            image_digest?: string | null;
+            /** Manifest Sha256 */
+            manifest_sha256?: string | null;
+            /** Source Commit */
+            source_commit?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "observed" | "unknown" | "repository_not_published" | "publication_not_deployed";
+        };
         /** PreparationReason */
         PreparationReason: {
             /** Code */
@@ -6187,6 +6344,38 @@ export interface components {
             base_revision: string;
             /** Changes */
             changes: components["schemas"]["ProposalChangeRequest"][];
+        };
+        /** RankProvenance */
+        RankProvenance: {
+            /**
+             * Identity Agreement
+             * @enum {string}
+             */
+            identity_agreement: "match" | "mismatch" | "unknown";
+            installation_evidence: components["schemas"]["EvidenceAge"];
+            /** Installation Evidence Sha256 */
+            installation_evidence_sha256?: string | null;
+            /** Installation State */
+            installation_state: string;
+            /** Node Id */
+            node_id: string;
+            /** Observation Receipt Sha256 */
+            observation_receipt_sha256?: string | null;
+            /** Observed Artifact Set Sha256 */
+            observed_artifact_set_sha256?: string | null;
+            /** Observed Image Digest */
+            observed_image_digest?: string | null;
+            /** Observed Recipe Sha256 */
+            observed_recipe_sha256?: string | null;
+            /** Observed Run Generation */
+            observed_run_generation?: number | null;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            runtime_evidence: components["schemas"]["EvidenceAge"];
+            /** Runtime State */
+            runtime_state: string;
         };
         /** RecipeBenchmark */
         RecipeBenchmark: {
@@ -6746,6 +6935,16 @@ export interface components {
             knobs?: {
                 [key: string]: components["schemas"]["RecipeSetting"];
             };
+        };
+        /** RecipeLibraryEvidence */
+        RecipeLibraryEvidence: {
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Repository */
+            repository?: string | null;
+            /** Source Commit */
+            source_commit?: string | null;
+            /** State */
+            state: string;
         };
         /** RecipeLifecycle */
         RecipeLifecycle: {
@@ -9498,6 +9697,58 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** WorkloadProvenance */
+        WorkloadProvenance: {
+            /** Build Id */
+            build_id?: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Current Mapping Generation */
+            current_mapping_generation?: number | null;
+            /** Image Digest */
+            image_digest: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Installation State */
+            installation_state: string;
+            /**
+             * Mapping Agreement
+             * @enum {string}
+             */
+            mapping_agreement: "match" | "mismatch" | "unknown";
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Models */
+            models: components["schemas"]["DeploymentModelIdentity"][];
+            physical_acceptance: components["schemas"]["PhysicalAcceptanceEvidence"];
+            /**
+             * Rank Agreement
+             * @enum {string}
+             */
+            rank_agreement: "match" | "mismatch" | "unknown";
+            /** Ranks */
+            ranks: components["schemas"]["RankProvenance"][];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Publisher */
+            recipe_publisher: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Recipe Revision Number */
+            recipe_revision_number: number;
+            /** Recipe Slug */
+            recipe_slug: string;
+            /** Run Generation */
+            run_generation?: number | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Run State */
+            run_state?: string | null;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256?: string | null;
+        };
         /**
          * CompiledExecutionPlan
          * @description Internal verified execution plan consumed by distribution/install.
@@ -10899,6 +11150,53 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getDeploymentProvenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentProvenance"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14081,6 +14379,7 @@ export interface operations {
             query?: {
                 artifact_set_sha256?: string | null;
                 limit?: number;
+                check_upstream?: boolean;
                 cursor?: string | null;
             };
             header?: never;

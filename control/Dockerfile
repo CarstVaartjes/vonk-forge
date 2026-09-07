@@ -97,6 +97,7 @@ RUN python -m pip install --no-cache-dir --prefix=/install \
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 ARG TARGETARCH
+ARG VONK_SOURCE_COMMIT
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
@@ -106,6 +107,10 @@ RUN groupadd --gid 10001 control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp
 COPY --from=build /install /usr/local
+RUN if [ -n "$VONK_SOURCE_COMMIT" ]; then \
+        install -d -m 0755 /usr/local/share/vonk-forge \
+        && VONK_BUILD_SOURCE="$VONK_SOURCE_COMMIT" python -c 'import os; from pathlib import Path; from vonk_control.deployment_provenance_contract import ControllerBuildMetadata; value = ControllerBuildMetadata(source_commit=os.environ["VONK_BUILD_SOURCE"]); Path("/usr/local/share/vonk-forge/controller-build.json").write_text(value.model_dump_json() + "\n")'; \
+    fi
 COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers

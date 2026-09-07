@@ -10,6 +10,7 @@ import type {
   AuditResponse,
   AuditSummary,
   ControlApi,
+  DeploymentProvenance,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetNodeIdentity,
@@ -364,8 +365,12 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
   }
 
-  async modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100}}, signal}));
+  async deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance> {
+    return resultData(await this.generated.GET("/api/v1/deployment-provenance", {signal}));
+  }
+
+  async modelCacheUpdates(signal?: AbortSignal, checkUpstream = false): Promise<ModelCacheUpdatesResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100, check_upstream: checkUpstream}}, signal}));
   }
 
   async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {

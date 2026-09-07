@@ -18,6 +18,10 @@ class ProvenanceModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class ControllerBuildMetadata(ProvenanceModel):
+    source_commit: Commit
+
+
 class EvidenceAge(ProvenanceModel):
     source: str
     observed_at: datetime | None = None
@@ -77,7 +81,7 @@ class RecipeLibraryEvidence(ProvenanceModel):
     evidence: EvidenceAge
 
 
-class ModelIdentity(ProvenanceModel):
+class DeploymentModelIdentity(ProvenanceModel):
     selection_id: str
     publisher: str
     slug: str
@@ -123,7 +127,7 @@ class WorkloadProvenance(ProvenanceModel):
     build_id: str | None = None
     build_input_sha256: Sha256 | None = None
     image_digest: ImageDigest
-    models: list[ModelIdentity]
+    models: list[DeploymentModelIdentity]
     mapping_id: str
     mapping_generation: int
     current_mapping_generation: int | None = None

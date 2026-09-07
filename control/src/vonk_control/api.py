@@ -70,6 +70,8 @@ from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
 )
+from .deployment_provenance import DeploymentProvenanceService
+from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
@@ -497,6 +499,7 @@ def create_app(
     tokens: TokenCodec,
     audits: AuditSink,
     fleet_projection: Any | None = None,
+    deployment_provenance: DeploymentProvenanceService | None = None,
     fleet_stream: Any | None = None,
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
@@ -795,6 +798,11 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         audits=audits,
+    )
+    install_deployment_provenance_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        provenance=deployment_provenance,
     )
     install_recipe_operation_routes(
         app,
@@ -1910,6 +1918,7 @@ def production_app() -> FastAPI:
         run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
+        deployment_provenance=DeploymentProvenanceService(sessions),
         library_placements=library_placements,
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,

@@ -1,5 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .agent_deployment_evidence import AgentDeploymentEvidence
+from .agent_deployment_evidence_connectivity import AgentDeploymentEvidenceConnectivity
 from .agent_failure_result import AgentFailureResult
 from .agent_install_result import AgentInstallResult
 from .agent_operation import AgentOperation
@@ -91,6 +93,8 @@ from .compiled_runtime_image_source import CompiledRuntimeImageSource
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
+from .deployment_model_identity import DeploymentModelIdentity
+from .deployment_provenance import DeploymentProvenance
 from .distribution_assignment import DistributionAssignment
 from .distribution_object import DistributionObject
 from .distribution_object_kind import DistributionObjectKind
@@ -109,6 +113,8 @@ from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .enum_parameter import EnumParameter
+from .evidence_age import EvidenceAge
+from .evidence_age_freshness import EvidenceAgeFreshness
 from .execution_mount import ExecutionMount
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
@@ -302,6 +308,8 @@ from .model_cache_repair_request import ModelCacheRepairRequest
 from .model_cache_retry_request import ModelCacheRetryRequest
 from .model_cache_update_response import ModelCacheUpdateResponse
 from .model_cache_updates_response import ModelCacheUpdatesResponse
+from .model_cache_upstream_revision import ModelCacheUpstreamRevision
+from .model_cache_upstream_revision_status import ModelCacheUpstreamRevisionStatus
 from .model_capabilities import ModelCapabilities
 from .model_capability_fact import ModelCapabilityFact
 from .model_capability_fact_capability import ModelCapabilityFactCapability
@@ -361,6 +369,8 @@ from .operational_run_state import OperationalRunState
 from .operational_state import OperationalState
 from .operations_response import OperationsResponse
 from .output_limits import OutputLimits
+from .physical_acceptance_evidence import PhysicalAcceptanceEvidence
+from .physical_acceptance_evidence_state import PhysicalAcceptanceEvidenceState
 from .placement_evidence_counts import PlacementEvidenceCounts
 from .placement_evidence_counts_truncated_collections_item import PlacementEvidenceCountsTruncatedCollectionsItem
 from .placement_limits import PlacementLimits
@@ -371,6 +381,9 @@ from .placement_recommendation_install_state import PlacementRecommendationInsta
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
 from .plan_reason import PlanReason
+from .platform_boundary import PlatformBoundary
+from .platform_boundary_boundary import PlatformBoundaryBoundary
+from .platform_boundary_state import PlatformBoundaryState
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
 from .projection_reason import ProjectionReason
@@ -380,6 +393,8 @@ from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_preview_response import ProposalPreviewResponse
 from .proposal_request import ProposalRequest
+from .rank_provenance import RankProvenance
+from .rank_provenance_identity_agreement import RankProvenanceIdentityAgreement
 from .recipe_benchmark import RecipeBenchmark
 from .recipe_benchmark_configuration import RecipeBenchmarkConfiguration
 from .recipe_build_definition import RecipeBuildDefinition
@@ -432,6 +447,7 @@ from .recipe_job_serving_request import RecipeJobServingRequest
 from .recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
 from .recipe_job_settings import RecipeJobSettings
 from .recipe_job_settings_knobs import RecipeJobSettingsKnobs
+from .recipe_library_evidence import RecipeLibraryEvidence
 from .recipe_lifecycle import RecipeLifecycle
 from .recipe_memory_resources import RecipeMemoryResources
 from .recipe_memory_resources_kind import RecipeMemoryResourcesKind
@@ -640,8 +656,13 @@ from .uninstall_node_impact_response import UninstallNodeImpactResponse
 from .uninstall_plan_response import UninstallPlanResponse
 from .uninstall_preview_request import UninstallPreviewRequest
 from .uninstall_request import UninstallRequest
+from .workload_provenance import WorkloadProvenance
+from .workload_provenance_mapping_agreement import WorkloadProvenanceMappingAgreement
+from .workload_provenance_rank_agreement import WorkloadProvenanceRankAgreement
 
 __all__ = (
+    "AgentDeploymentEvidence",
+    "AgentDeploymentEvidenceConnectivity",
     "AgentFailureResult",
     "AgentInstallResult",
     "AgentOperation",
@@ -733,6 +754,8 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
+    "DeploymentModelIdentity",
+    "DeploymentProvenance",
     "DistributionAssignment",
     "DistributionObject",
     "DistributionObjectKind",
@@ -751,6 +774,8 @@ __all__ = (
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "EnumParameter",
+    "EvidenceAge",
+    "EvidenceAgeFreshness",
     "ExecutionMount",
     "FleetNode",
     "FleetNodeIdentity",
@@ -944,6 +969,8 @@ __all__ = (
     "ModelCacheRetryRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
+    "ModelCacheUpstreamRevision",
+    "ModelCacheUpstreamRevisionStatus",
     "ModelCapabilities",
     "ModelCapabilityFact",
     "ModelCapabilityFactCapability",
@@ -1003,6 +1030,8 @@ __all__ = (
     "OperationResponse",
     "OperationsResponse",
     "OutputLimits",
+    "PhysicalAcceptanceEvidence",
+    "PhysicalAcceptanceEvidenceState",
     "PlacementEvidenceCounts",
     "PlacementEvidenceCountsTruncatedCollectionsItem",
     "PlacementLimits",
@@ -1013,6 +1042,9 @@ __all__ = (
     "PlacementRecommendationLoadState",
     "PlacementScore",
     "PlanReason",
+    "PlatformBoundary",
+    "PlatformBoundaryBoundary",
+    "PlatformBoundaryState",
     "PreparationReason",
     "PreparationReasonSeverity",
     "ProjectionReason",
@@ -1022,6 +1054,8 @@ __all__ = (
     "ProposalChangeRequestDocument",
     "ProposalPreviewResponse",
     "ProposalRequest",
+    "RankProvenance",
+    "RankProvenanceIdentityAgreement",
     "RecipeBenchmark",
     "RecipeBenchmarkConfiguration",
     "RecipeBuildDefinition",
@@ -1074,6 +1108,7 @@ __all__ = (
     "RecipeJobServingRequestInputSlots",
     "RecipeJobSettings",
     "RecipeJobSettingsKnobs",
+    "RecipeLibraryEvidence",
     "RecipeLifecycle",
     "RecipeMemoryResources",
     "RecipeMemoryResourcesKind",
@@ -1282,4 +1317,7 @@ __all__ = (
     "UninstallPlanResponse",
     "UninstallPreviewRequest",
     "UninstallRequest",
+    "WorkloadProvenance",
+    "WorkloadProvenanceMappingAgreement",
+    "WorkloadProvenanceRankAgreement",
 )

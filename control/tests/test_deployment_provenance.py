@@ -70,6 +70,43 @@ def test_all_boundaries_and_stable_json(tmp_path):
     assert service.snapshot().model_dump_json() == result.model_dump_json()
 
 
+def test_running_image_metadata_supplies_source_without_inventing_digest(tmp_path, monkeypatch):
+    from vonk_control import deployment_provenance as provenance
+
+    metadata = tmp_path / "controller-build.json"
+    metadata.write_text('{"source_commit":"' + "a" * 40 + '"}')
+    monkeypatch.delenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", raising=False)
+    monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", metadata)
+    observation = local_deployment_observations()
+    assert observation.controller.source_commit == "a" * 40
+    assert observation.controller.image_digest is None
+    assert observation.publication is None
+    metadata.write_text('{"source_commit":12}')
+    with pytest.raises(ValueError):
+        local_deployment_observations()
+
+
+def test_composed_app_serves_provenance_with_authentication(tmp_path):
+    from vonk_control.api import create_app
+    from vonk_control.audit import MemoryAuditStore
+    from vonk_control.auth import Actor, TokenCodec
+
+    from .test_api import Jobs
+
+    sessions, now, _, _ = deployment(tmp_path)
+    codec = TokenCodec(b"k" * 32)
+    app = create_app(
+        jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), now=lambda: 10,
+        deployment_provenance=DeploymentProvenanceService(sessions, clock=lambda: now),
+    )
+    client = TestClient(app)
+    assert client.get("/api/v1/deployment-provenance").status_code == 401
+    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
+    response = client.get("/api/v1/deployment-provenance", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert DeploymentProvenance.model_validate_json(response.content).agents
+
+
 def test_repository_publication_and_deployment_are_independent(tmp_path):
     sessions, now, _, _ = deployment(tmp_path)
     observations = DeploymentObservations(
