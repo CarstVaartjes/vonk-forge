@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field, field_validator
 
 from .auth import CursorCodec
 from .model_cache_contract import Digest
+from .operation_api import bounded_error_responses
 from .operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -175,8 +176,18 @@ def _failure_document(error: RecipeImageAvailabilityError) -> dict[str, object]:
     ).model_dump(mode="json")
 
 
+def _failure_response(error: RecipeImageAvailabilityError) -> RecipeImageAvailabilityErrorResponse:
+    """Build the complete documented conflict response through its model."""
+
+    return RecipeImageAvailabilityErrorResponse(
+        failure=AvailabilityOperationFailure.model_validate(_failure_document(error))
+    )
+
+
 def _progress(value: object) -> OperationProgress:
-    raw = dict(value) if isinstance(value, dict) else {"phase": "prepare"}
+    if not isinstance(value, dict):
+        raise TypeError("progress must be a JSON object")
+    raw = dict(value)
     # ModelCache uses transfer-specific counters; map them at this boundary
     # into the shared progress contract without leaking provider fields.
     if "completed_bytes" not in raw and isinstance(raw.get("downloaded_bytes"), int):
@@ -225,22 +236,26 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             }
         )
     failure = document.get("failure")
+    children = []
+    if view.model_child is not None:
+        children.append(_child(view.model_child, kind="model-cache"))
+    # image_progress is intentionally optional while the runtime image child
+    # has not been created. Once present, it is required to be a typed object.
+    if view.image_progress is not None:
+        children.append(_child({
+            "id": view.id,
+            "request_key": view.request_id,
+            "state": view.image_state or view.state,
+            "progress": view.image_progress,
+            "failure": view.image_failure,
+        }, kind="runtime-image"))
     return RecipeImageAvailabilityResponse(
         id=str(document["id"]), request_id=str(document["request_id"]), kind=str(document["kind"]),
         state=str(document["state"]), attempt=int(document["attempt"]),
         recipe_revision_id=str(document["recipe_revision_id"]),
         recipe_content_sha256=str(document["recipe_content_sha256"]),
         progress=_progress(document.get("progress")),
-        children=(
-            ([_child(view.model_child, kind="model-cache")] if view.model_child is not None else [])
-            + [_child({
-                "id": view.id,
-                "request_key": view.request_id,
-                "state": view.image_state or view.state,
-                "progress": view.image_progress or {"phase": "prepare"},
-                "failure": view.image_failure,
-            }, kind="runtime-image")]
-        ),
+        children=children,
         result=result_model,
         failure=AvailabilityOperationFailure.model_validate(failure) if isinstance(failure, dict) else None,
         actions=[RecipeImageAvailabilityAction(key=str(item)) for item in document.get("supported_actions", [])],
@@ -276,7 +291,8 @@ def install_recipe_image_availability_routes(
         "/api/v1/library/recipe-image-availability",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
-        responses={409: {"model": RecipeImageAvailabilityErrorResponse}},
+        responses=bounded_error_responses(401, 403, 409, 422, 503)
+        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
         operation_id="startRecipeImageAvailability",
     )
     def start(body: RecipeImageAvailabilityStart, _request: Request, actor: Any = actor_dependency):
@@ -284,11 +300,12 @@ def install_recipe_image_availability_routes(
         try:
             return _view_document(_service(service).start(body.recipe_revision_id, actor=actor.subject, request_id=body.request_key, force=body.force))
         except RecipeImageAvailabilityError as error:
-            return JSONResponse(status_code=409, content={"schema_version": 2, "failure": _failure_document(error)})
+            return JSONResponse(status_code=409, content=_failure_response(error).model_dump(mode="json"))
 
     @app.get(
         "/api/v1/library/recipe-image-availability",
         response_model=RecipeImageAvailabilityListResponse,
+        responses=bounded_error_responses(400, 401, 422, 503),
         operation_id="listRecipeImageAvailability",
     )
     def list_operations(
@@ -322,7 +339,8 @@ def install_recipe_image_availability_routes(
     @app.get(
         "/api/v1/library/recipe-image-availability/{operation_id}",
         response_model=RecipeImageAvailabilityResponse,
-        responses={409: {"model": RecipeImageAvailabilityErrorResponse}},
+        responses=bounded_error_responses(401, 404, 422, 503)
+        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
         operation_id="getRecipeImageAvailability",
     )
     def get(operation_id: str = Path(min_length=1, max_length=64), _actor: Any = actor_dependency):
@@ -335,7 +353,8 @@ def install_recipe_image_availability_routes(
         "/api/v1/library/recipe-image-availability/{operation_id}/retry",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
-        responses={409: {"model": RecipeImageAvailabilityErrorResponse}},
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503)
+        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
         operation_id="retryRecipeImageAvailability",
     )
     def retry(body: RecipeImageAvailabilityRetry, _request: Request, operation_id: str = Path(min_length=1, max_length=64), actor: Any = actor_dependency):
@@ -345,7 +364,7 @@ def install_recipe_image_availability_routes(
         except KeyError:
             raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
         except RecipeImageAvailabilityError as error:
-            return JSONResponse(status_code=409, content={"schema_version": 2, "failure": _failure_document(error)})
+            return JSONResponse(status_code=409, content=_failure_response(error).model_dump(mode="json"))
 
 
 __all__ = [

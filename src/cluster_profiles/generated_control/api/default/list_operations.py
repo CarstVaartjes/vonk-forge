@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.operations_response import OperationsResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -68,7 +69,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, OperationsResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = OperationsResponse.from_dict(response.json())
 
@@ -84,7 +85,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_401
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -103,7 +104,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, OperationsResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -120,7 +121,7 @@ def sync_detailed(
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, OperationsResponse]]:
+) -> Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
 
     Args:
@@ -134,7 +135,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, OperationsResponse]]
+        Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]
      """
 
 
@@ -160,7 +161,7 @@ def sync(
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, OperationsResponse]]:
+) -> Optional[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
 
     Args:
@@ -174,7 +175,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, OperationsResponse]
+        Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]
      """
 
 
@@ -195,7 +196,7 @@ async def asyncio_detailed(
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, OperationsResponse]]:
+) -> Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
 
     Args:
@@ -209,7 +210,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, OperationsResponse]]
+        Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]
      """
 
 
@@ -235,7 +236,7 @@ async def asyncio(
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, OperationsResponse]]:
+) -> Optional[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
 
     Args:
@@ -249,7 +250,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, OperationsResponse]
+        Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]
      """
 
 

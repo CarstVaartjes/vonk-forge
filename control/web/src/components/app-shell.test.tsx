@@ -12,7 +12,7 @@ const apiFixture = {
   audit: async () => ({events: []}),
   jobs: async () => ({jobs: [], next_cursor: null, total: 0}),
   visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
-  librarySnapshot: async () => ({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}),
+  librarySnapshot: async () => ({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}),
 } as unknown as ControlApi;
 
 afterEach(() => {

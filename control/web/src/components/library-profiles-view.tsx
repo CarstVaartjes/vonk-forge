@@ -147,27 +147,23 @@ function applicationLabel(application: FleetProfileApplication): string {
 
 function applicationProgressLabel(application: FleetProfileApplication, nodeNames: Record<string, string>): string {
   const progress = profileProgressRecord(application);
-  const subphase = typeof progress.subphase === "string" ? progress.subphase : "";
-  const phase = typeof progress.phase === "string" ? progress.phase : "";
-  const members = Array.isArray(progress.members) ? progress.members : [];
-  const activeMember = members.find(member => member && typeof member === "object" && (member as Record<string, unknown>).state === "running")
-    ?? members.find(member => member && typeof member === "object" && (member as Record<string, unknown>).state === "pending");
-  const nodeId = activeMember && typeof activeMember === "object" && typeof (activeMember as Record<string, unknown>).node_id === "string"
-    ? String((activeMember as Record<string, unknown>).node_id)
-    : undefined;
-  const nodeName = nodeId ? nodeNames[nodeId] ?? nodeId : undefined;
-  if (subphase === "container-build" || phase === "build" || phase === "prepare") return "Building container";
-  if (subphase === "model-download" || subphase === "model-copy" || phase === "transfer" && progress.asset === "model") return nodeName ? `Copying model to ${nodeName}` : "Downloading model";
-  if (subphase === "runtime-install" || subphase === "container-copy" || phase === "transfer" && progress.asset === "container") return nodeName ? `Copying container to ${nodeName}` : "Copying container to NAS";
+  const names = progress?.node_ids?.map(id => nodeNames[id] ?? id).join(", ");
+  const phase = progress?.phase;
+  if (phase === "container-build") return "Building container";
+  if (phase === "container-download") return "Downloading container";
+  if (phase === "model-download") return "Downloading model";
+  if (phase === "target-copy" || phase === "transfer") return names ? `Copying to ${names}` : "Copying to Sparks";
+  if (phase === "runtime-install") return "Loading container";
+  if (phase === "prepare") return "Preparing assets";
   if (phase === "start") return "Starting";
-  if (phase === "final_verify" || phase === "running") return "Running";
-  if (phase === "switch") return "Switching profile";
+  if (phase === "stop") return "Stopping";
+  if (phase === "verify" || phase === "final_verify" || phase === "final-verify") return "Checking running state";
   if (application.status_reason && application.state === "failed") return application.status_reason;
-  return application.state === "queued" ? "Checking current setup" : applicationLabel(application);
+  return application.progress.current_label ?? (application.state === "queued" ? "Checking current setup" : applicationLabel(application));
 }
 
-function profileProgressRecord(application: FleetProfileApplication): Record<string, unknown> {
-  return application.progress && typeof application.progress === "object" ? application.progress : {};
+function profileProgressRecord(application: FleetProfileApplication) {
+  return application.progress.child_progress ?? application.progress.switch_adapter?.child_progress;
 }
 
 function profileBytes(value: unknown): string | undefined {
@@ -186,23 +182,17 @@ function profileBytes(value: unknown): string | undefined {
 
 function ProfileApplicationProgress({application, nodeNames, onRetry}: {application: FleetProfileApplication; nodeNames: Record<string, string>; onRetry(): void}) {
   const progress = profileProgressRecord(application);
-  const completed = profileBytes(progress.completed_bytes);
-  const total = profileBytes(progress.total_bytes);
-  const totalKnown = typeof progress.total_bytes === "number" && Number.isFinite(progress.total_bytes);
-  const value = totalKnown && typeof progress.completed_bytes === "number" ? Math.min(100, Math.max(0, progress.completed_bytes / Number(progress.total_bytes) * 100)) : undefined;
-  const members = Array.isArray(progress.members) ? progress.members.flatMap(member => {
-    if (!member || typeof member !== "object") return [];
-    const item = member as Record<string, unknown>;
-    if (typeof item.node_id !== "string") return [];
-    return [{nodeId: item.node_id, state: typeof item.state === "string" ? item.state : "pending", completed: profileBytes(item.completed_bytes), total: profileBytes(item.total_bytes)}];
-  }) : [];
-  const memberLabel = (state: string) => state === "succeeded" ? "Complete" : state === "failed" ? "Failed" : state === "running" ? "In progress" : state === "unknown" ? "Status unavailable" : "Waiting";
+  const completed = profileBytes(progress?.bytes);
+  const total = profileBytes(progress?.total_bytes);
+  const value = progress?.total_bytes != null && progress.total_bytes > 0 && progress.bytes != null
+    ? Math.min(100, Math.max(0, progress.bytes / progress.total_bytes * 100)) : undefined;
+  const members = progress?.node_ids ?? [];
   return <section className={`library-profile-application state-${application.state}`} aria-live="polite" aria-label="Profile switch progress">
     <div className="library-profile-application-heading"><div><strong>{applicationProgressLabel(application, nodeNames)}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
     <div className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
-    {members.length > 0 && <ul className="library-profile-application-members" aria-label="Profile switch targets">{members.map(member => <li key={member.nodeId}><span>{nodeNames[member.nodeId] ?? member.nodeId}</span><small>{memberLabel(member.state)}{member.completed ? ` · ${member.completed}${member.total ? ` of ${member.total}` : ""}` : ""}</small></li>)}</ul>}
+    {members.length > 0 && <ul className="library-profile-application-members" aria-label="Profile switch targets">{members.map(nodeId => <li key={nodeId}><span>{nodeNames[nodeId] ?? nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
-    {TERMINAL_APPLICATION_STATES.has(application.state) && application.state !== "succeeded" && <button type="button" className="button secondary" onClick={onRetry}>Recheck and retry</button>}
+    {TERMINAL_APPLICATION_STATES.has(application.state) && application.state !== "succeeded" && <button type="button" className="button secondary" onClick={onRetry}>Recheck current setup</button>}
   </section>;
 }
 

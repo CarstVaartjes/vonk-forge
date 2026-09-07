@@ -100,8 +100,12 @@ def _queued_recovery_restart(tmp_path: Path):
     )
     for _node_id, payload in (item for group in produced_phases for item in group):
         RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
-    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
-    service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
+    service.record_node_result(
+        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
+    )
+    service.record_node_result(
+        stop_job.id, nodes[1], succeeded=True, evidence={"stopped": True}
+    )
     with sessions() as session:
         restart = session.scalar(
             select(Job).where(

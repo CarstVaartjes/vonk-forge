@@ -71,6 +71,7 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
+from .recipe_lifecycle_contract import parse_recipe_lifecycle_result
 from .recipe_routes import RecipeRouteService, route_publication_transaction
 from .recipe_runtime_specs import recipe_topology
 from .recipe_start_payloads import (
@@ -120,6 +121,20 @@ class AgentJobQueue(Protocol):
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
+
+
+def _validated_result(kind: str, value: object) -> dict[str, object] | None:
+    """Validate a lifecycle result before persistence and on readback."""
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RecipeOperationConflict("recipe operation result is invalid")
+    try:
+        parse_recipe_lifecycle_result(kind, value)
+    except (TypeError, ValueError) as error:
+        raise RecipeOperationConflict("recipe operation result is invalid") from error
+    return dict(value)
 
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
@@ -308,11 +323,7 @@ class RecipeOperationService:
                     targets=list(succeeded.targets),
                     payload_digest=succeeded.payload_digest,
                     payload=dict(succeeded.payload),
-                    result=(
-                        dict(succeeded.result)
-                        if isinstance(succeeded.result, Mapping)
-                        else None
-                    ),
+                    result=_validated_result("recipe.build.v1", succeeded.result),
                     created_at=now,
                     updated_at=now,
                 )
@@ -1204,7 +1215,7 @@ class RecipeOperationService:
                 targets=sorted(node.node_id for node in nodes),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                result={"activated": True},
+                result=_validated_result("recipe.job.activate.v1", {"activated": True}),
                 created_at=now,
                 updated_at=now,
             )
@@ -1966,9 +1977,7 @@ class RecipeOperationService:
                     endpoint, digest = _validate_start_evidence(
                         session, owner_id, operation, evidence
                     )
-                    recorded = (
-                        dict(job.result) if isinstance(job.result, Mapping) else {}
-                    )
+                    recorded = _validated_result(job.kind, job.result) or {}
                     launches = recorded.get("launch_evidence")
                     expected_generation = operation.payload.get("run_generation")
                     for started_node in session.scalars(
@@ -2061,16 +2070,13 @@ class RecipeOperationService:
                     )
                 node.state = "uninstalled" if succeeded else "failed"
                 node.updated_at = now
-        recorded_result = dict(job.result) if isinstance(job.result, Mapping) else {}
+        recorded_result = _validated_result(job.kind, job.result) or {}
         evidence_field = (
             "launch_evidence"
             if job.kind == "recipe.start"
             and (
                 operation.payload.get("phase") == "rank-launch"
-                or (
-                    operation.payload.get("run_generation") is not None
-                    and operation.payload.get("phase") is None
-                )
+                or operation.payload.get("phase") is None
             )
             else "node_evidence"
         )
@@ -2088,7 +2094,10 @@ class RecipeOperationService:
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
             raise RecipeOperationConflict("recipe node evidence changed")
         node_evidence[node_id] = observed_evidence
-        job.result = {**recorded_result, evidence_field: node_evidence}
+        job.result = _validated_result(
+            job.kind,
+            {**recorded_result, evidence_field: node_evidence},
+        )
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
@@ -2169,12 +2178,15 @@ class RecipeOperationService:
             }
             if "launch_evidence" in projected_result:
                 final_result["launch_evidence"] = projected_result["launch_evidence"]
-            job.result = final_result
+            job.result = _validated_result(job.kind, final_result)
             if recovery_error is not None:
-                job.result = {
-                    **job.result,
-                    "recovery_error": str(recovery_error),
-                }
+                job.result = _validated_result(
+                    job.kind,
+                    {
+                        **(job.result or {}),
+                        "recovery_error": str(recovery_error),
+                    },
+                )
             if job.kind == "recipe.build.v1":
                 self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":
@@ -2395,7 +2407,7 @@ class RecipeOperationService:
             if job is None or not job.kind.startswith("recipe."):
                 raise RecipeOperationConflict("recipe operation is not cancellable")
             if job.state == "cancelled":
-                previous = job.result if isinstance(job.result, Mapping) else {}
+                previous = _validated_result(job.kind, job.result) or {}
                 if (
                     previous.get("cancel_request_id") == request_id
                     and previous.get("reason") == cancellation_reason
@@ -2407,7 +2419,7 @@ class RecipeOperationService:
                 )
             if job.state not in {"queued", "running"}:
                 raise RecipeOperationConflict("recipe operation is not cancellable")
-            previous = job.result if isinstance(job.result, Mapping) else {}
+            previous = _validated_result(job.kind, job.result) or {}
             if previous.get("cancel_requested") is True:
                 if (
                     previous.get("cancel_request_id") == request_id
@@ -2428,13 +2440,13 @@ class RecipeOperationService:
             if job.kind == "recipe.job.run.v1" and any(
                 child.state == "running" for child in children
             ):
-                job.result = {
+                job.result = _validated_result(job.kind, {
                     **previous,
                     "cancel_requested": True,
                     "cancel_request_id": request_id,
                     "cancel_actor": actor,
                     "reason": cancellation_reason,
-                }
+                })
                 job.status_reason = cancellation_reason
                 job.updated_at = now
                 return self._view(job)
@@ -2444,7 +2456,7 @@ class RecipeOperationService:
                     child.updated_at = now
             job.state = "cancelled"
             job.status_reason = cancellation_reason
-            job.result = {
+            job.result = _validated_result(job.kind, {
                 **(dict(job.result) if isinstance(job.result, Mapping) else {}),
                 "cancelled": True,
                 "cancel_requested": True,
@@ -2452,7 +2464,7 @@ class RecipeOperationService:
                 "cancel_actor": actor,
                 "reason": cancellation_reason,
                 "recovery": "retry creates a new operation",
-            }
+            })
             job.updated_at = now
         return self.get(operation_id)
 
@@ -2521,7 +2533,7 @@ class RecipeOperationService:
                 targets=sorted(node.node_id for node in nodes),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                result={"stopped": True},
+                result=_validated_result("recipe.stop", {"stopped": True}),
                 created_at=now,
                 updated_at=now,
             )
@@ -3248,7 +3260,7 @@ class RecipeOperationService:
             state=job.state,
             plan_digest=_required_string(job.payload, "plan_digest"),
             nodes=tuple(job.targets),
-            result=dict(job.result) if isinstance(job.result, Mapping) else None,
+            result=_validated_result(job.kind, job.result),
         )
 
     @staticmethod
@@ -3638,6 +3650,9 @@ def _validate_rank_launch_evidence(
     operation: AgentOperation,
     evidence: Mapping[str, object],
 ) -> str:
+    run_generation = operation.payload.get("run_generation")
+    if type(run_generation) is not int or run_generation < 1:
+        raise RecipeOperationConflict("start run generation is invalid")
     expected_fields = {
         "phase",
         "run_id",
@@ -3657,10 +3672,9 @@ def _validate_rank_launch_evidence(
         "fabric_projection_bound",
         "launched",
         "evidence_digest",
+        "run_generation",
+        "runtime_arguments_sha256",
     }
-    exact_inspection = operation.payload.get("run_generation") is not None
-    if exact_inspection:
-        expected_fields |= {"run_generation", "runtime_arguments_sha256"}
     if (
         set(evidence) != expected_fields
         or evidence.get("phase") != "rank-launch"
@@ -3714,8 +3728,7 @@ def _validate_rank_launch_evidence(
         "master_port": operation.payload.get("master_port"),
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
-    if exact_inspection:
-        comparisons["run_generation"] = operation.payload.get("run_generation")
+    comparisons["run_generation"] = run_generation
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "rank launch evidence does not match its fenced request"
@@ -3728,7 +3741,7 @@ def _validate_rank_launch_evidence(
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
     runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
-    if exact_inspection and (
+    if (
         not isinstance(runtime_arguments_sha256, str)
         or len(runtime_arguments_sha256) != 64
         or any(
@@ -3753,6 +3766,9 @@ def _validate_start_evidence(
     operation: AgentOperation,
     evidence: Mapping[str, object],
 ) -> tuple[str, str]:
+    run_generation = operation.payload.get("run_generation")
+    if type(run_generation) is not int or run_generation < 1:
+        raise RecipeOperationConflict("start run generation is invalid")
     expected_fields = {
         "recipe_revision_id",
         "recipe_content_sha256",
@@ -3765,19 +3781,15 @@ def _validate_start_evidence(
         "memory_reservation_bytes",
         "ready",
         "evidence_digest",
+        "run_generation",
+        "runtime_arguments_sha256",
+        "local_address",
+        "master_address",
+        "master_port",
     }
     phase = operation.payload.get("phase")
     if phase == "collective-readiness":
         expected_fields |= {"phase", "run_id", "role"}
-    exact_inspection = operation.payload.get("run_generation") is not None
-    if exact_inspection:
-        expected_fields |= {
-            "run_generation",
-            "runtime_arguments_sha256",
-            "local_address",
-            "master_address",
-            "master_port",
-        }
     if set(evidence) != expected_fields or evidence.get("ready") is not True:
         raise RecipeOperationConflict("start evidence is invalid")
     run = session.get(RecipeRun, run_id)
@@ -3837,11 +3849,10 @@ def _validate_start_evidence(
                 "role": operation.payload.get("role"),
             }
         )
-    if exact_inspection:
-        comparisons["run_generation"] = operation.payload.get("run_generation")
-        comparisons["local_address"] = operation.payload.get("local_address")
-        comparisons["master_address"] = operation.payload.get("master_address")
-        comparisons["master_port"] = operation.payload.get("master_port")
+    comparisons["run_generation"] = run_generation
+    comparisons["local_address"] = operation.payload.get("local_address")
+    comparisons["master_address"] = operation.payload.get("master_address")
+    comparisons["master_port"] = operation.payload.get("master_port")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "start evidence does not match its fenced request"
@@ -3854,7 +3865,7 @@ def _validate_start_evidence(
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
     runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
-    if exact_inspection and (
+    if (
         not isinstance(runtime_arguments_sha256, str)
         or len(runtime_arguments_sha256) != 64
         or any(

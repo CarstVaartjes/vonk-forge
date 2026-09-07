@@ -10,6 +10,7 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.model_cache_eviction_preview_request import ModelCacheEvictionPreviewRequest
 from ...models.model_cache_eviction_preview_response import ModelCacheEvictionPreviewResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -41,7 +42,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ModelCacheEvictionPreviewResponse.from_dict(response.json())
 
@@ -71,7 +72,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_409
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -90,7 +91,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -104,7 +105,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: ModelCacheEvictionPreviewRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     """ Preview Eviction
 
     Args:
@@ -115,7 +116,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]
      """
 
 
@@ -135,7 +136,7 @@ def sync(
     client: AuthenticatedClient,
     body: ModelCacheEvictionPreviewRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     """ Preview Eviction
 
     Args:
@@ -146,7 +147,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]
+        Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]
      """
 
 
@@ -161,7 +162,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: ModelCacheEvictionPreviewRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     """ Preview Eviction
 
     Args:
@@ -172,7 +173,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]
      """
 
 
@@ -192,7 +193,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: ModelCacheEvictionPreviewRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]]:
     """ Preview Eviction
 
     Args:
@@ -203,7 +204,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse]
+        Union[BoundedErrorResponse, ModelCacheEvictionPreviewResponse, RequestValidationProblem]
      """
 
 

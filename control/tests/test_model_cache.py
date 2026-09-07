@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -36,6 +37,7 @@ from vonk_control.model_cache_api import (
 from vonk_control.model_cache_contract import (
     ModelCacheAccessResumeRequest,
     ModelCacheDownloadRequest,
+    ModelCacheDownloadResult,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictRequest,
 )
@@ -45,6 +47,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfile,
     ModelCacheArtifact,
+    ModelCacheOperation,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
@@ -441,6 +444,8 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         request_key="00000000-0000-4000-8000-000000000001",
     )
     assert first.state == "succeeded"
+    assert isinstance(first.result, ModelCacheDownloadResult)
+    assert first.result.artifact_set_sha256 == first.artifact_set_sha256
     entry = service.get_entry(first.artifact_set_sha256 or "")
     assert entry["coverage"] == "complete"
     assert entry["expected_bytes"] == len(b"primary model bytestokenizer auxiliary bytes")
@@ -512,6 +517,32 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     assert service.storage_summary().unique_used_bytes == len(
         b"primary model bytes"
     ) + len(b"tokenizer auxiliary bytes")
+
+
+@pytest.mark.parametrize(
+    "invalid_result",
+    [
+        {"schema_version": 2, "artifact_set_sha256": "a" * 64},
+        {"schema_version": 2, "removed_entries": [], "reclaimed_bytes": 0},
+        "not a result document",
+    ],
+)
+def test_cache_operation_reads_reject_malformed_or_wrong_kind_results(
+    cache, tmp_path: Path, invalid_result: object,
+) -> None:
+    service, sessions = cache
+    operation = _download(
+        service,
+        [_artifact(tmp_path, b"cached payload")],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000000019",
+    )
+    assert isinstance(operation.result, ModelCacheDownloadResult)
+    with sessions.begin() as session:
+        row = session.get(ModelCacheOperation, operation.id)
+        row.payload = {**row.payload, "result": invalid_result}
+    with pytest.raises(ValidationError):
+        service.get_operation(operation.id)
 
 
 def test_one_set_with_shared_digest_counts_one_physical_payload(

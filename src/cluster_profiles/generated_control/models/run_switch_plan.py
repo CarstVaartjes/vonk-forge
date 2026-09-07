@@ -23,8 +23,8 @@ if TYPE_CHECKING:
   from ..models.artifact_storage_impact import ArtifactStorageImpact
   from ..models.capability_evidence import CapabilityEvidence
   from ..models.effective_settings_selection import EffectiveSettingsSelection
+  from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
   from ..models.run_switch_reason import RunSwitchReason
-  from ..models.recipe_build_evidence import RecipeBuildEvidence
   from ..models.rollout_preparation import RolloutPreparation
   from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
   from ..models.invocation_metadata import InvocationMetadata
@@ -48,7 +48,7 @@ class RunSwitchPlan:
             alias (Union[None, str]):
             allowed (bool):
             blockers (list['RunSwitchReason']):
-            build (RecipeBuildEvidence):
+            build (RunSwitchBuildEvidence):
             conflicts (list['RunSwitchReason']):
             fit (SparkFit):
             fit_after_stop (Union['SparkFit', None]):
@@ -87,7 +87,7 @@ class RunSwitchPlan:
     alias: Union[None, str]
     allowed: bool
     blockers: list['RunSwitchReason']
-    build: 'RecipeBuildEvidence'
+    build: 'RunSwitchBuildEvidence'
     conflicts: list['RunSwitchReason']
     fit: 'SparkFit'
     fit_after_stop: Union['SparkFit', None]
@@ -132,8 +132,8 @@ class RunSwitchPlan:
         from ..models.artifact_storage_impact import ArtifactStorageImpact
         from ..models.capability_evidence import CapabilityEvidence
         from ..models.effective_settings_selection import EffectiveSettingsSelection
+        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
         from ..models.run_switch_reason import RunSwitchReason
-        from ..models.recipe_build_evidence import RecipeBuildEvidence
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
         from ..models.invocation_metadata import InvocationMetadata
@@ -344,8 +344,8 @@ class RunSwitchPlan:
         from ..models.artifact_storage_impact import ArtifactStorageImpact
         from ..models.capability_evidence import CapabilityEvidence
         from ..models.effective_settings_selection import EffectiveSettingsSelection
+        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
         from ..models.run_switch_reason import RunSwitchReason
-        from ..models.recipe_build_evidence import RecipeBuildEvidence
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
         from ..models.invocation_metadata import InvocationMetadata
@@ -378,7 +378,7 @@ class RunSwitchPlan:
             blockers.append(blockers_item)
 
 
-        build = RecipeBuildEvidence.from_dict(d.pop("build"))
+        build = RunSwitchBuildEvidence.from_dict(d.pop("build"))
 
 
 

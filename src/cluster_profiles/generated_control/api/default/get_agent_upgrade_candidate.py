@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.agent_upgrade_package_request import AgentUpgradePackageRequest
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -32,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = AgentUpgradePackageRequest.from_dict(response.json())
 
@@ -54,6 +55,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_403
 
+    if response.status_code == 422:
+        response_422 = RequestValidationProblem.from_dict(response.json())
+
+
+
+        return response_422
+
     if response.status_code == 503:
         response_503 = BoundedErrorResponse.from_dict(response.json())
 
@@ -67,7 +75,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -80,7 +88,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -88,7 +96,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]
+        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -106,7 +114,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -114,7 +122,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AgentUpgradePackageRequest, BoundedErrorResponse]
+        Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]
      """
 
 
@@ -127,7 +135,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -135,7 +143,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]
+        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -153,7 +161,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
+) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -161,7 +169,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AgentUpgradePackageRequest, BoundedErrorResponse]
+        Union[AgentUpgradePackageRequest, BoundedErrorResponse, RequestValidationProblem]
      """
 
 

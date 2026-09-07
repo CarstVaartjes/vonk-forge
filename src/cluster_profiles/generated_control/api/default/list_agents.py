@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.agents_response import AgentsResponse
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -32,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentsResponse, BoundedErrorResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = AgentsResponse.from_dict(response.json())
 
@@ -47,6 +48,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_401
 
+    if response.status_code == 422:
+        response_422 = RequestValidationProblem.from_dict(response.json())
+
+
+
+        return response_422
+
     if response.status_code == 503:
         response_503 = BoundedErrorResponse.from_dict(response.json())
 
@@ -60,7 +68,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentsResponse, BoundedErrorResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,7 +81,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[AgentsResponse, BoundedErrorResponse]]:
+) -> Response[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Agent List
 
     Raises:
@@ -81,7 +89,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AgentsResponse, BoundedErrorResponse]]
+        Response[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -99,7 +107,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[AgentsResponse, BoundedErrorResponse]]:
+) -> Optional[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Agent List
 
     Raises:
@@ -107,7 +115,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AgentsResponse, BoundedErrorResponse]
+        Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 
@@ -120,7 +128,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[AgentsResponse, BoundedErrorResponse]]:
+) -> Response[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Agent List
 
     Raises:
@@ -128,7 +136,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AgentsResponse, BoundedErrorResponse]]
+        Response[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -146,7 +154,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[AgentsResponse, BoundedErrorResponse]]:
+) -> Optional[Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Agent List
 
     Raises:
@@ -154,7 +162,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AgentsResponse, BoundedErrorResponse]
+        Union[AgentsResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 

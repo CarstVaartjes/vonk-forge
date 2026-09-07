@@ -7,7 +7,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from ...models.run_status_response import RunStatusResponse
 from typing import cast
 
@@ -33,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, RunStatusResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[RequestValidationProblem, RunStatusResponse]]:
     if response.status_code == 200:
         response_200 = RunStatusResponse.from_dict(response.json())
 
@@ -42,7 +42,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_200
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -54,7 +54,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, RunStatusResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[RequestValidationProblem, RunStatusResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -68,7 +68,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[HTTPValidationError, RunStatusResponse]]:
+) -> Response[Union[RequestValidationProblem, RunStatusResponse]]:
     """ Run Status
 
     Args:
@@ -79,7 +79,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RunStatusResponse]]
+        Response[Union[RequestValidationProblem, RunStatusResponse]]
      """
 
 
@@ -99,7 +99,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[HTTPValidationError, RunStatusResponse]]:
+) -> Optional[Union[RequestValidationProblem, RunStatusResponse]]:
     """ Run Status
 
     Args:
@@ -110,7 +110,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RunStatusResponse]
+        Union[RequestValidationProblem, RunStatusResponse]
      """
 
 
@@ -125,7 +125,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[HTTPValidationError, RunStatusResponse]]:
+) -> Response[Union[RequestValidationProblem, RunStatusResponse]]:
     """ Run Status
 
     Args:
@@ -136,7 +136,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RunStatusResponse]]
+        Response[Union[RequestValidationProblem, RunStatusResponse]]
      """
 
 
@@ -156,7 +156,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[HTTPValidationError, RunStatusResponse]]:
+) -> Optional[Union[RequestValidationProblem, RunStatusResponse]]:
     """ Run Status
 
     Args:
@@ -167,7 +167,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RunStatusResponse]
+        Union[RequestValidationProblem, RunStatusResponse]
      """
 
 

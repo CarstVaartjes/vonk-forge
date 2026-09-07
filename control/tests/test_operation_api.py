@@ -16,6 +16,7 @@ from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import (
     FleetNodeIdentity,
@@ -49,6 +50,37 @@ from vonk_control.operation_api import (
 COMMIT = "a" * 64
 DIGEST = "d" * 64
 NODE_ID = "spk_" + "1" * 32
+
+
+def _profile_operation_plan(
+    *, profile_id: str, profile_digest: str, plan_digest: str, node_ids: list[str], now: datetime
+) -> dict[str, object]:
+    """Build the same complete preview document persisted by profile apply."""
+
+    return FleetProfilePreview(
+        profile_id=profile_id,
+        profile_name="Studio",
+        profile_digest=profile_digest,
+        generated_at=now,
+        allowed=True,
+        scope={"node_ids": node_ids, "idle_node_ids": node_ids},
+        summary={
+            "already_correct": 0,
+            "placements": 0,
+            "builds": 0,
+            "distributions": 0,
+            "installs": 0,
+            "starts": 1,
+            "stops": 0,
+            "uninstalls": 0,
+            "blockers": 0,
+        },
+        assignments=[],
+        preparations=[],
+        steps=[{"index": 0, "kind": "start", "node_ids": node_ids, "label": "Start profile"}],
+        reasons=[],
+        plan_digest=plan_digest,
+    ).model_dump(mode="json")
 
 
 def _encoded(document: object) -> bytes:
@@ -471,14 +503,21 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                     profile_digest="9" * 64,
                     plan_digest=plan_digest,
                     state="running",
-                    plan={
-                        "scope": {"node_ids": node_ids},
-                        "steps": [{"kind": "start"}],
-                    },
+                    plan=_profile_operation_plan(
+                        profile_id=profile_id,
+                        profile_digest="9" * 64,
+                        plan_digest=plan_digest,
+                        node_ids=node_ids,
+                        now=created_at,
+                    ),
                     current_step=0,
                     current_operation_id=None,
-                    progress={"operation_kind": "fleet-profile.apply"},
-                    result=None,
+                    progress={
+                        "operation_kind": "fleet-profile.apply",
+                        "completed_steps": 0,
+                        "total_steps": 1,
+                    },
+                    result={"changed": False, "completed_steps": 0},
                     status_reason=None,
                     actor="admin",
                     created_at=created_at,
@@ -1410,7 +1449,7 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
             params={"target_cursor": cursor, "limit": 1},
         )
         assert response.status_code == 422
-        assert response.json() == {"detail": "job cursor is invalid"}
+        assert response.json() == {"detail": "job cursor is invalid", "issues": []}
 
 
 def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:

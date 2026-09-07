@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import types
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
@@ -80,6 +81,22 @@ def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
     fixture.write_bytes(b"github_pat_platform-fixture-text")
 
     _VALIDATOR._scan_secrets(library, platform)
+
+
+def test_canonical_harness_loader_uses_exact_platform_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = types.ModuleType("vonk_control")
+    stale_harnesses = types.ModuleType("vonk_control.harnesses")
+    stale_metadata = types.ModuleType("vonk_control.harnesses.canonical_metadata")
+    stale_metadata.canonical_harness = lambda _slug: (_ for _ in ()).throw(
+        AssertionError("stale package authority was imported")
+    )
+    monkeypatch.setitem(sys.modules, "vonk_control", stale)
+    monkeypatch.setitem(sys.modules, "vonk_control.harnesses", stale_harnesses)
+    monkeypatch.setitem(sys.modules, "vonk_control.harnesses.canonical_metadata", stale_metadata)
+
+    canonical = _VALIDATOR._canonical_harness_from(ROOT)
+    assert canonical("vllm").slug == "vllm"
+    assert "distributed" in canonical("vllm").topology_modes
 
 
 def test_selected_model_payload_requires_exact_path_digest_and_size() -> None:

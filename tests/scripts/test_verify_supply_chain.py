@@ -35,8 +35,6 @@ def _copy(tmp_path: Path) -> Path:
         "pyproject.toml",
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
-        "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/harness-evidence-v1.schema.json",
         "agent_protocol/pyproject.toml",
         ".dockerignore",
         "agent_protocol/uv.lock",
@@ -45,7 +43,6 @@ def _copy(tmp_path: Path) -> Path:
         "control/packaging/public-contracts.lock",
         "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
         ".github/workflows/validate-recipe-library.yml",
-        "control/src/vonk_control/catalog_contract.py",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
         "control/src/vonk_control/catalog_api.py",
@@ -62,6 +59,13 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/catalog_sync.py",
         "control/src/vonk_control/catalog_repository.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
+        "control/src/vonk_control/artifact_jobs.py",
+        "control/src/vonk_control/fleet_profile_contract.py",
+        "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/library_placement_contract.py",
+        "control/src/vonk_control/library_placements.py",
         "control/src/vonk_control/source_bundles.py",
         "control/src/vonk_control/strict_json.py",
         "src/cluster_profiles/control_client.py",
@@ -161,14 +165,6 @@ def _copy(tmp_path: Path) -> Path:
         destination = target / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / path, destination)
-    for directory in (
-        "config/model-groups",
-        "config/models",
-        "config/model-versions",
-        "config/runtime-distributions",
-        "config/patch-bundles",
-    ):
-        shutil.copytree(ROOT / directory, target / directory)
     shutil.copytree(
         ROOT / "control/src/vonk_control/harnesses",
         target / "control/src/vonk_control/harnesses",
@@ -389,9 +385,14 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
     manifest = json.loads((repository / "inventory/sbom/manifest.json").read_bytes())
 
     for path in (
-        "schemas/global/catalog-entity-v1.schema.json",
-        "control/src/vonk_control/catalog_contract.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
+        "control/src/vonk_control/artifact_jobs.py",
+        "control/src/vonk_control/fleet_profile_contract.py",
+        "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/library_placement_contract.py",
+        "control/src/vonk_control/library_placements.py",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "control/src/vonk_control/harnesses/canonical.py",
         "control/src/vonk_control/source_bundles.py",
@@ -452,6 +453,13 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
         "control/src/vonk_control/recipe_packages.py",
         "control/src/vonk_control/catalog_sync.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
+        "control/src/vonk_control/artifact_jobs.py",
+        "control/src/vonk_control/fleet_profile_contract.py",
+        "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/library_placement_contract.py",
+        "control/src/vonk_control/library_placements.py",
         "control/src/vonk_control/strict_json.py",
         "src/cluster_profiles/control_client.py",
         "src/cluster_profiles/schemas/control-openapi.json",

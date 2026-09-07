@@ -27,6 +27,7 @@ from vonk_control.recipe_api import MappingPlanResponse, MappingPreviewRequest
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     ImageDistributionPreview,
+    RecipeOperationConflict,
     RecipeOperationView,
     RecipeRunRankStatus,
     RecipeRunStatus,
@@ -458,7 +459,11 @@ class Recipes:
             "succeeded",
             "b" * 64,
             (NODE,),
-            {"successful_nodes": [NODE]},
+            {
+                "successful_nodes": [NODE],
+                "failed_nodes": [],
+                "node_evidence": {NODE: {"installed_bytes": 120}},
+            },
         )
 
 
@@ -745,6 +750,32 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
         == "previewRecipeUninstall"
     )
+
+
+def test_build_conflict_route_returns_validated_json_document() -> None:
+    client, headers, recipes, _audits = setup()
+
+    def conflict(_plan, **_kwargs):
+        raise RecipeOperationConflict("submitted build input does not match preview")
+
+    recipes.build = conflict
+    response = client.post(
+        "/api/v1/recipes/builds",
+        headers=headers(),
+        json={
+            "recipe_revision_id": REVISION,
+            "builder_node_id": NODE,
+            "build_input_sha256": "1" * 64,
+            "request_key": "10000000-0000-4000-8000-000000000020",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "recipe.operation_conflict",
+        "detail": "submitted build input does not match preview",
+        "request_id": response.headers["x-request-id"],
+    }
 
 
 def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None:

@@ -349,7 +349,7 @@ def add_controller_commands(
     _add_json(metrics_workloads)
 
     profile = fleet_commands.add_parser(
-        "node-profile", aliases=["profile"], help="Rename a Fleet node"
+        "node-profile", help="Rename a Fleet node"
     )
     profile.add_argument("node_id")
     profile.add_argument("--display-name", required=True)
@@ -791,14 +791,12 @@ def add_controller_commands(
     profile_duplicate.add_argument("--name", required=True)
     profile_duplicate.add_argument("--description")
     profile_duplicate.add_argument("--apply", action="store_true")
-    profile_duplicate.add_argument("--request-key")
     _structured_input(profile_duplicate, required=False)
     _add_json(profile_duplicate)
     profile_capture = profile_commands.add_parser("capture-current")
     profile_capture.add_argument("--name", required=True)
     profile_capture.add_argument("--description", default="")
     profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
-    profile_capture.add_argument("--request-key")
     _structured_input(profile_capture, required=False)
     _apply(profile_capture)
     _add_json(profile_capture)
@@ -1603,7 +1601,7 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
         )
     if command == "metrics":
         return _run_metric_command(args, client, args.metrics_command)
-    if command in {"profile", "node-profile"}:
+    if command == "node-profile":
         display_name = args.display_name.strip()
         if (
             not display_name
@@ -2928,15 +2926,9 @@ def _run_profiles(
         return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
     if command == "duplicate":
         body = _read_structured(args, required=False)
-        if body and "scope" not in body:
-            raise ValueError("profile duplicate input requires an explicit scope")
         body["name"] = args.name
         if args.description is not None:
             body["description"] = args.description
-        if args.apply:
-            if not args.request_key:
-                raise ValueError("profile duplicate apply requires --request-key")
-            body["request_key"] = _explicit_request_key(args.request_key)
         return _plan_or_request(
             args,
             client,
@@ -2949,10 +2941,6 @@ def _run_profiles(
         payload.setdefault("name", args.name)
         payload.setdefault("description", args.description)
         payload.setdefault("installation_policy", args.installation_policy)
-        if args.apply:
-            if not args.request_key:
-                raise ValueError("profile capture-current apply requires --request-key")
-            payload["request_key"] = _explicit_request_key(args.request_key)
         return _plan_or_request(args, client, "POST", f"{base}/capture-current", payload)
     if command == "delete":
         return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
@@ -2961,7 +2949,9 @@ def _run_profiles(
     if command == "status":
         return client.request("GET", f"{base}/{_quoted(args.profile_id)}/status")
     if command == "application":
-        return client.request("GET", f"{base}/applications/{_quoted(args.application_id)}")
+        return client.request(
+            "GET", f"/api/v1/fleet-profile-applications/{_quoted(args.application_id)}"
+        )
     profile_id = _quoted(args.profile_id)
     if command == "switch":
         switch_path = f"{base}/{profile_id}/switch"

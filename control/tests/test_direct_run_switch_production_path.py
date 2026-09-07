@@ -249,7 +249,6 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
                 "verified": True,
                 "verified_digests": [MODEL_DIGEST],
                 "verified_image_digest": assignment["oci_image_digest"],
-                "verified_registry_manifest_digest": REGISTRY_DIGEST,
                 "imported_image_digest": assignment["oci_image_digest"],
                 "verified_oci_layout_sha256": assignment["oci_archive_sha256"],
             }

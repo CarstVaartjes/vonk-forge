@@ -118,7 +118,7 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
         "tests/acceptance/recipe-library-revision.txt",
         "scripts/tests/check_recipe_launch_contracts.py",
         "scripts/tests/run_agent_wire_contracts.py",
-        "config/execution-harnesses/vllm.json",
+        "control/src/vonk_control/harnesses/canonical_metadata.py",
         "src/cluster_profiles/compiler.py",
         "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
     ],

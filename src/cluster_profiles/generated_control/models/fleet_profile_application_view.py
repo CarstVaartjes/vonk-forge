@@ -16,8 +16,8 @@ from typing import Literal, Union, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_application_view_progress import FleetProfileApplicationViewProgress
-  from ..models.fleet_profile_application_view_result_type_0 import FleetProfileApplicationViewResultType0
+  from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
+  from ..models.fleet_profile_application_result import FleetProfileApplicationResult
 
 
 
@@ -38,8 +38,8 @@ class FleetProfileApplicationView:
             plan_digest (str):
             profile_digest (str):
             profile_id (str):
-            progress (FleetProfileApplicationViewProgress):
-            result (Union['FleetProfileApplicationViewResultType0', None]):
+            progress (FleetProfileApplicationProgress): Typed progress tree persisted with every profile application.
+            result (Union['FleetProfileApplicationResult', None]):
             state (FleetProfileApplicationViewState):
             status_reason (Union[None, str]):
             total_steps (int):
@@ -54,8 +54,8 @@ class FleetProfileApplicationView:
     plan_digest: str
     profile_digest: str
     profile_id: str
-    progress: 'FleetProfileApplicationViewProgress'
-    result: Union['FleetProfileApplicationViewResultType0', None]
+    progress: 'FleetProfileApplicationProgress'
+    result: Union['FleetProfileApplicationResult', None]
     state: FleetProfileApplicationViewState
     status_reason: Union[None, str]
     total_steps: int
@@ -67,8 +67,8 @@ class FleetProfileApplicationView:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_application_view_progress import FleetProfileApplicationViewProgress
-        from ..models.fleet_profile_application_view_result_type_0 import FleetProfileApplicationViewResultType0
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
+        from ..models.fleet_profile_application_result import FleetProfileApplicationResult
         created_at = self.created_at.isoformat()
 
         current_operation_id: Union[None, str]
@@ -87,7 +87,7 @@ class FleetProfileApplicationView:
         progress = self.progress.to_dict()
 
         result: Union[None, dict[str, Any]]
-        if isinstance(self.result, FleetProfileApplicationViewResultType0):
+        if isinstance(self.result, FleetProfileApplicationResult):
             result = self.result.to_dict()
         else:
             result = self.result
@@ -130,8 +130,8 @@ class FleetProfileApplicationView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_application_view_progress import FleetProfileApplicationViewProgress
-        from ..models.fleet_profile_application_view_result_type_0 import FleetProfileApplicationViewResultType0
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
+        from ..models.fleet_profile_application_result import FleetProfileApplicationResult
         d = dict(src_dict)
         created_at = isoparse(d.pop("created_at"))
 
@@ -156,25 +156,25 @@ class FleetProfileApplicationView:
 
         profile_id = d.pop("profile_id")
 
-        progress = FleetProfileApplicationViewProgress.from_dict(d.pop("progress"))
+        progress = FleetProfileApplicationProgress.from_dict(d.pop("progress"))
 
 
 
 
-        def _parse_result(data: object) -> Union['FleetProfileApplicationViewResultType0', None]:
+        def _parse_result(data: object) -> Union['FleetProfileApplicationResult', None]:
             if data is None:
                 return data
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_type_0 = FleetProfileApplicationViewResultType0.from_dict(data)
+                result_type_0 = FleetProfileApplicationResult.from_dict(data)
 
 
 
                 return result_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['FleetProfileApplicationViewResultType0', None], data)
+            return cast(Union['FleetProfileApplicationResult', None], data)
 
         result = _parse_result(d.pop("result"))
 

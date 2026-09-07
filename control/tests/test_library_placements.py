@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
     FleetProfileApplicationView,
     FleetProfileAssignmentPreview,
     FleetProfilePlanStep,
@@ -272,6 +273,8 @@ def test_apply_is_digest_bound_and_exposes_durable_progress_and_locations() -> N
     assert result.state == replayed.state == "queued"
     assert result.total_steps == 2
     assert result.selected_node_ids == [NODE_A]
+    assert isinstance(result.progress, FleetProfileApplicationProgress)
+    assert result.progress.library_placement is None
     assert profiles.apply_calls[0]["placement_plan_digest"] == preview.plan_digest
     assert len(profiles.apply_calls) == 1
 

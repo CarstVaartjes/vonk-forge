@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -11,7 +12,9 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.catalog_api import CatalogProblem
 from vonk_control.models import Base, User
+from vonk_control.operation_api import BoundedErrorResponse, RequestValidationProblem
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -168,6 +171,28 @@ def test_health_is_public_but_fleet_requires_authentication() -> None:
     assert client.get("/api/v1/fleet").status_code == 401
 
 
+def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None:
+    client, _, _, _ = _client("viewer")
+
+    response = client.get("/api/v1/fleet")
+
+    assert response.status_code == 401
+    assert BoundedErrorResponse.model_validate_json(response.content).detail == (
+        "authentication required"
+    )
+
+
+def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:
+    client, _, _, _ = _client("viewer")
+
+    response = client.get("/api/v1/catalog/source-bundles/" + "a" * 64)
+
+    assert response.status_code == 401
+    problem = CatalogProblem.model_validate_json(response.content)
+    assert problem.code == "catalog.authentication_required"
+    assert problem.detail == "authentication required"
+
+
 def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -> None:
     client, _, _, _ = _client("viewer")
     build_id = "00000000-0000-4000-8000-000000000001"
@@ -283,6 +308,14 @@ def test_browser_repair_preview_rejects_legacy_schema_one() -> None:
 
     assert response.status_code == 422
     assert upgrades.calls == []
+    problem = RequestValidationProblem.model_validate(response.json())
+    assert any(issue.loc[-1] == "schema_version" for issue in problem.issues)
+    assert all(set(issue) == {"type", "loc", "msg"} for issue in response.json()["issues"])
+    schema = client.app.openapi()
+    response_schema = schema["paths"]["/api/v1/agents/upgrades/preview"]["post"][
+        "responses"
+    ]["422"]["content"]["application/json"]["schema"]
+    Draft202012Validator({**schema, **response_schema}).validate(response.json())
 
 
 def test_browser_repair_preview_requires_csrf_and_administrator_role() -> None:

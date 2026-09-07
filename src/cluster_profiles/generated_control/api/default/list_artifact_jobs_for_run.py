@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.artifact_job_list_response import ArtifactJobListResponse
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -33,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ArtifactJobListResponse.from_dict(response.json())
 
@@ -56,7 +57,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_404
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -75,7 +76,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -89,7 +90,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ List Jobs
 
     Args:
@@ -100,7 +101,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[ArtifactJobListResponse, BoundedErrorResponse]]
+        Response[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -120,7 +121,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ List Jobs
 
     Args:
@@ -131,7 +132,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[ArtifactJobListResponse, BoundedErrorResponse]
+        Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 
@@ -146,7 +147,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+) -> Response[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ List Jobs
 
     Args:
@@ -157,7 +158,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[ArtifactJobListResponse, BoundedErrorResponse]]
+        Response[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -177,7 +178,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse]]:
+) -> Optional[Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ List Jobs
 
     Args:
@@ -188,7 +189,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[ArtifactJobListResponse, BoundedErrorResponse]
+        Union[ArtifactJobListResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 

@@ -145,9 +145,6 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         ".github/workflows/validate-recipe-library.yml",
         PUBLIC_CONTRACT_LOCK,
         PUBLIC_CONTRACT_WHEEL,
-        "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/harness-evidence-v1.schema.json",
-        "control/src/vonk_control/catalog_contract.py",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
         "control/src/vonk_control/catalog_api.py",
@@ -164,6 +161,13 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/catalog_sync.py",
         "control/src/vonk_control/catalog_repository.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
+        "control/src/vonk_control/artifact_jobs.py",
+        "control/src/vonk_control/fleet_profile_contract.py",
+        "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/library_placement_contract.py",
+        "control/src/vonk_control/library_placements.py",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "control/src/vonk_control/harnesses/canonical.py",
         "control/src/vonk_control/source_bundles.py",
@@ -205,19 +209,6 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "scripts/validate-recipe-library",
         "config/recipe-library-manifest.json",
     ]
-    for relative in (
-        "config/model-groups",
-        "config/models",
-        "config/model-versions",
-        "config/runtime-distributions",
-        "config/patch-bundles",
-    ):
-        directory = root / relative
-        if directory.is_dir():
-            paths.extend(
-                path.relative_to(root).as_posix()
-                for path in sorted(directory.glob("*.json"))
-            )
     harnesses = root / "control/src/vonk_control/harnesses"
     if not harnesses.is_dir():
         raise ValueError("canonical recipe compiler harnesses are missing")

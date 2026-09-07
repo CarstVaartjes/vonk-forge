@@ -18,11 +18,11 @@ from typing import Union
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.compiled_artifact_contract import CompiledArtifactContract
   from ..models.artifact_file_declaration import ArtifactFileDeclaration
   from ..models.output_limits import OutputLimits
   from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
   from ..models.artifact_output_file import ArtifactOutputFile
-  from ..models.artifact_job_response_compiled_contract import ArtifactJobResponseCompiledContract
 
 
 
@@ -36,7 +36,7 @@ T = TypeVar("T", bound="ArtifactJobResponse")
 class ArtifactJobResponse:
     """
         Attributes:
-            compiled_contract (ArtifactJobResponseCompiledContract):
+            compiled_contract (CompiledArtifactContract): The canonical typed artifact execution contract.
             contract_sha256 (str):
             created_at (datetime.datetime):
             id (str):
@@ -57,7 +57,7 @@ class ArtifactJobResponse:
             status_reason (Union[None, Unset, str]):
      """
 
-    compiled_contract: 'ArtifactJobResponseCompiledContract'
+    compiled_contract: 'CompiledArtifactContract'
     contract_sha256: str
     created_at: datetime.datetime
     id: str
@@ -82,11 +82,11 @@ class ArtifactJobResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.compiled_artifact_contract import CompiledArtifactContract
         from ..models.artifact_file_declaration import ArtifactFileDeclaration
         from ..models.output_limits import OutputLimits
         from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
         from ..models.artifact_output_file import ArtifactOutputFile
-        from ..models.artifact_job_response_compiled_contract import ArtifactJobResponseCompiledContract
         compiled_contract = self.compiled_contract.to_dict()
 
         contract_sha256 = self.contract_sha256
@@ -193,13 +193,13 @@ class ArtifactJobResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.compiled_artifact_contract import CompiledArtifactContract
         from ..models.artifact_file_declaration import ArtifactFileDeclaration
         from ..models.output_limits import OutputLimits
         from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
         from ..models.artifact_output_file import ArtifactOutputFile
-        from ..models.artifact_job_response_compiled_contract import ArtifactJobResponseCompiledContract
         d = dict(src_dict)
-        compiled_contract = ArtifactJobResponseCompiledContract.from_dict(d.pop("compiled_contract"))
+        compiled_contract = CompiledArtifactContract.from_dict(d.pop("compiled_contract"))
 
 
 

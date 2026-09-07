@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlForbidden
+from cluster_profiles.control_client import (
+    ControlClientError,
+    ControlForbidden,
+    _operation,
+    _request_contract,
+)
 
 
 class _Model:
@@ -152,9 +157,11 @@ class _StrictTaskClient(_Client):
     ):
         allowed = {
             ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
-            ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name"},
+            ("POST", "/api/v1/fleet-profiles/capture-current"): {"name", "description", "installation_policy"},
             ("POST", "/api/v1/fleet-profiles/profile-1/preview"): set(),
             ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
+            ("GET", "/api/v1/fleet-profile-applications/application-1"): set(),
             ("POST", "/api/v1/model-cache/eviction-preview"): {"target_bytes"},
             ("POST", "/api/v1/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
             ("POST", "/api/v1/model-cache/repair-preview"): {"artifact_set_sha256"},
@@ -174,6 +181,8 @@ class _StrictTaskClient(_Client):
         self.extra_headers.append(extra_headers)
         if path == "/api/v1/fleet-profiles/profile-1/switch":
             return {"schema_version": 2, "operation_id": "profile-switch-1", "state": "queued"}
+        if path == "/api/v1/fleet-profile-applications/application-1":
+            return {"schema_version": 2, "id": "application-1"}
         if path == "/api/v1/operations/profile-switch-1":
             return {"schema_version": 2, "id": "profile-switch-1", "state": "succeeded"}
         if path == "/api/v1/model-cache/eviction-preview":
@@ -786,7 +795,7 @@ def test_fleet_enrollments_all_follows_continuation_cursors() -> None:
     ("argv", "method", "path"),
     [
         (
-            ("fleet", "profile", "spk/node", "--display-name", "Studio", "--apply"),
+            ("fleet", "node-profile", "spk/node", "--display-name", "Studio", "--apply"),
             "PATCH",
             "/api/v1/nodes/spk%2Fnode/profile",
         ),
@@ -931,7 +940,7 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
         ("cache", "repair", "artifact-set-1", "preview"),
         ("fleet", "enroll", "--ttl-seconds", "901"),
         ("fleet", "re-enroll", "spk_NOT_HEX"),
-        ("fleet", "profile", "node", "--display-name", "   "),
+        ("fleet", "node-profile", "node", "--display-name", "   "),
         ("fleet", "upgrade", "preview", "--node-id", "spk_NOT_HEX"),
     ],
 )
@@ -1726,9 +1735,11 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
     request_key = "11111111-1111-4111-8111-111111111111"
     commands = (
         ("profiles", "create", "--input", profile),
-        ("profiles", "duplicate", "profile-1", "--name", "Copy", "--input", '{"scope":{"node_ids":[]}}', "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+        ("profiles", "duplicate", "profile-1", "--name", "Copy", "--apply"),
+        ("profiles", "capture-current", "--name", "Current", "--apply"),
         ("profiles", "preview", "profile-1"),
         ("profiles", "switch", "profile-1", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("profiles", "application", "application-1"),
         ("cache", "eviction", "preview", "--target-bytes", "100"),
         ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
         ("cache", "repair", "a" * 64, "preview"),
@@ -1739,6 +1750,44 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
         result, _payload = _invoke(client, "--json", *command)
         assert result == 0
     assert ("GET", "/api/v1/operations/profile-switch-1", None, None) in client.calls
+
+
+def test_profile_routes_match_bundled_openapi_request_contracts() -> None:
+    _request_contract(
+        "/api/v1/fleet-profiles/profile-1/duplicate",
+        "POST",
+        {"name": "Copy"},
+    )
+    _request_contract(
+        "/api/v1/fleet-profiles/capture-current",
+        "POST",
+        {
+            "name": "Current",
+            "description": "",
+            "installation_policy": "keep-cached",
+        },
+    )
+    _request_contract(
+        "/api/v1/fleet-profile-applications/application-1",
+        "GET",
+        None,
+    )
+    assert _operation(
+        "/api/v1/fleet-profile-applications/application-1", "GET"
+    )["operationId"] == "getFleetProfileApplication"
+
+    with pytest.raises(ControlClientError, match="OpenAPI schema"):
+        _request_contract(
+            "/api/v1/fleet-profiles/profile-1/duplicate",
+            "POST",
+            {"name": "Copy", "request_key": "11111111-1111-4111-8111-111111111111"},
+        )
+    with pytest.raises(ControlClientError, match="OpenAPI schema"):
+        _request_contract(
+            "/api/v1/fleet-profiles/capture-current",
+            "POST",
+            {"name": "Current", "request_key": "11111111-1111-4111-8111-111111111111"},
+        )
 
 
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(

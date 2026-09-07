@@ -9,7 +9,7 @@ from ... import errors
 
 from ...models.authority_response import AuthorityResponse
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -50,7 +50,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = AuthorityResponse.from_dict(response.json())
 
@@ -66,7 +66,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_401
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -85,7 +85,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -99,7 +99,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     revision: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+) -> Response[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Authority View
 
     Args:
@@ -110,7 +110,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]
+        Response[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -130,7 +130,7 @@ def sync(
     client: AuthenticatedClient,
     revision: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Authority View
 
     Args:
@@ -141,7 +141,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]
+        Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 
@@ -156,7 +156,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     revision: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+) -> Response[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Authority View
 
     Args:
@@ -167,7 +167,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]
+        Response[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]
      """
 
 
@@ -187,7 +187,7 @@ async def asyncio(
     client: AuthenticatedClient,
     revision: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]]:
+) -> Optional[Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Authority View
 
     Args:
@@ -198,7 +198,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[AuthorityResponse, BoundedErrorResponse, HTTPValidationError]
+        Union[AuthorityResponse, BoundedErrorResponse, RequestValidationProblem]
      """
 
 

@@ -17,9 +17,10 @@ from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.model_cache_eviction_result import ModelCacheEvictionResult
+  from ..models.model_cache_download_result import ModelCacheDownloadResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.model_cache_operation_progress import ModelCacheOperationProgress
-  from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
 
 
 
@@ -45,7 +46,7 @@ class ModelCacheOperationResponse:
             state (ModelCacheOperationResponseState):
             updated_at (str):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
-            result (Union['ModelCacheOperationResponseResultType0', None, Unset]):
+            result (Union['ModelCacheDownloadResult', 'ModelCacheEvictionResult', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
@@ -61,7 +62,7 @@ class ModelCacheOperationResponse:
     state: ModelCacheOperationResponseState
     updated_at: str
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
-    result: Union['ModelCacheOperationResponseResultType0', None, Unset] = UNSET
+    result: Union['ModelCacheDownloadResult', 'ModelCacheEvictionResult', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -69,9 +70,10 @@ class ModelCacheOperationResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.model_cache_eviction_result import ModelCacheEvictionResult
+        from ..models.model_cache_download_result import ModelCacheDownloadResult
         from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.model_cache_operation_progress import ModelCacheOperationProgress
-        from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
         artifact_set_sha256: Union[None, str]
         artifact_set_sha256 = self.artifact_set_sha256
 
@@ -108,7 +110,9 @@ class ModelCacheOperationResponse:
         result: Union[None, Unset, dict[str, Any]]
         if isinstance(self.result, Unset):
             result = UNSET
-        elif isinstance(self.result, ModelCacheOperationResponseResultType0):
+        elif isinstance(self.result, ModelCacheDownloadResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, ModelCacheEvictionResult):
             result = self.result.to_dict()
         else:
             result = self.result
@@ -144,9 +148,10 @@ class ModelCacheOperationResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.model_cache_eviction_result import ModelCacheEvictionResult
+        from ..models.model_cache_download_result import ModelCacheDownloadResult
         from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.model_cache_operation_progress import ModelCacheOperationProgress
-        from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
         d = dict(src_dict)
         def _parse_artifact_set_sha256(data: object) -> Union[None, str]:
             if data is None:
@@ -217,7 +222,7 @@ class ModelCacheOperationResponse:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        def _parse_result(data: object) -> Union['ModelCacheOperationResponseResultType0', None, Unset]:
+        def _parse_result(data: object) -> Union['ModelCacheDownloadResult', 'ModelCacheEvictionResult', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -225,14 +230,24 @@ class ModelCacheOperationResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_type_0 = ModelCacheOperationResponseResultType0.from_dict(data)
+                result_type_0 = ModelCacheDownloadResult.from_dict(data)
 
 
 
                 return result_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['ModelCacheOperationResponseResultType0', None, Unset], data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_1 = ModelCacheEvictionResult.from_dict(data)
+
+
+
+                return result_type_1
+            except: # noqa: E722
+                pass
+            return cast(Union['ModelCacheDownloadResult', 'ModelCacheEvictionResult', None, Unset], data)
 
         result = _parse_result(d.pop("result", UNSET))
 

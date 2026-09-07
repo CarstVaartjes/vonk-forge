@@ -35,6 +35,7 @@ from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
 from .logging import redact_text
+from .model_cache_contract import ModelCacheOperationResult, parse_model_cache_result
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
@@ -434,7 +435,7 @@ class CacheOperationView:
     artifact_set_sha256: str | None
     plan_digest: str | None
     progress: Mapping[str, object]
-    result: Mapping[str, object] | None
+    result: ModelCacheOperationResult | None
     last_error: str | None
     created_at: str
     updated_at: str
@@ -842,11 +843,11 @@ def _supersedes_revision(
 def _revision_identity(row: CatalogDocumentRevision | None) -> dict[str, object] | None:
     if row is None or not isinstance(row.content_digest, str):
         return None
-    return {
-        "publisher": row.publisher,
-        "slug": row.slug,
-        "content_sha256": row.content_digest,
-    }
+    return ModelReference(
+        publisher=row.publisher,
+        slug=row.slug,
+        content_sha256=row.content_digest,
+    ).model_dump(mode="json")
 
 
 class ModelCacheService:
@@ -2867,7 +2868,10 @@ class ModelCacheService:
                     if key != "failure"
                 }
             if result is not None:
-                payload = dict(operation.payload) | {"result": dict(result)}
+                parsed_result = parse_model_cache_result(operation.kind, result)
+                payload = dict(operation.payload) | {
+                    "result": parsed_result.model_dump(mode="json")
+                }
                 payload.pop("failure", None)
                 operation.payload = payload
             if state in {"succeeded", "failed", "cancelled"}:
@@ -2999,7 +3003,10 @@ class ModelCacheService:
             artifact_set_sha256=operation.artifact_set_sha256,
             plan_digest=operation.plan_digest,
             progress=dict(operation.progress),
-            result=(dict(result) if isinstance(result, Mapping) else None),
+            result=(
+                parse_model_cache_result(operation.kind, result)
+                if result is not None else None
+            ),
             last_error=operation.last_error,
             created_at=_iso(operation.created_at) or "",
             updated_at=_iso(operation.updated_at) or "",

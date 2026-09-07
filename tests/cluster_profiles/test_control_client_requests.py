@@ -73,7 +73,41 @@ def _artifact_job_response() -> dict[str, object]:
         "interface": "image-job",
         "state": "draft",
         "contract_sha256": "a" * 64,
-        "compiled_contract": {},
+        "compiled_contract": {
+            "schema_version": 1,
+            "interface": "image-job",
+            "input": {
+                "required": False,
+                "media_types": [],
+                "max_bytes": 0,
+                "slots": [],
+            },
+            "parameters": [],
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 1,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Image",
+                        "description": "Generated image output",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 1,
+                        "max_total_bytes": 1,
+                    }
+                ],
+            },
+            "output_limits": {
+                "max_files": 1,
+                "max_file_bytes": 1,
+                "max_total_bytes": 1,
+                "allowed_media_types": ["image/png"],
+            },
+            "max_timeout_seconds": 3600,
+        },
         "input_manifest_sha256": "b" * 64,
         "input_total_bytes": 0,
         "input_declarations": [],

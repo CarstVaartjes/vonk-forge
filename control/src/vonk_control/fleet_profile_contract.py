@@ -8,6 +8,7 @@ from typing import Annotated, Literal, Protocol
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
 from .preparation_contract import RolloutPreparation
+from .run_switch_contract import RunSwitchOperationResult
 from .strict_json import StrictJSONModel
 
 _UUID_PATTERN = (
@@ -294,6 +295,144 @@ class FleetProfileChildProgress(_StrictModel):
             raise ValueError("child progress bytes cannot exceed total bytes")
         return self
 
+class FleetProfileSwitchQueueItem(_StrictModel):
+    """One durable Run/Switch child in the profile reconciliation queue."""
+
+    kind: Literal["run", "stop"]
+    id: UuidId
+
+
+class FleetProfileSwitchChildState(_StrictModel):
+    """Terminal receipt for a child already completed by the adapter."""
+
+    operation_id: UuidId
+    kind: Literal["run", "stop"]
+    state: Literal["succeeded", "failed", "cancelled"]
+
+
+class FleetProfileSwitchAdapterResult(_StrictModel):
+    """Complete result of reconciling every assignment in a profile scope."""
+
+    children: list[FleetProfileSwitchChildState] = Field(max_length=128)
+    assignment_ids: list[UuidId] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def assignment_ids_are_unique(self) -> FleetProfileSwitchAdapterResult:
+        if len(self.assignment_ids) != len(set(self.assignment_ids)):
+            raise ValueError("profile switch assignment IDs must be unique")
+        return self
+
+
+class FleetProfileSwitchAdapterState(_StrictModel):
+    """Persisted state used to resume a profile switch after restart."""
+
+    schema_version: Literal[2] = 2
+    child_id: UuidId
+    scope_node_ids: list[NodeId] = Field(max_length=32)
+    assignment_ids: list[UuidId] = Field(max_length=64)
+    assignments: list[FleetProfileAssignment] = Field(max_length=64)
+    queue: list[FleetProfileSwitchQueueItem] = Field(max_length=128)
+    position: int = Field(default=0, ge=0, le=128)
+    active_operation_id: UuidId | None = None
+    active_kind: Literal["run", "stop"] | None = None
+    children: list[FleetProfileSwitchChildState] = Field(default_factory=list, max_length=128)
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    request_id: UuidId
+    state: Literal[
+        "queued", "running", "waiting-for-operator", "succeeded", "failed", "cancelled"
+    ] = "queued"
+    child_progress: FleetProfileChildProgress | None = None
+    status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    result: FleetProfileSwitchAdapterResult | None = None
+
+    @model_validator(mode="after")
+    def identities_are_consistent(self) -> FleetProfileSwitchAdapterState:
+        if self.scope_node_ids != sorted(set(self.scope_node_ids)):
+            raise ValueError("profile switch scope node IDs must be sorted and unique")
+        if self.assignment_ids != [assignment.id for assignment in self.assignments]:
+            raise ValueError("profile switch assignments must match assignment IDs")
+        if self.active_kind is None and self.active_operation_id is not None:
+            raise ValueError("profile switch active operation must have a kind")
+        if self.active_kind is not None and self.active_operation_id is None:
+            raise ValueError("profile switch active kind must have an operation")
+        return self
+
+class FleetProfileSwitchChildResult(_StrictModel):
+    """Profile child receipt containing the public Run/Switch result tree."""
+
+    run_switch_operation_id: UuidId
+    run_switch: RunSwitchOperationResult
+
+
+class FleetProfileVerificationResult(_StrictModel):
+    """Small result used by profile switch adapters that verify directly."""
+
+    verified: bool
+
+
+class FleetProfileAssignmentContext(_StrictModel):
+    """Persisted mapping and installation identities for one assignment."""
+
+    mapping_id: UuidId | None = None
+    mapping_generation: int | None = Field(default=None, ge=1)
+    installation_id: UuidId | None = None
+
+
+class FleetProfileLibraryPlacementContext(_StrictModel):
+    """Identity binding retained for replay of a direct Library placement."""
+
+    recipe_id: UuidId
+    recipe_revision_id: UuidId
+    selected_node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    desired_state: Literal["installed", "running"]
+    alias: Alias | None = None
+    profile_plan_digest: Digest
+    installation_ids: list[UuidId] = Field(default_factory=list, max_length=16)
+    run_ids: list[UuidId] = Field(default_factory=list, max_length=16)
+    plan_digest: Digest
+
+
+FleetProfileChildResult = (
+    FleetProfileSwitchChildResult
+    | FleetProfileSwitchAdapterResult
+    | FleetProfileVerificationResult
+)
+
+
+class FleetProfileStepResult(_StrictModel):
+    """Result receipt for one completed profile plan step."""
+
+    operation_id: UuidId
+    owner_id: UuidId | None = None
+    kind: Annotated[str, StringConstraints(min_length=1, max_length=80)] | None = None
+    result: FleetProfileChildResult | None = None
+
+class FleetProfileApplicationProgress(_StrictModel):
+    """Typed progress tree persisted with every profile application."""
+
+    operation_kind: Literal["fleet-profile.apply", "fleet-profile.prepare"] | None = None
+    completed_steps: int = Field(default=0, ge=0, le=1024)
+    total_steps: int = Field(default=0, ge=0, le=1024)
+    current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
+    child_source: Literal["recipe", "switch-adapter"] | None = None
+    child_progress: FleetProfileChildProgress | None = None
+    step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
+    switch_adapter: FleetProfileSwitchAdapterState | None = None
+    assignments: dict[UuidId, FleetProfileAssignmentContext] = Field(default_factory=dict)
+    library_placement: FleetProfileLibraryPlacementContext | None = None
+
+    @model_validator(mode="after")
+    def progress_is_consistent(self) -> FleetProfileApplicationProgress:
+        if self.total_steps < self.completed_steps:
+            raise ValueError("profile progress completed steps exceed total steps")
+        return self
+
+class FleetProfileApplicationResult(_StrictModel):
+    """Terminal result for one profile application."""
+
+    changed: bool
+    completed_steps: int = Field(ge=0, le=1024)
+
 
 class FleetProfileChildOperation(_StrictModel):
     """Stable child operation envelope independent of the Run service module."""
@@ -309,7 +448,7 @@ class FleetProfileChildOperation(_StrictModel):
     ]
     progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
-    result: dict[str, object] | None = None
+    result: FleetProfileChildResult | None = None
 
 
 class FleetProfileSwitchAdapter(Protocol):
@@ -376,8 +515,8 @@ class FleetProfileApplicationView(_StrictModel):
     total_steps: int = Field(ge=0, le=1024)
     current_operation_id: UuidId | None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None
-    progress: dict[str, object]
-    result: dict[str, object] | None
+    progress: FleetProfileApplicationProgress
+    result: FleetProfileApplicationResult | None
     created_at: datetime
     updated_at: datetime
 
@@ -426,6 +565,8 @@ class FleetProfileCaptureInput(_StrictModel):
 
 
 __all__ = [
+    "FleetProfileApplicationProgress",
+    "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
     "FleetProfileApplyRequest",
     "FleetProfileAssignment",
@@ -435,8 +576,10 @@ __all__ = [
     "FleetProfileCaptureInput",
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
+    "FleetProfileChildResult",
     "FleetProfileDuplicateInput",
     "FleetProfileInput",
+    "FleetProfileLibraryPlacementContext",
     "FleetProfileList",
     "FleetProfileNode",
     "FleetProfilePlanStep",
@@ -449,6 +592,13 @@ __all__ = [
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStatusView",
+    "FleetProfileStepResult",
     "FleetProfileSwitchAdapter",
+    "FleetProfileSwitchAdapterResult",
+    "FleetProfileSwitchAdapterState",
+    "FleetProfileSwitchChildResult",
+    "FleetProfileSwitchChildState",
+    "FleetProfileSwitchQueueItem",
+    "FleetProfileVerificationResult",
     "FleetProfileView",
 ]

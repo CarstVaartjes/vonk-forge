@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -35,6 +34,11 @@ from .artifact_blob_store import (
     ArtifactBlobStoreError,
     StoredArtifactBlob,
 )
+from .compiled_artifact_contract import (
+    CompiledArtifactContract,
+    compile_artifact_contract,
+    validate_parameter_definition,
+)
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -52,19 +56,6 @@ from .strict_json import StrictJSONModel
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
 MAX_INPUT_TOTAL_BYTES = 1024**3
-_SLOT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
-_EXTENSION = re.compile(r"\.[a-z0-9][a-z0-9._-]{0,15}\Z")
-_PARAMETER_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
-_UNSAFE_PARAMETER_KEY = re.compile(
-    r"^(?:apikey|passwordhash)$|"
-    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
-    r"(?:$|[_-])|"
-    r"(?:^|[_-])(?:api|access|auth|bearer|github|hf|huggingface)[_-]?token$|"
-    r"(?:^|[_-])private[_-]?key$|"
-    r"^token$|"
-    r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
-    re.IGNORECASE,
-)
 
 
 class ArtifactJobError(ValueError):
@@ -163,7 +154,7 @@ class ArtifactJobResponse(ArtifactJobContractModel):
         "waiting-for-operator",
     ]
     contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    compiled_contract: dict[str, object]
+    compiled_contract: CompiledArtifactContract
     input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_total_bytes: int = Field(ge=0)
     input_declarations: tuple[ArtifactFileDeclaration, ...]
@@ -207,7 +198,6 @@ class ArtifactJobCapabilitiesResponse(ArtifactJobContractModel):
     storage: ArtifactJobStorageCapabilities
 
 
-
 @dataclass(frozen=True, slots=True)
 class ArtifactJobView:
     """Internal lifecycle projection; HTTP routes validate it at the boundary."""
@@ -218,7 +208,7 @@ class ArtifactJobView:
     interface: str
     state: str
     contract_sha256: str
-    compiled_contract: dict[str, object]
+    compiled_contract: CompiledArtifactContract
     input_manifest_sha256: str
     input_total_bytes: int
     input_declarations: tuple[dict[str, object], ...]
@@ -254,403 +244,66 @@ def _recipe_interface(document: Mapping[str, object]) -> str:
 
 
 def _finite_parameter_number(value: object) -> bool:
-    return (
-        (isinstance(value, float) and math.isfinite(value))
-        or (isinstance(value, int) and not isinstance(value, bool))
+    return (isinstance(value, float) and math.isfinite(value)) or (
+        isinstance(value, int) and not isinstance(value, bool)
     )
-
-
-def _settings_parameters(document: Mapping[str, object]) -> list[dict[str, object]]:
-    settings = document.get("settings")
-    knobs = settings.get("knobs") if isinstance(settings, Mapping) else None
-    if knobs is None:
-        return []
-    if not isinstance(knobs, Mapping) or len(knobs) > 64:
-        raise ArtifactJobError("artifact parameter contract is invalid")
-    parameters: list[dict[str, object]] = []
-    for name, setting in knobs.items():
-        if not isinstance(name, str) or not isinstance(setting, Mapping):
-            raise ArtifactJobError("artifact parameter contract is invalid")
-        value = setting.get("value")
-        if isinstance(value, bool):
-            kind = "boolean"
-        elif isinstance(value, int):
-            kind = "integer"
-        elif isinstance(value, float):
-            kind = "float"
-        elif isinstance(value, str):
-            kind = "string"
-        else:
-            raise ArtifactJobError("artifact parameter contract is invalid")
-        parameters.append(
-            {
-                "name": name,
-                "type": kind,
-                "default": value,
-                "minimum": None,
-                "maximum": None,
-            }
-        )
-    return parameters
-
-
-def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, object]:
-    name = raw.get("name")
-    kind = raw.get("type")
-    if (
-        not isinstance(name, str)
-        or _PARAMETER_NAME.fullmatch(name) is None
-        or _UNSAFE_PARAMETER_KEY.search(name)
-        or kind not in {"string", "integer", "float", "boolean", "enum"}
-    ):
-        raise ArtifactJobError("artifact parameter contract is invalid")
-    default = raw.get("default")
-    minimum = raw.get("minimum")
-    maximum = raw.get("maximum")
-    if kind == "string":
-        valid = (
-            isinstance(default, str)
-            and "\x00" not in default
-            and len(default.encode("utf-8")) <= 4096
-            and minimum is None
-            and maximum is None
-        )
-    elif kind == "integer":
-        valid = (
-            type(default) is int
-            and type(minimum) in (int, type(None))
-            and type(maximum) in (int, type(None))
-        )
-    elif kind == "float":
-        valid = (
-            _finite_parameter_number(default)
-            and type(minimum) in (int, float, type(None))
-            and type(maximum) in (int, float, type(None))
-            and (minimum is None or _finite_parameter_number(minimum))
-            and (maximum is None or _finite_parameter_number(maximum))
-        )
-    elif kind == "boolean":
-        valid = type(default) is bool and minimum is None and maximum is None
-    else:
-        allowed = raw.get("allowed_values")
-        valid = (
-            isinstance(allowed, list)
-            and 1 <= len(allowed) <= 128
-            and all(
-                isinstance(item, (str, int, float, bool))
-                and not (isinstance(item, float) and not math.isfinite(item))
-                for item in allowed
-            )
-            and default in allowed
-            and minimum is None
-            and maximum is None
-        )
-    if not valid or (
-        minimum is not None
-        and maximum is not None
-        and minimum > maximum
-    ):
-        raise ArtifactJobError("artifact parameter contract is invalid")
-    pattern = raw.get("pattern")
-    if pattern is not None and (
-        not isinstance(pattern, str)
-        or "\x00" in pattern
-        or len(pattern) > 256
-    ):
-        raise ArtifactJobError("artifact parameter contract is invalid")
-    return {
-        "name": name,
-        "type": kind,
-        "default": default,
-        "minimum": minimum,
-        "maximum": maximum,
-        "allowed_values": list(raw.get("allowed_values", [])),
-        "pattern": pattern,
-    }
 
 
 def _compile_contract(
     document: Mapping[str, object], interface_name: str
-) -> dict[str, object]:
-    interfaces = document.get("interfaces")
-    interface = (
-        next(
-            (
-                item
-                for item in interfaces
-                if isinstance(item, Mapping) and item.get("adapter") == interface_name
-            ),
-            None,
+) -> CompiledArtifactContract:
+    try:
+        return compile_artifact_contract(document, interface_name)
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError(str(error)) from error
+
+
+def _canonical_contract(value: object) -> CompiledArtifactContract:
+    try:
+        return (
+            value
+            if isinstance(value, CompiledArtifactContract)
+            else CompiledArtifactContract.parse(value)
         )
-        if isinstance(interfaces, list)
-        else None
-    )
-    if interface is None:
-        raise ArtifactJobError("artifact job interface contract is unavailable")
-    raw_input = interface.get("input")
-    if raw_input is None:
-        input_contract: dict[str, object] = {
-            "required": False,
-            "media_types": [],
-            "max_bytes": 0,
-            "slots": [],
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("compiled artifact contract is invalid") from error
+
+
+def _contract_sha256(contract: CompiledArtifactContract | Mapping[str, object]) -> str:
+    return _canonical_contract(contract).sha256()
+
+
+def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, object]:
+    try:
+        return validate_parameter_definition(raw).model_dump(mode="json")
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("artifact parameter contract is invalid") from error
+
+
+def _output_mappings(
+    contract: CompiledArtifactContract | Mapping[str, object],
+) -> list[dict[str, object]]:
+    parsed = _canonical_contract(contract)
+    return [
+        {
+            "slot": slot.id,
+            "media_type": slot.media_types[0],
+            "extensions": list(slot.extensions),
         }
-    elif isinstance(raw_input, Mapping):
-        media_types = raw_input.get("media_types")
-        max_bytes = raw_input.get("max_bytes")
-        required = raw_input.get("required")
-        if (
-            not isinstance(media_types, list)
-            or not media_types
-            or not all(isinstance(item, str) for item in media_types)
-            or not isinstance(max_bytes, int)
-            or isinstance(max_bytes, bool)
-            or not 1 <= max_bytes <= MAX_INPUT_TOTAL_BYTES
-            or not isinstance(required, bool)
-        ):
-            raise ArtifactJobError("artifact input contract is invalid")
-        aggregate_media = sorted(set(media_types))
-        raw_slots = raw_input.get("slots")
-        if raw_slots is None:
-            raw_slots = [
-                {
-                    "id": "input",
-                    "label": "Input",
-                    "description": "Recipe input",
-                    "media_types": aggregate_media,
-                    "extensions": [],
-                    "min_files": 1 if required else 0,
-                    "max_files": MAX_INPUT_FILES,
-                    "max_file_bytes": min(max_bytes, MAX_INPUT_FILE_BYTES),
-                    "max_total_bytes": max_bytes,
-                }
-            ]
-        if (
-            not isinstance(raw_slots, list)
-            or not 1 <= len(raw_slots) <= MAX_INPUT_FILES
-        ):
-            raise ArtifactJobError("artifact input slot contract is invalid")
-        slots: list[dict[str, object]] = []
-        for raw_slot in raw_slots:
-            if not isinstance(raw_slot, Mapping):
-                raise ArtifactJobError("artifact input slot contract is invalid")
-            slot_id = raw_slot.get("id")
-            label = raw_slot.get("label")
-            description = raw_slot.get("description")
-            slot_media = raw_slot.get("media_types")
-            extensions = raw_slot.get("extensions")
-            min_files = raw_slot.get("min_files")
-            max_files = raw_slot.get("max_files")
-            max_file_bytes = raw_slot.get("max_file_bytes")
-            max_total_bytes = raw_slot.get("max_total_bytes")
-            if (
-                not isinstance(slot_id, str)
-                or _SLOT_ID.fullmatch(slot_id) is None
-                or not isinstance(label, str)
-                or not 1 <= len(label) <= 64
-                or not isinstance(description, str)
-                or not 1 <= len(description) <= 256
-                or not isinstance(slot_media, list)
-                or not 1 <= len(slot_media) <= 16
-                or not all(isinstance(item, str) for item in slot_media)
-                or len(set(slot_media)) != len(slot_media)
-                or not set(slot_media) <= set(aggregate_media)
-                or not isinstance(extensions, list)
-                or len(extensions) > 16
-                or not all(
-                    isinstance(item, str) and _EXTENSION.fullmatch(item) is not None
-                    for item in extensions
-                )
-                or len(set(extensions)) != len(extensions)
-                or not isinstance(min_files, int)
-                or isinstance(min_files, bool)
-                or not isinstance(max_files, int)
-                or isinstance(max_files, bool)
-                or not 0 <= min_files <= max_files <= MAX_INPUT_FILES
-                or max_files < 1
-                or not isinstance(max_file_bytes, int)
-                or isinstance(max_file_bytes, bool)
-                or not 1 <= max_file_bytes <= MAX_INPUT_FILE_BYTES
-                or not isinstance(max_total_bytes, int)
-                or isinstance(max_total_bytes, bool)
-                or not max_file_bytes <= max_total_bytes <= max_bytes
-            ):
-                raise ArtifactJobError("artifact input slot contract is invalid")
-            slots.append(
-                {
-                    "id": slot_id,
-                    "label": label,
-                    "description": description,
-                    "media_types": sorted(slot_media),
-                    "extensions": sorted(extensions),
-                    "min_files": min_files,
-                    "max_files": max_files,
-                    "max_file_bytes": max_file_bytes,
-                    "max_total_bytes": max_total_bytes,
-                }
-            )
-        if len({str(item["id"]) for item in slots}) != len(slots):
-            raise ArtifactJobError("artifact input slot ids must be unique")
-        if required and not any(int(item["min_files"]) > 0 for item in slots):
-            raise ArtifactJobError("required artifact input has no required slot")
-        input_contract = {
-            "required": required,
-            "media_types": aggregate_media,
-            "max_bytes": max_bytes,
-            "slots": sorted(slots, key=lambda item: str(item["id"])),
-        }
-    else:
-        raise ArtifactJobError("artifact input contract is invalid")
-    raw_parameters = _settings_parameters(document)
-    parameters: list[dict[str, object]] = []
-    for raw in raw_parameters:
-        if not isinstance(raw, Mapping):
-            raise ArtifactJobError("artifact parameter contract is invalid")
-        parameters.append(_validate_parameter_definition(raw))
-    raw_output = interface.get("output")
-    if not isinstance(raw_output, Mapping) or raw_output.get("path") != "/outputs":
-        raise ArtifactJobError("artifact output contract is unavailable")
-    aggregate_output_bytes = raw_output.get("max_total_bytes")
-    raw_output_slots = raw_output.get("slots")
-    if (
-        not isinstance(aggregate_output_bytes, int)
-        or isinstance(aggregate_output_bytes, bool)
-        or not 1 <= aggregate_output_bytes <= 2 * 1024**3
-        or not isinstance(raw_output_slots, list)
-        or not 1 <= len(raw_output_slots) <= 32
-    ):
-        raise ArtifactJobError("artifact output contract is invalid")
-    output_slots: list[dict[str, object]] = []
-    for raw_slot in raw_output_slots:
-        if not isinstance(raw_slot, Mapping):
-            raise ArtifactJobError("artifact output slot contract is invalid")
-        slot_id = raw_slot.get("id")
-        label = raw_slot.get("label")
-        description = raw_slot.get("description")
-        slot_media = raw_slot.get("media_types")
-        extensions = raw_slot.get("extensions")
-        min_files = raw_slot.get("min_files")
-        max_files = raw_slot.get("max_files")
-        max_file_bytes = raw_slot.get("max_file_bytes")
-        max_total_bytes = raw_slot.get("max_total_bytes")
-        if (
-            not isinstance(slot_id, str)
-            or _SLOT_ID.fullmatch(slot_id) is None
-            or not isinstance(label, str)
-            or not 1 <= len(label) <= 64
-            or not isinstance(description, str)
-            or not 1 <= len(description) <= 256
-            or not isinstance(slot_media, list)
-            or len(slot_media) != 1
-            or not all(isinstance(item, str) for item in slot_media)
-            or len(set(slot_media)) != len(slot_media)
-            or not isinstance(extensions, list)
-            or not 1 <= len(extensions) <= 16
-            or not all(
-                isinstance(item, str) and _EXTENSION.fullmatch(item) is not None
-                for item in extensions
-            )
-            or len(set(extensions)) != len(extensions)
-            or not isinstance(min_files, int)
-            or isinstance(min_files, bool)
-            or not isinstance(max_files, int)
-            or isinstance(max_files, bool)
-            or not 0 <= min_files <= max_files <= 32
-            or max_files < 1
-            or not isinstance(max_file_bytes, int)
-            or isinstance(max_file_bytes, bool)
-            or not 1 <= max_file_bytes <= 1024**3
-            or not isinstance(max_total_bytes, int)
-            or isinstance(max_total_bytes, bool)
-            or not max_file_bytes <= max_total_bytes <= aggregate_output_bytes
-        ):
-            raise ArtifactJobError("artifact output slot contract is invalid")
-        output_slots.append(
-            {
-                "id": slot_id,
-                "label": label,
-                "description": description,
-                "media_types": sorted(slot_media),
-                "extensions": sorted(extensions),
-                "min_files": min_files,
-                "max_files": max_files,
-                "max_file_bytes": max_file_bytes,
-                "max_total_bytes": max_total_bytes,
-            }
-        )
-    if len({str(item["id"]) for item in output_slots}) != len(output_slots):
-        raise ArtifactJobError("artifact output slot ids must be unique")
-    all_extensions = [
-        str(extension) for slot in output_slots for extension in slot["extensions"]
+        for slot in parsed.output.slots
     ]
-    if len(set(all_extensions)) != len(all_extensions):
-        raise ArtifactJobError("artifact output extensions must identify one slot")
-    output_slots.sort(key=lambda item: str(item["id"]))
-    output_media = sorted(
-        {str(media) for slot in output_slots for media in slot["media_types"]}
-    )
-    output_contract = {
-        "path": "/outputs",
-        "max_total_bytes": aggregate_output_bytes,
-        "slots": output_slots,
-    }
-    return {
-        "schema_version": 1,
-        "interface": interface_name,
-        "input": input_contract,
-        "parameters": sorted(parameters, key=lambda item: str(item["name"])),
-        "output": output_contract,
-        "output_limits": {
-            "max_files": min(32, sum(int(item["max_files"]) for item in output_slots)),
-            "max_file_bytes": max(int(item["max_file_bytes"]) for item in output_slots),
-            "max_total_bytes": aggregate_output_bytes,
-            "allowed_media_types": output_media,
-        },
-        "max_timeout_seconds": 3600,
-    }
-
-
-def _contract_sha256(contract: Mapping[str, object]) -> str:
-    return hashlib.sha256(canonical_message(contract)).hexdigest()
-
-
-def _output_mappings(contract: Mapping[str, object]) -> list[dict[str, object]]:
-    output = contract.get("output")
-    slots = output.get("slots") if isinstance(output, Mapping) else None
-    if not isinstance(slots, list):
-        raise ArtifactJobError("artifact output mappings are unavailable")
-    mappings: list[dict[str, object]] = []
-    for slot in slots:
-        if not isinstance(slot, Mapping):
-            raise ArtifactJobError("artifact output mappings are unavailable")
-        media_types = slot.get("media_types")
-        extensions = slot.get("extensions")
-        if (
-            not isinstance(slot.get("id"), str)
-            or not isinstance(media_types, list)
-            or len(media_types) != 1
-            or not isinstance(media_types[0], str)
-            or not isinstance(extensions, list)
-            or not extensions
-            or not all(isinstance(item, str) for item in extensions)
-        ):
-            raise ArtifactJobError("artifact output mappings are unavailable")
-        mappings.append(
-            {
-                "slot": slot["id"],
-                "media_type": media_types[0],
-                "extensions": sorted(extensions),
-            }
-        )
-    return sorted(mappings, key=lambda item: str(item["slot"]).encode("utf-8"))
 
 
 def _effective_output_limits(
-    contract: Mapping[str, object], supplied: Mapping[str, object]
+    contract: CompiledArtifactContract | Mapping[str, object],
+    supplied: Mapping[str, object],
 ) -> RecipeJobOutputLimits:
+    parsed = _canonical_contract(contract)
     try:
         requested = RecipeJobOutputLimits.parse(supplied)
-        allowed = RecipeJobOutputLimits.parse(contract["output_limits"])
+        allowed = RecipeJobOutputLimits.parse(
+            parsed.output_limits.model_dump(mode="json")
+        )
     except (AgentProtocolError, KeyError, TypeError) as error:
         raise ArtifactJobError("artifact output limits are invalid") from error
     if (
@@ -660,21 +313,9 @@ def _effective_output_limits(
         or not set(requested.allowed_media_types) <= set(allowed.allowed_media_types)
     ):
         raise ArtifactJobError("artifact output limits exceed the recipe contract")
-    output = contract.get("output")
-    slots = output.get("slots") if isinstance(output, Mapping) else None
-    required_slots = (
-        [
-            item
-            for item in slots
-            if isinstance(item, Mapping) and item.get("min_files", 0) > 0
-        ]
-        if isinstance(slots, list)
-        else []
-    )
-    if requested.max_files < sum(
-        int(item["min_files"]) for item in required_slots
-    ) or any(
-        not set(item["media_types"]) & set(requested.allowed_media_types)
+    required_slots = [item for item in parsed.output.slots if item.min_files > 0]
+    if requested.max_files < sum(item.min_files for item in required_slots) or any(
+        not set(item.media_types) & set(requested.allowed_media_types)
         for item in required_slots
     ):
         raise ArtifactJobError(
@@ -684,32 +325,24 @@ def _effective_output_limits(
 
 
 def _validate_inputs_against_contract(
-    contract: Mapping[str, object], inputs: tuple[RecipeJobInputFile, ...]
+    contract: CompiledArtifactContract | Mapping[str, object],
+    inputs: tuple[RecipeJobInputFile, ...],
 ) -> None:
-    raw_input = contract.get("input")
-    if not isinstance(raw_input, Mapping):
-        raise ArtifactJobError("artifact input contract is invalid")
-    raw_slots = raw_input.get("slots")
-    if not isinstance(raw_slots, list):
-        raise ArtifactJobError("artifact input contract is invalid")
-    slots = {
-        item["id"]: item
-        for item in raw_slots
-        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
-    }
+    parsed = _canonical_contract(contract)
+    slots = {item.id: item for item in parsed.input.slots}
     if not slots and inputs:
         raise ArtifactJobError("recipe does not accept artifact input files")
     for item in inputs:
         slot = slots.get(item.slot)
         if slot is None:
             raise ArtifactJobError(f"artifact input slot {item.slot} is undeclared")
-        if item.media_type not in slot["media_types"]:
+        if item.media_type not in slot.media_types:
             raise ArtifactJobError(
                 f"artifact input {item.name} media type is not allowed"
             )
-        if item.size_bytes > slot["max_file_bytes"]:
+        if item.size_bytes > slot.max_file_bytes:
             raise ArtifactJobError(f"artifact input {item.name} exceeds its slot limit")
-        extensions = slot["extensions"]
+        extensions = slot.extensions
         if extensions and not any(
             item.name.lower().endswith(ext) for ext in extensions
         ):
@@ -718,70 +351,123 @@ def _validate_inputs_against_contract(
             )
     for slot_id, slot in slots.items():
         selected = [item for item in inputs if item.slot == slot_id]
-        if not slot["min_files"] <= len(selected) <= slot["max_files"]:
+        if not slot.min_files <= len(selected) <= slot.max_files:
             raise ArtifactJobError(
                 f"artifact input slot {slot_id} file count is invalid"
             )
-        if sum(item.size_bytes for item in selected) > slot["max_total_bytes"]:
+        if sum(item.size_bytes for item in selected) > slot.max_total_bytes:
             raise ArtifactJobError(
                 f"artifact input slot {slot_id} bytes exceed the limit"
             )
-    if sum(item.size_bytes for item in inputs) > raw_input["max_bytes"]:
+    if sum(item.size_bytes for item in inputs) > parsed.input.max_bytes:
         raise ArtifactJobError("artifact job input bytes exceed the recipe contract")
 
 
 def _validate_outputs_against_contract(
-    contract: Mapping[str, object], outputs: Sequence[RecipeJobFile], *, terminal: bool
+    contract: CompiledArtifactContract | Mapping[str, object],
+    outputs: Sequence[RecipeJobFile],
+    *,
+    terminal: bool,
 ) -> None:
-    raw_output = contract.get("output")
-    slots_value = raw_output.get("slots") if isinstance(raw_output, Mapping) else None
-    if not isinstance(raw_output, Mapping) or not isinstance(slots_value, list):
-        raise ArtifactJobError("artifact output contract is invalid")
-    slots = [item for item in slots_value if isinstance(item, Mapping)]
-    assignments: dict[str, list[RecipeJobFile]] = {
-        str(slot["id"]): [] for slot in slots
-    }
+    parsed = _canonical_contract(contract)
+    slots = parsed.output.slots
+    assignments: dict[str, list[RecipeJobFile]] = {slot.id: [] for slot in slots}
     for output in outputs:
         matches = [
             (len(extension.encode("utf-8")), slot)
             for slot in slots
-            if output.media_type in slot["media_types"]
-            for extension in slot["extensions"]
+            if output.media_type in slot.media_types
+            for extension in slot.extensions
             if output.name.endswith(extension)
         ]
         if not matches:
             raise ArtifactJobError(f"artifact output {output.name} has no unique slot")
         longest = max(length for length, _slot in matches)
-        longest_slots = {
-            str(slot["id"]): slot for length, slot in matches if length == longest
-        }
+        longest_slots = {slot.id: slot for length, slot in matches if length == longest}
         if len(longest_slots) != 1:
             raise ArtifactJobError(f"artifact output {output.name} has no unique slot")
         slot = next(iter(longest_slots.values()))
-        if output.size_bytes > slot["max_file_bytes"]:
+        if output.size_bytes > slot.max_file_bytes:
             raise ArtifactJobError(
                 f"artifact output {output.name} exceeds its slot limit"
             )
-        assignments[str(slot["id"])].append(output)
+        assignments[slot.id].append(output)
     for slot in slots:
-        selected = assignments[str(slot["id"])]
-        minimum = int(slot["min_files"]) if terminal else 0
-        if not minimum <= len(selected) <= int(slot["max_files"]):
+        selected = assignments[slot.id]
+        minimum = slot.min_files if terminal else 0
+        if not minimum <= len(selected) <= slot.max_files:
             raise ArtifactJobError(
-                f"artifact output slot {slot['id']} file count is invalid"
+                f"artifact output slot {slot.id} file count is invalid"
             )
-        if sum(item.size_bytes for item in selected) > int(slot["max_total_bytes"]):
+        if sum(item.size_bytes for item in selected) > slot.max_total_bytes:
             raise ArtifactJobError(
-                f"artifact output slot {slot['id']} bytes exceed the limit"
+                f"artifact output slot {slot.id} bytes exceed the limit"
             )
-    if sum(item.size_bytes for item in outputs) > int(raw_output["max_total_bytes"]):
+    if sum(item.size_bytes for item in outputs) > parsed.output.max_total_bytes:
         raise ArtifactJobError("artifact output bytes exceed the recipe contract")
 
 
 def _effective_parameters(
-    contract: Mapping[str, object], supplied: Mapping[str, object]
+    contract: CompiledArtifactContract | Mapping[str, object],
+    supplied: Mapping[str, object],
 ) -> dict[str, object]:
-    definitions = contract.get("parameters")
+    if isinstance(contract, CompiledArtifactContract):
+        by_name = {item.name: item for item in contract.parameters}
+        if set(supplied) - set(by_name):
+            raise ArtifactJobError("artifact job contains undeclared parameters")
+        effective: dict[str, object] = {}
+        for name, definition in by_name.items():
+            value = supplied.get(name, definition.default)
+            kind = definition.type
+            valid_type = (
+                kind == "string"
+                and isinstance(value, str)
+                and "\x00" not in value
+                and len(value.encode("utf-8")) <= 4096
+                or kind == "integer"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                or kind == "float"
+                and _finite_parameter_number(value)
+                or kind == "boolean"
+                and isinstance(value, bool)
+                or kind == "enum"
+                and value in definition.allowed_values
+            )
+            if not valid_type:
+                raise ArtifactJobError(
+                    f"artifact job parameter {name} has the wrong type"
+                )
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and (
+                    definition.minimum is not None
+                    and value < definition.minimum
+                    or definition.maximum is not None
+                    and value > definition.maximum
+                )
+            ):
+                raise ArtifactJobError(
+                    f"artifact job parameter {name} is outside its range"
+                )
+            if isinstance(definition.pattern, str) and isinstance(value, str):
+                try:
+                    matched = re.fullmatch(definition.pattern, value) is not None
+                except re.error as error:
+                    raise ArtifactJobError(
+                        "artifact parameter pattern is invalid"
+                    ) from error
+                if not matched:
+                    raise ArtifactJobError(
+                        f"artifact job parameter {name} does not match"
+                    )
+            effective[name] = value
+        return effective
+
+    # Retain the narrow mapping form for the focused helper's isolated tests;
+    # service paths always take the typed branch above.
+    definitions = contract.get("parameters") if isinstance(contract, Mapping) else None
     if not isinstance(definitions, list):
         raise ArtifactJobError("artifact parameter contract is invalid")
     by_name = {
@@ -1057,8 +743,7 @@ class ArtifactJobService:
             contract_digest = _contract_sha256(contract)
             parameters_copy = _effective_parameters(contract, supplied_parameters)
             limits = _effective_output_limits(contract, output_limits)
-            max_timeout = contract.get("max_timeout_seconds")
-            if not isinstance(max_timeout, int) or timeout_seconds > max_timeout:
+            if timeout_seconds > contract.max_timeout_seconds:
                 raise ArtifactJobError(
                     "artifact job timeout exceeds the recipe contract"
                 )
@@ -1070,11 +755,12 @@ class ArtifactJobService:
                 ) from None
             raise
         effective_limits = limits.to_mapping()
+        contract_mapping = contract.to_mapping()
         if existing is not None:
             if (
                 existing.parameters != parameters_copy
                 or existing.output_limits != effective_limits
-                or existing.compiled_contract != contract
+                or existing.compiled_contract != contract_mapping
                 or existing.contract_sha256 != contract_digest
             ):
                 raise ArtifactJobError("request key was already used differently")
@@ -1086,7 +772,7 @@ class ArtifactJobService:
             interface=interface,
             parameters=parameters_copy,
             output_limits=effective_limits,
-            compiled_contract=contract,
+            compiled_contract=contract_mapping,
             contract_sha256=contract_digest,
             state="draft",
             input_manifest=manifest,
@@ -1284,10 +970,7 @@ class ArtifactJobService:
                 if installation is not None
                 else None
             )
-            if (
-                installation is None
-                or resolved is None
-            ):
+            if installation is None or resolved is None:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
             revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
@@ -1886,6 +1569,7 @@ class ArtifactJobService:
             self._file_mapping(item)
             for item in self._files_in_session(session, job.id, "output")
         )
+        contract = _canonical_contract(job.compiled_contract)
         return ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
@@ -1893,7 +1577,7 @@ class ArtifactJobService:
             interface=job.interface,
             state=state,
             contract_sha256=job.contract_sha256,
-            compiled_contract=dict(job.compiled_contract),
+            compiled_contract=contract,
             input_manifest_sha256=job.input_manifest_sha256,
             input_total_bytes=job.input_total_bytes,
             input_declarations=tuple(
@@ -1921,5 +1605,6 @@ __all__ = [
     "ArtifactJobResponse",
     "ArtifactJobService",
     "ArtifactJobView",
+    "CompiledArtifactContract",
     "OutputLimits",
 ]

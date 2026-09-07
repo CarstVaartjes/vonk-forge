@@ -10,6 +10,7 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.fleet_profile_duplicate_input import FleetProfileDuplicateInput
 from ...models.fleet_profile_view import FleetProfileView
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -42,7 +43,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetProfileView]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     if response.status_code == 201:
         response_201 = FleetProfileView.from_dict(response.json())
 
@@ -79,7 +80,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_409
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -98,7 +99,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetProfileView]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -113,7 +114,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: FleetProfileDuplicateInput,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileView]]:
+) -> Response[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     """ Duplicate Profile
 
     Args:
@@ -125,7 +126,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileView]]
+        Response[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]
      """
 
 
@@ -147,7 +148,7 @@ def sync(
     client: AuthenticatedClient,
     body: FleetProfileDuplicateInput,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileView]]:
+) -> Optional[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     """ Duplicate Profile
 
     Args:
@@ -159,7 +160,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileView]
+        Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]
      """
 
 
@@ -176,7 +177,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: FleetProfileDuplicateInput,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileView]]:
+) -> Response[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     """ Duplicate Profile
 
     Args:
@@ -188,7 +189,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileView]]
+        Response[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]
      """
 
 
@@ -210,7 +211,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: FleetProfileDuplicateInput,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileView]]:
+) -> Optional[Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]]:
     """ Duplicate Profile
 
     Args:
@@ -222,7 +223,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileView]
+        Union[BoundedErrorResponse, FleetProfileView, RequestValidationProblem]
      """
 
 

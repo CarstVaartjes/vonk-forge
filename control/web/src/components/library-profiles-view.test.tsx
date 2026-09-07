@@ -74,20 +74,19 @@ const application = {
   current_operation_id: null,
   status_reason: null,
   progress: {
-    phase: "transfer",
-    subphase: "model-copy",
-    completed_bytes: 4 * 1024 ** 3,
-    total_bytes: 8 * 1024 ** 3,
-    total_bytes_known: true,
-    members: [
-      {node_id: nodeA, state: "running", completed_bytes: 4 * 1024 ** 3, total_bytes: 8 * 1024 ** 3},
-      {node_id: nodeB, state: "pending", completed_bytes: 1 * 1024 ** 3, total_bytes: 8 * 1024 ** 3},
-    ],
+    completed_steps: 0,
+    total_steps: 3,
+    child_progress: {
+      phase: "target-copy",
+      bytes: 4 * 1024 ** 3,
+      total_bytes: 8 * 1024 ** 3,
+      node_ids: [nodeA, nodeB],
+    },
   },
   result: null,
   created_at: "2026-09-05T00:00:00Z",
   updated_at: "2026-09-05T00:00:00Z",
-} as unknown as FleetProfileApplication;
+} satisfies FleetProfileApplication;
 
 const fleet = {
   schema_version: 1,
@@ -116,7 +115,7 @@ test("switches an in-scope dual-to-solo replacement on the first click and keeps
   expect(applyFleetProfile).toHaveBeenCalledTimes(1);
   expect(applyFleetProfile).toHaveBeenCalledWith(profileId, {plan_digest: preview.plan_digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(screen.queryByRole("button", {name: "Review switch effects"})).not.toBeInTheDocument();
-  expect(screen.getByText("Copying model to Spark A")).toBeVisible();
+  expect(screen.getByText("Copying to Spark A, Spark B")).toBeVisible();
   const progress = screen.getByRole("region", {name: "Profile switch progress"});
   expect(progress).toHaveTextContent("4.0 GiB of 8.0 GiB");
   expect(within(progress).getByRole("progressbar", {name: "Profile switch progress"})).toHaveAttribute("aria-valuenow", "50");

@@ -7,9 +7,9 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.http_validation_error import HTTPValidationError
 from ...models.mapping_request import MappingRequest
 from ...models.mapping_response import MappingResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -41,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, MappingResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[MappingResponse, RequestValidationProblem]]:
     if response.status_code == 201:
         response_201 = MappingResponse.from_dict(response.json())
 
@@ -50,7 +50,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_201
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -62,7 +62,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, MappingResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[MappingResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +76,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: MappingRequest,
 
-) -> Response[Union[HTTPValidationError, MappingResponse]]:
+) -> Response[Union[MappingResponse, RequestValidationProblem]]:
     """ Create Mapping
 
     Args:
@@ -87,7 +87,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, MappingResponse]]
+        Response[Union[MappingResponse, RequestValidationProblem]]
      """
 
 
@@ -107,7 +107,7 @@ def sync(
     client: AuthenticatedClient,
     body: MappingRequest,
 
-) -> Optional[Union[HTTPValidationError, MappingResponse]]:
+) -> Optional[Union[MappingResponse, RequestValidationProblem]]:
     """ Create Mapping
 
     Args:
@@ -118,7 +118,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, MappingResponse]
+        Union[MappingResponse, RequestValidationProblem]
      """
 
 
@@ -133,7 +133,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: MappingRequest,
 
-) -> Response[Union[HTTPValidationError, MappingResponse]]:
+) -> Response[Union[MappingResponse, RequestValidationProblem]]:
     """ Create Mapping
 
     Args:
@@ -144,7 +144,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, MappingResponse]]
+        Response[Union[MappingResponse, RequestValidationProblem]]
      """
 
 
@@ -164,7 +164,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: MappingRequest,
 
-) -> Optional[Union[HTTPValidationError, MappingResponse]]:
+) -> Optional[Union[MappingResponse, RequestValidationProblem]]:
     """ Create Mapping
 
     Args:
@@ -175,7 +175,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, MappingResponse]
+        Union[MappingResponse, RequestValidationProblem]
      """
 
 

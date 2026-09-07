@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
+from .fleet_profile_contract import FleetProfileApplicationProgress
 from .library_contract import Digest, NodeId, UuidId
 from .strict_json import StrictJSONModel
 
@@ -127,7 +128,7 @@ class LibraryPlacementApplication(_StrictModel):
     total_steps: int = Field(ge=0, le=1024)
     current_operation_id: UuidId | None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None
-    progress: dict[str, object]
+    progress: FleetProfileApplicationProgress
     locations: LibraryPlacementLocations
     created_at: datetime
     updated_at: datetime

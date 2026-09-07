@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -18,10 +19,10 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import DistributionAssignment, canonical_message
 
 from .cluster_mappings import (
     ClusterMappingError,
@@ -71,7 +72,6 @@ from .resource_planning import (
 )
 from .run_switch_contract import (
     ArtifactStorageImpact,
-    ArtifactVerificationResult,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
@@ -80,25 +80,31 @@ from .run_switch_contract import (
     FreshnessEvidence,
     InvocationMetadata,
     MappingSelection,
-    RecipeBuildEvidence,
     ResourceDemandEvidence,
     RunSwitchApplyRequest,
+    RunSwitchBuildEvidence,
     RunSwitchMemberProgress,
     RunSwitchOperation,
+    RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPhaseKind,
+    RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchProgress,
     RunSwitchReason,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
+    RunSwitchVerifyResult,
     RuntimeImageStorageImpact,
     SparkFit,
     SparkFitNode,
     SparkGroup,
     SparkGroupNode,
     StopImpact,
+)
+from .runtime_image_preparation import (
+    RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
 
 
@@ -1628,7 +1634,7 @@ class RunSwitchOperationService:
                 ):
                     raise RunSwitchOperationConflict("run-switch request key was already used")
                 return self._operation_view(existing)
-            progress = dict(previous.result) if isinstance(previous.result, Mapping) else {}
+            progress = _read_progress(previous.result)
             raw_retry = previous.payload.get("retry", {})
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
             operator_retries = retry.get("operator_retries")
@@ -1663,7 +1669,7 @@ class RunSwitchOperationService:
                 targets=list(previous.targets),
                 payload_digest=_digest(payload),
                 payload=payload,
-                result=progress,
+                result=_persisted_result(progress),
                 current_attempt=1,
                 created_at=now,
                 updated_at=now,
@@ -2549,7 +2555,7 @@ class RunSwitchOperationService:
         *,
         require_available: bool = True,
     ) -> tuple[
-        RecipeBuildEvidence,
+        RunSwitchBuildEvidence,
         RuntimeImageStorageImpact,
         list[RunSwitchReason],
         list[RunSwitchReason],
@@ -2851,7 +2857,7 @@ class RunSwitchOperationService:
                     )
                 )
         return (
-            RecipeBuildEvidence(
+            RunSwitchBuildEvidence(
                 state=state,
                 build_id=build.id if build is not None else candidate.id if candidate is not None else None,
                 build_input_sha256=(
@@ -3902,7 +3908,7 @@ class RunSwitchOperationService:
                 targets=[node.node_id for node in plan.spark_group.nodes],
                 payload_digest=_digest(payload),
                 payload=payload,
-                result=dict(payload["progress"]),
+                result=_persisted_result(payload["progress"]),
                 created_at=now,
                 updated_at=now,
             )
@@ -3954,7 +3960,7 @@ class RunSwitchOperationService:
                 session.commit()
                 return True
             plan = _load_plan(raw_plan)
-            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            progress = _read_progress(job.result)
             phase_index = progress.get("phase_index", 0)
             item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
@@ -3967,7 +3973,7 @@ class RunSwitchOperationService:
             if phase_index >= len(plan.phases):
                 job.state = "succeeded"
                 progress = _complete_operation_progress(plan, progress)
-                job.result = progress
+                job.result = _persisted_result(progress)
                 job.updated_at = now
                 session.commit()
                 return True
@@ -3989,7 +3995,7 @@ class RunSwitchOperationService:
                     job = session.get(Job, operation_id, with_for_update=True)
                     if job is None:
                         return False
-                    progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+                    progress = _read_progress(job.result)
                     persisted_plan = _load_plan(job.payload["plan"])
                     persisted_phase_index = int(progress.get("phase_index", phase_index))
                     persisted_phase = (
@@ -4006,7 +4012,7 @@ class RunSwitchOperationService:
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
                     job.state = "running"
-                    job.result = progress
+                    job.result = _persisted_result(progress)
                     job.updated_at = now
                 return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
@@ -4029,7 +4035,7 @@ class RunSwitchOperationService:
                 job = session.get(Job, operation_id, with_for_update=True)
                 if job is None:
                     return False
-                progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+                progress = _read_progress(job.result)
                 phase_index = int(progress.get("phase_index", 0))
                 item_index = int(progress.get("item_index", 0)) + 1
                 persisted_plan = _load_plan(job.payload["plan"])
@@ -4054,7 +4060,7 @@ class RunSwitchOperationService:
                 if isinstance(child_receipts, list):
                     results = list(progress.get("phase_results", []))
                     results.extend(
-                        dict(receipt)
+                        _phase_result(receipt, phase=phase)
                         for receipt in child_receipts
                         if isinstance(receipt, Mapping)
                     )
@@ -4069,7 +4075,7 @@ class RunSwitchOperationService:
                         job.state = "failed"
                         job.status_reason = str(error)[:512]
                         progress["failed_phase"] = phase.kind
-                        job.result = progress
+                        job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
                     results = list(progress.get("phase_results", []))
@@ -4079,7 +4085,7 @@ class RunSwitchOperationService:
                         and item.get("image_digest") == receipt["image_digest"]
                         for item in results
                     ):
-                        results.append(receipt)
+                        results.append(_phase_result(receipt, phase=phase))
                         progress["phase_results"] = results
                 if phase.kind in {"transfer", "verify", "cleanup"} or (
                     phase.kind == "prepare" and phase.subphase == "runtime-image"
@@ -4115,7 +4121,7 @@ class RunSwitchOperationService:
                 else:
                     progress["item_index"] = item_index
                 job.state = "running"
-                job.result = progress
+                job.result = _persisted_result(progress)
                 job.updated_at = now
             return True
         with self._sessions() as session:
@@ -4123,7 +4129,7 @@ class RunSwitchOperationService:
             if job is None:
                 return False
             plan = _load_plan(job.payload["plan"])
-            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            progress = _read_progress(job.result)
             phase_index = int(progress.get("phase_index", 0))
             item_index = int(progress.get("item_index", 0))
             if phase_index >= len(plan.phases):
@@ -4183,7 +4189,7 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
                 return False
-            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            progress = _read_progress(job.result)
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -4206,10 +4212,10 @@ class RunSwitchOperationService:
                         return True
                     # Keep one current observation while awaiting route publication.
                     # Repeated polling must not grow durable phase receipts.
-                    progress["final_observation"] = dict(execution.result or {})
+                    progress["final_observation"] = _phase_result(execution.result or {}, phase=phase)
                 elif execution.result is not None:
                     results = list(progress.get("phase_results", []))
-                    results.append(dict(execution.result))
+                    results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
@@ -4217,12 +4223,12 @@ class RunSwitchOperationService:
                 progress["subphase"] = phase.subphase
                 if execution.result is not None:
                     results = list(progress.get("phase_results", []))
-                    results.append(dict(execution.result))
+                    results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             else:
                 if execution.result is not None:
                     results = list(progress.get("phase_results", []))
-                    results.append(dict(execution.result))
+                    results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
                 if phase.subphase == "container-build":
                     try:
@@ -4231,7 +4237,7 @@ class RunSwitchOperationService:
                         job.state = "failed"
                         job.status_reason = str(error)[:512]
                         progress["failed_phase"] = phase.kind
-                        job.result = progress
+                        job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
                     results = list(progress.get("phase_results", []))
@@ -4241,7 +4247,7 @@ class RunSwitchOperationService:
                         and item.get("image_digest") == receipt["image_digest"]
                         for item in results
                     ):
-                        results.append(receipt)
+                        results.append(_phase_result(receipt, phase=phase))
                         progress["phase_results"] = results
                 completed = list(progress.get("completed_phases", []))
                 completed.append(phase.kind)
@@ -4259,7 +4265,7 @@ class RunSwitchOperationService:
                     else None
                 )
             job.state = "running"
-            job.result = progress
+            job.result = _persisted_result(progress)
             job.updated_at = now
         return True
 
@@ -4290,7 +4296,7 @@ class RunSwitchOperationService:
             if job is None:
                 return False
             attempt = max(1, int(job.current_attempt or 0))
-            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            progress = _read_progress(job.result)
             plan = _load_plan(job.payload["plan"])
             raw_retry = job.payload.get("retry", {})
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
@@ -4313,7 +4319,7 @@ class RunSwitchOperationService:
             job.current_attempt = attempt + 1
             job.state = "queued"
             job.status_reason = None
-            job.result = progress
+            job.result = _persisted_result(progress)
             job.updated_at = _now(self._clock)
             return True
 
@@ -4334,34 +4340,29 @@ class RunSwitchOperationService:
         job.state = "failed"
         job.status_reason = reason[:512]
         if progress is None:
-            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            progress = _read_progress(job.result)
         progress["failed_phase"] = progress.get("phase")
         progress["retryable"] = retryable
-        job.result = progress
+        job.result = _persisted_result(progress)
         job.updated_at = now
 
     @staticmethod
     def _operation_view(job: Job) -> RunSwitchOperation:
-        progress = dict(job.result) if isinstance(job.result, Mapping) else {}
-        # The durable progress payload contains member counters, while the
-        # Job row owns the authoritative target membership.  Keep the
-        # projection valid even when a plan is unavailable during restart or
-        # recovery and the raw payload has no copied node_ids field.
-        progress["node_ids"] = [
-            str(node_id) for node_id in job.targets if isinstance(node_id, str)
-        ]
-        raw_plan = job.payload.get("plan")
-        plan = _load_plan(raw_plan) if isinstance(raw_plan, Mapping) else None
-        action = plan.action if plan is not None else str(job.payload.get("action", "run"))
-        current = progress.get("phase")
-        current_phase = current if current in _PHASES else None
-        completed = [value for value in progress.get("completed_phases", []) if value in _PHASES]
+        progress = _read_progress(job.result)
+        persisted_result = _parse_persisted_result(job.result)
+        # Target membership belongs to the Job; receipts carry member progress.
+        progress["node_ids"] = list(job.targets)
+        plan = _load_plan(job.payload.get("plan"))
+        current_phase = persisted_result.phase if persisted_result is not None else None
+        completed = (
+            persisted_result.completed_phases if persisted_result is not None else []
+        )
         return RunSwitchOperation(
             operation_id=job.id,
             kind=job.kind,
-            action=action,
+            action=plan.action,
             state=job.state,
-            plan_digest=str(job.payload.get("plan_digest", "0" * 64)),
+            plan_digest=plan.plan_digest,
             request_key=job.request_id,
             node_ids=list(job.targets),
             current_phase=current_phase,
@@ -4373,7 +4374,7 @@ class RunSwitchOperationService:
                 job.status_reason,
             ),
             status_reason=job.status_reason,
-            result=dict(job.result) if isinstance(job.result, Mapping) else None,
+            result=persisted_result,
         )
 
 
@@ -4521,7 +4522,7 @@ def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
 def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
     """Keep family result data and add bounded generic failure evidence."""
 
-    result = dict(operation.result) if operation.result is not None else {}
+    result = operation.result.model_dump(mode="json") if operation.result is not None else {}
     if operation.state == "failed":
         retryable = bool(result.get("retryable") is True)
         result.update(
@@ -4606,6 +4607,10 @@ def effective_build_receipt(
     preserving the original plan digest.
     """
 
+    progress_mapping = _progress_mapping(progress)
+    if progress_mapping is None:
+        return None
+    progress = progress_mapping
     expected_build_id = plan.recipe_build_id
     expected_input = plan.build.build_input_sha256
     candidates: list[Mapping[str, object]] = []
@@ -4713,6 +4718,71 @@ def _progress_mapping(value: object) -> Mapping[str, object] | None:
             return None
         return dumped if isinstance(dumped, Mapping) else None
     return None
+
+
+def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
+    """Parse stored JSON strictly, including nested datetime and tuple fields."""
+
+    if value is None:
+        return None
+    try:
+        return RunSwitchOperationResult.model_validate_json(
+            json.dumps(value), strict=True
+        )
+    except (TypeError, ValueError) as error:
+        raise RunSwitchOperationConflict(
+            "run-switch persisted result is invalid"
+        ) from error
+
+
+def _read_progress(value: object) -> dict[str, object]:
+    result = _parse_persisted_result(value)
+    return (
+        result.model_dump(mode="json", exclude_unset=True) if result is not None else {}
+    )
+
+
+def _persisted_result(value: Mapping[str, object]) -> dict[str, object]:
+    """Validate the same canonical JSON contract before storing a result."""
+
+    return _read_progress(value)
+
+
+_PHASE_RESULT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)
+
+
+def _phase_result(
+    value: Mapping[str, object],
+    *,
+    phase: RunSwitchPhase | None = None,
+) -> dict[str, object]:
+    """Validate one phase receipt before it enters durable progress."""
+
+    try:
+        normalized = dict(value)
+        if phase is not None:
+            if "phase" in normalized and normalized["phase"] != phase.kind:
+                raise ValueError("phase receipt belongs to a different phase")
+            normalized.setdefault("phase", phase.kind)
+            subphase = getattr(phase, "subphase", None)
+            if subphase is None and phase.kind in {"transfer", "verify"}:
+                subphase = "target-copy"
+            if "subphase" in normalized and normalized["subphase"] != subphase:
+                raise ValueError("phase receipt belongs to a different subphase")
+            normalized.setdefault("subphase", subphase)
+        assignments = normalized.get("assignments")
+        if isinstance(assignments, Mapping):
+            normalized["assignments"] = {
+                node_id: DistributionAssignment.parse(raw)
+                if isinstance(raw, Mapping) else raw
+                for node_id, raw in assignments.items()
+            }
+        result = _PHASE_RESULT_ADAPTER.validate_python(normalized, strict=True)
+    except (TypeError, ValueError) as error:
+        raise RunSwitchOperationConflict(
+            "run-switch phase receipt is invalid"
+        ) from error
+    return result.model_dump(mode="json", exclude_unset=True)
 
 
 def _child_progress_payload(child: object) -> Mapping[str, object]:
@@ -5105,21 +5175,17 @@ def _validate_artifact_execution(
             f"run-switch.{phase.kind}-returned-invalid-evidence"
         )
     if phase.kind == "prepare" and phase.subphase == "runtime-image":
-        raw_receipt = result.get("runtime_image")
-        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else result
-        image_digest = receipt.get("image_digest")
-        layout_digest = receipt.get("oci_layout_sha256", receipt.get("oci_archive_sha256"))
-        image_bytes = receipt.get("image_bytes")
-        if (
-            not _is_oci_digest(image_digest)
-            or not _is_hex_digest(layout_digest)
-            or type(image_bytes) is not int
-            or image_bytes < 1
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.runtime-image-preparation-evidence-invalid"
+        try:
+            receipt = RuntimeImageReceiptDocument.model_validate(
+                result.get("runtime_image"), strict=True
             )
-        registry_digest = receipt.get("registry_manifest_digest")
+        except (TypeError, ValidationError) as error:
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-receipt-invalid"
+            ) from error
+        image_digest = receipt.image_digest
+        layout_digest = receipt.oci_archive_sha256
+        registry_digest = receipt.registry_manifest_digest
         if (
             plan.image_digest is not None
             and image_digest != plan.image_digest
@@ -5179,7 +5245,12 @@ def _validate_artifact_execution(
         return
     if phase.kind == "verify":
         try:
-            verification = ArtifactVerificationResult.model_validate(result, strict=True)
+            normalized = dict(result)
+            normalized.setdefault("phase", "verify")
+            normalized.setdefault("subphase", "target-copy")
+            verification = RunSwitchVerifyResult.model_validate(
+                normalized, strict=True
+            )
         except (TypeError, ValidationError) as error:
             if (
                 plan.recipe_build_id is not None
@@ -5382,7 +5453,10 @@ def _load_plan(value: object) -> RunSwitchPlan:
         raise RunSwitchOperationConflict("run-switch persisted plan is invalid")
     # Job.payload is JSON, so strict validation must permit the RFC3339
     # timestamp representation when a worker restarts and reloads a plan.
-    return RunSwitchPlan.model_validate(value, strict=False)
+    try:
+        return RunSwitchPlan.model_validate_json(json.dumps(value), strict=True)
+    except (TypeError, ValueError) as error:
+        raise RunSwitchOperationConflict("run-switch persisted plan is invalid") from error
 
 
 __all__ = [

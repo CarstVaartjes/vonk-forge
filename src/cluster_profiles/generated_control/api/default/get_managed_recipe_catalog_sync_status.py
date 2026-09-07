@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.catalog_problem import CatalogProblem
 from ...models.managed_catalog_sync_response import ManagedCatalogSyncResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -32,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ManagedCatalogSyncResponse.from_dict(response.json())
 
@@ -61,6 +62,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_404
 
+    if response.status_code == 422:
+        response_422 = RequestValidationProblem.from_dict(response.json())
+
+
+
+        return response_422
+
     if response.status_code == 503:
         response_503 = CatalogProblem.from_dict(response.json())
 
@@ -74,7 +82,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -87,7 +95,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -95,7 +103,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[CatalogProblem, ManagedCatalogSyncResponse]]
+        Response[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]
      """
 
 
@@ -113,7 +121,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -121,7 +129,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[CatalogProblem, ManagedCatalogSyncResponse]
+        Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]
      """
 
 
@@ -134,7 +142,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+) -> Response[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -142,7 +150,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[CatalogProblem, ManagedCatalogSyncResponse]]
+        Response[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]
      """
 
 
@@ -160,7 +168,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse]]:
+) -> Optional[Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -168,7 +176,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[CatalogProblem, ManagedCatalogSyncResponse]
+        Union[CatalogProblem, ManagedCatalogSyncResponse, RequestValidationProblem]
      """
 
 

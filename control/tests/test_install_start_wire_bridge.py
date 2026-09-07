@@ -19,8 +19,10 @@ from vonk_agent_protocol import (
     AgentResult,
     DistributionAssignment,
     RecipeOperationRequest,
+    RecipeStartResult,
     canonical_message,
 )
+from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
@@ -377,6 +379,43 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
             )
         )
         assert {node.state for node in nodes_after_readiness} == {"running"}
+
+
+def test_controller_tensor_parallel_result_uses_shared_rust_evidence_contract(
+    tmp_path: Path, install_start_wire_probe: Path
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="wire-bridge-tensor-install",
+    )
+    start_plan = service.preview_run(installation.owner_id, "tensor")
+    start_operation = service.start(
+        start_plan,
+        plan_digest=start_plan.plan_digest,
+        actor="admin",
+        request_id="wire-bridge-tensor-start",
+    )
+    seen_roles: list[str] = []
+    while rows := _queued_children(sessions, start_operation.id):
+        assert len(rows) == 1
+        row = rows[0]
+        seen_roles.append(row.payload["role"])
+        assert row.payload.get("phase") is None
+        results = _bridge(install_start_wire_probe, rows)
+        for result in results:
+            envelope = RecipeStartResult.model_validate(result.result)
+            assert isinstance(envelope.evidence, TensorParallelStartEvidence)
+            assert envelope.evidence.run_generation == 1
+        _project(service, sessions, rows, results)
+
+    assert seen_roles == ["worker", "entrypoint"]
+    assert service.get(start_operation.id).state == "succeeded"
 
 
 def test_controller_distribution_http_response_round_trips_through_rust(

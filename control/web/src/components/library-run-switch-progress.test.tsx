@@ -9,6 +9,10 @@ const digest = "a".repeat(64);
 const recipeRevisionId = "c".repeat(64);
 const nodeA = "spk_" + "1".repeat(32);
 
+function result(retryable: boolean): NonNullable<RunSwitchOperation["result"]> {
+  return {phase_index: 0, item_index: 0, completed_bytes: 0, total_bytes: null, total_bytes_known: false, retryable};
+}
+
 const sourceGroup = {
   eligible: true,
   topology_name: "solo",
@@ -65,8 +69,8 @@ test("keeps unknown byte progress indeterminate and polls the durable operation"
 });
 
 test("retries a transient Run through the durable endpoint and adopts its new operation", async () => {
-  const failed = operation({state: "failed", status_reason: "temporary Spark transfer failure", result: {retryable: true}});
-  const replacement = operation({operation_id: "33333333-3333-4333-8333-333333333333", state: "queued", result: {retryable: false}});
+  const failed = operation({state: "failed", status_reason: "temporary Spark transfer failure", result: result(true)});
+  const replacement = operation({operation_id: "33333333-3333-4333-8333-333333333333", state: "queued", result: result(false)});
   const retryRecipeRunSwitch = vi.fn(async () => replacement);
   const onChange = vi.fn();
   vi.spyOn(crypto, "randomUUID").mockReturnValue("44444444-4444-4444-8444-444444444444");
@@ -78,7 +82,7 @@ test("retries a transient Run through the durable endpoint and adopts its new op
 });
 
 test("does not offer Run recovery for terminal authorization or integrity failures", () => {
-  const failed = operation({state: "failed", status_reason: "model artifact digest mismatch", result: {retryable: false}});
+  const failed = operation({state: "failed", status_reason: "model artifact digest mismatch", result: result(false)});
   render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={failed} title="Qwen Chat"/>);
   expect(screen.queryByRole("button", {name: "Retry run"})).not.toBeInTheDocument();
 });

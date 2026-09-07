@@ -51,6 +51,7 @@ import type {
   JobDetail,
   JobResumeResponse,
   JobsResponse,
+  ChangeResponse,
   ProposalInput,
   ProposalPreview,
   TelemetryHistory,
@@ -762,5 +763,5 @@ export class ApiClient implements ControlApi {
 
   audit() { return this.request<AuditResponse>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
-  submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
+  submit(digest: string) { return this.request<ChangeResponse>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
 }

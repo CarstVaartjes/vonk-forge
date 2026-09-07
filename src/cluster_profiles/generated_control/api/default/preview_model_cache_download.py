@@ -10,6 +10,7 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.model_cache_download_preview_request import ModelCacheDownloadPreviewRequest
 from ...models.model_cache_download_preview_response import ModelCacheDownloadPreviewResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -41,7 +42,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ModelCacheDownloadPreviewResponse.from_dict(response.json())
 
@@ -78,7 +79,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_409
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -97,7 +98,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -111,7 +112,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: ModelCacheDownloadPreviewRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     """ Preview Download
 
     Args:
@@ -122,7 +123,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]
      """
 
 
@@ -142,7 +143,7 @@ def sync(
     client: AuthenticatedClient,
     body: ModelCacheDownloadPreviewRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     """ Preview Download
 
     Args:
@@ -153,7 +154,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]
+        Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]
      """
 
 
@@ -168,7 +169,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: ModelCacheDownloadPreviewRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     """ Preview Download
 
     Args:
@@ -179,7 +180,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]
      """
 
 
@@ -199,7 +200,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: ModelCacheDownloadPreviewRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]]:
     """ Preview Download
 
     Args:
@@ -210,7 +211,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse]
+        Union[BoundedErrorResponse, ModelCacheDownloadPreviewResponse, RequestValidationProblem]
      """
 
 

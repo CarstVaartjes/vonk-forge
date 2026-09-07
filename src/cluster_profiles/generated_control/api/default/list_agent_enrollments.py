@@ -9,7 +9,7 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.enrollment_list_response import EnrollmentListResponse
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -61,7 +61,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = EnrollmentListResponse.from_dict(response.json())
 
@@ -84,7 +84,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_403
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -103,7 +103,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -119,7 +119,7 @@ def sync_detailed(
     state: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
 
-) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     """ List Enrollments
 
     Args:
@@ -132,7 +132,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]
+        Response[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]
      """
 
 
@@ -156,7 +156,7 @@ def sync(
     state: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
 
-) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     """ List Enrollments
 
     Args:
@@ -169,7 +169,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]
+        Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]
      """
 
 
@@ -188,7 +188,7 @@ async def asyncio_detailed(
     state: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
 
-) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+) -> Response[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     """ List Enrollments
 
     Args:
@@ -201,7 +201,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]
+        Response[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]
      """
 
 
@@ -225,7 +225,7 @@ async def asyncio(
     state: Union[None, Unset, str] = UNSET,
     limit: Union[Unset, int] = 100,
 
-) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]]:
+) -> Optional[Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]]:
     """ List Enrollments
 
     Args:
@@ -238,7 +238,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EnrollmentListResponse, HTTPValidationError]
+        Union[BoundedErrorResponse, EnrollmentListResponse, RequestValidationProblem]
      """
 
 

@@ -15,10 +15,16 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingPlan
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
     FleetProfileScope,
+    FleetProfileSwitchAdapterResult,
+    FleetProfileSwitchAdapterState,
+    FleetProfileSwitchChildResult,
+    FleetProfileSwitchChildState,
 )
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -52,6 +58,137 @@ def _uuid(value: int) -> str:
 
 def _node_id(value: int) -> str:
     return "spk_" + f"{value:032x}"
+
+
+def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
+    operation_id = _uuid(700)
+    progress = FleetProfileApplicationProgress.model_validate(
+        {
+            "operation_kind": "fleet-profile.apply",
+            "completed_steps": 1,
+            "total_steps": 1,
+            "step_results": {
+                "0": {
+                    "operation_id": operation_id,
+                    "result": {"verified": True},
+                }
+            },
+        }
+    )
+    assert progress.step_results["0"].result is not None
+    assert progress.step_results["0"].result.verified is True
+    assert FleetProfileApplicationResult(changed=True, completed_steps=1).model_dump(
+        mode="json"
+    ) == {"changed": True, "completed_steps": 1}
+    adapter_result = FleetProfileSwitchAdapterResult(
+        children=[
+            FleetProfileSwitchChildState(
+                operation_id=operation_id, kind="run", state="succeeded"
+            )
+        ],
+        assignment_ids=[],
+    )
+    assert adapter_result.children[0].operation_id == operation_id
+    with pytest.raises(ValidationError):
+        FleetProfileApplicationProgress.model_validate(
+            {"step_results": {}, "unexpected": True}
+        )
+    with pytest.raises(ValidationError):
+        FleetProfileApplicationResult.model_validate({"completed_steps": 1})
+    with pytest.raises(ValidationError):
+        FleetProfileSwitchAdapterResult.model_validate({"assignment_ids": []})
+    with pytest.raises(ValidationError):
+        FleetProfileSwitchChildResult.model_validate(
+            {"run_switch_operation_id": operation_id}
+        )
+
+
+def test_profile_switch_state_rejects_malformed_persisted_progress() -> None:
+    with pytest.raises(FleetProfileConflict, match="progress is invalid"):
+        RunSwitchFleetProfileAdapter._state(SimpleNamespace(progress="invalid"))
+    with pytest.raises(FleetProfileConflict, match="progress is invalid"):
+        RunSwitchFleetProfileAdapter._state(
+            SimpleNamespace(progress={"switch_adapter": "invalid"})
+        )
+
+
+def test_profile_application_read_rejects_malformed_persisted_plan_and_result() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(701),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.plan = {"steps": []}
+    with pytest.raises(FleetProfileConflict, match="plan is invalid"):
+        service.application(application.id)
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.plan = preview.model_dump(mode="json")
+        row.result = ["malformed"]
+    with pytest.raises(FleetProfileConflict, match="result is invalid"):
+        service.application(application.id)
+
+
+def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, recipe_operations=object()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(702),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.plan = {"steps": []}
+
+    assert service.tick() is True
+    with sessions() as session:
+        failed = session.get(FleetProfileApplication, application.id)
+        assert failed is not None
+        assert failed.state == "failed"
+        assert failed.status_reason == "Persisted Fleet profile plan is invalid"
+
+
+def test_profile_application_read_requires_result_for_succeeded_state() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(703),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.state = "succeeded"
+        row.result = None
+    with pytest.raises(FleetProfileConflict, match="result is invalid"):
+        service.application(application.id)
 
 
 def _exact_preparation(
@@ -967,20 +1104,25 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     )
     assert service.tick() is True
     progress = service.application(application.id).progress
-    assert progress["child_progress"]["phase"] == "model-download"
+    assert progress.child_progress is not None
+    assert progress.child_progress.phase == "model-download"
     assert adapter.starts[0]["scope_node_ids"] == (_node_id(1), _node_id(2))
 
-    observed_phases = [progress["child_progress"]["phase"]]
+    observed_phases = [progress.child_progress.phase]
     for _ in range(8):
         assert service.tick() is True
         current = service.application(application.id)
-        child_progress = current.progress.get("child_progress")
-        if isinstance(child_progress, dict):
-            observed_phases.append(child_progress["phase"])
+        child_progress = current.progress.child_progress
+        if child_progress is not None:
+            observed_phases.append(child_progress.phase)
         if current.state == "succeeded":
             break
 
-    assert service.application(application.id).state == "succeeded"
+    completed = service.application(application.id)
+    assert completed.state == "succeeded"
+    assert completed.result is not None
+    assert completed.result.changed is True
+    assert completed.result.completed_steps == 1
     assert observed_phases[:5] == [
         "model-download",
         "container-download",
@@ -988,9 +1130,9 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
         "start",
         "final-verify",
     ]
-    assert service.application(application.id).progress["step_results"]["0"][
-        "result"
-    ] == {"verified": True}
+    step_result = service.application(application.id).progress.step_results["0"]
+    assert step_result.result is not None
+    assert step_result.result.verified is True
 
 
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
@@ -1352,6 +1494,23 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     assert preview.steps == []
     assert preview.preparations == []
 
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(801),
+        actor="admin",
+    )
+    assert application.state == "succeeded"
+    assert application.result is not None
+    assert application.result.changed is False
+    assert application.result.completed_steps == 0
+    readback = service.application(application.id)
+    assert readback.result is not None
+    assert readback.result.model_dump(mode="json") == {
+        "changed": False,
+        "completed_steps": 0,
+    }
+
 
 def test_production_profile_adapter_binds_one_real_run_switch_child(
     tmp_path: Path,
@@ -1433,15 +1592,26 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert service.tick() is True
     current = service.application(application.id)
     assert current.current_operation_id == application.id
-    adapter_progress = current.progress["switch_adapter"]
-    child_id = adapter_progress["active_operation_id"]
+    adapter_progress = current.progress.switch_adapter
+    assert isinstance(adapter_progress, FleetProfileSwitchAdapterState)
+    child_id = adapter_progress.active_operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.run-switch.v2"
     assert child.node_ids == list(nodes)
     assert child.action == "switch"
-    assert current.progress["child_progress"]["node_ids"] == list(nodes)
-    assert current.progress["child_progress"]["phase"] == "runtime-install"
+    assert current.progress.child_progress is not None
+    assert current.progress.child_progress.node_ids == list(nodes)
+    assert current.progress.child_progress.phase == "runtime-install"
+    with sessions() as session:
+        stored = session.get(FleetProfileApplication, application.id)
+        assert stored is not None
+        persisted_progress = FleetProfileApplicationProgress.model_validate(
+            stored.progress
+        )
+        assert isinstance(
+            persisted_progress.switch_adapter, FleetProfileSwitchAdapterState
+        )
 
     replay = adapter.start(
         application_id=application.id,
@@ -1471,7 +1641,8 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert restarted_service.tick() is True
     resumed = restarted_service.application(application.id)
     assert resumed.current_operation_id == application.id
-    assert resumed.progress["switch_adapter"]["active_operation_id"] == child_id
+    assert resumed.progress.switch_adapter is not None
+    assert resumed.progress.switch_adapter.active_operation_id == child_id
 
 
 def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
@@ -1539,8 +1710,9 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     assert service.tick() is True
     current = service.application(application.id)
     assert current.current_operation_id == application.id
-    state = current.progress["switch_adapter"]
-    child_id = state["active_operation_id"]
+    state = current.progress.switch_adapter
+    assert state is not None
+    child_id = state.active_operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.stop.v2"
