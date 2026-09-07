@@ -85,6 +85,46 @@ vonkctl fleet metrics workloads SPARK_ID --run-id RUN_ID --state running --json
 vonkctl fleet metrics export SPARK_ID --range 7d --file metrics.json --json
 ```
 
+## Library placement
+
+Place a Library recipe on an exact Spark group using the same Controller plan
+as the browser. Save the preview intent in `placement.json`:
+
+```json
+{
+  "recipe_id": "11111111-1111-4111-8111-111111111111",
+  "node_ids": ["spk_0123456789abcdef0123456789abcdef"],
+  "desired_state": "running",
+  "alias": "chat",
+  "invocation": "button"
+}
+```
+
+Use sorted, unique Spark IDs. Running placements require an alias; use
+`"desired_state": "installed"` and omit the alias for installation only.
+The Controller validates topology, capacity, existing work, and blockers.
+
+```bash
+vonkctl library placement preview --input-file placement.json --json
+vonkctl library placement apply --input-file placement.json \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl library placement get PLACEMENT_ID --json
+vonkctl library placement retry PLACEMENT_ID --request-key REQUEST_UUID --apply --json
+```
+
+Apply the returned digest with the unchanged preview intent. Without `--apply`,
+the apply command prints the request without submitting it. Keep the request
+UUID for safe resubmission after an uncertain response; omitted request keys
+are generated automatically. `get` returns durable progress, failure details,
+and installed/running locations. `--input JSON` and `--stdin` also accept intent.
+
+Retry creates a linked application from the original intent, reconciled against
+the current fleet, preserving successful work. The response includes its new
+ID, `retry_of_application_id`, and `attempt`; inspect that new ID for progress.
+The failed application remains available. Reuse the retry request UUID to
+retrieve the same attempt after an uncertain response. The same behavior is
+available through `profiles retry APPLICATION_ID`.
+
 ## Models, NAS cache, and profiles
 
 The task-oriented groups keep model selection, NAS caching, and whole-fleet
@@ -134,6 +174,8 @@ vonkctl profiles switch PROFILE_ID --dry-run --json
 vonkctl profiles switch PROFILE_ID \
   --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
 vonkctl profiles status PROFILE_ID --json
+vonkctl profiles application APPLICATION_ID --json
+vonkctl profiles retry APPLICATION_ID --request-key REQUEST_UUID --apply --json
 vonkctl profiles delete PROFILE_ID --apply --json
 ```
 

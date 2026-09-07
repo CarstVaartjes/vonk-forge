@@ -435,6 +435,25 @@ def add_controller_commands(
     library_compare.add_argument("recipe_id", nargs="+", metavar="RECIPE_ID")
     _add_json(library_compare)
 
+    placement = library_commands.add_parser(
+        "placement", help="Preview, apply, and inspect recipe placement on Sparks"
+    )
+    placement_commands = _subcommands(placement, "placement_command")
+    placement_preview = placement_commands.add_parser("preview")
+    _structured_input(placement_preview)
+    _add_json(placement_preview)
+    placement_apply = placement_commands.add_parser("apply")
+    _structured_input(placement_apply)
+    _plan_flags(placement_apply, require_digest=True)
+    placement_get = placement_commands.add_parser("get")
+    placement_get.add_argument("placement_id")
+    _add_json(placement_get)
+    placement_retry = placement_commands.add_parser("retry")
+    placement_retry.add_argument("placement_id")
+    _request_key(placement_retry)
+    _apply(placement_retry)
+    _add_json(placement_retry)
+
     operation = library_commands.add_parser(
         "operation", help="Inspect or retry a recipe operation"
     )
@@ -827,6 +846,11 @@ def add_controller_commands(
     profile_application = profile_commands.add_parser("application")
     profile_application.add_argument("application_id")
     _add_json(profile_application)
+    profile_retry = profile_commands.add_parser("retry", help="Retry a failed profile application")
+    profile_retry.add_argument("application_id")
+    _request_key(profile_retry)
+    _apply(profile_retry)
+    _add_json(profile_retry)
 
     operations = commands.add_parser("operations", help="Inspect durable operations and evidence")
     operation_commands = _subcommands(operations, "operations_command")
@@ -2034,6 +2058,26 @@ def _run_library(
             ],
             "compared_count": len(recipe_ids),
         }
+    if command == "placement":
+        base = "/api/v1/library/placements"
+        if args.placement_command == "get":
+            return client.request("GET", f"{base}/{_quoted(args.placement_id)}")
+        if args.placement_command == "retry":
+            args.request_key = _explicit_request_key(_request_key_value(args, request_id_factory))
+            return _plan_or_request(
+                args, client, "POST", f"{base}/{_quoted(args.placement_id)}/retry",
+                {"request_key": args.request_key},
+            )
+        payload = _read_structured(args)
+        if args.placement_command == "preview":
+            return client.request("POST", f"{base}/preview", payload)
+        if _LOWER_SHA256.fullmatch(args.plan_digest) is None:
+            raise ValueError("plan digest must be a lowercase SHA-256 digest")
+        if "plan_digest" in payload or "request_key" in payload:
+            raise ValueError("placement input must contain only preview intent; use --plan-digest and --request-key")
+        args.request_key = _explicit_request_key(_request_key_value(args, request_id_factory))
+        payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+        return _plan_or_request(args, client, "POST", base, payload)
     if command == "operation":
         if args.operation_command == "check-access":
             if _LOWER_SHA256.fullmatch(args.plan_digest) is None:
@@ -2951,6 +2995,13 @@ def _run_profiles(
     if command == "application":
         return client.request(
             "GET", f"/api/v1/fleet-profile-applications/{_quoted(args.application_id)}"
+        )
+    if command == "retry":
+        args.request_key = _explicit_request_key(_request_key_value(args, request_id_factory))
+        return _plan_or_request(
+            args, client, "POST",
+            f"/api/v1/fleet-profile-applications/{_quoted(args.application_id)}/retry",
+            {"request_key": args.request_key},
         )
     profile_id = _quoted(args.profile_id)
     if command == "switch":
