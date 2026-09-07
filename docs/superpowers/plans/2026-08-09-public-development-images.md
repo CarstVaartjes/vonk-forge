@@ -58,8 +58,8 @@ worktrees, non-fast-forward transitions, and rollback commits fail.
 
 Call `stage_runtime_secrets` with literal source files. Assert the API output is
 exactly `database-url`, `git-signing-key`, and `admin-grant-private-key`; worker
-output is exactly `database-url` and `worker-api-token`; neither directory
-contains the other service's authority.
+output is exactly `database-url`; neither directory contains the other
+service's authority.
 
 - [ ] **Step 4: Run tests and verify missing-module failures**
 

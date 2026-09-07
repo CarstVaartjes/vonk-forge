@@ -22,7 +22,6 @@ def _rendered() -> dict:
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
         "METRICS_TOKEN_FILE": "/dev/null",
-        "WORKER_API_TOKEN_FILE": "/dev/null",
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
         "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
@@ -123,7 +122,7 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "registry-edge",
         "registry-publisher",
     }
-    assert set(services["control-worker"]["networks"]) == {"data", "worker-authority", "artifact-egress"}
+    assert set(services["control-worker"]["networks"]) == {"data", "artifact-egress"}
     assert not services["control-worker"].get("ports")
     assert not rendered["networks"]["artifact-egress"].get("internal", False)
     assert {
@@ -135,7 +134,6 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "application",
         "ca",
         "data",
-        "worker-authority",
     }
     assert services["control-api"]["environment"]["VONK_RECIPE_LIBRARY_API_URL"] == (
         "http://caddy:8083"
@@ -144,7 +142,6 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "http://caddy:8084"
     )
     assert rendered["networks"]["ingress"].get("internal", False) is False
-    assert rendered["networks"]["worker-authority"]["internal"] is True
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
         "litellm-data",
@@ -229,7 +226,6 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
     assert "VONK_GIT_SIGNING_KEY_FILE" not in worker["environment"]
-    assert worker["environment"]["VONK_INTERNAL_API_URL"] == "http://control-api:8000"
 
     assert "control-signer" not in services
     assert "VONK_UPDATE_SIGNER_SOCKET" not in worker["environment"]
@@ -298,15 +294,11 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
         ("VONK_TOKEN_SIGNING_KEY_FILE", "token-signing-key"),
         ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
         ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
-        ("VONK_WORKER_API_TOKEN_FILE", "worker-api-token"),
         ("VONK_HF_TOKEN_FILE", "hf-token"),
     ):
         assert api["environment"][variable] == f"/run/vonk-normalized-secrets/{name}"
     assert worker["environment"]["VONK_DATABASE_URL_FILE"] == (
         "/run/vonk-normalized-secrets/database-url"
-    )
-    assert worker["environment"]["VONK_WORKER_API_TOKEN_FILE"] == (
-        "/run/vonk-normalized-secrets/worker-api-token"
     )
     assert worker["environment"]["VONK_HF_TOKEN_FILE"] == (
         "/run/vonk-normalized-secrets/hf-token"

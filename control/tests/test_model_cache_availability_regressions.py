@@ -66,18 +66,18 @@ def _artifact(index: str, data: bytes, *, host: str = "example.test") -> dict[st
         "sha256": hashlib.sha256(data).hexdigest(),
         "download_bytes": len(data),
         "roles": ["model"],
-        "model_version_sha256": hashlib.sha256(index.encode()).hexdigest(),
+        "model_content_sha256": hashlib.sha256(index.encode()).hexdigest(),
     }
 
 
 def _start(service: ModelCacheService, artifacts: list[dict[str, object]], key: str):
-    model = str(artifacts[0]["model_version_sha256"])
-    preview = service.download_preview(model_version_sha256=model, artifacts=artifacts)
+    model = str(artifacts[0]["model_content_sha256"])
+    preview = service.download_preview(model_content_sha256=model, artifacts=artifacts)
     return service.start_download(
         actor="test",
         request_key=key,
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=artifacts,
     )
 
@@ -390,7 +390,7 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "download_bytes": len(data),
                 "roles": ["model"],
-                "model_version_sha256": "c" * 64,
+                "model_content_sha256": "c" * 64,
             }
         )
     operation = _start(
@@ -400,7 +400,7 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
     )
     _drain(service, operation.id, timeout_seconds=30)
     result = service.get_operation(operation.id)
-    assert result.state == "succeeded"
+    assert result.state == "succeeded", result.failure
     parsed = ModelCacheOperationProgress.model_validate(result.progress)
     assert len(parsed.members) == 129
     service.close()
@@ -474,7 +474,7 @@ def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(tmp_path: 
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "1")
     current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
-    manifest = service.resolve_artifact_set(model_version_sha256=current_digest)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
     newer = _model_document("source-revision-2", "2", supersedes=current_digest)
@@ -492,7 +492,7 @@ def test_update_discovery_reports_incomparable_lineage_candidates(tmp_path: Path
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "3")
     current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
-    manifest = service.resolve_artifact_set(model_version_sha256=current_digest)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
     _insert_model_revision(sessions, _model_document("candidate-a", "4"), created_at=NOW + timedelta(hours=1))
@@ -648,7 +648,12 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     with sessions() as session:
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
+        assert persisted.state == failed.state
         assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
+        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["retry"]["next_retry_at"] is None
+        assert persisted.payload["retry"]["retry_after_seconds"] is None
+    assert service._hf_cooldown_until is None
 
     # Terminal auth failures do not re-enter the automatic scheduler.
     service.tick()
@@ -663,6 +668,15 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     )
     assert denied.id == first.id
     assert denied.state == "failed"
+    assert denied.failure is not None
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.state == denied.state
+        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["retry"]["next_retry_at"] is None
+        assert persisted.payload["retry"]["retry_after_seconds"] is None
+    assert service._hf_cooldown_until is None
     assert len(requests) == 3
     denied_repeat = service.check_access_and_resume(
         first.id,
@@ -692,9 +706,35 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     assert resumed.artifact_set_sha256 == first.artifact_set_sha256
     assert resumed.plan_digest == first.plan_digest
     assert resumed.progress["downloaded_bytes"] >= len(public_data)
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.state == "queued"
+        assert persisted.payload["failure"]["code"] == "model_cache.rate_limited"
+        assert persisted.payload["failure"]["retry_time"] == NOW.replace(
+            second=30
+        ).isoformat()
+        assert persisted.payload["retry"]["next_retry_at"] == persisted.payload[
+            "failure"
+        ]["retry_time"]
+        assert persisted.payload["retry"]["retry_after_seconds"] == 30
+    assert service._hf_cooldown_until == NOW.replace(second=30)
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)
-    assert service.get_operation(resumed.id).state == "succeeded"
+    completed = service.get_operation(resumed.id)
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        diagnostic = {
+            "state": persisted.state,
+            "failure": persisted.payload.get("failure"),
+            "retry": persisted.payload.get("retry"),
+        }
+        assert completed.state == "succeeded", diagnostic
+        assert completed.failure is None
+        assert persisted.state == completed.state
+        assert "failure" not in persisted.payload
+        assert "claim" not in persisted.payload
     assert len(requests) == 5
     service.close()
     client.close()
@@ -724,7 +764,7 @@ def test_access_recheck_groups_hf_files_by_repository_without_failed_key(
         )
         artifacts.append(artifact)
     manifest = service.resolve_artifact_set(
-        model_version_sha256="e" * 64,
+        model_content_sha256="e" * 64,
         artifacts=artifacts,
     )
     service._check_huggingface_access(manifest, failed_artifact_key=None)

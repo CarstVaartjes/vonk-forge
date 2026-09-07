@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel
 from vonk_agent_protocol import (
     AgentProtocolError,
     DistributionAssignment,
@@ -46,6 +47,7 @@ def test_distribution_assignment_import_and_round_trip_are_canonical() -> None:
     assignment = _assignment()
     wire = assignment.to_mapping()
 
+    assert isinstance(assignment, BaseModel)
     assert isinstance(assignment.objects[0], DistributionObject)
     assert DistributionAssignment.parse(wire).to_mapping() == wire
     assert canonical_message(assignment) == canonical_message(wire)
@@ -53,7 +55,7 @@ def test_distribution_assignment_import_and_round_trip_are_canonical() -> None:
 
 def test_distribution_assignment_rejects_unsafe_object_name() -> None:
     wire = _assignment().to_mapping()
-    wire["objects"][0]["name"] = "weights/model bin"
+    wire["objects"][0]["name"] = "weights/../model.bin"
 
     with pytest.raises(AgentProtocolError):
         DistributionAssignment.parse(wire)
@@ -80,3 +82,45 @@ def test_distribution_allows_only_the_canonical_empty_model_support_file() -> No
                 "kind": "oci-archive",
             }
         )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "__init__.py",
+        "weights/model bin",
+        "UPPERCASE.bin",
+        "模型.bin",
+        "模型 file_" * 64,
+    ],
+)
+def test_distribution_preserves_safe_object_names(name: str) -> None:
+    wire = _assignment().to_mapping()
+    wire["objects"][0]["name"] = name
+    assert DistributionAssignment.parse(wire).objects[0].name == name
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", 2.0), ("schema_version", True),
+        ("generation", True), ("generation", 3.0),
+        ("expires_at", "2026-09-05T12:00:00"),
+        ("expires_at", "2026-09-05T12:00:00+02:00"),
+    ],
+)
+def test_distribution_rejects_wrong_json_types_and_non_utc_expiry(field: str, value: object) -> None:
+    wire = _assignment().to_mapping()
+    wire[field] = value
+    with pytest.raises(AgentProtocolError):
+        DistributionAssignment.parse(wire)
+
+
+def test_compiled_distribution_reuses_the_assignment_object_contract() -> None:
+    from vonk_agent_protocol.compiled_execution_plan import CompiledDistributionObject
+
+    assert issubclass(CompiledDistributionObject, DistributionObject)
+    wire = _assignment().objects[0].to_mapping()
+    for name in ["weights/model bin", "__init__.py"]:
+        wire["name"] = name
+        assert CompiledDistributionObject.model_validate(wire).to_mapping() == wire

@@ -21,17 +21,12 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.operation_api import admin_openapi_schema
-
 ROOT = Path(__file__).resolve().parents[1]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_OUTPUT = ROOT / "control/web/src/api/generated.d.ts"
+CLI_OPENAPI_OUTPUT = ROOT / "src/cluster_profiles/schemas/control-openapi.json"
+CLI_OPENAPI_MIRROR = ROOT / "schemas/control-openapi.json"
 
 
 class _SchemaJobs:
@@ -58,6 +53,13 @@ class _SchemaJobs:
 
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.api import create_app
+    from vonk_control.audit import MemoryAuditStore
+    from vonk_control.auth import TokenCodec
+    from vonk_control.browser_auth import BrowserAuthService
+    from vonk_control.operation_api import admin_openapi_schema
+
     signing_key = b"schema-only-signing-key-32-bytes!"
     app = create_app(
         jobs=_SchemaJobs(),
@@ -100,16 +102,19 @@ def _generated_client_schema(
             del paths[path]
     if python_compatibility:
         # openapi-python-client 0.26.2 cannot parse recursive anyOf unions.
-        # Keep the server and TypeScript schemas exact while representing these
-        # JSON-shaped values as mappings in the generated Python client.
+        # Keep the server and TypeScript schemas exact while making these
+        # JSON-shaped values Any in the generated Python client.  An empty
+        # schema is openapi-python-client's supported spelling for Any and
+        # preserves scalar, array, null, and object values.
         components = schema.get("components", {})
         schemas = components.get("schemas", {})
-        for name in ("JsonValue", "RuntimeArgumentValue"):
-            if name in schemas:
-                schemas[name] = {
-                    "type": "object",
-                    "additionalProperties": True,
-                }
+        for name in list(schemas):
+            # Pydantic uses a qualified component name when a recursive JSON
+            # value comes from an imported contract module.  Match the leaf
+            # name so that the compatibility copy stays correct after a
+            # contract package is reorganized.
+            if name.rsplit("__", 1)[-1] in {"JsonValue", "RuntimeArgumentValue"}:
+                schemas[name] = {}
     return schema
 
 
@@ -155,6 +160,12 @@ def main() -> None:
 
     if arguments.schema_only:
         _write_openapi(_schema(include_browser_auth=True))
+        _write_openapi(
+            _schema(include_browser_auth=False), path=CLI_OPENAPI_OUTPUT
+        )
+        _write_openapi(
+            _schema(include_browser_auth=False), path=CLI_OPENAPI_MIRROR
+        )
         return
 
     # Keep the tracked document complete. Generated clients receive a filtered
@@ -165,6 +176,8 @@ def main() -> None:
 
         admin_schema = _schema(include_browser_auth=False)
         _write_openapi(admin_schema)
+        _write_openapi(admin_schema, path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(admin_schema, path=CLI_OPENAPI_MIRROR)
         _write_openapi(
             _generated_client_schema(admin_schema, python_compatibility=True),
             path=client_openapi,
@@ -182,7 +195,8 @@ def main() -> None:
                 "--output-path",
                 str(PYTHON_OUTPUT),
                 "--overwrite",
-            ]
+                "--fail-on-warning",
+            ],
         )
         _normalize_generated_text(PYTHON_OUTPUT)
 
@@ -196,7 +210,7 @@ def main() -> None:
                 str(client_openapi),
                 "--output",
                 str(TYPESCRIPT_OUTPUT),
-            ]
+            ],
         )
         _normalize_generated_text(TYPESCRIPT_OUTPUT)
 

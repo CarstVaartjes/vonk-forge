@@ -36,7 +36,6 @@ x-api-environment: &api-environment
   VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
-  VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
   VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
@@ -45,8 +44,6 @@ x-worker-environment: &worker-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
-  VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
-  VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
   VONK_STATE_PATH: /state
@@ -104,7 +101,7 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -125,7 +122,7 @@ services:
     # dedicated volume so Controller restarts do not invalidate accepted
     # builds. PostgreSQL remains the authority for their lifecycle.
     tmpfs: [/tmp]
-    networks: [application, data, agent-proxy, worker-authority, ca]
+    networks: [application, data, agent-proxy, ca]
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:
@@ -156,7 +153,7 @@ services:
     # The cache worker fetches pinned models and OCI images from public
     # providers. Keep its outbound network separate from ingress and do not
     # publish worker ports; the API and database retain internal networks.
-    networks: [data, worker-authority, artifact-egress]
+    networks: [data, artifact-egress]
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
@@ -368,8 +365,6 @@ secrets:
     file: "${CONTROLLER_SERVER_KEY_FILE:?set controller server private key secret file}"
   agent-proxy-auth:
     file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
-  worker-api-token:
-    file: "${WORKER_API_TOKEN_FILE:?set worker API token secret file}"
   package-helper-grant-private-key:
     file: "${PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE:?set workload package helper grant private key file}"
   package-helper-receipt-private-key:
@@ -393,7 +388,6 @@ networks:
   ingress: {}
   agent-proxy: {internal: true}
   application: {internal: true}
-  worker-authority: {internal: true}
   artifact-egress: {}
   data: {internal: true}
   litellm-data: {internal: true}

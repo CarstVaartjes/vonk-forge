@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-LEGACY_GENERIC_AGENT_UPGRADE_REASONS = frozenset(
+GENERIC_AGENT_UPGRADE_REASONS = frozenset(
     {
         "agent upgrade request is invalid",
         "agent upgrade helper rejected the request",
@@ -14,7 +14,7 @@ LEGACY_GENERIC_AGENT_UPGRADE_REASONS = frozenset(
 
 RECOVERABLE_AGENT_UPGRADE_REASONS = frozenset(
     {
-        *LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+        *GENERIC_AGENT_UPGRADE_REASONS,
         "agent upgrade helper is unavailable",
         "agent upgrade did not restart the service",
         "agent upgrade helper rejected the request: package_verification_failed",
@@ -51,9 +51,9 @@ def operator_agent_upgrade_reason(
     raw_reason: str,
     retry_queued: bool,
 ) -> str:
-    """Explain an ambiguous legacy failure without rewriting its raw evidence."""
+    """Explain a current helper failure that omits its failed stage."""
 
-    if raw_reason not in LEGACY_GENERIC_AGENT_UPGRADE_REASONS:
+    if raw_reason not in GENERIC_AGENT_UPGRADE_REASONS:
         return raw_reason
     observed = _identity_label(
         version=observed_semantic_version,
@@ -68,7 +68,7 @@ def operator_agent_upgrade_reason(
     attempt_label = "attempt" if attempt_count == 1 else "attempts"
     return (
         f"Spark {node_id} still reports {observed} after {attempt_count} install "
-        f"{attempt_label}; target {expected} was not proven. The legacy helper "
+        f"{attempt_label}; target {expected} was not proven. The helper "
         "returned a generic failure that does not distinguish package installation "
         "from service restart failure and does not establish an authorization or "
         f"download failure. {agent_upgrade_next_action(retry_queued=retry_queued)}"

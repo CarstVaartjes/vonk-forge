@@ -85,21 +85,18 @@ it("omits secret-like input fields from bounded object details", async () => {
   expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
 });
 
-it("keeps visual Fleet snapshots separate from reconciliation evidence", async () => {
+it("loads the current Fleet snapshot endpoint for browser Fleet data", async () => {
   const captured: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const request = input as Request;
     captured.push(request);
-    const pathname = new URL(request.url).pathname;
-    const body = pathname === "/api/v1/fleet"
-      ? {
-        schema_version: 1,
-        event_cursor: 7,
-        generated_at: "2026-08-15T12:00:00Z",
-        authority_revision: "a".repeat(64),
-        nodes: [],
-      }
-      : {commit: "a".repeat(40), evidence_digest: "e".repeat(64), nodes: []};
+    const body = {
+      schema_version: 1,
+      event_cursor: 7,
+      generated_at: "2026-08-15T12:00:00Z",
+      authority_revision: "a".repeat(64),
+      nodes: [],
+    };
     return new Response(JSON.stringify(body), {
       headers: {"Content-Type": "application/json"},
       status: 200,
@@ -108,8 +105,6 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
   const api = new ApiClient();
 
   const visual = await api.visualFleet();
-  const evidence = await api.fleetEvidence();
-  const statuses = await api.nodeStatuses();
 
   expect(visual).toEqual({
     schema_version: 1,
@@ -118,13 +113,7 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
     authority_revision: "a".repeat(64),
     nodes: [],
   });
-  expect(evidence.evidence_digest).toBe("e".repeat(64));
-  expect(statuses.evidence_digest).toBe("e".repeat(64));
-  expect(captured.map(request => new URL(request.url).pathname)).toEqual([
-    "/api/v1/fleet",
-    "/api/v1/nodes/status",
-    "/api/v1/nodes/status",
-  ]);
+  expect(captured.map(request => new URL(request.url).pathname)).toEqual(["/api/v1/fleet"]);
   expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
 });
 
@@ -249,7 +238,7 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   const requestKey = "00000000-0000-4000-8000-000000000401";
   const runInput: RunSwitchPreviewRequest = {
     schema_version: 2,
-    model_version_sha256: modelDigest,
+    model_content_sha256: modelDigest,
     recipe_revision_id: "revision-run",
     spark_group: {nodes: [{node_id: "spark-a", rank: 0, role: "leader", endpoint_owner: true}, {node_id: "spark-b", rank: 1, role: "worker", endpoint_owner: false}]},
     alias: "chat",
@@ -649,9 +638,9 @@ it("previews and applies one digest-bound fleet-wide model deletion", async () =
   const plan = {
     active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * 1024 ** 3,
     installations: [{installation_id: "installation-chat", installed_bytes: 120 * 1024 ** 3, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
-    model_title: "Qwen 3 BF16", model_version_sha256: modelDigest,
+    model_title: "Qwen 3 BF16", model_content_sha256: modelDigest,
     nodes: [{installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-alpha", recipe_ids: ["recipe-chat"]}, {installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-beta", recipe_ids: ["recipe-chat"]}],
-    plan_digest: "model-delete-plan", shared_cache_policy: "Unrelated immutable caches remain installed.", warnings: [],
+    plan_digest: "model-delete-plan", shared_cache_policy: "retain-shared-download-cache", warnings: [],
   };
   const operation = {id: "operation-model-delete", kind: "model-delete", owner_id: modelDigest, state: "queued", plan_digest: plan.plan_digest, nodes: ["node-alpha", "node-beta"], result: null};
   const captured: Request[] = [];
@@ -669,7 +658,7 @@ it("previews and applies one digest-bound fleet-wide model deletion", async () =
     ["/api/v1/library/model-deletion-plans/preview", "POST"],
     [`/api/v1/library/models/${modelDigest}/delete`, "POST"],
   ]);
-  expect(await captured[0]!.json()).toEqual({model_version_sha256: modelDigest});
+  expect(await captured[0]!.json()).toEqual({model_content_sha256: modelDigest});
   expect(await captured[1]!.json()).toEqual({plan_digest: plan.plan_digest, request_key: requestKey});
   expect(captured[0]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");
   expect(captured[1]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");

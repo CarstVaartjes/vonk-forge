@@ -26,7 +26,7 @@ def upgrade() -> None:
         "model_cache_sets",
         sa.Column("artifact_set_sha256", sa.String(length=64), nullable=False),
         sa.Column("schema_version", sa.Integer(), nullable=False, server_default="2"),
-        sa.Column("model_version_sha256", sa.String(length=64), nullable=True),
+        sa.Column("model_content_sha256", sa.String(length=64), nullable=True),
         sa.Column("recipe_revision_sha256", sa.String(length=64), nullable=True),
         sa.Column("manifest", sa.JSON(), nullable=False),
         sa.Column("expected_bytes", sa.BigInteger(), nullable=False),
@@ -45,10 +45,10 @@ def upgrade() -> None:
             name="ck_model_cache_sets_artifact_set_digest",
         ),
         sa.CheckConstraint(
-            "model_version_sha256 IS NULL OR ("
-            + _lower_hex("model_version_sha256", 64)
+            "model_content_sha256 IS NULL OR ("
+            + _lower_hex("model_content_sha256", 64)
             + ")",
-            name="ck_model_cache_sets_model_version_digest",
+            name="ck_model_cache_sets_model_content_digest",
         ),
         sa.CheckConstraint(
             "recipe_revision_sha256 IS NULL OR ("
@@ -71,9 +71,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("artifact_set_sha256"),
     )
     op.create_index(
-        "ix_model_cache_sets_model_version_sha256",
+        "ix_model_cache_sets_model_content_sha256",
         "model_cache_sets",
-        ["model_version_sha256"],
+        ["model_content_sha256"],
     )
     op.create_index(
         "ix_model_cache_sets_recipe_revision_sha256",

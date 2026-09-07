@@ -42,6 +42,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from .agent_api import (
     MAX_RECIPE_IMAGE_BYTES,
@@ -90,8 +91,13 @@ from .model_cache_api import (
 )
 from .operation_api import (
     AgentsResponse,
+    AuditEventResponse,
+    AuditResponse,
+    AuthorityResponse,
+    ChangeResponse,
     EndpointResponse,
-    FleetStatusResponse,
+    HealthzResponse,
+    IdentityHistoryResponse,
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
@@ -101,11 +107,12 @@ from .operation_api import (
     OperationDetailResponse,
     OperationPage,
     OperationsResponse,
+    ProposalPreviewResponse,
+    ReadyzResponse,
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,
     decode_offset,
-    fleet_response,
     job_response,
     operation_detail_response,
 )
@@ -128,7 +135,7 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 )
 _LOGIN_PATH = "/api/v1/auth/login"
 _TELEMETRY_PATH = "/agent/v1/telemetry"
-_MAX_TELEMETRY_BODY_BYTES = 64 * 1024
+_MAX_TELEMETRY_BODY_BYTES = MAX_TELEMETRY_REPORT_BYTES
 _ARTIFACT_INPUT_UPLOAD = re.compile(
     r"/api/v1/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
 )
@@ -408,58 +415,34 @@ class AuditSink(Protocol):
 
 def refresh_fleet_metrics(
     metrics: MetricsRegistry,
-    fleet_state: Mapping[str, object],
+    fleet_snapshot: FleetSnapshot,
 ) -> None:
-    """Refresh bounded fleet series while omitting unknown probe ages."""
+    """Refresh metrics from the single typed FleetProjection evidence path."""
 
-    nodes = fleet_state.get("nodes")
-    if not isinstance(nodes, Sequence):
-        raise TypeError("fleet metrics nodes are invalid")
-    for node in nodes:
-        if not isinstance(node, Mapping):
-            raise TypeError("fleet metrics node is invalid")
-        probe_age = node.get("probe_age_seconds")
-        metrics.update_node(
-            str(node["id"]),
-            ready=node.get("healthy") is True,
-            memory_available_bytes=int(node["memory_available_bytes"]),
-            disk_available_bytes=int(node["disk_available_bytes"]),
-            probe_age_seconds=(None if probe_age is None else float(probe_age)),
-        )
-
-
-class JobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: str = Field(min_length=1, max_length=80)
-    authority_revision: str = Field(min_length=1, max_length=128)
-    targets: list[str] = Field(max_length=64)
-    payload: dict[str, object]
-
-
-class JobResponse(BaseModel):
-    id: str
-    state: str
+    metrics.update_fleet(fleet_snapshot)
 
 
 class ProposalChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     path: str = Field(min_length=1, max_length=512)
     document: dict[str, object]
 
 
 class ProposalRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     base_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     changes: list[ProposalChangeRequest] = Field(min_length=1, max_length=32)
 
 
 class ChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class NodeProfileUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True
+    )
     display_name: str = Field(
         min_length=1,
         max_length=80,
@@ -485,9 +468,6 @@ def create_app(
     agent: AgentApiServices | None = None,
     trusted_agent_proxy_auth: bytes = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
-    worker_authority: Any | None = None,
-    worker_api_token: bytes = b"",
-    generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
     recipe_library: Any | None = None,
@@ -717,14 +697,6 @@ def create_app(
         upgrades=agent_upgrades,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
-    if worker_authority is not None:
-        from .worker_authority import install_worker_authority_routes
-
-        install_worker_authority_routes(
-            app,
-            worker_authority,
-            token=worker_api_token,
-        )
     authenticated_actor = Depends(actor)
     authenticated_browser_actor = Depends(browser_session_actor)
 
@@ -790,13 +762,13 @@ def create_app(
         cursor_codec=cursor_codec,
     )
 
-    @app.get("/api/v1/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    @app.get("/api/v1/healthz", response_model=HealthzResponse)
+    def healthz() -> HealthzResponse:
+        return HealthzResponse(status="ok")
 
-    @app.get("/api/v1/readyz")
-    def readyz() -> dict[str, str]:
-        return {"status": "ready"}
+    @app.get("/api/v1/readyz", response_model=ReadyzResponse)
+    def readyz() -> ReadyzResponse:
+        return ReadyzResponse(status="ready")
 
     @app.get("/metrics", include_in_schema=False)
     def platform_metrics(request: Request) -> Response:
@@ -870,22 +842,6 @@ def create_app(
                 "X-Accel-Buffering": "no",
             },
         )
-
-    @app.get(
-        "/api/v1/nodes/status",
-        response_model=FleetStatusResponse,
-        responses=bounded_error_responses(401),
-        operation_id="getNodeStatuses",
-        summary="Read explicit node health-probe evidence",
-        description=(
-            "Returns the legacy node health-probe projection. Its stale fields refer "
-            "only to explicit node.probe compute-gate evidence, not aggregate Fleet "
-            "readiness. Use /api/v1/fleet for live connection, inventory, and "
-            "telemetry readiness."
-        ),
-    )
-    def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
-        return fleet_response(fleet())
 
     @app.patch(
         "/api/v1/nodes/{node_id}/profile",
@@ -1076,13 +1032,13 @@ def create_app(
     def endpoint_view(
         alias: str = ApiPath(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$"),
         _actor: Actor = authenticated_actor,
-    ) -> Mapping[str, object]:
+    ) -> EndpointResponse:
         if operations is None:
             raise HTTPException(
                 status_code=503, detail="endpoint publication unavailable"
             )
         try:
-            return operations.endpoint(alias)
+            return EndpointResponse.model_validate(operations.endpoint(alias))
         except KeyError:
             raise HTTPException(status_code=404, detail="endpoint not found") from None
         except RuntimeError:
@@ -1096,34 +1052,47 @@ def create_app(
         responses=bounded_error_responses(401, 503),
         operation_id="listAgents",
     )
-    def agent_list(_actor: Actor = authenticated_actor) -> dict[str, object]:
+    def agent_list(_actor: Actor = authenticated_actor) -> AgentsResponse:
         if operations is None:
             raise HTTPException(status_code=503, detail="agent projection unavailable")
         try:
-            return {"agents": list(operations.agents())}
+            return AgentsResponse(agents=list(operations.agents()))
         except RuntimeError:
             raise HTTPException(
                 status_code=503, detail="agent projection unavailable"
             ) from None
 
-    @app.get("/api/v1/authority")
+    @app.get(
+        "/api/v1/authority",
+        response_model=AuthorityResponse,
+        responses=bounded_error_responses(401, 503),
+        operation_id="getAuthority",
+    )
     def authority_view(
         revision: str | None = None, _actor: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> AuthorityResponse:
         if admin is None:
             raise HTTPException(status_code=503, detail="authority unavailable")
         resolved = revision or admin.authority.head()
         snapshot = admin.authority.inspect(resolved)
-        return {
-            "revision": snapshot.revision,
-            "documents": dict(snapshot.documents),
-            "dependencies": dict(snapshot.dependencies),
-        }
+        return AuthorityResponse(
+            revision=snapshot.revision,
+            documents=dict(snapshot.documents),
+            dependencies={
+                path: list(dependencies)
+                for path, dependencies in snapshot.dependencies.items()
+            },
+        )
 
-    @app.post("/api/v1/proposals")
+    @app.post(
+        "/api/v1/proposals",
+        response_model=ProposalPreviewResponse,
+        responses=bounded_error_responses(401, 403, 422, 503),
+        operation_id="previewProposal",
+    )
     def proposal_preview(
         body: ProposalRequest, authenticated: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> ProposalPreviewResponse:
         require_mutation_role(authenticated, "/api/v1/proposals")
         if admin is None:
             raise HTTPException(status_code=503, detail="authority unavailable")
@@ -1132,20 +1101,26 @@ def create_app(
             body.base_revision,
             [AuthorityChange(change.path, change.document) for change in body.changes],
         )
-        return {
-            "base_revision": preview.base_revision,
-            "digest": preview.digest,
-            "patch": base64.b64encode(preview.patch).decode(),
-            "affected_documents": list(preview.affected_documents),
-            "validation_results": list(preview.validation_results),
-        }
+        return ProposalPreviewResponse(
+            base_revision=preview.base_revision,
+            digest=preview.digest,
+            patch=base64.b64encode(preview.patch).decode(),
+            affected_documents=list(preview.affected_documents),
+            validation_results=list(preview.validation_results),
+        )
 
-    @app.post("/api/v1/changes", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/v1/changes",
+        response_model=ChangeResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="submitChange",
+    )
     def submit_change(
         body: ChangeRequest,
         request: Request,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> ChangeResponse:
         require_mutation_role(authenticated, "/api/v1/changes")
         if admin is None or admin.changes is None:
             raise HTTPException(status_code=503, detail="change submission unavailable")
@@ -1161,46 +1136,7 @@ def create_app(
                 (),
             )
         )
-        return dict(result)
-
-    @app.post(
-        "/api/v1/jobs",
-        response_model=JobResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        include_in_schema=False,
-    )
-    def enqueue(
-        body: JobRequest, request: Request, authenticated: Actor = authenticated_actor
-    ) -> JobResponse:
-        require_mutation_role(authenticated, "/api/v1/jobs")
-        if not generic_jobs_enabled:
-            raise HTTPException(
-                status_code=422,
-                detail="generic jobs are disabled; use an immutable reconciliation plan",
-            )
-        if body.kind == "reconcile":
-            raise HTTPException(
-                status_code=422,
-                detail="reconciliations require an accepted immutable plan",
-            )
-        job = jobs.enqueue(
-            body.kind,
-            authenticated.subject,
-            body.authority_revision,
-            body.targets,
-            body.payload,
-            request_id=request.state.request_id,
-        )
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                f"job.enqueue:{body.kind}",
-                body.authority_revision,
-                tuple(body.targets),
-            )
-        )
-        return JobResponse(id=str(job.id), state=str(job.state))
+        return ChangeResponse.model_validate(result)
 
     @app.get(
         "/api/v1/jobs",
@@ -1216,7 +1152,7 @@ def create_app(
         ),
         target: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
         _actor: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> JobsResponse:
         try:
             page, next_cursor, total = jobs.list_page(
                 limit=limit,
@@ -1228,12 +1164,12 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="job cursor is invalid"
             ) from None
-        return {
-            "jobs": [
+        return JobsResponse(
+            jobs=[
                 {
-                    "id": str(job.id),
-                    "state": str(job.state),
-                    "kind": str(job.kind),
+                    "id": job.id,
+                    "state": job.state,
+                    "kind": job.kind,
                     "created_at": (
                         job.created_at.replace(tzinfo=UTC)
                         if job.created_at.tzinfo is None
@@ -1242,9 +1178,9 @@ def create_app(
                 }
                 for job in page
             ],
-            "next_cursor": next_cursor,
-            "total": total,
-        }
+            next_cursor=next_cursor,
+            total=total,
+        )
 
     @app.get(
         "/api/v1/operations",
@@ -1309,28 +1245,42 @@ def create_app(
             ) from None
         return operation_detail_response(item)
 
-    @app.get("/api/v1/audit")
-    def audit_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
-        return {
-            "events": [
-                {
-                    "request_id": event.request_id,
-                    "actor": event.actor,
-                    "action": event.action,
-                    "authority_revision": event.authority_revision,
-                    "targets": list(event.targets),
-                    "occurred_at": event.occurred_at.isoformat()
-                    if event.occurred_at is not None
-                    else None,
-                }
+    @app.get(
+        "/api/v1/audit",
+        response_model=AuditResponse,
+        responses=bounded_error_responses(401),
+        operation_id="listAuditEvents",
+    )
+    def audit_view(_actor: Actor = authenticated_actor) -> AuditResponse:
+        return AuditResponse(
+            events=[
+                AuditEventResponse(
+                    request_id=event.request_id,
+                    actor=event.actor,
+                    action=event.action,
+                    authority_revision=event.authority_revision,
+                    targets=list(event.targets),
+                    occurred_at=(
+                        event.occurred_at.isoformat()
+                        if event.occurred_at is not None
+                        else None
+                    ),
+                )
                 for event in audits.list()
             ]
-        }
+        )
 
-    @app.get("/api/v1/identity-history", operation_id="listIdentityHistory")
-    def identity_history_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
-        return {
-            "identities": [
+    @app.get(
+        "/api/v1/identity-history",
+        response_model=IdentityHistoryResponse,
+        responses=bounded_error_responses(401),
+        operation_id="listIdentityHistory",
+    )
+    def identity_history_view(
+        _actor: Actor = authenticated_actor,
+    ) -> IdentityHistoryResponse:
+        return IdentityHistoryResponse(
+            identities=[
                 {
                     "node_id": record.node_id,
                     "agent_state": record.agent_state,
@@ -1342,7 +1292,7 @@ def create_app(
                 }
                 for record in audits.identity_history()
             ]
-        }
+        )
 
     @app.get(
         "/api/v1/jobs/{job_id}",
@@ -1430,20 +1380,21 @@ def create_app(
     )
     def job_log_list(
         job_id: str, authenticated: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> JobLogsResponse:
         if authenticated.role not in {"operator", "administrator"}:
             raise HTTPException(status_code=403, detail="insufficient role")
         if job_logs is None:
             raise HTTPException(status_code=503, detail="job logs unavailable")
         try:
             jobs.get(job_id)
-            return {"job_id": job_id, "digests": list(job_logs.list(job_id))}
+            return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job not found") from None
 
     @app.get(
         "/api/v1/jobs/{job_id}/logs/{digest}",
         responses=bounded_error_responses(401, 403, 404, 503),
+        openapi_extra={"x-vonk-streaming-transport": True},
     )
     def job_log_content(
         job_id: str, digest: str, authenticated: Actor = authenticated_actor
@@ -1467,15 +1418,9 @@ def production_app() -> FastAPI:
     from sqlalchemy import func, select
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-    from .agent_reconciliation import (
-        bind_reconciliation_result_consumer,
-        load_reconciliation_authority_input,
-    )
     from .agent_upgrades import AgentUpgradeService
-    from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
-    from .dashboard import DashboardService
     from .database_authority import (
         DatabaseAuthorityService,
         DatabaseChangeService,
@@ -1500,6 +1445,7 @@ def production_app() -> FastAPI:
     from .run_admission import RunAdmissionService
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
+        RuntimeImageReceipt,
         SkopeoOCIImageTransport,
         persist_runtime_image_receipt,
         prepare_runtime_image,
@@ -1507,7 +1453,6 @@ def production_app() -> FastAPI:
     )
     from .settings import Settings
     from .telemetry import TelemetryRepository
-    from .worker_authority import WorkerAuthorityService
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
@@ -1521,7 +1466,6 @@ def production_app() -> FastAPI:
     proposals = DatabaseProposalService(authority)
     changes = DatabaseChangeService(authority, proposals)
     database_bundles = DatabaseSourceBundleStore(sessions)
-    dashboard = DashboardService(authority, sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
@@ -1581,7 +1525,9 @@ def production_app() -> FastAPI:
     )
     runtime_image_transport = SkopeoOCIImageTransport()
 
-    def prepare_runtime_image_receipt(document, runtime_spec, build):
+    def prepare_runtime_image_receipt(
+        document, runtime_spec, build
+    ) -> RuntimeImageReceipt:
         runtime = runtime_spec.get("runtime")
         if not isinstance(runtime, Mapping):
             raise TypeError("compiled runtime projection is unavailable")
@@ -1606,7 +1552,7 @@ def production_app() -> FastAPI:
                 "image_bytes": build.image_bytes,
             }
 
-        def write_receipt(receipt):
+        def write_receipt(receipt: RuntimeImageReceipt) -> None:
             recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
             with sessions.begin() as session:
                 revision = session.scalar(
@@ -1637,7 +1583,9 @@ def production_app() -> FastAPI:
             receipt_writer=write_receipt,
         )
 
-    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
+    def resolve_runtime_image_receipt(
+        document, image_digest, runtime_spec
+    ) -> RuntimeImageReceipt:
         """Read an already prepared OCI receipt without pulling or exporting."""
 
         runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
@@ -1687,38 +1635,6 @@ def production_app() -> FastAPI:
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
 
-    def reconciliation_authority_input(
-        reconciliation_id: str,
-    ) -> tuple[str, str, tuple[Any, ...], str]:
-        def endpoint(session: Any, node_id: str) -> tuple[str, Any]:
-            observation = agent_services.presence.latest_in_session(
-                session,
-                node_id,
-                maximum_age_seconds=300,
-            )
-            return observation.address, observation.observed_at
-
-        with sessions() as session:
-            snapshot = load_reconciliation_authority_input(
-                session,
-                reconciliation_id,
-                endpoint,
-            )
-        return (
-            snapshot.authority_revision,
-            snapshot.plan_digest,
-            snapshot.routes,
-            snapshot.fleet_evidence_digest,
-        )
-
-    worker_authority = WorkerAuthorityService(
-        current_revision=current_revision,
-        revision_eligible=revision_eligible,
-        reconciliation_input=reconciliation_authority_input,
-        current_fleet_evidence=lambda: (
-            fleet_response(dashboard.fleet()).evidence_digest
-        ),
-    )
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
         management_policy=ManagementAddressPolicy.parse(
@@ -1750,7 +1666,6 @@ def production_app() -> FastAPI:
         sessions,
         install_admission=InstallAdmissionService(
             sessions,
-            sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
@@ -1824,20 +1739,11 @@ def production_app() -> FastAPI:
         recipe_operations.consume_agent_result(session, operation, attempt, message)
         agent_upgrades.consume_agent_result(session, operation, attempt, message)
 
-    bind_reconciliation_result_consumer(
-        sessions,
-        operations=agent_services.operations,
-        presence=agent_services.presence,
-        clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
-        additional_result_consumer=consume_agent_result,
-    )
+    agent_services.operations.set_result_consumer(consume_agent_result)
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()
-        fleet_state = dashboard.fleet()
-        refresh_fleet_metrics(metrics, fleet_state)
+        refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
             for kind, state, count in session.execute(
                 select(Job.kind, Job.state, func.count()).group_by(Job.kind, Job.state)
@@ -1884,7 +1790,7 @@ def production_app() -> FastAPI:
         jobs=job_service,
         tokens=token_codec,
         audits=audits_store,
-        fleet=dashboard.fleet,
+        fleet=visual_fleet.read,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
@@ -1899,12 +1805,6 @@ def production_app() -> FastAPI:
         job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime == "enabled" else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
-        worker_authority=(
-            worker_authority if settings.agent_runtime == "enabled" else None
-        ),
-        worker_api_token=(
-            settings.worker_api_token if settings.agent_runtime == "enabled" else b""
-        ),
         operations=register_model_cache_operation_provider(
             durable_operation_services(
                 sessions,

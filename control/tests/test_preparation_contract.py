@@ -45,10 +45,10 @@ def _ready_document() -> dict[str, object]:
         "schema_version": 2,
         "model": {
             "artifact_set_sha256": "a" * 64,
-            "model_version_sha256": "b" * 64,
+            "model_content_sha256": "b" * 64,
             "artifact_count": 3,
             "artifact_set_bytes": 100,
-            "dependency_model_version_sha256": ["c" * 64],
+            "dependency_model_content_sha256": ["c" * 64],
             "completeness": "complete",
             "controller": controller,
             "targets": targets,
@@ -129,7 +129,7 @@ def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
     model["recipe_revision_sha256"] = "f" * 64
     compatibility = {
         "recipe_revision_sha256": "f" * 64,
-        "model_version_sha256": "b" * 64,
+        "model_content_sha256": "b" * 64,
         "runtime_image_digest": "sha256:" + "d" * 64,
         "parameters_sha256": "9" * 64,
         "hardware_profile_sha256": "8" * 64,
@@ -195,7 +195,7 @@ def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
     model["recipe_revision_sha256"] = "f" * 64
     compatibility = {
         "recipe_revision_sha256": "f" * 64,
-        "model_version_sha256": "7" * 64,
+        "model_content_sha256": "7" * 64,
         "runtime_image_digest": "sha256:" + "d" * 64,
         "parameters_sha256": "9" * 64,
         "hardware_profile_sha256": None,
@@ -223,7 +223,7 @@ def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
     model = out_of_scope["model"]
     assert isinstance(model, dict)
     model["recipe_revision_sha256"] = "f" * 64
-    compatibility["model_version_sha256"] = "b" * 64
+    compatibility["model_content_sha256"] = "b" * 64
     out_of_scope["exceptions"] = [
         {
             **document["exceptions"][0],

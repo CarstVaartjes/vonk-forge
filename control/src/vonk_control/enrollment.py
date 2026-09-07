@@ -17,9 +17,11 @@ from datetime import UTC, datetime, timedelta
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
 
 from .models import (
     AgentCertificate,
@@ -39,26 +41,7 @@ from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 MAX_ENROLLMENT_GRANT_TTL_SECONDS = 900
-_MAX_CSR_BYTES = 16 * 1024
-_EVIDENCE_FIELDS = (
-    "node_id",
-    "csr_public_key_fingerprint",
-    "host_key_fingerprint",
-    "hardware_fingerprint",
-    "agent_digest",
-    "boot_id",
-)
 _OBSERVATION_RECEIPT_PUBLIC_KEY = "observation_receipt_public_key"
-_EVIDENCE_LIMITS = {
-    "node_id": 36,
-    "csr_public_key_fingerprint": 64,
-    "host_key_fingerprint": 512,
-    "hardware_fingerprint": 512,
-    "agent_digest": 128,
-    "boot_id": 128,
-    _OBSERVATION_RECEIPT_PUBLIC_KEY: 64,
-}
-_HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
 
 
@@ -224,7 +207,7 @@ class EnrollmentService:
                 failure = "enrollment grant is expired"
             else:
                 try:
-                    if not isinstance(csr, bytes) or len(csr) > _MAX_CSR_BYTES:
+                    if not isinstance(csr, bytes) or len(csr) > MAX_CSR_BYTES:
                         raise EnrollmentDenied("CSR is too large")
                     csr_pem, public_key_pem, public_key_fingerprint, csr_node_id = (
                         _load_csr(grant.node_id, csr)
@@ -1238,35 +1221,16 @@ def _validate_evidence(
     csr_node_id: str,
     public_key_fingerprint: str,
 ) -> tuple[dict[str, str], str | None]:
-    values: dict[str, str] = {}
-    fields = set(evidence)
-    if fields not in (
-        set(_EVIDENCE_FIELDS),
-        {*_EVIDENCE_FIELDS, _OBSERVATION_RECEIPT_PUBLIC_KEY},
-    ):
-        return values, "evidence fields are invalid"
-    for name in fields:
-        value = evidence.get(name)
-        if (
-            not isinstance(value, str)
-            or not value.strip()
-            or len(value) > _EVIDENCE_LIMITS[name]
-        ):
-            return values, f"evidence {name} is required"
-        values[name] = value
+    try:
+        values = EnrollmentEvidence.model_validate(evidence).model_dump()
+    except ValidationError:
+        return {}, "evidence fields are invalid"
     if values["node_id"] != csr_node_id:
         return values, "evidence node ID does not match CSR"
     if grant_node_id is not None and values["node_id"] != grant_node_id:
         return values, "evidence node ID does not match enrollment grant"
     if values["csr_public_key_fingerprint"] != public_key_fingerprint:
         return values, "evidence CSR public-key fingerprint does not match CSR"
-    if _HEX_64.fullmatch(values["csr_public_key_fingerprint"]) is None:
-        return values, "evidence CSR public-key fingerprint is invalid"
-    if _HEX_64.fullmatch(values["agent_digest"]) is None:
-        return values, "evidence agent digest is invalid"
-    receipt_key = values.get(_OBSERVATION_RECEIPT_PUBLIC_KEY)
-    if receipt_key is not None and _HEX_64.fullmatch(receipt_key) is None:
-        return values, "evidence observation receipt public key is invalid"
     return values, None
 
 

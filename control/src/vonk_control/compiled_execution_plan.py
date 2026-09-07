@@ -27,13 +27,18 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
     field_validator,
     model_validator,
 )
+from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    canonical_message,
+)
+
+from .strict_json import StrictJSONModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -41,6 +46,7 @@ Identifier = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 ]
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+MAX_COMPILED_EXECUTION_PLAN_BYTES = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
@@ -48,17 +54,17 @@ class CompiledExecutionPlanError(ValueError):
     """The canonical runtime and verified delivery receipts cannot be bound."""
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-def _safe_path(value: str, *, absolute: bool) -> str:
+def _safe_path(value: str, *, absolute: bool, max_length: int = 512) -> str:
     parts = (
         value[1:].split("/") if absolute and value.startswith("/") else value.split("/")
     )
     if (
         not value
-        or len(value) > 512
+        or len(value) > max_length
         or "\\" in value
         or "\x00" in value
         or any(part in {"", ".", ".."} for part in parts)
@@ -97,9 +103,16 @@ class ModelCatalogIdentity(_StrictModel):
     They remain Controller/cache inputs and are never sent to a Spark.
     """
 
-    publisher: Identifier
+    publisher: str = Field(min_length=1, max_length=128)
     slug: Identifier
     content_sha256: Digest
+
+    @field_validator("publisher")
+    @classmethod
+    def publisher_is_safe_text(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("model publisher is invalid")
+        return value
 
 
 class DistributionObjectReceipt(_StrictModel):
@@ -126,7 +139,7 @@ class VerifiedModelObject(_StrictModel):
     """One cache-authorized model file before recipe mount selection.
 
     The model content identity and file ID are part of the lookup key.  A
-    path alone is insufficient because different model versions legitimately
+    path alone is insufficient because different model definitions legitimately
     contain files with the same name, such as ``config.json``.
     """
 
@@ -178,7 +191,10 @@ class CompiledModelArtifact(_StrictModel):
     bytes: int = Field(ge=0, le=16 * 1024**4)
     roles: list[Identifier] = Field(min_length=1, max_length=32)
     mount: ExecutionMount
-    materialized_path: str = Field(min_length=1, max_length=512)
+    # This is a generated absolute path containing the selection prefix and
+    # the complete canonical file path, so it is bounded separately from the
+    # public ModelFile.path ceiling.
+    materialized_path: str = Field(min_length=1, max_length=1024)
     model: ModelCatalogIdentity
     distribution_object: DistributionObjectReceipt
 
@@ -190,7 +206,7 @@ class CompiledModelArtifact(_StrictModel):
     @field_validator("materialized_path")
     @classmethod
     def materialized_path_is_safe(cls, value: str) -> str:
-        value = _safe_path(value, absolute=True)
+        value = _safe_path(value, absolute=True, max_length=1024)
         if not value.startswith("/run/vonk/models/"):
             raise ValueError("materialized model path must be Controller-owned")
         return value
@@ -303,18 +319,45 @@ class CompiledExecutionPlan(_StrictModel):
     @model_validator(mode="after")
     def artifact_set_bytes_are_exact(self) -> CompiledExecutionPlan:
         by_digest: dict[str, int] = {}
+        by_physical: dict[tuple[str, str], tuple[object, ...]] = {}
+        selected: dict[tuple[str, str], str] = {}
+        projection_ids: set[str] = set()
+        mount_paths: set[tuple[str, str]] = set()
         for artifact in self.artifacts:
+            if artifact.id in projection_ids:
+                raise ValueError("compiled model artifact projections must be unique")
+            projection_ids.add(artifact.id)
+            physical = (
+                artifact.file_id,
+                artifact.sha256,
+                artifact.bytes,
+                artifact.model.publisher,
+                artifact.model.slug,
+                artifact.model.content_sha256,
+                artifact.distribution_object.name,
+                artifact.distribution_object.sha256,
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind,
+            )
+            physical_key = (artifact.selection_id, artifact.path)
+            previous = by_physical.get(physical_key)
+            if previous is not None and previous != physical:
+                raise ValueError("compiled model artifact physical identity conflicts")
+            by_physical[physical_key] = physical
+            selected_key = (artifact.selection_id, artifact.file_id)
+            previous_path = selected.get(selected_key)
+            if previous_path is not None and previous_path != artifact.path:
+                raise ValueError("compiled model artifact file identity conflicts")
+            selected[selected_key] = artifact.path
             previous = by_digest.setdefault(artifact.sha256, artifact.bytes)
             if previous != artifact.bytes:
                 raise ValueError("one model digest cannot have multiple byte counts")
+            mount_path = (artifact.mount.target, artifact.path)
+            if mount_path in mount_paths:
+                raise ValueError("compiled model artifacts repeat a mount target")
+            mount_paths.add(mount_path)
         if sum(by_digest.values()) != self.model_artifact_set_bytes:
             raise ValueError("model artifact-set bytes do not match selected receipts")
-        keys = [(item.selection_id, item.file_id) for item in self.artifacts]
-        if len(keys) != len(set(keys)):
-            raise ValueError("compiled model artifacts repeat a selected file")
-        paths = [(item.selection_id, item.path) for item in self.artifacts]
-        if len(paths) != len(set(paths)):
-            raise ValueError("compiled model artifacts repeat a materialized path")
         return self
 
     def reusable_identity_document(self) -> dict[str, object]:
@@ -496,28 +539,28 @@ class CompiledExecutionPlan(_StrictModel):
                 raise CompiledExecutionPlanError(f"{label} is invalid")
             return value
 
+        if "port" not in placement:
+            raise CompiledExecutionPlanError("runtime port is missing")
+        raw_port = placement["port"]
         placement_doc = {
             "endpoint_address": placement.get("endpoint_address"),
-            "rank": _required_int(placement.get("rank", topology.get("rank")), "runtime rank"),
-            "role": placement.get("role", topology.get("role")),
+            "rank": _required_int(placement.get("rank"), "runtime rank"),
+            "role": placement.get("role"),
             "world_size": _required_int(
-                placement.get("world_size", topology.get("world_size")),
+                placement.get("world_size"),
                 "runtime world size",
                 minimum=1,
             ),
             "local_address": placement.get("local_address"),
             "master_address": placement.get("master_address"),
             "master_port": placement.get("master_port"),
-            "port": _required_int(
-                placement.get(
-                    "port",
-                    _mapping(endpoint, "endpoint").get("port") if isinstance(endpoint, Mapping) else 1024,
-                ),
-                "runtime port",
-                minimum=1,
+            "port": (
+                None
+                if raw_port is None
+                else _required_int(raw_port, "runtime port", minimum=1)
             ),
             "reserved_memory_bytes": _required_int(
-                placement.get("reserved_memory_bytes", 1),
+                placement.get("reserved_memory_bytes"),
                 "runtime reserved memory",
                 minimum=1,
             ),
@@ -612,7 +655,10 @@ class CompiledExecutionPlan(_StrictModel):
             dict(_mapping(endpoint, "endpoint")) if endpoint is not None else None
         )
         payload["job"] = dict(_mapping(job, "job")) if job is not None else None
-        return payload
+        # The projected document is persisted and later served by the agent
+        # route.  Validate it at this producer boundary so the stored payload
+        # is the same canonical schema consumed by agents.
+        return validate_compiled_launch_payload(payload)
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -775,12 +821,6 @@ def compile_verified_execution_plan(
             "runtime model artifact-set digest does not match the cache authority"
         )
     identity = _mapping(spec.get("identity"), "runtime identity")
-    if {
-        "model_version_sha256",
-        "runtime_distribution_sha256",
-        "patch_bundle_sha256",
-    } & set(identity):
-        raise CompiledExecutionPlanError("runtime identity contains retired authority")
     recipe_revision_sha256 = _digest(
         identity.get("recipe_revision_sha256"), "recipe revision digest"
     )
@@ -816,6 +856,7 @@ def compile_verified_execution_plan(
 
     artifacts: list[CompiledModelArtifact] = []
     selected_keys: set[tuple[str, str]] = set()
+    selected_physical: dict[tuple[str, str], tuple[object, ...]] = {}
     for raw in raw_artifacts:
         item = _mapping(raw, "runtime model artifact")
         allowed = {
@@ -863,6 +904,26 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model selection identity is invalid"
             )
+        physical = (
+            model_identity,
+            file_id,
+            path,
+            source.sha256,
+            source.bytes,
+            model.get("publisher"),
+            model.get("slug"),
+            source.distribution_object.name,
+            source.distribution_object.sha256,
+            source.distribution_object.bytes,
+            source.distribution_object.kind,
+        )
+        physical_key = (selection_id, path)
+        previous_physical = selected_physical.get(physical_key)
+        if previous_physical is not None and previous_physical != physical:
+            raise CompiledExecutionPlanError(
+                "runtime model artifact physical identity conflicts"
+            )
+        selected_physical[physical_key] = physical
         selected_keys.add((model_identity, file_id))
         artifact_data = {
             "id": item.get("id"),
@@ -928,232 +989,22 @@ def compile_verified_execution_plan(
 
 
 def validate_compiled_launch_payload(value: object) -> dict[str, object]:
-    """Validate the schema-2 launch projection before it reaches an agent.
-
-    The shared agent protocol owns its wire DTO.  The Controller still
-    validates persisted JSON at the HTTP boundary so a stale row or accidental
-    legacy payload cannot be handed to a Spark process after a restart.
-    """
+    """Enforce canonical schema/security validation and the transport ceiling."""
+    from vonk_agent_protocol import validate_compiled_execution_plan
 
     payload = _mapping(value, "compiled launch plan")
-    expected = {
-        "schema_version",
-        "identity",
-        "runtime",
-        "artifacts",
-        "runtime_image",
-        "security",
-        "topology",
-        "lifecycle",
-    }
-    required = expected | {"endpoint", "job"}
-    if set(payload) != required or payload.get("schema_version") != 2:
-        raise CompiledExecutionPlanError("compiled launch plan schema is invalid")
-    if (payload.get("endpoint") is None) == (payload.get("job") is None):
-        raise CompiledExecutionPlanError("compiled launch plan interface is invalid")
-    identity = _mapping(payload.get("identity"), "compiled launch identity")
-    if set(identity) != {
-        "recipe_revision_sha256",
-        "execution_sha256",
-        "harness_sha256",
-        "build_input_sha256",
-        "model_artifact_set_sha256",
-        "model_artifact_bytes",
-    }:
-        raise CompiledExecutionPlanError("compiled launch identity fields are invalid")
-    for key in (
-        "recipe_revision_sha256",
-        "execution_sha256",
-        "harness_sha256",
-        "model_artifact_set_sha256",
-    ):
-        _digest(identity.get(key), f"compiled launch identity {key}")
-    build_input = identity.get("build_input_sha256")
-    if build_input is not None:
-        _digest(build_input, "compiled launch build input digest")
-    artifact_bytes = identity.get("model_artifact_bytes")
-    if type(artifact_bytes) is not int or artifact_bytes < 0:
-        raise CompiledExecutionPlanError("compiled launch model artifact bytes are invalid")
-    artifacts = payload.get("artifacts")
-    if not isinstance(artifacts, Sequence) or isinstance(artifacts, (str, bytes)) or not artifacts:
-        raise CompiledExecutionPlanError("compiled launch model artifacts are invalid")
-    by_digest: dict[str, int] = {}
-    selected: set[tuple[object, object]] = set()
-    paths: set[tuple[object, object]] = set()
-    for raw in artifacts:
-        artifact = _mapping(raw, "compiled launch model artifact")
-        if set(artifact) != {
-            "selection_id",
-            "file_id",
-            "path",
-            "sha256",
-            "size_bytes",
-            "roles",
-            "mount",
-            "model",
-            "distribution_object",
-        }:
-            raise CompiledExecutionPlanError("compiled launch model artifact fields are invalid")
-        selection_id = artifact.get("selection_id")
-        file_id = artifact.get("file_id")
-        path = artifact.get("path")
-        if not all(type(item) is str and item for item in (selection_id, file_id, path)):
-            raise CompiledExecutionPlanError("compiled launch model artifact identity is invalid")
-        digest = _digest(artifact.get("sha256"), "compiled launch model artifact digest")
-        size = artifact.get("size_bytes")
-        if type(size) is not int or size < 0:
-            raise CompiledExecutionPlanError("compiled launch model artifact size is invalid")
-        distribution = DistributionObjectReceipt.model_validate(
-            _mapping(artifact.get("distribution_object"), "compiled launch distribution object")
-        )
-        if distribution.kind != "model" or distribution.sha256 != digest or distribution.bytes != size:
-            raise CompiledExecutionPlanError("compiled launch model receipt is inconsistent")
-        mount = _mapping(artifact.get("mount"), "compiled launch model mount")
-        if set(mount) != {"target", "read_only"} or type(mount.get("target")) is not str or mount.get("read_only") is not True:
-            raise CompiledExecutionPlanError("compiled launch model mount is invalid")
-        roles = artifact.get("roles")
-        if (
-            not isinstance(roles, list)
-            or not roles
-            or any(type(role) is not str or not role for role in roles)
-            or roles != sorted(set(roles))
-        ):
-            raise CompiledExecutionPlanError("compiled launch model roles are invalid")
-        try:
-            _safe_path(path, absolute=False)
-        except ValueError as error:
-            raise CompiledExecutionPlanError("compiled launch model path is invalid") from error
-        selected_key = (selection_id, file_id)
-        path_key = (selection_id, path)
-        if selected_key in selected or path_key in paths:
-            raise CompiledExecutionPlanError("compiled launch model selection is duplicated")
-        selected.add(selected_key)
-        paths.add(path_key)
-        previous = by_digest.setdefault(digest, size)
-        if previous != size:
-            raise CompiledExecutionPlanError("compiled launch model digest has conflicting sizes")
-        model = _mapping(artifact.get("model"), "compiled launch model identity")
-        if set(model) != {"publisher", "slug", "content_sha256"}:
-            raise CompiledExecutionPlanError("compiled launch model identity is invalid")
-        _digest(model.get("content_sha256"), "compiled launch model identity")
-        if distribution.name != path:
-            raise CompiledExecutionPlanError("compiled launch model receipt path is inconsistent")
-    if sum(by_digest.values()) != artifact_bytes:
-        raise CompiledExecutionPlanError("compiled launch model bytes do not match receipts")
-    runtime = _mapping(payload.get("runtime"), "compiled launch runtime")
-    if set(runtime) != {"executable", "argv", "env", "image_digest", "placement"}:
-        raise CompiledExecutionPlanError("compiled launch runtime fields are invalid")
-    if type(runtime.get("executable")) is not str or not runtime["executable"]:
-        raise CompiledExecutionPlanError("compiled launch executable is invalid")
-    if (
-        not isinstance(runtime.get("argv"), list)
-        or any(type(item) is not str for item in runtime["argv"])
-    ):
-        raise CompiledExecutionPlanError("compiled launch argv is invalid")
-    environment = runtime.get("env")
-    if (
-        not isinstance(environment, list)
-        or any(
-            not isinstance(item, Mapping)
-            or set(item) != {"name", "value"}
-            or type(item.get("name")) is not str
-            or type(item.get("value")) is not str
-            for item in environment
-        )
-    ):
-        raise CompiledExecutionPlanError("compiled launch environment is invalid")
-    runtime_image = CompiledRuntimeImage.model_validate(
-        _mapping(payload.get("runtime_image"), "compiled launch runtime image")
-    )
-    if runtime.get("image_digest") != runtime_image.image_digest:
-        raise CompiledExecutionPlanError("compiled launch image digest is inconsistent")
-    placement = _mapping(runtime.get("placement"), "compiled launch placement")
-    required_placement = {
-        "endpoint_address", "rank", "role", "world_size", "local_address",
-        "master_address", "master_port", "port", "reserved_memory_bytes",
-    }
-    if set(placement) != required_placement:
-        raise CompiledExecutionPlanError("compiled launch placement fields are invalid")
-    topology = _mapping(payload.get("topology"), "compiled launch topology")
-    if (
-        type(placement.get("rank")) is not int
-        or placement["rank"] < 0
-        or type(placement.get("world_size")) is not int
-        or placement["world_size"] < 1
-        or placement["rank"] >= placement["world_size"]
-        or type(placement.get("port")) is not int
-        or placement["port"] < 1
-        or type(placement.get("reserved_memory_bytes")) is not int
-        or placement["reserved_memory_bytes"] < 1
-        or placement.get("rank") != topology.get("rank")
-        or placement.get("role") != topology.get("role")
-        or placement.get("world_size") != topology.get("world_size")
-    ):
-        raise CompiledExecutionPlanError("compiled launch placement does not match topology")
-    topology_required = {
-        "name",
-        "mode",
-        "backend",
-        "node_count",
-        "world_size",
-        "rank",
-        "role",
-    }
-    if set(topology) != topology_required:
-        raise CompiledExecutionPlanError("compiled launch topology fields are invalid")
-    security = _mapping(payload.get("security"), "compiled launch security")
-    security_required = {
-        "devices",
-        "capabilities",
-        "network_mode",
-        "host_network",
-        "privileged",
-        "user",
-        "mounts",
-        "read_only_root",
-        "no_new_privileges",
-    }
-    if set(security) != security_required:
-        raise CompiledExecutionPlanError("compiled launch security fields are invalid")
-    expected_network_mode = (
-        "bridge"
-        if placement.get("endpoint_address") is not None
-        or placement.get("master_port") is not None
-        else "none"
-    )
-    if (
-        security.get("network_mode") != expected_network_mode
-        or security.get("host_network") is not False
-        or not isinstance(security.get("devices"), list)
-        or len(security["devices"]) > 1
-        or any(device != "nvidia.com/gpu=all" for device in security["devices"])
-        or security.get("capabilities") != []
-        or security.get("privileged") is not False
-        or security.get("read_only_root") is not True
-        or security.get("no_new_privileges") is not True
-    ):
-        raise CompiledExecutionPlanError(
-            "compiled launch security must match signed ports with isolated network and host networking disabled"
-        )
-    mounts = security.get("mounts")
-    if not isinstance(mounts, list):
-        raise CompiledExecutionPlanError("compiled launch security mounts are invalid")
-    for raw_mount in mounts:
-        mount = _mapping(raw_mount, "compiled launch security mount")
-        if (
-            set(mount) != {"source", "target", "read_only"}
-            or mount.get("source") not in {"model", "inputs", "outputs"}
-            or type(mount.get("target")) is not str
-            or type(mount.get("read_only")) is not bool
-        ):
-            raise CompiledExecutionPlanError("compiled launch security mount is invalid")
-    lifecycle = _mapping(payload.get("lifecycle"), "compiled launch lifecycle")
-    if set(lifecycle) != {"pre_start", "post_stop", "stop_timeout_seconds"}:
-        raise CompiledExecutionPlanError("compiled launch lifecycle fields are invalid")
-    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    if any(f'"{name}"' in serialized for name in ("model_version_sha256", "runtime_distribution_sha256", "patch_bundle_sha256")):
-        raise CompiledExecutionPlanError("compiled launch plan contains retired authority")
-    return dict(payload)
+    try:
+        encoded = canonical_message(payload)
+    except ValueError as error:
+        raise CompiledExecutionPlanError("compiled launch plan is not JSON") from error
+    if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+        raise CompiledExecutionPlanError("compiled launch plan is too large")
+    try:
+        # This calls CompiledExecutionPlan.model_validate, including all nested
+        # schema, identity, path, mount, runtime and security validators.
+        return validate_compiled_execution_plan(payload)
+    except ValueError as error:
+        raise CompiledExecutionPlanError(str(error)) from error
 
 
 __all__ = [

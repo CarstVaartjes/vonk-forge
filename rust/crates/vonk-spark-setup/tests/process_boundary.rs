@@ -390,6 +390,8 @@ fn run_fresh_handoff_process(root: PathBuf) {
         "ca_fingerprint": fingerprint,
         "ca_pem": String::from_utf8(ca).unwrap(),
         "host_helper_authority_public_key": "11".repeat(32),
+        "controller_address": null,
+        "service_hostnames": [],
     }))
     .unwrap();
     let receipt = root.join("sudo-receipt");

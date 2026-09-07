@@ -18,6 +18,7 @@ require routine SSH.
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
 | Understand identities and trust | [Security threat model](security/threat-model.md) |
 | Contribute or verify changes | [Testing and CI](testing-and-ci.md) |
+| Understand shared Python, Rust, and API contracts | [Contract ownership and handoffs](api-contracts.md) |
 
 ## Authority at a glance
 

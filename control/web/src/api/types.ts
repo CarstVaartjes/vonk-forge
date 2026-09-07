@@ -1,6 +1,5 @@
 import type {components} from "./generated";
 
-export type NodeSummary = components["schemas"]["NodeStatus"];
 export type AuthSession = components["schemas"]["AuthSession"];
 export type FleetTelemetryDetails = components["schemas"]["TelemetryDetails"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
@@ -9,7 +8,6 @@ export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type FleetNodeIdentity = components["schemas"]["FleetNodeIdentity"];
 export type NodeProfileUpdate = components["schemas"]["NodeProfileUpdateRequest"];
-export type FleetEvidenceResponse = components["schemas"]["FleetStatusResponse"];
 export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
 export type TelemetryResolution = TelemetryHistory["resolution"];
 export type TelemetryHistoryPoint = components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"];
@@ -81,53 +79,14 @@ export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
 export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
 export type LibraryOperation = components["schemas"]["OperationResponse"];
 export type LibraryRunStatus = components["schemas"]["RunStatusResponse"];
-export type ArtifactJobInterface = "audio-job" | "video-job" | "image-job" | "mesh-job" | "artifact-job";
-export type ArtifactJobFile = {name: string; media_type: string; size_bytes: number; sha256: string};
-export type ArtifactJobInputFile = ArtifactJobFile & {slot: string};
-export type ArtifactJobOutputLimits = {
-  max_files: number;
-  max_file_bytes: number;
-  max_total_bytes: number;
-  allowed_media_types: string[];
-};
-export type ArtifactJobCreateInput = {
-  interface: ArtifactJobInterface;
-  parameters: Record<string, string | number | boolean>;
-  inputs: ArtifactJobInputFile[];
-  output_limits: ArtifactJobOutputLimits;
-  timeout_seconds: number;
-};
-export type ArtifactJob = {
-  id: string;
-  run_id: string;
-  operation_id: string | null;
-  interface: ArtifactJobInterface;
-  state: "draft" | "ready" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  contract_sha256: string;
-  compiled_contract: Record<string, unknown>;
-  input_manifest_sha256: string;
-  input_total_bytes: number;
-  input_declarations: ArtifactJobInputFile[];
-  input_files: ArtifactJobInputFile[];
-  output_limits: ArtifactJobOutputLimits;
-  output_manifest_sha256: string | null;
-  output_files: ArtifactJobFile[];
-  result_evidence: {elapsed_milliseconds?: number; peak_memory_bytes?: number} | null;
-  status_reason: string | null;
-  timeout_seconds: number;
-  created_at: string;
-  updated_at: string;
-};
-export type ArtifactJobList = {jobs: ArtifactJob[]};
-export type ArtifactJobCapabilities = {
-  schema_version: 1;
-  transport: {
-    max_input_files: number; max_input_file_bytes: number; max_input_total_bytes: number;
-    max_output_files: number; max_output_file_bytes: number; max_output_total_bytes: number;
-    max_timeout_seconds: number; reserved_input_names: string[];
-  };
-  storage: {max_stored_bytes: number; used_bytes: number; remaining_bytes: number};
-};
+export type ArtifactJobInterface = components["schemas"]["ArtifactJobResponse"]["interface"];
+export type ArtifactJobFile = components["schemas"]["ArtifactOutputFile"];
+export type ArtifactJobInputFile = components["schemas"]["ArtifactFileDeclaration"];
+export type ArtifactJobOutputLimits = components["schemas"]["OutputLimits"];
+export type ArtifactJobCreateInput = components["schemas"]["ArtifactJobCreate"];
+export type ArtifactJob = components["schemas"]["ArtifactJobResponse"];
+export type ArtifactJobList = components["schemas"]["ArtifactJobListResponse"];
+export type ArtifactJobCapabilities = components["schemas"]["ArtifactJobCapabilitiesResponse"];
 export type ArtifactTransferProgress = {loaded: number; total: number};
 export type FleetProfile = components["schemas"]["FleetProfileView"];
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
@@ -216,8 +175,8 @@ export interface LibraryApi {
   previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal): Promise<LibraryPlacementPreview>;
   applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
   libraryPlacement(placementId: string, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
-  previewLibraryModelDeletion(modelVersionSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
-  deleteLibraryModel(modelVersionSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
+  deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal): Promise<LibraryBuildPlan>;
   applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal): Promise<LibraryMappingPlan>;
@@ -281,8 +240,6 @@ export interface ControlApi extends LibraryApi {
   recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
-  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
-  nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
   nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse>;
   nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse>;

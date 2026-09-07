@@ -92,11 +92,11 @@ def test_worker_heartbeat_runs_after_idle_housekeeping(tmp_path) -> None:
     assert calls == ["housekeeping", "heartbeat"]
 
 
-def test_worker_ticks_durable_reconciliations_before_generic_jobs(tmp_path) -> None:
+def test_worker_ticks_recipe_operations_before_generic_jobs(tmp_path) -> None:
     jobs = _service(tmp_path)
     jobs.enqueue("probe", "operator", "a" * 40, ["node"], {})
 
-    class Reconciliations:
+    class RecipeOperations:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -104,25 +104,25 @@ def test_worker_ticks_durable_reconciliations_before_generic_jobs(tmp_path) -> N
             self.calls += 1
             return True
 
-    reconciliations = Reconciliations()
+    recipes = RecipeOperations()
     handled = []
     worker = Worker(
         jobs,
         "worker-1",
         {"probe": lambda request: handled.append(request) or {}},
-        reconciliations=reconciliations,
+        recipes=recipes,
     )
 
     assert worker.run_once() is True
-    assert reconciliations.calls == 1
+    assert recipes.calls == 1
     assert handled == []
 
 
-def test_worker_falls_through_when_no_reconciliation_can_advance(tmp_path) -> None:
+def test_worker_falls_through_when_recipe_operations_are_idle(tmp_path) -> None:
     jobs = _service(tmp_path)
     jobs.enqueue("probe", "operator", "a" * 40, ["node"], {})
 
-    class Reconciliations:
+    class RecipeOperations:
         def tick(self) -> bool:
             return False
 
@@ -131,20 +131,20 @@ def test_worker_falls_through_when_no_reconciliation_can_advance(tmp_path) -> No
         jobs,
         "worker-1",
         {"probe": lambda request: handled.append(request.kind) or {}},
-        reconciliations=Reconciliations(),
+        recipes=RecipeOperations(),
     )
 
     assert worker.run_once() is True
     assert handled == ["probe"]
 
 
-def test_worker_alternates_busy_reconciliation_and_generic_job_queues(
+def test_worker_alternates_busy_recipe_and_generic_job_queues(
     tmp_path,
 ) -> None:
     jobs = _service(tmp_path)
     jobs.enqueue("probe", "operator", "a" * 40, ["node"], {})
 
-    class Reconciliations:
+    class RecipeOperations:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -152,22 +152,22 @@ def test_worker_alternates_busy_reconciliation_and_generic_job_queues(
             self.calls += 1
             return True
 
-    reconciliations = Reconciliations()
+    recipes = RecipeOperations()
     handled = []
     worker = Worker(
         jobs,
         "worker-1",
         {"probe": lambda request: handled.append(request.kind) or {}},
-        reconciliations=reconciliations,
+        recipes=recipes,
     )
 
     assert worker.run_once() is True
     assert worker.run_once() is True
-    assert reconciliations.calls == 1
+    assert recipes.calls == 1
     assert handled == ["probe"]
 
 
-def test_worker_alternates_reconciliation_and_generic_without_starvation(
+def test_worker_alternates_recipe_and_generic_without_starvation(
     tmp_path,
 ) -> None:
     jobs = _service(tmp_path)
@@ -187,14 +187,14 @@ def test_worker_alternates_reconciliation_and_generic_without_starvation(
         jobs,
         "worker-1",
         {"probe": lambda _request: events.append("generic") or {}},
-        reconciliations=Source("reconciliation"),
+        recipes=Source("recipe"),
     )
 
     assert [worker.run_once() for _ in range(4)] == [True] * 4
     assert events == [
-        "reconciliation",
+        "recipe",
         "generic",
-        "reconciliation",
+        "recipe",
         "generic",
     ]
 
@@ -263,7 +263,7 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
         housekeeping=telemetry_maintenance.TelemetryMaintenanceCadence(
             Maintenance(), clock=lambda: current
         ),
-        reconciliations=Source("reconciliation"),
+        recipes=Source("recipe"),
     )
 
     for _ in range(3):
@@ -272,9 +272,9 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
 
     assert events == [
         "maintenance",
-        "reconciliation",
+        "recipe",
         "maintenance",
         "generic",
         "maintenance",
-        "reconciliation",
+        "recipe",
     ]

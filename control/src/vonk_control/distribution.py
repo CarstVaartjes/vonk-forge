@@ -451,7 +451,6 @@ class ModelCacheVerifiedObjectSource:
                     bytes=int(descriptor["bytes"]),
                     kind="model",
                 )
-                item = DistributionObject.parse(item.to_mapping())
                 path = descriptor["file"]
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is malformed") from error
@@ -774,14 +773,21 @@ class DistributionService:
             raise DistributionError("distribution.expired", "assignment has expired")
         return assignment
 
-    def manifest(self, *, node_id: str, plan_digest: str) -> dict[str, object]:
-        return self.authorize(node_id=node_id, plan_digest=plan_digest).to_mapping()
-
     def open_object(self, *, node_id: str, plan_digest: str, digest: str) -> tuple[DistributionAssignment, DistributionObject, VerifiedObject]:
         assignment = self.authorize(node_id=node_id, plan_digest=plan_digest)
         object_spec = next((item for item in assignment.objects if item.sha256 == digest), None)
         if object_spec is None:
             raise DistributionError("distribution.unassigned", "object is not assigned to this node")
+        # The worker registers assignments, while another API process serves
+        # their bytes. Rehydrate that process's model lookup from the durable
+        # assignment instead of relying on the worker's in-memory cache.
+        if object_spec.kind == "model" and not self.source.verify_artifact_set(
+            assignment.model_artifact_set_sha256, assignment.objects
+        ):
+            raise DistributionError(
+                "distribution.model_set_mismatch",
+                "assignment model objects do not match the cache manifest",
+            )
         try:
             opened = self.source.open_verified(digest, object_spec.bytes)
         except DistributionError:

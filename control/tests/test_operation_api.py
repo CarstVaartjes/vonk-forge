@@ -125,6 +125,19 @@ class ProjectedFleet:
             resolution=resolution,
             maximum_points=maximum_points,
             points=[],
+            metadata={
+                "requested_start": start,
+                "requested_end": end,
+                "actual_start": None,
+                "actual_end": None,
+                "requested_resolution": resolution,
+                "actual_resolution": resolution,
+                "timezone": "UTC",
+                "point_count": 0,
+                "coverage_seconds": 0,
+                "gap_samples": 0,
+                "downsampled": resolution != "raw",
+            },
         )
 
     def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
@@ -264,6 +277,35 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert detail.json() == listed.json()["operations"][0]
 
 
+def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:
+    projected = operation_api._progress_projection(
+        {
+            "phase": "download",
+            "kind": "oci-layer",
+            "object_sha256": "a" * 64,
+            "completed_bytes": 128,
+            "total_bytes": 256,
+            "total_bytes_known": True,
+        }
+    )
+    assert projected is not None
+    assert projected.model_dump(mode="json") == {
+        "phase": "download",
+        "kind": "oci-layer",
+        "object_sha256": "a" * 64,
+        "completed_bytes": 128,
+        "total_bytes": 256,
+        "total_bytes_known": True,
+    }
+    assert operation_api._progress_projection({"phase": "verify"}).model_dump(
+        mode="json"
+    ) == {"phase": "verify"}
+    for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
+        assert operation_api._progress_projection(
+            {"phase": "download", retired: 1}
+        ) is None
+
+
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
@@ -286,7 +328,11 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
             "kind": "cache-download",
             "state": "running",
             "attempt": 1,
-            "progress": {"phase": "download", "total_unknown": True},
+            "progress": {
+                "phase": "download",
+                "total_bytes": None,
+                "total_bytes_known": False,
+            },
             "updated_at": "2026-08-15T12:01:00Z",
             "created_at": "2026-08-15T12:01:00Z",
             "supported_actions": [],
@@ -481,11 +527,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert filtered.json()["operations"][0]["id"] == newest_id
 
 
-def test_fleet_exposes_visual_state_and_node_evidence() -> None:
+def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 
     visual = client.get("/api/v1/fleet", headers=operator)
-    evidence = client.get("/api/v1/nodes/status", headers=operator)
 
     assert visual.status_code == 200
     assert visual.json() == {
@@ -496,11 +541,6 @@ def test_fleet_exposes_visual_state_and_node_evidence() -> None:
         "nodes": [],
     }
     assert "evidence_digest" not in visual.json()
-    assert evidence.status_code == 200
-    assert evidence.json()["authority_revision"] == COMMIT
-    assert evidence.json()["nodes"] == []
-    assert len(evidence.json()["evidence_digest"]) == 64
-    assert "event_cursor" not in evidence.json()
 
 
 def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
@@ -528,6 +568,19 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         "resolution": "raw",
         "maximum_points": 1500,
         "points": [],
+        "metadata": {
+            "requested_start": "2026-08-15T11:00:00Z",
+            "requested_end": "2026-08-15T12:00:00Z",
+            "actual_start": None,
+            "actual_end": None,
+            "requested_resolution": "raw",
+            "actual_resolution": "raw",
+            "timezone": "UTC",
+            "point_count": 0,
+            "coverage_seconds": 0.0,
+            "gap_samples": 0,
+            "downsampled": False,
+        },
     }
     assert projection.history_calls == [
         (
@@ -637,41 +690,6 @@ def test_viewer_cannot_rename_node() -> None:
 
     assert response.status_code == 403
     assert projection.profile_calls == []
-
-
-def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
-    def fleet():
-        return {
-            "authority_revision": COMMIT,
-            "nodes": [
-                {
-                    "id": NODE_ID,
-                    "display_name": "Alpha",
-                    "hostname": "alpha",
-                    "lifecycle": "ready",
-                    "healthy": None,
-                    "labels": {},
-                    "profile": None,
-                    "memory_available_bytes": 0,
-                    "disk_available_bytes": 0,
-                    "probe_age_seconds": None,
-                    "health_probe_stale": True,
-                    "stale": True,
-                }
-            ],
-        }
-
-    client, operator, _reconciler, _audits = _client(fleet=fleet)
-
-    response = client.get("/api/v1/nodes/status", headers=operator)
-
-    assert response.status_code == 200
-    node = response.json()["nodes"][0]
-    assert node["healthy"] is None
-    assert node["health_probe_stale"] is True
-    assert node["stale"] is True
-    assert node["probe_age_seconds"] is None
-    assert "management" not in json.dumps(response.json(), sort_keys=True)
 
 
 def test_optional_operation_projections_fail_closed_when_unavailable() -> None:
@@ -1229,7 +1247,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                 "retry_queued": False,
             }
         ],
-        "legacy_generic_ambiguous": True,
+        "failure_details_unavailable": True,
         "next_action": (
             "Keep the rollout paused and inspect the Spark package-helper and dpkg "
             "recovery state before resuming. When ready, Resume queues the retry "
@@ -1322,7 +1340,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
-    assert specific["legacy_generic_ambiguous"] is False
+    assert specific["failure_details_unavailable"] is False
     assert specific["next_action"] is not None
     assert (
         "Resume queues the retry behind a new safety delay" in specific["next_action"]
@@ -1485,7 +1503,7 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         )
 
 
-def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct() -> (
+def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> (
     None
 ):
     client, _operator, _reconciler, _audits = _client()
@@ -1497,19 +1515,9 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert paths["/api/v1/nodes/status"]["get"]["operationId"] == ("getNodeStatuses")
-    assert paths["/api/v1/nodes/status"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    health_probe_stale = node_status["properties"]["health_probe_stale"]
-    legacy_stale = node_status["properties"]["stale"]
-    assert "not aggregate node readiness" in health_probe_stale["description"]
-    assert legacy_stale["deprecated"] is True
-    assert "health_probe_stale" in legacy_stale["description"]
-    assert paths["/api/v1/nodes/status"]["get"]["summary"] == (
-        "Read explicit node health-probe evidence"
-    )
+    assert "/api/v1/nodes/status" not in paths
+    assert "NodeStatus" not in schema["components"]["schemas"]
+    assert "FleetStatusResponse" not in schema["components"]["schemas"]
     assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
         "getNodeTelemetryHistory"
     )
@@ -1535,7 +1543,6 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     ]
     assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
     assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
-    assert paths["/api/v1/nodes/status"]["get"]["security"] == [{"BearerAuth": []}]
 
 
 def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:

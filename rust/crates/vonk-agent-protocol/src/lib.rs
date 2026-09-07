@@ -2,16 +2,191 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, FixedOffset};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use chrono::{DateTime, FixedOffset, Utc};
+use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as DeError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
+pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
 pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
+pub const RECIPE_RUN_OBSERVATION_SCHEMA_VERSION: u8 = 2;
 const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
+pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
+const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperManagedArea {
+    Models,
+    State,
+    Workloads,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperRestartUnit {
+    Agent,
+    Helper,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperContainerRuntimeAction {
+    ImageImport,
+    ImageInspect,
+    RunInspect,
+    Start,
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum HostHelperOperation {
+    CreateManagedDirectory {
+        area: HostHelperManagedArea,
+        relative_path: String,
+    },
+    InstallVonkDeb {
+        package_sha256: String,
+        package_signature: String,
+    },
+    RestartVonkUnit {
+        unit: HostHelperRestartUnit,
+    },
+    ScheduleReboot {
+        delay_seconds: u16,
+    },
+    ExecuteContainerRuntimeRequest {
+        action: HostHelperContainerRuntimeAction,
+        job_id: Uuid,
+        operation_id: Uuid,
+        attempt: u32,
+        fence: Uuid,
+        request_sha256: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_identity_sha256: Option<String>,
+    },
+}
+
+impl HostHelperOperation {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let valid = match self {
+            Self::CreateManagedDirectory { relative_path, .. } => {
+                valid_host_helper_relative_path(relative_path)
+            }
+            Self::InstallVonkDeb {
+                package_sha256,
+                package_signature,
+            } => lower_hex(package_sha256, 64) && lower_hex(package_signature, 128),
+            Self::RestartVonkUnit { .. } => true,
+            Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
+            Self::ExecuteContainerRuntimeRequest {
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                request_sha256,
+                observation_identity_sha256,
+            } => {
+                job_id.get_version() == Some(uuid::Version::Random)
+                    && operation_id.get_version() == Some(uuid::Version::Random)
+                    && *attempt > 0
+                    && fence.get_version() == Some(uuid::Version::Random)
+                    && lower_hex(request_sha256, 64)
+                    && observation_identity_sha256.as_ref().is_none_or(|digest| {
+                        *action == HostHelperContainerRuntimeAction::RunInspect
+                            && lower_hex(digest, 64)
+                    })
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("host helper operation"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostHelperGrantClaims {
+    pub schema_version: u8,
+    pub authority: String,
+    pub request_id: Uuid,
+    pub node_id: String,
+    pub issued_at: i64,
+    pub expires_at: i64,
+    pub operation: HostHelperOperation,
+}
+
+impl HostHelperGrantClaims {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.authority != HOST_HELPER_AUTHORITY
+            || self.request_id.get_version() != Some(uuid::Version::Random)
+            || !valid_node_id(&self.node_id)
+            || self.issued_at <= 0
+            || !(1..=300).contains(&(self.expires_at - self.issued_at))
+        {
+            return Err(ProtocolError::Identity("host helper grant claims"));
+        }
+        self.operation.validate()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostHelperGrantSignature {
+    pub algorithm: String,
+    pub key_id: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedHostHelperGrant {
+    pub schema_version: u8,
+    pub claims: HostHelperGrantClaims,
+    pub signature: HostHelperGrantSignature,
+}
+
+impl SignedHostHelperGrant {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.claims.validate()?;
+        if self.schema_version != 1
+            || self.signature.algorithm != "ed25519"
+            || !lower_hex(&self.signature.key_id, 64)
+            || !lower_hex(&self.signature.value, 128)
+        {
+            return Err(ProtocolError::Identity("signed host helper grant"));
+        }
+        Ok(())
+    }
+}
+
+pub fn host_helper_grant_signing_bytes(
+    claims: &HostHelperGrantClaims,
+) -> Result<Vec<u8>, ProtocolError> {
+    claims.validate()?;
+    let mut value = HOST_HELPER_GRANT_DOMAIN.to_vec();
+    value.extend(canonical_json(claims)?);
+    Ok(value)
+}
+
+fn required_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -80,9 +255,12 @@ pub struct RecipeRunInspectionBinding {
     pub artifact_set_digest: String,
     pub image_digest: String,
     pub installation_id: Uuid,
-    pub local_address: std::net::IpAddr,
-    pub master_address: std::net::IpAddr,
-    pub master_port: u16,
+    #[serde(deserialize_with = "required_optional")]
+    pub local_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "required_optional")]
+    pub master_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "required_optional")]
+    pub master_port: Option<u16>,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
     pub model_identity: String,
@@ -101,12 +279,9 @@ impl RecipeRunInspectionBinding {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.mapping_generation == 0
             || self.run_generation == 0
-            || self.world_size <= 1
+            || self.world_size == 0
             || self.rank >= self.world_size
-            || self.master_port == 0
             || self.port == 0
-            || !valid_fabric_address(self.local_address)
-            || !valid_fabric_address(self.master_address)
             || !valid_role(&self.role)
             || !lower_hex(&self.recipe_content_sha256, 64)
             || !lower_hex(&self.artifact_set_digest, 64)
@@ -121,6 +296,19 @@ impl RecipeRunInspectionBinding {
             || self.recipe_revision_id.get_version() != Some(uuid::Version::Random)
         {
             return Err(ProtocolError::Identity("recipe run inspection binding"));
+        }
+        let singleton = self.world_size == 1;
+        let rendezvous_valid = if singleton {
+            self.local_address.is_none()
+                && self.master_address.is_none()
+                && self.master_port.is_none()
+        } else {
+            self.local_address.is_some_and(valid_fabric_address)
+                && self.master_address.is_some_and(valid_fabric_address)
+                && self.master_port.is_some_and(|port| port >= 1024)
+        };
+        if !rendezvous_valid {
+            return Err(ProtocolError::Identity("recipe run inspection rendezvous"));
         }
         Ok(())
     }
@@ -194,6 +382,76 @@ impl RecipeRunObservationReceipt {
     }
 }
 
+/// The only current Controller observation payload.  The receipt and its
+/// enrolled public key are mandatory so a plain run/readiness boolean can
+/// never cross the authenticated agent boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationWire {
+    pub schema_version: u8,
+    pub node_id: String,
+    #[serde(flatten)]
+    pub binding: RecipeRunInspectionBinding,
+    pub observed_at: DateTime<Utc>,
+    #[serde(deserialize_with = "required_optional")]
+    pub endpoint_ready: Option<bool>,
+    pub observation_identity_sha256: String,
+    pub grant: SignedHostHelperGrant,
+    pub helper_receipt: RecipeRunObservationReceipt,
+    pub observation_receipt_public_key: String,
+}
+
+impl RecipeRunObservationWire {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.binding.validate()?;
+        self.helper_receipt.validate()?;
+        if self.schema_version != 1
+            || !valid_node_id(&self.node_id)
+            || self.node_id.is_empty()
+            || !lower_hex(&self.observation_identity_sha256, 64)
+            || !lower_hex(&self.observation_receipt_public_key, 64)
+            || self.grant.validate().is_err()
+            || self.grant.claims.node_id != self.node_id
+            || self.grant.claims.request_id != self.helper_receipt.claims.request_id
+            || self.helper_receipt.claims.node_id != self.node_id
+            || self.helper_receipt.claims.observation_identity_sha256
+                != self.observation_identity_sha256
+            || match &self.grant.claims.operation {
+                HostHelperOperation::ExecuteContainerRuntimeRequest {
+                    action,
+                    job_id,
+                    attempt,
+                    request_sha256,
+                    observation_identity_sha256,
+                    ..
+                } => {
+                    *action != HostHelperContainerRuntimeAction::RunInspect
+                        || *job_id != self.binding.run_id
+                        || u32::try_from(self.binding.run_generation).ok() != Some(*attempt)
+                        || request_sha256 != &self.helper_receipt.claims.request_sha256
+                        || observation_identity_sha256.as_deref()
+                            != Some(self.observation_identity_sha256.as_str())
+                }
+                _ => true,
+            }
+            || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
+            || (self.binding.local_address == self.binding.master_address)
+                != self.endpoint_ready.is_some()
+        {
+            return Err(ProtocolError::Identity("recipe run observation"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationsWire<'a> {
+    pub schema_version: u8,
+    pub observed_at: DateTime<Utc>,
+    pub runs: &'a [RecipeRunObservationWire],
+}
+
 pub fn recipe_run_observation_receipt_signing_bytes(
     claims: &RecipeRunObservationReceiptClaims,
 ) -> Result<Vec<u8>, ProtocolError> {
@@ -251,8 +509,14 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
+        let maximum_bytes = if matches!(self.operation.as_str(), "recipe.install" | "recipe.start")
+        {
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        } else {
+            MAX_DOCUMENT_BYTES
+        };
         if !self.payload.is_object()
-            || payload.len() > 64 * 1024
+            || payload.len() > maximum_bytes
             || hex_sha256(&payload) != self.payload_digest
         {
             return Err(ProtocolError::Identity("claim payload digest"));
@@ -270,6 +534,94 @@ pub struct ArtifactDistributionRequest {
     pub authority_revision: String,
     pub plan_digest: String,
     pub schema_version: u8,
+}
+
+/// Canonical schema-1 inventory evidence reported by a Spark agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InventoryRequest {
+    pub schema_version: u8,
+    pub observed_at: DateTime<Utc>,
+    pub disk_total_bytes: u64,
+    pub disk_free_bytes: u64,
+    pub host_memory_total_bytes: u64,
+    pub host_memory_free_bytes: u64,
+    pub gpu_memory_total_bytes: u64,
+    pub gpu_memory_free_bytes: u64,
+    pub gpu_count: u32,
+    pub artifact_store_read_only: bool,
+    pub capabilities: Vec<String>,
+    #[serde(deserialize_with = "deserialize_canonical_ip")]
+    pub fabric_address: Option<std::net::IpAddr>,
+    pub fabric_bandwidth_mbps: Option<u64>,
+    pub nvidia_driver_version: String,
+    pub container_runtime_version: String,
+}
+
+fn deserialize_canonical_ip<'de, D>(deserializer: D) -> Result<Option<std::net::IpAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    raw.map(|value| {
+        let parsed: std::net::IpAddr = value
+            .parse()
+            .map_err(|_| D::Error::custom("invalid IP address"))?;
+        if parsed.to_string() != value {
+            return Err(D::Error::custom("non-canonical IP address"));
+        }
+        Ok(parsed)
+    })
+    .transpose()
+}
+
+impl InventoryRequest {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.disk_total_bytes > 16 * 1024_u64.pow(4)
+            || self.disk_free_bytes > 16 * 1024_u64.pow(4)
+            || self.host_memory_total_bytes > 16 * 1024_u64.pow(4)
+            || self.host_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_memory_total_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_count > 64
+            || self.disk_free_bytes > self.disk_total_bytes
+            || self.host_memory_free_bytes > self.host_memory_total_bytes
+            || self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
+            || self.capabilities.len() > 64
+            || self
+                .capabilities
+                .iter()
+                .any(|value| !valid_inventory_capability(value))
+            || {
+                let mut unique = BTreeSet::new();
+                self.capabilities.iter().any(|value| !unique.insert(value))
+            }
+            || self.nvidia_driver_version.is_empty()
+            || self.container_runtime_version.is_empty()
+            || self.nvidia_driver_version.len() > 256
+            || self.container_runtime_version.len() > 256
+            || !self.nvidia_driver_version.is_ascii()
+            || !self.container_runtime_version.is_ascii()
+            || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
+            || self
+                .fabric_bandwidth_mbps
+                .is_some_and(|value| !(1..=1_000_000).contains(&value))
+        {
+            return Err(ProtocolError::Identity("inventory request"));
+        }
+        Ok(())
+    }
+}
+
+fn valid_inventory_capability(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 impl ArtifactDistributionRequest {
@@ -359,7 +711,8 @@ pub struct AgentProgress {
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
-        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > 64 * 1024 {
+        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES
+        {
             return Err(ProtocolError::Identity("progress document"));
         }
         Ok(())
@@ -382,19 +735,6 @@ pub struct AgentDirective {
 impl AgentDirective {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)
-    }
-
-    pub fn from_progress(progress: AgentProgress) -> Self {
-        Self {
-            attempt: progress.attempt,
-            cancel_requested: false,
-            deadline: progress.deadline,
-            fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id,
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
-        }
     }
 }
 
@@ -424,15 +764,10 @@ pub struct DistributionObject {
 
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        let valid_name = self.name.len() <= 512
-            && self
-                .name
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
-            && self.name.as_bytes()[1..].iter().all(|byte| {
-                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-')
-            });
+        let valid_name = !self.name.is_empty()
+            && self.name.chars().count() <= 512
+            && !self.name.starts_with('/')
+            && !self.name.contains(['\\', '\0']);
         if !valid_name
             || self
                 .name
@@ -539,6 +874,18 @@ pub struct EnrollmentEvidence {
     pub hardware_fingerprint: String,
     pub host_key_fingerprint: String,
     pub node_id: String,
+    pub observation_receipt_public_key: String,
+}
+
+impl EnrollmentEvidence {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if !lower_hex(&self.observation_receipt_public_key, 64) {
+            return Err(ProtocolError::Identity(
+                "enrollment observation receipt public key",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -550,7 +897,7 @@ pub enum RecipeOperationRequest {
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
-    ModelUninstall(RecipeModelUninstallRequest),
+    ModelCleanup(RecipeModelCleanupRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -800,28 +1147,63 @@ pub struct RecipeImageImportRequest {
     pub kind: String,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
-    // Protocol-v1 name retained for compatibility. Docker-backed nodes bind
-    // the complete docker-save archive digest in this field.
+    // The field binds the complete Docker archive digest for the imported
+    // image, including when the producer uses Docker-backed storage.
     pub oci_layout_sha256: String,
     pub schema_version: u8,
     pub source_node_id: String,
 }
 
+/// Typed receipt emitted after a recipe image has been built and the exported
+/// archive has been bound to its content identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildEvidence {
+    pub build_input_sha256: String,
+    pub image_bytes: u64,
+    pub image_digest: String,
+    pub oci_layout_sha256: String,
+    pub policy: RecipeBuildPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildPolicy {
+    pub passed: bool,
+    pub dockerfile: String,
+    pub findings: Vec<RecipeBuildPolicyFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildPolicyFinding {
+    pub code: String,
+    pub path: String,
+    pub line: Option<usize>,
+    pub detail: String,
+}
+
+/// Typed receipt emitted after a node verifies and imports the exact build
+/// archive identified by the Controller operation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeImageImportEvidence {
+    pub build_id: Uuid,
+    pub image_bytes: u64,
+    pub image_digest: String,
+    pub oci_layout_sha256: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeInstallRequest {
-    pub expected_bytes: u64,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    pub plan_digest: String,
-    pub rank: u32,
-    pub recipe_build_id: Uuid,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub role: String,
     pub schema_version: u8,
+    pub installation_id: Uuid,
+    pub plan_digest: String,
+    pub expected_bytes: u64,
+    pub rank: u32,
+    pub role: String,
+    pub compiled_execution_plan: Value,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -833,15 +1215,27 @@ pub enum RecipeStartPhase {
     CollectiveReadiness,
 }
 
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeStartRequest {
     pub alias: String,
+    pub compiled_execution_plan: Value,
     pub endpoint_address: std::net::IpAddr,
     pub image_digest: String,
     pub installation_id: Uuid,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub local_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
@@ -874,8 +1268,8 @@ pub struct RecipeStopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeUninstallRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cleanup_model_version_sha256: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub cleanup_model_content_sha256: Option<String>,
     pub installation_id: Uuid,
     pub plan_digest: String,
     pub recipe_content_sha256: String,
@@ -884,18 +1278,70 @@ pub struct RecipeUninstallRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct RecipeModelUninstallInstallation {
+pub struct RecipeModelCleanupInstallation {
     pub installation_id: Uuid,
     pub recipe_content_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct RecipeModelUninstallRequest {
-    pub installations: Vec<RecipeModelUninstallInstallation>,
-    pub model_version_sha256: String,
+pub struct RecipeModelCleanupRequest {
+    pub installations: Vec<RecipeModelCleanupInstallation>,
+    pub model_content_sha256: String,
     pub plan_digest: String,
     pub schema_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeStopResult {
+    pub stopped: bool,
+}
+
+impl RecipeStopResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.stopped {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe stop result"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeUninstallResult {
+    pub uninstalled: bool,
+    pub removed_model_bytes: u64,
+}
+
+impl RecipeUninstallResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.uninstalled && self.removed_model_bytes <= 16 * 1024_u64.pow(4) {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe uninstall result"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeModelCleanupResult {
+    pub uninstalled_installations: u16,
+    pub removed_model_bytes: u64,
+}
+
+impl RecipeModelCleanupResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if (1..=512).contains(&self.uninstalled_installations)
+            && self.removed_model_bytes <= 16 * 1024_u64.pow(4)
+        {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe model cleanup result"))
+        }
+    }
 }
 
 impl RecipeOperationRequest {
@@ -918,7 +1364,7 @@ impl RecipeOperationRequest {
             "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
             "recipe.uninstall" => Self::Uninstall(serde_json::from_value(claim.payload.clone())?),
             "recipe.model-uninstall.v1" => {
-                Self::ModelUninstall(serde_json::from_value(claim.payload.clone())?)
+                Self::ModelCleanup(serde_json::from_value(claim.payload.clone())?)
             }
             _ => return Err(ProtocolError::Identity("recipe operation")),
         };
@@ -941,17 +1387,23 @@ impl RecipeOperationRequest {
             }
             Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
-                valid_common(value.schema_version, &value.plan_digest)
+                value.schema_version == 2
+                    && lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
-                    && lower_hex(&value.recipe_content_sha256, 64)
-                    && valid_oci_digest(&value.image_digest)
-                    && value.mapping_generation >= 1
                     && valid_role(&value.role)
+                    && value.compiled_execution_plan.is_object()
             }
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
                 {
-                    (None, None, None) => true,
+                    // Role-ordered distributed starts are deliberately
+                    // unphased.  The collective readiness variant carries
+                    // the complete phase envelope below.
+                    (None, None, None) => value.world_size > 1,
+                    // A singleton has no rendezvous phase, but still carries
+                    // its run generation so its exact observation binding is
+                    // persisted from the initial start.
+                    (None, None, Some(generation)) => generation > 0,
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
@@ -970,7 +1422,8 @@ impl RecipeOperationRequest {
                     }
                     _ => false,
                 };
-                valid_common(value.schema_version, &value.plan_digest)
+                value.schema_version == 2
+                    && lower_hex(&value.plan_digest, 64)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && valid_oci_digest(&value.image_digest)
                     && value.mapping_generation >= 1
@@ -996,19 +1449,20 @@ impl RecipeOperationRequest {
                             && value.master_port.is_some_and(|port| port >= 1024)
                     }
                     && valid_alias(&value.alias)
+                    && value.compiled_execution_plan.is_object()
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && value
-                        .cleanup_model_version_sha256
+                        .cleanup_model_content_sha256
                         .as_ref()
                         .is_none_or(|digest| lower_hex(digest, 64))
             }
-            Self::ModelUninstall(value) => {
+            Self::ModelCleanup(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
-                    && lower_hex(&value.model_version_sha256, 64)
+                    && lower_hex(&value.model_content_sha256, 64)
                     && !value.installations.is_empty()
                     && value.installations.len() <= 512
                     && value
@@ -1033,6 +1487,157 @@ impl RecipeOperationRequest {
 }
 
 #[cfg(test)]
+mod inventory_tests {
+    use super::*;
+
+    fn inventory() -> InventoryRequest {
+        InventoryRequest {
+            schema_version: 1,
+            observed_at: "2026-08-03T00:00:00Z".parse().unwrap(),
+            disk_total_bytes: 2 * 1024_u64.pow(4),
+            disk_free_bytes: 1024_u64.pow(4),
+            host_memory_total_bytes: 2 * 1024_u64.pow(4),
+            host_memory_free_bytes: 1024_u64.pow(4),
+            gpu_memory_total_bytes: 100_000,
+            gpu_memory_free_bytes: 80_000,
+            gpu_count: 1,
+            artifact_store_read_only: false,
+            capabilities: vec!["recipe.build.v1".to_owned()],
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+            nvidia_driver_version: "550.1".to_owned(),
+            container_runtime_version: "podman-5".to_owned(),
+        }
+    }
+
+    #[test]
+    fn inventory_validation_matches_python_bounds_and_shapes() {
+        let value = inventory();
+        value.validate().unwrap();
+
+        let mut invalid = value.clone();
+        invalid.gpu_count = 65;
+        assert!(invalid.validate().is_err());
+        let mut invalid = value.clone();
+        invalid.capabilities = vec!["Recipe.Build".to_owned()];
+        assert!(invalid.validate().is_err());
+        let mut invalid = value.clone();
+        invalid.fabric_bandwidth_mbps = Some(0);
+        assert!(invalid.validate().is_err());
+        let mut invalid = value;
+        invalid.nvidia_driver_version = "é".to_owned();
+        assert!(invalid.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod recipe_model_cleanup_tests {
+    use super::*;
+
+    fn claim(payload: Value) -> AgentClaim {
+        AgentClaim {
+            attempt: 1,
+            authority_revision: "a".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        }
+    }
+
+    #[test]
+    fn controller_model_cleanup_payload_uses_content_digest_and_rejects_retired_name() {
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "model_content_sha256": "f".repeat(64),
+            "plan_digest": "b".repeat(64),
+            "installations": [{
+                "installation_id": "00000000-0000-4000-8000-000000000004",
+                "recipe_content_sha256": "c".repeat(64)
+            }]
+        });
+        let parsed = RecipeOperationRequest::parse(&claim(payload.clone())).unwrap();
+        let RecipeOperationRequest::ModelCleanup(request) = parsed else {
+            panic!("model cleanup payload parsed as the wrong operation");
+        };
+        assert_eq!(request.model_content_sha256, "f".repeat(64));
+
+        let mut retired = payload;
+        retired["model_version_sha256"] = retired["model_content_sha256"].take();
+        assert!(RecipeOperationRequest::parse(&claim(retired)).is_err());
+    }
+
+    #[test]
+    fn uninstall_payload_requires_explicit_nullable_cleanup_field() {
+        let mut payload = serde_json::json!({
+            "schema_version": 1,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b".repeat(64),
+            "recipe_content_sha256": "c".repeat(64),
+            "cleanup_model_content_sha256": null,
+        });
+        let mut uninstall_claim = claim(serde_json::json!({
+            "schema_version": 1,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b".repeat(64),
+            "recipe_content_sha256": "c".repeat(64),
+            "cleanup_model_content_sha256": null,
+        }));
+        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_ok());
+        payload
+            .as_object_mut()
+            .unwrap()
+            .remove("cleanup_model_content_sha256");
+        uninstall_claim.payload = payload;
+        uninstall_claim.payload_digest =
+            hex_sha256(&canonical_json(&uninstall_claim.payload).unwrap());
+        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_err());
+    }
+
+    #[test]
+    fn lifecycle_success_bodies_are_strict_and_bounded() {
+        let stop: RecipeStopResult =
+            serde_json::from_value(serde_json::json!({"stopped": true})).unwrap();
+        assert!(stop.validate().is_ok());
+        assert!(
+            serde_json::from_value::<RecipeStopResult>(
+                serde_json::json!({"stopped": true, "extra": 1})
+            )
+            .is_err()
+        );
+        let uninstall: RecipeUninstallResult = serde_json::from_value(
+            serde_json::json!({"uninstalled": true, "removed_model_bytes": 0}),
+        )
+        .unwrap();
+        assert!(uninstall.validate().is_ok());
+        let oversized_uninstall: RecipeUninstallResult = serde_json::from_value(
+            serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64}),
+        )
+        .unwrap();
+        assert!(oversized_uninstall.validate().is_err());
+        let cleanup: RecipeModelCleanupResult = serde_json::from_value(
+            serde_json::json!({"uninstalled_installations": 1, "removed_model_bytes": 0}),
+        )
+        .unwrap();
+        assert!(cleanup.validate().is_ok());
+        assert!(
+            serde_json::from_value::<RecipeModelCleanupResult>(
+                serde_json::json!({"uninstalled_installations": 0, "removed_model_bytes": 0})
+            )
+            .unwrap()
+            .validate()
+            .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
 mod recipe_start_tests {
     use super::*;
 
@@ -1045,6 +1650,7 @@ mod recipe_start_tests {
     ) -> Value {
         let mut payload = serde_json::json!({
             "alias": "distributed-model",
+            "compiled_execution_plan": {},
             "endpoint_address": "100.100.20.30",
             "image_digest": format!("sha256:{}", "a".repeat(64)),
             "installation_id": "00000000-0000-4000-8000-000000000001",
@@ -1061,9 +1667,15 @@ mod recipe_start_tests {
             "reserved_memory_bytes": 1024,
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "run_id": "00000000-0000-4000-8000-000000000004",
-            "schema_version": 1,
+            "schema_version": 2,
             "world_size": world_size,
         });
+        if world_size == 1 {
+            payload
+                .as_object_mut()
+                .unwrap()
+                .insert("run_generation".to_owned(), Value::from(1));
+        }
         if let Some(phase) = phase {
             let document = payload.as_object_mut().unwrap();
             document.insert("phase".to_owned(), Value::String(phase.to_owned()));
@@ -1100,14 +1712,23 @@ mod recipe_start_tests {
     }
 
     #[test]
-    fn legacy_start_payloads_without_a_phase_remain_accepted_and_omit_the_field() {
+    fn schema_two_start_payload_allows_unphased_distributed_role_ordering() {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
-        assert_eq!(single.run_generation, None);
-        let legacy_wire = serde_json::to_value(single).unwrap();
-        assert!(legacy_wire.get("phase").is_none());
-        assert!(legacy_wire.get("start_deadline").is_none());
+        assert_eq!(single.run_generation, Some(1));
+        let unphased_wire = serde_json::to_value(single).unwrap();
+        assert!(unphased_wire.get("phase").is_none());
+        assert!(unphased_wire.get("start_deadline").is_none());
+
+        for field in ["local_address", "master_address", "master_port"] {
+            let mut omitted = start_payload(1, 0, None, None, None);
+            omitted.as_object_mut().unwrap().remove(field);
+            assert!(
+                parsed_start(omitted).is_err(),
+                "omitted singleton field {field} must be rejected"
+            );
+        }
 
         let distributed = parsed_start(start_payload(
             2,
@@ -1119,6 +1740,7 @@ mod recipe_start_tests {
         .unwrap();
         assert_eq!(distributed.phase, None);
         assert_eq!(distributed.start_deadline, None);
+        assert_eq!(distributed.run_generation, None);
     }
 
     #[test]
@@ -1147,6 +1769,21 @@ mod recipe_start_tests {
             collective.phase,
             Some(RecipeStartPhase::CollectiveReadiness)
         );
+
+        for field in ["local_address", "master_address", "master_port"] {
+            let mut omitted = start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("rank-launch"),
+            );
+            omitted.as_object_mut().unwrap().remove(field);
+            assert!(
+                parsed_start(omitted).is_err(),
+                "omitted distributed field {field} must be rejected"
+            );
+        }
     }
 
     #[test]
@@ -1198,13 +1835,23 @@ mod recipe_start_tests {
             .remove("run_generation");
         assert!(parsed_start(missing_generation).is_err());
 
-        let mut legacy_with_deadline =
+        let mut missing_phase = start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        );
+        missing_phase.as_object_mut().unwrap().remove("phase");
+        assert!(parsed_start(missing_phase).is_err());
+
+        let mut unphased_with_deadline =
             start_payload(2, 1, Some("192.168.100.3"), Some("192.168.100.2"), None);
-        legacy_with_deadline.as_object_mut().unwrap().insert(
+        unphased_with_deadline.as_object_mut().unwrap().insert(
             "start_deadline".to_owned(),
             Value::String("2026-09-01T12:00:00+00:00".to_owned()),
         );
-        assert!(parsed_start(legacy_with_deadline).is_err());
+        assert!(parsed_start(unphased_with_deadline).is_err());
 
         let mut non_utc_deadline = start_payload(
             2,
@@ -1218,6 +1865,63 @@ mod recipe_start_tests {
             Value::String("2026-09-01T14:00:00+02:00".to_owned()),
         );
         assert!(parsed_start(non_utc_deadline).is_err());
+    }
+
+    #[test]
+    fn authenticated_launch_claims_use_the_dedicated_document_ceiling() {
+        let mut payload = start_payload(1, 0, None, None, None);
+        payload
+            .as_object_mut()
+            .unwrap()
+            .get_mut("compiled_execution_plan")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("artifact".to_owned(), Value::String("x".repeat(516 * 1024)));
+        assert!(claim(payload).validate().is_ok());
+
+        let oversized = serde_json::json!({
+            "value": "x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)
+        });
+        assert!(claim(oversized).validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod recipe_install_tests {
+    use super::*;
+
+    #[test]
+    fn schema_two_install_requires_the_inline_compiled_plan() {
+        let payload = serde_json::json!({
+            "compiled_execution_plan": {},
+            "expected_bytes": 1024,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "plan_digest": "a".repeat(64),
+            "rank": 0,
+            "role": "entrypoint",
+            "schema_version": 2,
+        });
+        let claim = AgentClaim {
+            attempt: 1,
+            authority_revision: "b".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.install".to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        };
+        let RecipeOperationRequest::Install(request) =
+            RecipeOperationRequest::parse(&claim).expect("schema 2 install wire should parse")
+        else {
+            panic!("expected install request");
+        };
+        assert_eq!(request.schema_version, 2);
+        assert!(request.compiled_execution_plan.is_object());
     }
 }
 
@@ -1564,6 +2268,20 @@ fn valid_node_id(value: &str) -> bool {
         && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_host_helper_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.split('/').all(|component| {
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && component.len() <= 128
+                && component
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 fn validate_attempt_identity(
@@ -2011,9 +2729,9 @@ mod recipe_run_inspection_tests {
             artifact_set_digest: "a".repeat(64),
             image_digest: "b".repeat(64),
             installation_id: Uuid::new_v4(),
-            local_address: "192.168.100.11".parse().unwrap(),
-            master_address: "192.168.100.10".parse().unwrap(),
-            master_port: 29500,
+            local_address: Some("192.168.100.11".parse().unwrap()),
+            master_address: Some("192.168.100.10".parse().unwrap()),
+            master_port: Some(29500),
             mapping_generation: 3,
             mapping_id: Uuid::new_v4(),
             model_identity: "example/model@0123456789abcdef".to_owned(),
@@ -2092,6 +2810,91 @@ mod recipe_run_inspection_tests {
         replay_shaped.claims.node_id = "wrong".to_owned();
         assert!(replay_shaped.validate().is_err());
     }
+
+    #[test]
+    fn singleton_observation_uses_the_same_required_signed_shape() {
+        let mut binding = binding();
+        binding.rank = 0;
+        binding.role = "entrypoint".to_owned();
+        binding.world_size = 1;
+        binding.local_address = None;
+        binding.master_address = None;
+        binding.master_port = None;
+        binding.validate().unwrap();
+
+        let observed_at = DateTime::from_timestamp(1_788_000_000, 0).unwrap();
+        let identity_sha256 = "a".repeat(64);
+        let receipt = RecipeRunObservationReceipt {
+            schema_version: 1,
+            claims: RecipeRunObservationReceiptClaims {
+                schema_version: 1,
+                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+                node_id: "spk_11111111111111111111111111111111".to_owned(),
+                request_id: Uuid::new_v4(),
+                request_sha256: "b".repeat(64),
+                observation_identity_sha256: identity_sha256.clone(),
+                outcome: RecipeRunObservationOutcome::Running,
+                observed_at: observed_at.timestamp(),
+            },
+            signature: RecipeRunObservationReceiptSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "c".repeat(64),
+                value: "d".repeat(128),
+            },
+        };
+        let grant = SignedHostHelperGrant {
+            schema_version: 1,
+            claims: HostHelperGrantClaims {
+                schema_version: 1,
+                authority: "vonk.host-maintenance-helper".to_owned(),
+                request_id: receipt.claims.request_id,
+                node_id: receipt.claims.node_id.clone(),
+                issued_at: observed_at.timestamp(),
+                expires_at: observed_at.timestamp() + 60,
+                operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
+                    action: HostHelperContainerRuntimeAction::RunInspect,
+                    job_id: binding.run_id,
+                    operation_id: Uuid::new_v4(),
+                    attempt: binding.run_generation as u32,
+                    fence: Uuid::new_v4(),
+                    request_sha256: "b".repeat(64),
+                    observation_identity_sha256: Some(identity_sha256.clone()),
+                },
+            },
+            signature: HostHelperGrantSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "f".repeat(64),
+                value: "e".repeat(128),
+            },
+        };
+        let observation = RecipeRunObservationWire {
+            schema_version: 1,
+            node_id: receipt.claims.node_id.clone(),
+            binding,
+            observed_at,
+            endpoint_ready: Some(true),
+            observation_identity_sha256: identity_sha256,
+            grant,
+            helper_receipt: receipt,
+            observation_receipt_public_key: "e".repeat(64),
+        };
+        observation.validate().unwrap();
+        let mut wrong_operation = observation.clone();
+        wrong_operation.grant.claims.operation = HostHelperOperation::CreateManagedDirectory {
+            area: HostHelperManagedArea::Models,
+            relative_path: "observation".to_owned(),
+        };
+        assert!(wrong_operation.validate().is_err());
+
+        let mut partial_rendezvous = observation.binding.clone();
+        partial_rendezvous.world_size = 2;
+        partial_rendezvous.master_address = Some("10.0.0.2".parse().unwrap());
+        assert!(partial_rendezvous.validate().is_err());
+
+        let mut encoded = serde_json::to_value(&observation).unwrap();
+        encoded.as_object_mut().unwrap().remove("endpoint_ready");
+        assert!(serde_json::from_value::<RecipeRunObservationWire>(encoded).is_err());
+    }
 }
 
 #[cfg(test)]
@@ -2139,9 +2942,20 @@ mod distribution_tests {
     #[test]
     fn object_name_validation_matches_python_boundary() {
         let mut value = assignment();
-        value.objects[0].name = "weights/model bin".to_owned();
-        assert!(value.validate().is_err());
+        for name in [
+            "weights/model bin",
+            "__init__.py",
+            "nested/UPPERCASE.bin",
+            "模型.bin",
+        ] {
+            value.objects[0].name = name.to_owned();
+            value.validate().unwrap();
+        }
+        value.objects[0].name = "模型 file_".repeat(64);
+        value.validate().unwrap();
         value.objects[0].name = "../model.bin".to_owned();
+        assert!(value.validate().is_err());
+        value.objects[0].name = "model\0.bin".to_owned();
         assert!(value.validate().is_err());
     }
 

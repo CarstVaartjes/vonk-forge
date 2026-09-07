@@ -15,7 +15,7 @@ from typing import cast
 
 
 def _get_kwargs(
-    model_version_sha256: str,
+    model_content_sha256: str,
     *,
     body: UninstallRequest,
 
@@ -29,7 +29,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/library/models/{model_version_sha256}/delete".format(model_version_sha256=model_version_sha256,),
+        "url": "/api/v1/library/models/{model_content_sha256}/delete".format(model_content_sha256=model_content_sha256,),
     }
 
     _kwargs["json"] = body.to_dict()
@@ -73,7 +73,7 @@ def _build_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
 
 def sync_detailed(
-    model_version_sha256: str,
+    model_content_sha256: str,
     *,
     client: AuthenticatedClient,
     body: UninstallRequest,
@@ -82,7 +82,7 @@ def sync_detailed(
     """ Delete Model
 
     Args:
-        model_version_sha256 (str):
+        model_content_sha256 (str):
         body (UninstallRequest):
 
     Raises:
@@ -95,7 +95,7 @@ def sync_detailed(
 
 
     kwargs = _get_kwargs(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
 body=body,
 
     )
@@ -107,7 +107,7 @@ body=body,
     return _build_response(client=client, response=response)
 
 def sync(
-    model_version_sha256: str,
+    model_content_sha256: str,
     *,
     client: AuthenticatedClient,
     body: UninstallRequest,
@@ -116,7 +116,7 @@ def sync(
     """ Delete Model
 
     Args:
-        model_version_sha256 (str):
+        model_content_sha256 (str):
         body (UninstallRequest):
 
     Raises:
@@ -129,14 +129,14 @@ def sync(
 
 
     return sync_detailed(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
 client=client,
 body=body,
 
     ).parsed
 
 async def asyncio_detailed(
-    model_version_sha256: str,
+    model_content_sha256: str,
     *,
     client: AuthenticatedClient,
     body: UninstallRequest,
@@ -145,7 +145,7 @@ async def asyncio_detailed(
     """ Delete Model
 
     Args:
-        model_version_sha256 (str):
+        model_content_sha256 (str):
         body (UninstallRequest):
 
     Raises:
@@ -158,7 +158,7 @@ async def asyncio_detailed(
 
 
     kwargs = _get_kwargs(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
 body=body,
 
     )
@@ -170,7 +170,7 @@ body=body,
     return _build_response(client=client, response=response)
 
 async def asyncio(
-    model_version_sha256: str,
+    model_content_sha256: str,
     *,
     client: AuthenticatedClient,
     body: UninstallRequest,
@@ -179,7 +179,7 @@ async def asyncio(
     """ Delete Model
 
     Args:
-        model_version_sha256 (str):
+        model_content_sha256 (str):
         body (UninstallRequest):
 
     Raises:
@@ -192,7 +192,7 @@ async def asyncio(
 
 
     return (await asyncio_detailed(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
 client=client,
 body=body,
 

@@ -1,4 +1,9 @@
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -9,15 +14,17 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding, RecipeRunObservationReceipt,
-    canonical_json, hex_sha256, parse_strict,
+    HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
+    InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
+    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
     config::AgentConfig,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
-    oci::{MAX_MANAGED_RECIPE_RUNS, RecipeRunObservation},
+    oci::MAX_MANAGED_RECIPE_RUNS,
     pair::{IssuedResponse, verify_ca_pin},
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
@@ -25,6 +32,7 @@ use crate::{
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
+const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
@@ -63,54 +71,95 @@ struct ClaimRequest<'a> {
     lease_seconds: u64,
     node_id: &'a str,
     protocol_version: u32,
-    runtime_identity: Option<&'a AgentRuntimeIdentity>,
+    runtime_identity: &'a AgentRuntimeIdentity,
     wait_seconds: u64,
 }
 
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct InventoryRequest<'a> {
-    schema_version: u8,
+/// Serialize the current claim contract used by the HTTP transport.
+pub fn claim_request_document(
+    node_id: &str,
+    capabilities: &[&str],
+    hostname: Option<&str>,
+    wait_seconds: u64,
+    runtime_identity: &AgentRuntimeIdentity,
+) -> Result<Vec<u8>, ClientError> {
+    if !runtime_identity.self_test_passed {
+        return Err(ClientError::Protocol);
+    }
+    runtime_identity
+        .observation_receipt_public_key()
+        .map_err(|_| ClientError::Protocol)?;
+    canonical_json(&ClaimRequest {
+        capabilities,
+        hostname,
+        lease_seconds: 60,
+        node_id,
+        protocol_version: 3,
+        runtime_identity,
+        wait_seconds: wait_seconds.min(60),
+    })
+    .map_err(|_| ClientError::Protocol)
+}
+
+pub type ExactRecipeRunObservation = RecipeRunObservationWire;
+
+/// Validate and construct the one current snapshot envelope used by both the
+/// production executor and the Linux wire probe.
+pub fn build_exact_recipe_run_observations<'a>(
+    node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
-    #[serde(flatten)]
-    inventory: &'a Inventory,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunObservationsRequest<'a> {
-    schema_version: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    runs: &'a [RecipeRunObservation],
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ExactRecipeRunObservationsRequest<'a> {
-    schema_version: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    runs: &'a [ExactRecipeRunObservation],
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExactRecipeRunObservation {
-    pub schema_version: u8,
-    pub node_id: String,
-    pub observed_at: chrono::DateTime<chrono::Utc>,
-    #[serde(flatten)]
-    pub binding: RecipeRunInspectionBinding,
-    pub endpoint_ready: Option<bool>,
-    pub grant: serde_json::Value,
-    pub observation_identity_sha256: String,
-    pub helper_receipt: RecipeRunObservationReceipt,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct TelemetryRequest<'a> {
-    schema_version: u8,
-    samples: &'a [TelemetrySample],
+    observations: &'a [ExactRecipeRunObservation],
+) -> Result<RecipeRunObservationsWire<'a>, ClientError> {
+    if observations.len() > MAX_MANAGED_RECIPE_RUNS {
+        return Err(ClientError::Protocol);
+    }
+    if !valid_node_id(node_id) {
+        return Err(ClientError::Protocol);
+    }
+    let mut run_ids = std::collections::BTreeSet::new();
+    for observation in observations {
+        observation.validate().map_err(|_| ClientError::Protocol)?;
+        if observation.node_id != node_id || !run_ids.insert(observation.binding.run_id) {
+            return Err(ClientError::Protocol);
+        }
+        let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
+        let (grant_job_id, grant_request_sha256) = match &observation.grant.claims.operation {
+            HostHelperOperation::ExecuteContainerRuntimeRequest {
+                job_id,
+                request_sha256,
+                ..
+            } => (job_id, request_sha256),
+            _ => return Err(ClientError::Protocol),
+        };
+        if observation.schema_version != 1
+            || !valid_sha256(&observation.observation_identity_sha256)
+            || observation.helper_receipt.validate().is_err()
+            || observation.helper_receipt.claims.node_id != node_id
+            || observation
+                .helper_receipt
+                .claims
+                .observation_identity_sha256
+                != observation.observation_identity_sha256
+            || hex::decode(&observation.observation_receipt_public_key)
+                .ok()
+                .filter(|key| key.len() == 32)
+                .map(|key| hex_sha256(&key))
+                != Some(observation.helper_receipt.signature.key_id.clone())
+            || *grant_job_id != observation.binding.run_id
+            || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
+            || observation.grant.claims.request_id.to_string() != receipt_request_id
+            || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
+            || (observation.binding.local_address == observation.binding.master_address)
+                != observation.endpoint_ready.is_some()
+        {
+            return Err(ClientError::Protocol);
+        }
+    }
+    Ok(RecipeRunObservationsWire {
+        schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
+        observed_at,
+        runs: observations,
+    })
 }
 
 #[derive(Serialize)]
@@ -171,12 +220,12 @@ struct AgentUpgradeGrantRequest<'a> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostRuntimeGrantResponse {
-    grant: serde_json::Value,
+    grant: SignedHostHelperGrant,
 }
 
 #[derive(Debug)]
 pub struct RecipeRunInspectionGrant {
-    pub grant: serde_json::Value,
+    pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
 }
 
@@ -185,7 +234,7 @@ pub struct RecipeRunInspectionGrant {
 struct RecipeRunInspectionGrantResponse {
     schema_version: u8,
     observation_identity_sha256: String,
-    grant: serde_json::Value,
+    grant: SignedHostHelperGrant,
 }
 
 #[derive(Debug, Clone)]
@@ -269,18 +318,18 @@ impl AgentHttpClient {
         runtime_identity: Option<&AgentRuntimeIdentity>,
     ) -> Result<Option<AgentClaim>, ClientError> {
         let hostname = local_hostname();
+        let body = claim_request_document(
+            &self.node_id,
+            capabilities,
+            hostname.as_deref(),
+            wait_seconds,
+            runtime_identity.ok_or(ClientError::Protocol)?,
+        )?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/claim")?)
-            .json(&ClaimRequest {
-                capabilities,
-                hostname: hostname.as_deref(),
-                lease_seconds: 60,
-                node_id: &self.node_id,
-                protocol_version: 3,
-                runtime_identity,
-                wait_seconds: wait_seconds.min(60),
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         let status = response.status();
@@ -288,7 +337,7 @@ impl AgentHttpClient {
             return Ok(None);
         }
         classify_status(status)?;
-        let body = bounded_body(response).await?;
+        let body = bounded_claim_body(response).await?;
         parse_claim_response(status.as_u16(), &body)
     }
 
@@ -329,9 +378,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let directive = parse_strict::<AgentDirective>(&body)
-            .or_else(|_| parse_strict::<AgentProgress>(&body).map(AgentDirective::from_progress))
-            .map_err(|_| ClientError::Protocol)?;
+        let directive = parse_strict::<AgentDirective>(&body).map_err(|_| ClientError::Protocol)?;
         directive.validate().map_err(|_| ClientError::Protocol)?;
         if directive.schema_version != progress.schema_version
             || directive.job_id != progress.job_id
@@ -351,7 +398,7 @@ impl AgentHttpClient {
         claim: &AgentClaim,
         action: HostRuntimeAction,
         request_sha256: &str,
-    ) -> Result<serde_json::Value, ClientError> {
+    ) -> Result<SignedHostHelperGrant, ClientError> {
         if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
             return Err(ClientError::Protocol);
         }
@@ -377,9 +424,6 @@ impl AgentHttpClient {
         let body = bounded_body(response).await?;
         let response: HostRuntimeGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if !response.grant.is_object() {
-            return Err(ClientError::Protocol);
-        }
         Ok(response.grant)
     }
 
@@ -431,7 +475,38 @@ impl AgentHttpClient {
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if response.schema_version != 1
             || !valid_sha256(&response.observation_identity_sha256)
-            || !response.grant.is_object()
+            || response.grant.validate().is_err()
+            || response.grant.claims.node_id != self.node_id
+        {
+            return Err(ClientError::Protocol);
+        }
+        let operation = match &response.grant.claims.operation {
+            HostHelperOperation::ExecuteContainerRuntimeRequest {
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                request_sha256: granted_request_sha256,
+                observation_identity_sha256: Some(observation_identity_sha256),
+            } => (
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                granted_request_sha256,
+                observation_identity_sha256,
+            ),
+            _ => return Err(ClientError::Protocol),
+        };
+        if *operation.0 != HostHelperContainerRuntimeAction::RunInspect
+            || operation.1 != &request.job_id
+            || operation.2 != &request.operation_id
+            || *operation.3 != request.attempt
+            || operation.4 != &request.fence
+            || operation.5 != request_sha256
+            || operation.6 != &response.observation_identity_sha256
         {
             return Err(ClientError::Protocol);
         }
@@ -446,7 +521,7 @@ impl AgentHttpClient {
         claim: &AgentClaim,
         package_sha256: &str,
         package_signature: &str,
-    ) -> Result<serde_json::Value, ClientError> {
+    ) -> Result<SignedHostHelperGrant, ClientError> {
         if claim.node_id != self.node_id
             || !valid_sha256(package_sha256)
             || package_signature.len() != 128
@@ -479,9 +554,6 @@ impl AgentHttpClient {
         let body = bounded_body(response).await?;
         let response: HostRuntimeGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if !response.grant.is_object() {
-            return Err(ClientError::Protocol);
-        }
         Ok(response.grant)
     }
 
@@ -500,7 +572,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         classify_status(response.status())?;
-        let body = bounded_body(response).await?;
+        let body = bounded_claim_body(response).await?;
         let spec: CompiledExecutionPlan =
             serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
         spec.validate().map_err(|_| ClientError::Protocol)?;
@@ -683,8 +755,8 @@ impl AgentHttpClient {
     }
 
     /// Download one object from the Controller's assignment-bound delivery
-    /// API.  A partial destination is a resumable checkpoint; the assignment,
-    /// ETag, length and final SHA-256 are checked on every completed transfer.
+    /// API. A `.partial` destination is a resumable checkpoint; the assignment,
+    /// ETag, length, and range are checked on every response.
     pub async fn download_distribution_object(
         &self,
         plan_digest: &str,
@@ -695,34 +767,13 @@ impl AgentHttpClient {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
-        self.download_distribution_object_with_progress(
+        self.download_trusted_distribution_object_with_progress(
             plan_digest,
             sha256,
             expected_bytes,
             destination,
+            destination.parent().ok_or(ClientError::Protocol)?,
             |_| {},
-        )
-        .await
-    }
-
-    async fn download_distribution_object_with_progress<F>(
-        &self,
-        plan_digest: &str,
-        sha256: &str,
-        expected_bytes: u64,
-        destination: &Path,
-        progress: F,
-    ) -> Result<(), ClientError>
-    where
-        F: FnMut(u64),
-    {
-        self.download_content_addressed_with_progress(
-            "/agent/v1/distribution/objects",
-            Some(plan_digest),
-            sha256,
-            expected_bytes,
-            destination,
-            progress,
         )
         .await
     }
@@ -752,45 +803,59 @@ impl AgentHttpClient {
         Ok(assignment)
     }
 
-    /// Consume a complete assignment. Every model/configiliary object and the
+    /// Consume a complete assignment. Every model/configuration object and the
     /// exact OCI archive is fetched through the assignment-bound endpoint;
-    /// existing complete files are re-hashed and reused, while partial files
-    /// resume by identity and length after an agent process restart.
+    /// complete files are reused by trusted metadata, while `.partial` files
+    /// resume by identity and length after an agent process restart. Model
+    /// objects are stored below one content-addressed root so assignments with
+    /// different plan digests can reuse the same verified bytes.
     pub async fn download_distribution(
         &self,
         plan_digest: &str,
         destination_root: &Path,
+        archive_root: &Path,
     ) -> Result<DistributionDownloadEvidence, ClientError> {
-        self.download_distribution_with_progress(plan_digest, destination_root, |_| {})
-            .await
+        self.download_distribution_with_progress(
+            plan_digest,
+            destination_root,
+            archive_root,
+            |_| {},
+        )
+        .await
     }
 
     pub async fn download_distribution_with_progress<F>(
         &self,
         plan_digest: &str,
         destination_root: &Path,
+        archive_root: &Path,
         mut progress: F,
     ) -> Result<DistributionDownloadEvidence, ClientError>
     where
         F: FnMut(DistributionProgress),
     {
-        if !valid_sha256(plan_digest) || !destination_root.is_absolute() {
+        if !valid_sha256(plan_digest)
+            || !destination_root.is_absolute()
+            || !archive_root.is_absolute()
+        {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
-        let model_root = destination_root
-            .join("models")
-            .join(&assignment.model_artifact_set_sha256);
-        let oci_root = destination_root.join("oci-archives");
+        let model_root = destination_root.join("models");
+        let oci_root = archive_root.to_path_buf();
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
+        tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
+        tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
+        ensure_private_parent(&model_root, destination_root).await?;
+        ensure_private_parent(&oci_root, archive_root).await?;
         let mut model_paths = Vec::new();
         let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
         let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
         for object in &assignment.objects {
             let path = if object.kind == "model" {
-                model_root.join(&object.name)
+                model_root.join(&object.sha256)
             } else if object.sha256 == assignment.oci_archive_sha256 && object.kind == "oci-archive"
             {
                 oci_root.join(&object.sha256)
@@ -799,7 +864,12 @@ impl AgentHttpClient {
             } else {
                 continue;
             };
-            if !path.starts_with(destination_root) {
+            let managed_root = if object.kind == "model" {
+                destination_root
+            } else {
+                archive_root
+            };
+            if !path.starts_with(managed_root) {
                 return Err(ClientError::Protocol);
             }
             if let Some(parent) = path.parent() {
@@ -808,11 +878,12 @@ impl AgentHttpClient {
             let object_digest = object.sha256.clone();
             let kind = object.kind.clone();
             let base = downloaded_bytes;
-            self.download_distribution_object_with_progress(
+            self.download_trusted_distribution_object_with_progress(
                 plan_digest,
                 &object.sha256,
                 object.bytes,
                 &path,
+                managed_root,
                 |bytes| {
                     progress(DistributionProgress {
                         object_sha256: object_digest.clone(),
@@ -851,6 +922,123 @@ impl AgentHttpClient {
             oci_image_digest: assignment.oci_image_digest,
             downloaded_bytes,
         })
+    }
+
+    async fn download_trusted_distribution_object_with_progress<F>(
+        &self,
+        plan_digest: &str,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+        managed_root: &Path,
+        mut progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64),
+    {
+        // The assignment-bound mTLS endpoint and its exact ranged response
+        // headers establish the transfer contract. Hash the completed object
+        // before accepting it so a digest-named cache file cannot be trusted
+        // merely because its length and custody metadata look correct.
+        if !valid_sha256(plan_digest)
+            || !valid_sha256(sha256)
+            || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes)
+            || !destination.is_absolute()
+        {
+            return Err(ClientError::Protocol);
+        }
+        let parent = destination.parent().ok_or(ClientError::Protocol)?;
+        if !destination.starts_with(managed_root) {
+            return Err(ClientError::Protocol);
+        }
+        ensure_private_parent(parent, managed_root).await?;
+
+        if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
+            drop(file);
+            if sha256_path(destination, expected_bytes).await? != sha256 {
+                return Err(ClientError::Protocol);
+            }
+            progress(expected_bytes);
+            return Ok(());
+        }
+
+        let partial = partial_path(destination);
+        let mut output = open_trusted_partial(&partial).await?;
+        let metadata = output.metadata().await?;
+        let mut offset = metadata.len();
+        if offset > expected_bytes {
+            return Err(ClientError::Protocol);
+        }
+        if offset == expected_bytes {
+            output.sync_all().await?;
+            drop(output);
+            tokio::fs::rename(&partial, destination).await?;
+            sync_parent(parent).await?;
+            validate_trusted_file(destination, expected_bytes).await?;
+            if sha256_path(destination, expected_bytes).await? != sha256 {
+                return Err(ClientError::Protocol);
+            }
+            progress(expected_bytes);
+            return Ok(());
+        }
+
+        while offset < expected_bytes {
+            let end = expected_bytes
+                .saturating_sub(1)
+                .min(offset.saturating_add(8 * 1024 * 1024 - 1));
+            let mut url = self.endpoint(&format!("/agent/v1/distribution/objects/{sha256}"))?;
+            url.query_pairs_mut()
+                .append_pair("plan_digest", plan_digest);
+            let response = self
+                .client
+                .get(url)
+                .header("range", format!("bytes={offset}-{end}"))
+                .header("if-range", format!("\"sha256:{sha256}\""))
+                .send()
+                .await?;
+            let expected_etag = format!("\"sha256:{sha256}\"");
+            let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
+            if response.status() != StatusCode::PARTIAL_CONTENT
+                || response.content_length() != Some(end - offset + 1)
+                || response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_etag.as_str())
+                || response
+                    .headers()
+                    .get("content-range")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_range.as_str())
+            {
+                classify_status(response.status())?;
+                return Err(ClientError::Protocol);
+            }
+            let mut copied = 0_u64;
+            let expected_chunk = end - offset + 1;
+            let mut response = response;
+            while let Some(chunk) = response.chunk().await? {
+                copied = copied.saturating_add(chunk.len() as u64);
+                if copied > expected_chunk {
+                    return Err(ClientError::Protocol);
+                }
+                output.write_all(&chunk).await?;
+            }
+            if copied != expected_chunk {
+                return Err(ClientError::Protocol);
+            }
+            offset = end + 1;
+            progress(offset);
+        }
+        output.sync_all().await?;
+        drop(output);
+        tokio::fs::rename(&partial, destination).await?;
+        sync_parent(parent).await?;
+        validate_trusted_file(destination, expected_bytes).await?;
+        if sha256_path(destination, expected_bytes).await? != sha256 {
+            return Err(ClientError::Protocol);
+        }
+        Ok(())
     }
 
     async fn download_content_addressed(
@@ -968,54 +1156,31 @@ impl AgentHttpClient {
     }
 
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
+        let request = InventoryRequest {
+            schema_version: 1,
+            observed_at: chrono::Utc::now(),
+            disk_total_bytes: inventory.disk_total_bytes,
+            disk_free_bytes: inventory.disk_available_bytes,
+            host_memory_total_bytes: inventory.memory_total_bytes,
+            host_memory_free_bytes: inventory.memory_available_bytes,
+            gpu_memory_total_bytes: inventory.gpu_memory_total_bytes,
+            gpu_memory_free_bytes: inventory.gpu_memory_free_bytes,
+            gpu_count: inventory.gpu_count,
+            artifact_store_read_only: inventory.artifact_store_read_only,
+            capabilities: inventory.capabilities.clone(),
+            fabric_address: inventory.fabric_address,
+            fabric_bandwidth_mbps: inventory.fabric_bandwidth_mbps,
+            nvidia_driver_version: inventory.nvidia_driver_version.clone(),
+            container_runtime_version: inventory.container_runtime_version.clone(),
+        };
+        request.validate().map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/inventory")?)
-            .json(&InventoryRequest {
-                schema_version: 1,
-                observed_at: chrono::Utc::now(),
-                inventory,
-            })
+            .json(&request)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
-            Ok(())
-        } else {
-            classify_status(response.status())?;
-            Err(ClientError::Protocol)
-        }
-    }
-
-    pub async fn report_recipe_run_observations(
-        &self,
-        observations: &[RecipeRunObservation],
-    ) -> Result<(), ClientError> {
-        if observations.len() > MAX_MANAGED_RECIPE_RUNS {
-            return Err(ClientError::Protocol);
-        }
-        let mut run_ids = std::collections::BTreeSet::new();
-        for observation in observations {
-            let run_id =
-                uuid::Uuid::parse_str(&observation.run_id).map_err(|_| ClientError::Protocol)?;
-            if run_id.to_string() != observation.run_id
-                || !run_ids.insert(observation.run_id.as_str())
-            {
-                return Err(ClientError::Protocol);
-            }
-        }
-        let response = self
-            .client
-            .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&RecipeRunObservationsRequest {
-                schema_version: 1,
-                observed_at: chrono::Utc::now(),
-                runs: observations,
-            })
-            .send()
-            .await?;
-        if response.status() == StatusCode::NO_CONTENT
-            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
-        {
             Ok(())
         } else {
             classify_status(response.status())?;
@@ -1027,62 +1192,15 @@ impl AgentHttpClient {
         &self,
         observations: &[ExactRecipeRunObservation],
     ) -> Result<(), ClientError> {
-        if observations.len() > MAX_MANAGED_RECIPE_RUNS {
-            return Err(ClientError::Protocol);
-        }
-        let mut run_ids = std::collections::BTreeSet::new();
-        for observation in observations {
-            observation
-                .binding
-                .validate()
-                .map_err(|_| ClientError::Protocol)?;
-            let grant_claims = observation
-                .grant
-                .get("claims")
-                .and_then(serde_json::Value::as_object)
-                .ok_or(ClientError::Protocol)?;
-            let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
-            if !run_ids.insert(observation.binding.run_id)
-                || observation.schema_version != 1
-                || observation.node_id != self.node_id
-                || !valid_sha256(&observation.observation_identity_sha256)
-                || !observation.grant.is_object()
-                || observation.helper_receipt.validate().is_err()
-                || observation.helper_receipt.claims.node_id != self.node_id
-                || observation
-                    .helper_receipt
-                    .claims
-                    .observation_identity_sha256
-                    != observation.observation_identity_sha256
-                || grant_claims
-                    .get("request_id")
-                    .and_then(serde_json::Value::as_str)
-                    != Some(receipt_request_id.as_str())
-                || grant_claims
-                    .get("request_sha256")
-                    .and_then(serde_json::Value::as_str)
-                    != Some(observation.helper_receipt.claims.request_sha256.as_str())
-                || observation.observed_at.timestamp()
-                    != observation.helper_receipt.claims.observed_at
-                || (observation.binding.local_address == observation.binding.master_address)
-                    != observation.endpoint_ready.is_some()
-            {
-                return Err(ClientError::Protocol);
-            }
-        }
+        let envelope =
+            build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&ExactRecipeRunObservationsRequest {
-                schema_version: 2,
-                observed_at: chrono::Utc::now(),
-                runs: observations,
-            })
+            .json(&envelope)
             .send()
             .await?;
-        if response.status() == StatusCode::NO_CONTENT
-            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
-        {
+        if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
             classify_status(response.status())?;
@@ -1098,7 +1216,7 @@ impl AgentHttpClient {
             .client
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
-            .json(&TelemetryRequest {
+            .json(&crate::telemetry::TelemetryRequest {
                 schema_version: 1,
                 samples,
             })
@@ -1166,7 +1284,7 @@ impl AgentHttpClient {
 pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClaim>, ClientError> {
     match status {
         204 if body.is_empty() => Ok(None),
-        200 if body.len() <= MAX_BODY_BYTES => {
+        200 if body.len() <= MAX_CLAIM_BODY_BYTES => {
             let claim: AgentClaim = parse_strict(body).map_err(|_| ClientError::Protocol)?;
             claim.validate().map_err(|_| ClientError::Protocol)?;
             Ok(Some(claim))
@@ -1190,8 +1308,20 @@ async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientErro
     bounded_body_limit(response, MAX_BODY_BYTES).await
 }
 
+async fn bounded_claim_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
+    bounded_body_limit(response, MAX_CLAIM_BODY_BYTES).await
+}
+
 async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientError> {
-    let mut file = tokio::fs::File::open(path).await?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await?;
+    let before = file.metadata().await?;
+    if !before.file_type().is_file() || before.file_type().is_symlink() || before.nlink() != 1 {
+        return Err(ClientError::Protocol);
+    }
     let mut digest = Sha256::new();
     let mut total = 0_u64;
     // Keep the buffer on the heap: this async future is held by the default
@@ -1212,7 +1342,124 @@ async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientE
     if total != expected_bytes {
         return Err(ClientError::Protocol);
     }
+    let after = file.metadata().await?;
+    if before.dev() != after.dev() || before.ino() != after.ino() || before.len() != after.len() {
+        return Err(ClientError::Protocol);
+    }
     Ok(hex::encode(digest.finalize()))
+}
+
+async fn ensure_private_parent(parent: &Path, managed_root: &Path) -> Result<(), ClientError> {
+    let metadata = tokio::fs::symlink_metadata(parent).await?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(ClientError::Protocol);
+    }
+    if !parent.starts_with(managed_root) {
+        return Err(ClientError::Protocol);
+    }
+    let relative = parent
+        .strip_prefix(managed_root)
+        .map_err(|_| ClientError::Protocol)?;
+    let mut component = managed_root.to_path_buf();
+    for part in relative.components() {
+        component.push(part.as_os_str());
+        let metadata = tokio::fs::symlink_metadata(&component).await?;
+        if metadata.file_type().is_symlink() {
+            return Err(ClientError::Protocol);
+        }
+    }
+    let canonical_root = tokio::fs::canonicalize(managed_root).await?;
+    let canonical_parent = tokio::fs::canonicalize(parent).await?;
+    if !canonical_parent.starts_with(canonical_root) {
+        return Err(ClientError::Protocol);
+    }
+    Ok(())
+}
+
+fn partial_path(path: &Path) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(".partial");
+    PathBuf::from(value)
+}
+
+fn validate_trusted_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    metadata.file_type().is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.nlink() == 1
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.mode() & 0o777 == 0o600
+        && metadata.len() == expected_bytes
+}
+
+async fn inspect_trusted_final(
+    path: &Path,
+    expected_bytes: u64,
+) -> Result<Option<tokio::fs::File>, ClientError> {
+    let path_metadata = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !validate_trusted_metadata(&path_metadata, expected_bytes) {
+        return Err(ClientError::Protocol);
+    }
+    let file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await
+        .map_err(|_| ClientError::Protocol)?;
+    let opened_metadata = file.metadata().await?;
+    if !validate_trusted_metadata(&opened_metadata, expected_bytes)
+        || opened_metadata.dev() != path_metadata.dev()
+        || opened_metadata.ino() != path_metadata.ino()
+    {
+        return Err(ClientError::Protocol);
+    }
+    Ok(Some(file))
+}
+
+async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File, ClientError> {
+    if let Ok(metadata) = tokio::fs::symlink_metadata(path).await
+        && !validate_trusted_metadata(&metadata, metadata.len())
+    {
+        return Err(ClientError::Protocol);
+    }
+    let file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await
+        .map_err(|_| ClientError::Protocol)?;
+    let metadata = file.metadata().await?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.nlink() != 1
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o777 != 0o600
+    {
+        return Err(ClientError::Protocol);
+    }
+    Ok(file)
+}
+
+async fn validate_trusted_file(path: &Path, expected_bytes: u64) -> Result<(), ClientError> {
+    inspect_trusted_final(path, expected_bytes)
+        .await?
+        .map(|_| ())
+        .ok_or(ClientError::Protocol)
+}
+
+async fn sync_parent(parent: &Path) -> Result<(), ClientError> {
+    tokio::fs::File::open(parent).await?.sync_all().await?;
+    Ok(())
 }
 
 async fn bounded_body_limit(
@@ -1238,6 +1485,14 @@ async fn bounded_body_limit(
 fn valid_sha256(value: &str) -> bool {
     value.len() == 64
         && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_node_id(value: &str) -> bool {
+    value.len() == 36
+        && value.starts_with("spk_")
+        && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
@@ -1274,35 +1529,59 @@ fn valid_oci_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentHttpClient, ClientError, ExactRecipeRunObservation, valid_reported_hostname};
-    use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
+    use super::{
+        AgentHttpClient, ClientError, ExactRecipeRunObservation, partial_path,
+        valid_reported_hostname,
+    };
+    use crate::{
+        oci::OciRuntime,
+        process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+        telemetry::TelemetrySample,
+        workloads::CompiledExecutionPlan,
+    };
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
     use std::{
         collections::HashMap,
         io::{Read, Write},
         net::TcpListener,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
         thread,
         time::Duration,
     };
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::{
-        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
-        RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
+        AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
+        HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
+        HostRuntimeRequest, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
         RecipeRunObservationOutcome, RecipeRunObservationReceipt,
-        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature, canonical_json,
-        hex_sha256,
+        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature,
+        SignedHostHelperGrant, canonical_json, hex_sha256,
     };
+
+    struct NoProcess;
+
+    impl ProcessRunner for NoProcess {
+        fn run(
+            &self,
+            _: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            panic!("distribution/install handoff test must not launch a process");
+        }
+    }
 
     fn inspection_binding() -> RecipeRunInspectionBinding {
         RecipeRunInspectionBinding {
             artifact_set_digest: "a".repeat(64),
             image_digest: "b".repeat(64),
             installation_id: Uuid::new_v4(),
-            local_address: "192.168.100.11".parse().unwrap(),
-            master_address: "192.168.100.10".parse().unwrap(),
-            master_port: 29500,
+            local_address: Some("192.168.100.11".parse().unwrap()),
+            master_address: Some("192.168.100.10".parse().unwrap()),
+            master_port: Some(29500),
             mapping_generation: 4,
             mapping_id: Uuid::new_v4(),
             model_identity: "example/model@immutable".to_owned(),
@@ -1342,7 +1621,7 @@ mod tests {
             },
             signature: RecipeRunObservationReceiptSignature {
                 algorithm: "ed25519".to_owned(),
-                key_id: "a".repeat(64),
+                key_id: hex_sha256(&[0; 32]),
                 value: "b".repeat(128),
             },
         }
@@ -1532,7 +1811,7 @@ mod tests {
             AgentHttpClient::for_http_test(&format!("http://{address}/"), &assignment.node_id);
         let root = tempfile::tempdir().unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(
@@ -1642,7 +1921,7 @@ mod tests {
     #[derive(Clone, Copy)]
     enum DistributionFixtureMode {
         Good,
-        CorruptFirstObject,
+        WrongEtagFirstObject,
     }
 
     fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
@@ -1741,17 +2020,19 @@ mod tests {
                     .unwrap();
                 assert!(end >= start && end < source.len());
                 assert!(end - start < 8 * 1024 * 1024);
-                let mut body = source[start..=end].to_vec();
-                if matches!(mode, DistributionFixtureMode::CorruptFirstObject)
-                    && digest == assignment.objects[0].sha256
-                    && !body.is_empty()
-                {
-                    body[0] ^= 0xff;
-                }
+                let body = source[start..=end].to_vec();
+                let response_digest =
+                    if matches!(mode, DistributionFixtureMode::WrongEtagFirstObject)
+                        && digest == assignment.objects[0].sha256
+                    {
+                        "0".repeat(64)
+                    } else {
+                        digest.to_owned()
+                    };
                 write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"sha256:{}\"\r\nConnection: close\r\n\r\n",
-                    body.len(), start, end, source.len(), digest
+                    body.len(), start, end, source.len(), response_digest
                 )
                 .unwrap();
                 stream.write_all(&body).unwrap();
@@ -1780,19 +2061,31 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         let root = tempfile::tempdir().unwrap();
+        let assignment_root = root.path().join("distribution").join("plan");
+        let archive_root = root.path().join("oci-archives");
+        std::fs::create_dir_all(&assignment_root).unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
+        assert_eq!(
+            evidence.oci_archive_path,
+            archive_root.join(&assignment.oci_archive_sha256)
+        );
         assert_eq!(std::fs::read(&evidence.oci_archive_path).unwrap(), archive);
         assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
-        let reused_evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
-            .await
-            .unwrap();
-        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
-
+        assert_eq!(
+            std::fs::metadata(&evidence.oci_archive_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(
+            !PathBuf::from(format!("{}.partial", evidence.oci_archive_path.display())).exists()
+        );
         let importer = crate::image_importer::ImageImporter {
             data_root: root.path(),
         };
@@ -1804,6 +2097,12 @@ mod tests {
                 &evidence.oci_archive_path,
             )
             .unwrap();
+        assert_eq!(cached, evidence.oci_archive_path);
+        let reused_evidence = client
+            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
+            .await
+            .unwrap();
+        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
         let reused = importer
             .retain_verified_distribution_archive(
                 &evidence.oci_archive_sha256,
@@ -1813,6 +2112,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cached, reused);
+        assert!(
+            !archive_root
+                .join(format!("{}.partial", assignment.oci_archive_sha256))
+                .exists()
+        );
+        assert!(
+            std::fs::read_dir(&archive_root)
+                .unwrap()
+                .flatten()
+                .all(|entry| !entry.file_name().to_string_lossy().contains("partial"))
+        );
         assert_eq!(
             importer.distribution_runtime_arguments(
                 &evidence.oci_archive_sha256,
@@ -1824,11 +2134,175 @@ mod tests {
         );
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 4);
+        let archive_gets = requests
+            .iter()
+            .filter(|request| {
+                String::from_utf8_lossy(request).contains(&format!(
+                    "/agent/v1/distribution/objects/{}",
+                    assignment.oci_archive_sha256
+                ))
+            })
+            .count();
+        assert_eq!(archive_gets, 1);
         assert!(requests.iter().all(|request| {
             String::from_utf8_lossy(request)
                 .to_ascii_lowercase()
                 .contains("x-vonk-fixture-auth: enrolled-agent")
         }));
+    }
+
+    #[tokio::test]
+    async fn content_addressed_distribution_handoff_reuses_objects_across_plan_digests() {
+        let model = b"model payload".to_vec();
+        let (archive, _) = oci_archive_fixture();
+        let image_digest = "1".repeat(64);
+        let mut assignment = distribution_assignment_fixture(&model, &archive, &image_digest);
+        assignment.plan_digest = "a".repeat(64);
+        assignment.model_artifact_set_sha256 = "d".repeat(64);
+        assignment.validate().unwrap();
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(&model), model.clone());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects.clone(),
+            3,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let distribution_root = root.path().join("distribution");
+        let archive_root = root.path().join("oci-archives");
+        std::fs::create_dir_all(&distribution_root).unwrap();
+        std::fs::create_dir_all(&archive_root).unwrap();
+        let evidence = client
+            .download_distribution(&assignment.plan_digest, &distribution_root, &archive_root)
+            .await
+            .unwrap();
+        assert_eq!(server.join().unwrap().len(), 3);
+        assert_eq!(
+            evidence.model_paths,
+            vec![distribution_root.join("models").join(hex_sha256(&model))]
+        );
+        assert_eq!(
+            evidence.oci_archive_path,
+            archive_root.join(&assignment.oci_archive_sha256)
+        );
+
+        let mut plan_value: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let model_sha256 = hex_sha256(&model);
+        let archive_sha256 = hex_sha256(&archive);
+        plan_value["identity"]["execution_sha256"] = json!("e".repeat(64));
+        plan_value["identity"]["model_artifact_set_sha256"] =
+            json!(assignment.model_artifact_set_sha256.clone());
+        plan_value["identity"]["model_artifact_bytes"] = json!(model.len());
+        plan_value["artifacts"][0]["sha256"] = json!(model_sha256.clone());
+        plan_value["artifacts"][0]["size_bytes"] = json!(model.len());
+        plan_value["artifacts"][0]["distribution_object"]["sha256"] = json!(model_sha256);
+        plan_value["artifacts"][0]["distribution_object"]["bytes"] = json!(model.len());
+        plan_value["runtime"]["image_digest"] = json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["image_digest"] = json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["platform_manifest_digest"] =
+            json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha256.clone());
+        plan_value["runtime_image"]["image_bytes"] = json!(archive.len());
+        plan_value["runtime_image"]["local_image_reference"] = json!(format!(
+            "localhost/vonk/compiled-runtime-{archive_sha256}@sha256:{image_digest}"
+        ));
+        plan_value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha256);
+        plan_value["runtime_image"]["distribution_object"]["bytes"] = json!(archive.len());
+        let plan: CompiledExecutionPlan = serde_json::from_value(plan_value).unwrap();
+        plan.validate().unwrap();
+
+        let runner = NoProcess;
+        let runtime = OciRuntime {
+            runner: &runner,
+            data_root: root.path(),
+            huggingface_curl_config: None,
+        };
+        let first_installation = "cb555393-764b-4eb6-8f15-b416d289428f";
+        runtime
+            .install(
+                &plan,
+                first_installation,
+                &plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(format!(
+                "installations/{first_installation}/models/primary/weights.bin"
+            )))
+            .unwrap(),
+            model
+        );
+        assert!(archive_root.join(&archive_sha256).is_file());
+
+        let before_reinstall = crate::oci::test_sha256_open_file_call_count();
+        runtime
+            .install(
+                &plan,
+                first_installation,
+                &plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::oci::test_sha256_open_file_call_count(),
+            before_reinstall,
+            "reinstall reuses the receipt-bound destination without rereading the source"
+        );
+
+        let mut second_assignment = assignment.clone();
+        second_assignment.plan_digest = "f".repeat(64);
+        second_assignment.model_artifact_set_sha256 = "c".repeat(64);
+        let (second_client, second_server) = distribution_fixture_server(
+            second_assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let reused = second_client
+            .download_distribution(
+                &second_assignment.plan_digest,
+                &distribution_root,
+                &archive_root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(reused.downloaded_bytes, evidence.downloaded_bytes);
+        assert_eq!(
+            reused.model_paths,
+            vec![distribution_root.join("models").join(&model_sha256)]
+        );
+        assert_eq!(
+            std::fs::read_dir(distribution_root.join("models"))
+                .unwrap()
+                .count(),
+            1,
+            "the same object is retained once across artifact sets"
+        );
+        assert_eq!(second_server.join().unwrap().len(), 1);
+
+        let mut second_plan = plan.clone();
+        second_plan.identity.execution_sha256 = "f".repeat(64);
+        second_plan.identity.model_artifact_set_sha256 =
+            second_assignment.model_artifact_set_sha256.clone();
+        let second_installation = "cb555393-764b-4eb6-8f15-b416d2894290";
+        runtime
+            .install(
+                &second_plan,
+                second_installation,
+                &second_plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(format!(
+                "installations/{second_installation}/models/primary/weights.bin"
+            )))
+            .unwrap(),
+            model
+        );
     }
 
     #[tokio::test]
@@ -1843,10 +2317,11 @@ mod tests {
         let model_path = root
             .path()
             .join("models")
-            .join(&assignment.model_artifact_set_sha256)
-            .join("weights/model.bin");
+            .join(&assignment.objects[0].sha256);
+        let partial_path = PathBuf::from(format!("{}.partial", model_path.display()));
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
-        std::fs::write(&model_path, &model[..5]).unwrap();
+        std::fs::write(&partial_path, &model[..5]).unwrap();
+        std::fs::set_permissions(&partial_path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -1854,7 +2329,7 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(std::fs::read(&model_path).unwrap(), model);
@@ -1872,15 +2347,63 @@ mod tests {
                 values
             },
             2,
-            DistributionFixtureMode::CorruptFirstObject,
+            DistributionFixtureMode::WrongEtagFirstObject,
         );
         assert!(matches!(
             corrupt_client
-                .download_distribution(&assignment.plan_digest, corrupt_root.path())
+                .download_distribution(
+                    &assignment.plan_digest,
+                    corrupt_root.path(),
+                    corrupt_root.path(),
+                )
                 .await,
             Err(ClientError::Protocol)
         ));
         assert_eq!(corrupt_server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_object_resumes_private_partial_atomically() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("config.json");
+        let partial = partial_path(&destination);
+        std::fs::write(&partial, &model[..5]).unwrap();
+        std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600)).unwrap();
+        client
+            .download_distribution_object(
+                &assignment.plan_digest,
+                &assignment.objects[0].sha256,
+                model.len() as u64,
+                &destination,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert!(!partial.exists());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn trusted_partial_paths_keep_same_stem_objects_distinct() {
+        let json = Path::new("/tmp/config.json");
+        let yaml = Path::new("/tmp/config.yaml");
+        assert_ne!(partial_path(json), partial_path(yaml));
+        assert_eq!(
+            partial_path(json),
+            PathBuf::from("/tmp/config.json.partial")
+        );
     }
 
     #[tokio::test]
@@ -1913,16 +2436,24 @@ mod tests {
         let model_path = root
             .path()
             .join("models")
-            .join(&assignment.model_artifact_set_sha256)
-            .join("weights/model.bin");
+            .join(&assignment.objects[0].sha256);
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
         std::fs::write(model_path, model).unwrap();
+        std::fs::set_permissions(
+            root.path()
+                .join("models")
+                .join(&assignment.objects[0].sha256),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
         let destination = root
             .path()
             .join("oci-archives")
             .join(&assignment.oci_archive_sha256);
+        let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
         std::fs::write(&destination, vec![0_u8; archive.len()]).unwrap();
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -1931,7 +2462,7 @@ mod tests {
         );
         assert!(matches!(
             client
-                .download_distribution(&assignment.plan_digest, root.path())
+                .download_distribution(&assignment.plan_digest, root.path(), &archive_root)
                 .await,
             Err(ClientError::Protocol)
         ));
@@ -1994,6 +2525,17 @@ mod tests {
             "details": {
                 "accelerator_name": "NVIDIA GB10",
                 "accelerator_performance_state": null
+            },
+            "metrics": {
+                "schema_version": 2,
+                "series": [],
+                "capabilities": [],
+                "runtimes": [],
+                "workloads": [],
+                "provenance": {
+                    "collector": "test",
+                    "collector_version": "1"
+                }
             }
         }))
         .unwrap()
@@ -2015,7 +2557,7 @@ mod tests {
         request_capture_client(
             200,
             vec!["Content-Type: application/json".to_owned()],
-            br#"{"grant":{}}"#.to_vec(),
+            br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-import","attempt":1,"fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","job_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","operation_id":"f450b5ac-5a78-4af5-9670-e874f735e3ee","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
             None,
         )
     }
@@ -2083,6 +2625,23 @@ mod tests {
             serde_json::from_slice::<AgentProgress>(body).unwrap(),
             progress
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_rejects_legacy_progress_response_shape() {
+        let progress = progress();
+        let (client, server) = request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            canonical_json(&progress).unwrap(),
+            None,
+        );
+
+        assert!(matches!(
+            client.heartbeat(&progress).await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
     }
 
     #[tokio::test]
@@ -2154,10 +2713,36 @@ mod tests {
             observation: Some(binding.clone()),
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
+        let request_id = Uuid::new_v4();
         let response = serde_json::to_vec(&serde_json::json!({
             "schema_version": 1,
             "observation_identity_sha256": "e".repeat(64),
-            "grant": {"claims": {"request_id": Uuid::new_v4()}}
+            "grant": {
+                "schema_version": 1,
+                "claims": {
+                    "schema_version": 1,
+                    "authority": "vonk.host-maintenance-helper",
+                    "request_id": request_id,
+                    "node_id": "spk_0123456789abcdef0123456789abcdef",
+                    "issued_at": 1_788_000_000,
+                    "expires_at": 1_788_000_010,
+                    "operation": {
+                        "type": "execute-container-runtime-request",
+                        "action": "run-inspect",
+                        "job_id": binding.run_id,
+                        "operation_id": request.operation_id,
+                        "attempt": request.attempt,
+                        "fence": request.fence,
+                        "request_sha256": digest,
+                        "observation_identity_sha256": "e".repeat(64)
+                    }
+                },
+                "signature": {
+                    "algorithm": "ed25519",
+                    "key_id": "f".repeat(64),
+                    "value": "e".repeat(128)
+                }
+            }
         }))
         .unwrap();
         let (client, server) = request_capture_client(200, vec![], response, None);
@@ -2207,12 +2792,34 @@ mod tests {
                 .unwrap(),
             binding: binding.clone(),
             endpoint_ready: None,
-            grant: serde_json::json!({"claims": {
-                "request_id": helper_receipt.claims.request_id,
-                "request_sha256": helper_receipt.claims.request_sha256.clone(),
-            }}),
+            grant: SignedHostHelperGrant {
+                schema_version: 1,
+                claims: HostHelperGrantClaims {
+                    schema_version: 1,
+                    authority: "vonk.host-maintenance-helper".to_owned(),
+                    request_id: helper_receipt.claims.request_id,
+                    node_id: helper_receipt.claims.node_id.clone(),
+                    issued_at: helper_receipt.claims.observed_at - 1,
+                    expires_at: helper_receipt.claims.observed_at + 60,
+                    operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
+                        action: HostHelperContainerRuntimeAction::RunInspect,
+                        job_id: binding.run_id,
+                        operation_id: Uuid::new_v4(),
+                        attempt: binding.run_generation as u32,
+                        fence: Uuid::new_v4(),
+                        request_sha256: helper_receipt.claims.request_sha256.clone(),
+                        observation_identity_sha256: Some("e".repeat(64)),
+                    },
+                },
+                signature: HostHelperGrantSignature {
+                    algorithm: "ed25519".to_owned(),
+                    key_id: "f".repeat(64),
+                    value: "e".repeat(128),
+                },
+            },
             observation_identity_sha256: "e".repeat(64),
             helper_receipt,
+            observation_receipt_public_key: "00".repeat(32),
         }];
         let (client, server) = observation_client(204);
         client
@@ -2238,89 +2845,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recipe_run_observations_post_strict_bounded_shape_and_accept_only_204() {
-        let observations = vec![RecipeRunObservation {
-            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
-            ready: true,
-        }];
+    async fn telemetry_posts_large_valid_metrics_without_content_loss() {
+        let mut sample = telemetry_sample(1);
+        sample.metrics.series = (0..143)
+            .map(|index| {
+                serde_json::from_value(json!({
+                    "key": format!("device.metric_{index}"), "scope": "node",
+                    "process_name": "測".repeat(128), "value": "測".repeat(256),
+                    "unit": "state", "source": "native-collector",
+                    "measurement_kind": "measured", "observed_at": sample.observed_at,
+                    "freshness": "fresh", "freshness_threshold_seconds": 6.0,
+                    "support_status": "available", "aggregation": "last"
+                }))
+                .unwrap()
+            })
+            .collect();
         let (client, server) = observation_client(204);
-
         client
-            .report_recipe_run_observations(&observations)
+            .report_telemetry(std::slice::from_ref(&sample))
             .await
             .unwrap();
-
         let request = server.join().unwrap();
-        let (headers, body) = request
+        let index = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
-            .map(|index| (&request[..index], &request[index + 4..]))
-            .unwrap();
-        let headers = std::str::from_utf8(headers).unwrap();
-        assert!(headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n"));
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        let mut keys = body
-            .as_object()
             .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.sort();
-        assert_eq!(keys, ["observed_at", "runs", "schema_version"]);
-        assert_eq!(body["schema_version"], 1);
+            + 4;
+        let body: Value = serde_json::from_slice(&request[index..]).unwrap();
+        assert!(request.len() - index > 64 * 1024);
         assert_eq!(
-            body["runs"],
-            serde_json::json!([{
-                "ready": true,
-                "run_id": "45ea6921-50c9-4971-be2a-4cd04ce05069"
-            }])
+            body["samples"][0]["metrics"]["series"],
+            json!(sample.metrics.series)
         );
-        let observed_at = DateTime::parse_from_rfc3339(body["observed_at"].as_str().unwrap())
-            .unwrap()
-            .with_timezone(&Utc);
-        assert!((Utc::now() - observed_at).num_seconds().abs() < 5);
-
-        let (client, server) = observation_client(200);
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
     }
 
     #[tokio::test]
-    async fn absent_observation_endpoint_is_optional_only_without_managed_runs() {
-        let (client, server) = observation_client(404);
-
-        client.report_recipe_run_observations(&[]).await.unwrap();
-        server.join().unwrap();
-
-        let observations = vec![RecipeRunObservation {
-            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
-            ready: true,
-        }];
-        let (client, server) = observation_client(404);
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
-    async fn absent_endpoint_compatibility_does_not_mask_authentication_errors() {
-        for status in [401, 403] {
-            let (client, server) = observation_client(status);
-            assert!(matches!(
-                client.report_recipe_run_observations(&[]).await,
-                Err(ClientError::Authentication)
-            ));
-            server.join().unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn telemetry_posts_exact_task_three_shape_without_node_identity() {
+    async fn telemetry_posts_current_contract_without_node_identity() {
         let sample = telemetry_sample(1);
         let (client, server) = observation_client(204);
 
@@ -2368,6 +2928,7 @@ mod tests {
                 "load_average_1m",
                 "memory_available_bytes",
                 "memory_total_bytes",
+                "metrics",
                 "network_receive_bytes_per_second",
                 "network_transmit_bytes_per_second",
                 "observed_at",
@@ -2426,26 +2987,6 @@ mod tests {
                 "status {status} classified as {error:?}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn recipe_run_observations_reject_unbounded_payload_before_transport() {
-        let client = AgentHttpClient {
-            client: reqwest::Client::new(),
-            controller: Url::parse("http://127.0.0.1:9/").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-        };
-        let observations = (0..=64)
-            .map(|value| RecipeRunObservation {
-                run_id: uuid::Uuid::from_u128(value).to_string(),
-                ready: false,
-            })
-            .collect::<Vec<_>>();
-
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
     }
 
     #[tokio::test]

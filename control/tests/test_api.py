@@ -38,7 +38,7 @@ class Jobs:
         return Enqueued(id=job_id)
 
 
-def _client(role: str, *, generic_jobs_enabled: bool = True, agent_upgrades=None):
+def _client(role: str, *, agent_upgrades=None):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     jobs = Jobs()
@@ -48,7 +48,6 @@ def _client(role: str, *, generic_jobs_enabled: bool = True, agent_upgrades=None
         audits=audits,
         fleet=lambda: {"nodes": []},
         now=lambda: 10,
-        generic_jobs_enabled=generic_jobs_enabled,
         agent_upgrades=agent_upgrades,
     )
     client = TestClient(app)
@@ -102,7 +101,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
         audits=MemoryAuditStore(),
         fleet=lambda: {"nodes": []},
         now=lambda: 10,
-        generic_jobs_enabled=True,
         browser_auth=service,
         agent_upgrades=agent_upgrades,
     )
@@ -201,87 +199,14 @@ def test_removed_package_and_deployment_routes_are_not_registered() -> None:
     assert legacy_paths == set()
 
 
-def test_viewer_cannot_enqueue_mutation() -> None:
-    client, headers, _, _ = _client("viewer")
-    response = client.post(
-        "/api/v1/jobs",
-        headers=headers,
-        json={
-            "kind": "probe",
-            "authority_revision": "abc",
-            "targets": ["node"],
-            "payload": {},
-        },
-    )
-    assert response.status_code == 403
-
-
-def test_admin_mutation_is_correlated_and_audited() -> None:
-    client, headers, jobs, audits = _client("administrator")
-    response = client.post(
-        "/api/v1/jobs",
-        headers=headers,
-        json={
-            "kind": "probe",
-            "authority_revision": "abc",
-            "targets": ["node"],
-            "payload": {"safe": True},
-        },
-    )
-    assert response.status_code == 202
-    request_id = response.headers["x-request-id"]
-    assert jobs.calls[0][1:4] == ("administrator", "abc", ["node"])
-    event = audits.for_request(request_id)
-    assert event.occurred_at is not None
-    assert (event.actor, event.authority_revision, event.targets) == (
-        "administrator",
-        "abc",
-        ("node",),
-    )
-    audit_response = client.get("/api/v1/audit", headers=headers)
-    assert audit_response.status_code == 200
-    assert (
-        audit_response.json()["events"][0]["occurred_at"]
-        == event.occurred_at.isoformat()
-    )
-
-
-def test_generic_job_endpoint_cannot_create_reconciliation_authority() -> None:
+def test_generic_job_submission_route_is_retired() -> None:
     client, headers, jobs, _audits = _client("administrator")
 
-    response = client.post(
+    assert client.post(
         "/api/v1/jobs",
         headers=headers,
-        json={
-            "kind": "reconcile",
-            "authority_revision": "a" * 64,
-            "targets": ["spk_" + "1" * 32],
-            "payload": {"reconciliation_id": "attacker-controlled"},
-        },
-    )
-
-    assert response.status_code == 422
-    assert jobs.calls == []
-
-
-def test_production_boundary_rejects_direct_probe_job_submission() -> None:
-    client, headers, jobs, _audits = _client(
-        "administrator",
-        generic_jobs_enabled=False,
-    )
-
-    response = client.post(
-        "/api/v1/jobs",
-        headers=headers,
-        json={
-            "kind": "probe",
-            "authority_revision": "a" * 64,
-            "targets": ["spk_" + "1" * 32],
-            "payload": {},
-        },
-    )
-
-    assert response.status_code == 422
+        json={"kind": "probe", "authority_revision": "abc", "targets": [], "payload": {}},
+    ).status_code == 405
     assert jobs.calls == []
 
 
@@ -298,18 +223,13 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
 def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     client, issued, _service, _sessions, _clock, _codec, jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
-    document = {
-        "kind": "probe",
-        "authority_revision": "abc",
-        "targets": [],
-        "payload": {},
-    }
+    document = {"proposal_digest": "a" * 64}
 
-    assert client.post("/api/v1/jobs", json=document).status_code == 403
+    assert client.post("/api/v1/changes", json=document).status_code == 403
     client.cookies.set("vonk_csrf", issued.csrf)
     assert (
         client.post(
-            "/api/v1/jobs",
+            "/api/v1/changes",
             headers={"x-csrf-token": "wrong"},
             json=document,
         ).status_code
@@ -318,11 +238,11 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     assert jobs.calls == []
     assert (
         client.post(
-            "/api/v1/jobs",
+            "/api/v1/changes",
             headers={"x-csrf-token": issued.csrf},
             json=document,
         ).status_code
-        == 202
+        == 503
     )
 
 
@@ -427,6 +347,31 @@ def test_upgrade_preview_accepts_current_package_echo_but_rejects_unsigned_custo
         "a custom agent package requires its node-bound repair manifest"
     )
     assert len(upgrades.calls) == 1
+
+
+def test_upgrade_preview_response_is_canonical_and_closed() -> None:
+    upgrades = RepairPreviewUpgrades()
+    client, issued, *_ = _browser_client(agent_upgrades=upgrades)
+    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("vonk_csrf", issued.csrf)
+
+    response = client.post(
+        "/api/v1/agents/upgrades/preview",
+        headers={"x-csrf-token": issued.csrf},
+        json=repair_preview_document(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "authority_revision",
+        "node_ids",
+        "package",
+        "plan_digest",
+        "repair_manifest",
+        "strategy",
+    }
+    assert body["package"]["schema_version"] == 1
 
 
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
