@@ -2920,8 +2920,12 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
 
     assert preview.allowed is True
     assert preview.model_content_sha256 == model_digest
-    assert preview.shared_cache_policy == "remove-unreferenced-model-artifacts-only"
+    assert preview.shared_cache_policy == "retain-shared-download-cache"
     assert preview.bytes_removed == 480
+    assert preview.warnings[0].detail == (
+        "Only affected installation copies are removed; reusable downloaded model "
+        "cache remains retained."
+    )
     assert [item.installation_id for item in preview.installations] == sorted(
         [installation.owner_id, second_installation.owner_id]
     )

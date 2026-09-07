@@ -6,8 +6,11 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from vonk_agent_protocol import canonical_message
+
+SharedCachePolicy = Literal["retain-shared-download-cache"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +136,7 @@ class ModelDeletionPlan:
     active_run_count: int
     blockers: tuple[ActionReason, ...]
     warnings: tuple[ActionReason, ...]
-    shared_cache_policy: str
+    shared_cache_policy: SharedCachePolicy
     plan_digest: str
 
 
@@ -516,7 +519,7 @@ def model_deletion_plan(
         "active_runs_truncated": active_runs_truncated,
         "active_operation": active_operation,
         "evidence_exact": evidence_exact,
-        "shared_cache_policy": "remove-unreferenced-model-artifacts-only",
+        "shared_cache_policy": "retain-shared-download-cache",
     }
     digest = hashlib.sha256(canonical_message(identity)).hexdigest()
     return ModelDeletionPlan(
@@ -532,10 +535,10 @@ def model_deletion_plan(
         warnings=(
             ActionReason(
                 "model-delete.shared_cache_protected",
-                "Only exact artifact directories unreferenced by remaining installations are removed; unrelated immutable caches remain protected.",
+                "Only affected installation copies are removed; reusable downloaded model cache remains retained.",
             ),
         ),
-        shared_cache_policy="remove-unreferenced-model-artifacts-only",
+        shared_cache_policy="retain-shared-download-cache",
         plan_digest=digest,
     )
 
@@ -545,6 +548,7 @@ __all__ = [
     "ModelDeletionInstallationImpact",
     "ModelDeletionNodeImpact",
     "ModelDeletionPlan",
+    "SharedCachePolicy",
     "StopNodeImpact",
     "StopPlan",
     "UninstallActiveRun",
