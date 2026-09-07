@@ -54,6 +54,7 @@ from .preparation_contract import (
     RuntimeImagePreparation,
     TargetAssetState,
 )
+from .recipe_builds import RecipeBuildPlan
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .resource_planning import (
@@ -895,6 +896,15 @@ class RecipeLifecyclePhaseExecutor:
             raise RunSwitchOperationConflict(
                 "run-switch.container-build-identity-unavailable"
             )
+        expected_build_id = _string_or_none(plan.build.build_id)
+        expected_build_input = _string_or_none(plan.build.build_input_sha256)
+        if (
+            expected_build_id is not None
+            and expected_build_id != build_id
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.container-build-plan-invalid"
+            )
         with self._sessions() as session:
             build = session.get(RecipeBuild, build_id)
             if build is None or build.recipe_revision_id != revision_id:
@@ -949,25 +959,57 @@ class RecipeLifecyclePhaseExecutor:
                 )
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
-        preview_build = getattr(self._lifecycle, "preview_build", None)
+            source_bundle_sha256 = build.source_bundle_sha256
+            stored_plan = build.plan
+            if (
+                expected_build_input is not None
+                and expected_build_input != build_input_sha256
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
         start_build = getattr(self._lifecycle, "build", None)
-        if not callable(preview_build) or not callable(start_build):
+        if not callable(start_build):
             raise RunSwitchOperationConflict(
                 "run-switch.container-build-executor-unavailable"
             )
-        try:
-            build_plan = preview_build(revision_id, builder_node_id)
-        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
-            raise RunSwitchOperationConflict(
-                f"run-switch.container-build-plan-unavailable: {error}"
-            ) from error
-        if (
-            getattr(build_plan, "build_id", None) != build_id
-            or getattr(build_plan, "build_input_sha256", None) != build_input_sha256
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.container-build-plan-changed"
-            )
+        # Preview already selected and persisted the exact executable build
+        # plan in ``RecipeBuild.plan``.  Re-running preview here would admit
+        # mutable builder evidence a second time and could derive a different
+        # build id/input digest between preview and apply.  Consume the
+        # durable producer record instead; the lifecycle build primitive still
+        # validates the current builder runtime and resource admission before
+        # it queues the child.
+        with self._sessions() as session:
+            revision = session.get(CatalogDocumentRevision, revision_id)
+            if (
+                not isinstance(stored_plan, Mapping)
+                or stored_plan.get("build_id") != build_id
+                or stored_plan.get("recipe_revision_id") != revision_id
+                or stored_plan.get("source_bundle_sha256") != source_bundle_sha256
+                or stored_plan.get("build_input_sha256") != build_input_sha256
+                or revision is None
+                or revision.kind != "recipe"
+                or revision.state != "active"
+                or stored_plan.get("recipe_content_sha256") != revision.content_digest
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
+            try:
+                build_plan = RecipeBuildPlan(
+                    build_id=build_id,
+                    recipe_revision_id=revision_id,
+                    recipe_content_sha256=revision.content_digest,
+                    builder_node_id=builder_node_id,
+                    source_bundle_sha256=source_bundle_sha256,
+                    build_input_sha256=build_input_sha256,
+                    agent_payload=dict(stored_plan),
+                )
+            except (TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.container-build-plan-invalid: {error}"
+                ) from error
         child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
         try:
             value = start_build(
