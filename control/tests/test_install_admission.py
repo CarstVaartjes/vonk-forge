@@ -37,7 +37,9 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build",
+    *,
+    denied_jurisdictions: tuple[str, ...] = (),
+    recipe_mode: str = "build",
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
@@ -87,7 +89,8 @@ def _seed_canonical_catalog(
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode,
+        denied_jurisdictions=denied_jurisdictions,
+        recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
     model_digest = content_sha256(model)
@@ -186,13 +189,14 @@ def _seed_canonical_catalog(
             ]
         )
         session.flush()
-        stored_model_revision = session.get(
-            CatalogDocumentRevision, MODEL_REVISION_ID
-        )
+        stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
-        assert content_sha256(
-            ModelDefinition.model_validate(stored_model_revision.document)
-        ) == stored_model_revision.content_digest
+        assert (
+            content_sha256(
+                ModelDefinition.model_validate(stored_model_revision.document)
+            )
+            == stored_model_revision.content_digest
+        )
         stored_recipe_revision = session.get(
             CatalogDocumentRevision, RECIPE_REVISION_ID
         )
@@ -531,6 +535,7 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
         "install.license_territorial_restrictions_informational"
     )
 
+
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     sessions, now, node, mapping, build, sizes = setup(tmp_path, free=80)
     with sessions.begin() as session:
@@ -649,9 +654,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
         )
     )
 
-    refreshed = service.plan_install(
-        mapping, build, now=now + timedelta(seconds=1)
-    )
+    refreshed = service.plan_install(mapping, build, now=now + timedelta(seconds=1))
 
     assert refreshed.allowed is True
     assert refreshed.nodes[0].inventory_observed_at != (
