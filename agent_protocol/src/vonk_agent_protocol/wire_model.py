@@ -158,10 +158,9 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
         document.pop("checkpoint", None)
     if parsed.completed_bytes == 0 and "completed_bytes" not in value:
         document.pop("completed_bytes", None)
-    if (
-        parsed.total_bytes_known is False
-        and "total_bytes_known" not in value
-        and not set(value) & {
+    extended = bool(
+        set(value)
+        & {
             "completed_bytes",
             "total_bytes",
             "bytes_per_second",
@@ -169,8 +168,12 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
             "checkpoint",
             "members",
         }
-    ):
-        document.pop("total_bytes_known", None)
+    )
+    if parsed.total_bytes_known is False and "total_bytes_known" not in value:
+        if extended:
+            document["total_bytes_known"] = False
+        else:
+            document.pop("total_bytes_known", None)
     return document
 
 

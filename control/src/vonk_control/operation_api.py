@@ -704,8 +704,8 @@ def _progress_projection(value: object) -> OperationProgress | None:
     try:
         OperationProgress.model_validate(value, strict=True)
         normalized = normalize_operation_progress(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError("durable operation progress is invalid") from error
+    except (TypeError, ValueError):
+        return None
     return OperationProgress.model_validate(normalized)
 
 
