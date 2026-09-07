@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import tarfile
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -32,7 +34,10 @@ from vonk_control.compiled_execution_plan import (
     materialized_model_path,
     validate_compiled_launch_payload,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
+    _bind_runtime_artifacts,
+)
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
     AgentCertificate,
@@ -49,7 +54,10 @@ from vonk_control.models import (
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import _compiled_plan_for_start
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_bundles import SourceBundleStore
+
+from tests.recipe_library_source import recipe_library_root
 
 
 def _spec(
@@ -1161,79 +1169,93 @@ def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None
 def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     recipe_name: str,
 ) -> None:
-    recipe = json.loads(
-        (Path("/opt/vonk-forge-recipes") / "recipes" / recipe_name).read_text(
-            encoding="utf-8"
+    library_root = recipe_library_root()
+    recipe_document = json.loads(
+        (library_root / "recipes" / recipe_name).read_text(encoding="utf-8")
+    )
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    model_slug = recipe_document["models"][0]["model"]["slug"]
+    model = ModelDefinition.model_validate(
+        json.loads(
+            (library_root / "models" / f"{model_slug}.json").read_text(
+                encoding="utf-8"
+            )
         )
     )
-    model = json.loads(
-        (
-            Path("/opt/vonk-forge-recipes")
-            / "model-versions"
-            / "ltx-2-5-22b-distilled-bf16-diffusers.json"
-        ).read_text(encoding="utf-8")
-    )
-    raw_artifacts = {item["id"]: item for item in recipe["artifacts"]}
-    targets = [
-        raw_artifacts["license-token-preflight"]["mount"]["target"],
-        raw_artifacts["target"]["mount"]["target"],
-    ]
-    physical = model["artifacts"][0]
-    model_content_sha256 = recipe["model"]["content_sha256"]
+    model_selection = recipe.models[0]
+    physical = next(file for file in model.files if file.id == "filtered-snapshot")
+    model_content_sha256 = model_selection.model.content_sha256
     model_object = {
         "model_content_sha256": model_content_sha256,
-        "file_id": physical["id"],
-        "path": physical["path"],
-        "sha256": physical["sha256"],
-        "bytes": physical["installed_bytes"],
-        "roles": physical["roles"],
+        "file_id": physical.id,
+        "path": physical.path,
+        "sha256": physical.sha256,
+        "bytes": physical.size_bytes,
+        "roles": list(physical.roles),
         "distribution_object": {
-            "name": physical["path"],
-            "sha256": physical["sha256"],
-            "bytes": physical["installed_bytes"],
+            "name": physical.path,
+            "sha256": physical.sha256,
+            "bytes": physical.size_bytes,
             "kind": "model",
         },
     }
-    spec = _spec()
-    spec["model_dependencies"] = [
-        {
-            "selection_id": "primary",
-            "publisher": model["identity"]["publisher"],
-            "slug": model["identity"]["slug"],
-            "content_sha256": model_content_sha256,
-            "artifact_key": physical["id"],
-        }
+    package_path = library_root / "packages" / f"{recipe.identity.slug}.tar.gz"
+    with tarfile.open(package_path, mode="r:*") as package_archive:
+        package_paths = package_archive.getnames()
+    package_paths.append(recipe.execution.build.context.path)
+    image_digest = "1" * 64
+    spec = compile_runtime_spec(
+        recipe,
+        models=[model],
+        package_handle={
+            "image_digest": image_digest,
+            "image_reference": f"localhost/vonk/build@sha256:{image_digest}",
+            "platform": "linux/arm64",
+            "paths": package_paths,
+        },
+        role="entrypoint",
+        rank=0,
+    )
+    model_projection = SimpleNamespace(
+        document=model.model_dump(mode="json"),
+        content_digest=content_sha256(model),
+    )
+    spec = _bind_runtime_artifacts(spec, [model_projection])
+    assert len(spec["artifacts"]) == 2
+    assert [
+        (item["id"], item["selection_id"], item["file_id"], item["path"])
+        for item in spec["artifacts"]
+    ] == [
+        (
+            "primary-filtered-snapshot",
+            "primary",
+            "filtered-snapshot",
+            "filtered-snapshot",
+        ),
+        (
+            "primary-filtered-snapshot-2",
+            "primary",
+            "filtered-snapshot",
+            "filtered-snapshot",
+        ),
     ]
-    spec["artifacts"] = [
-        {
-            "id": artifact_id,
-            "selection_id": "primary",
-            "file_id": physical["id"],
-            "path": physical["path"],
-            "sha256": physical["sha256"],
-            "bytes": physical["installed_bytes"],
-            "roles": physical["roles"],
-            "mount": {"source": "/run/vonk/models/primary", "target": target, "read_only": True},
-            "model": {
-                "publisher": recipe["model"]["publisher"],
-                "slug": recipe["model"]["slug"],
-                "content_sha256": model_content_sha256,
-            },
-        }
-        for artifact_id, target in zip(
-            ("license-token-preflight", "target"), targets, strict=True
-        )
-    ]
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    targets = [item["mount"]["target"] for item in spec["artifacts"]]
+    assert targets == ["/models/license-token-preflight", "/models/target"]
     plan = compile_verified_execution_plan(
         spec,
         model_artifact_set_sha256="d" * 64,
         model_objects=[model_object],
-        runtime_image=_image(),
+        runtime_image=_image(source="controller-build", build_id="1" * 64),
     )
     assert len(plan.artifacts) == 2
     assert [artifact.mount.target for artifact in plan.artifacts] == targets
-    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical["sha256"]
+    assert [
+        (artifact.selection_id, artifact.file_id, artifact.path)
+        for artifact in plan.artifacts
+    ] == [("primary", "filtered-snapshot", "filtered-snapshot")] * 2
+    assert plan.artifacts[0].model == plan.artifacts[1].model
+    assert plan.artifacts[0].distribution_object == plan.artifacts[1].distribution_object
+    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical.sha256
 
 
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(

@@ -634,7 +634,7 @@ mod tests {
         value["artifacts"].as_array_mut().unwrap().push(projection);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
-        assert_eq!(invocation.mounts.len(), 8);
+        assert_eq!(invocation.mounts.len(), 7);
         assert_eq!(invocation.mounts[0].source, invocation.mounts[3].source);
         assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
         assert_eq!(invocation.mounts[3].target, "/models/secondary/config.json");

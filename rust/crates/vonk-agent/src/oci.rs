@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     net::IpAddr,
@@ -99,6 +99,20 @@ const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
 const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
 const MAX_COMPILED_DOCUMENT_BYTES: u64 = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
 const TRUSTED_RUNTIME_UID: u32 = 10_001;
+
+type PhysicalArtifactIdentity = (
+    String,
+    String,
+    u64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u64,
+    String,
+);
+type PhysicalMaterialization = (PathBuf, PhysicalArtifactIdentity);
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1156,7 +1170,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         });
         if receipt.is_some() {
             let mut fast_path = true;
-            for artifact in &plan.artifacts {
+            for artifact in unique_plan_artifacts(&plan) {
                 let destination = models.join(&artifact.selection_id).join(&artifact.path);
                 let Some(entry) = receipt_index.as_ref().and_then(|index| {
                     index.get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
@@ -1175,8 +1189,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
 
-        let mut refreshed = Vec::with_capacity(plan.artifacts.len());
-        for artifact in &plan.artifacts {
+        let unique_artifacts = unique_plan_artifacts(&plan);
+        let mut refreshed = Vec::with_capacity(unique_artifacts.len());
+        for artifact in unique_artifacts {
             let destination = models.join(&artifact.selection_id).join(&artifact.path);
             let (mut file, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
             if let Some(entry) = receipt_index.as_ref().and_then(|index| {
@@ -1337,8 +1352,9 @@ fn write_installation_metadata(
     plan: &CompiledExecutionPlan,
 ) -> Result<(), OciError> {
     let models = installation.join("models");
-    let mut entries = Vec::with_capacity(plan.artifacts.len());
-    for artifact in &plan.artifacts {
+    let unique_artifacts = unique_plan_artifacts(plan);
+    let mut entries = Vec::with_capacity(unique_artifacts.len());
+    for artifact in unique_artifacts {
         let path = models.join(&artifact.selection_id).join(&artifact.path);
         let metadata = fs::symlink_metadata(&path)?;
         if !trusted_model_metadata(&metadata, artifact.size_bytes) {
@@ -1388,8 +1404,9 @@ fn receipt_matches_plan(
     receipt: &InstallationMetadataReceipt,
     plan: &CompiledExecutionPlan,
 ) -> bool {
+    let unique_artifacts = unique_plan_artifacts(plan);
     if receipt.schema_version != INSTALLATION_METADATA_SCHEMA_VERSION
-        || receipt.entries.len() != plan.artifacts.len()
+        || receipt.entries.len() != unique_artifacts.len()
     {
         return false;
     }
@@ -1405,10 +1422,20 @@ fn receipt_matches_plan(
             return false;
         }
     }
-    plan.artifacts.iter().all(|artifact| {
+    unique_artifacts.iter().all(|artifact| {
         observed.get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
             == Some(&(&artifact.sha256, artifact.size_bytes))
     })
+}
+
+fn unique_plan_artifacts(
+    plan: &CompiledExecutionPlan,
+) -> Vec<&crate::workloads::CompiledModelArtifact> {
+    let mut seen = BTreeSet::new();
+    plan.artifacts
+        .iter()
+        .filter(|artifact| seen.insert((artifact.selection_id.as_str(), artifact.path.as_str())))
+        .collect()
 }
 
 fn installation_metadata_entry(
@@ -1575,24 +1602,7 @@ fn materialize_compiled_models(
         .join("models")
         .join(&plan.identity.model_artifact_set_sha256);
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
-    let mut physical_by_path: BTreeMap<
-        (String, String),
-        (
-            PathBuf,
-            (
-                String,
-                String,
-                u64,
-                String,
-                String,
-                String,
-                String,
-                String,
-                u64,
-                String,
-            ),
-        ),
-    > = BTreeMap::new();
+    let mut physical_by_path: BTreeMap<(String, String), PhysicalMaterialization> = BTreeMap::new();
     for artifact in &plan.artifacts {
         let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
         let destination = destination_root
@@ -1797,7 +1807,8 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OciError, OciRuntime, SHA256_FILE_CALLS, materialize_compiled_models, reset_runtime_tmp,
+        OciError, OciRuntime, SHA256_FILE_CALLS, materialize_compiled_models,
+        read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
         write_installation_metadata,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
@@ -1877,7 +1888,7 @@ mod tests {
                     "sha256": secondary,
                     "size_bytes": 9,
                     "roles": ["entrypoint"],
-                    "mount": {"target": "/models", "read_only": true},
+                    "mount": {"target": "/models/secondary", "read_only": true},
                     "model": {"publisher": "vonk-forge", "slug": "secondary-model", "content_sha256": "f".repeat(64)},
                     "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 9, "kind": "model"}
                 }
@@ -1929,6 +1940,7 @@ mod tests {
             artifact["selection_id"] = json!(format!("model-{index:04}"));
             artifact["file_id"] = json!(format!("config-{index:04}"));
             artifact["model"]["slug"] = json!(format!("primary-model-{index:04}"));
+            artifact["mount"]["target"] = json!(format!("/models/model-{index:04}"));
             artifacts.push(artifact);
         }
         serde_json::from_value(value).unwrap()
@@ -1949,7 +1961,7 @@ mod tests {
         plan: crate::workloads::CompiledExecutionPlan,
     ) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
         let installation = data.join("installations").join(&installation_id);
-        for artifact in &plan.artifacts {
+        for artifact in unique_plan_artifacts(&plan) {
             let path = installation
                 .join("models")
                 .join(&artifact.selection_id)
@@ -2018,6 +2030,45 @@ mod tests {
 
         let after = SHA256_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn installation_metadata_deduplicates_physical_projection_entries() {
+        let data = tempdir().unwrap();
+        let mut value = compiled_plan();
+        value["identity"]["model_artifact_bytes"] = json!(7);
+        let first = value["artifacts"][0].clone();
+        let mut second = first.clone();
+        second["mount"]["target"] = json!("/models/target");
+        value["artifacts"] = json!([first, second]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let (installation_id, installation, plan) = persisted_plan_installation(
+            data.path(),
+            "cb555393-764b-4eb6-8f15-b416d2894291".to_owned(),
+            plan,
+        );
+        assert_eq!(plan.artifacts.len(), 2);
+        assert_eq!(
+            read_installation_metadata(&installation)
+                .unwrap()
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+
+        std::thread::sleep(Duration::from_millis(2));
+        fs::write(installation.join("models/primary/config.json"), b"primary").unwrap();
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before + 1);
     }
 
     #[test]
@@ -2334,6 +2385,7 @@ mod tests {
     #[test]
     fn compiled_models_materialize_one_source_for_two_mount_projections() {
         let mut value = compiled_plan();
+        value["identity"]["model_artifact_bytes"] = json!(7);
         let mut projection = value["artifacts"][0].clone();
         projection["mount"]["target"] = json!("/models/target");
         value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
