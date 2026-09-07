@@ -45,7 +45,7 @@ class _Authority(CertificateAuthority):
             b"certificate",
             b"chain",
             "serial-c",
-            "fp-c",
+            hashlib.sha256(b"certificate").hexdigest(),
             now,
             now + timedelta(days=1),
         )
