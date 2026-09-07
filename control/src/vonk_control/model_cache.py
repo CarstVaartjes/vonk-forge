@@ -17,9 +17,10 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -39,6 +40,7 @@ from .logging import redact_text
 from .model_cache_contract import (
     ModelCacheOperationResponse,
     ModelCacheOperationResult,
+    ModelCacheRepairCheckpoint,
     parse_model_cache_result,
 )
 from .models import (
@@ -70,6 +72,8 @@ _RETRY_BASE_SECONDS = 5
 _RETRY_MAX_SECONDS = 300
 _MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
 _TRANSFER_CLAIM_SECONDS = 120
+_UPSTREAM_CHECK_SECONDS = 8.0
+_UPSTREAM_CHECK_WORKERS = 4
 _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
@@ -918,6 +922,10 @@ class ModelCacheService:
             max_workers=max_parallel_downloads,
             thread_name_prefix="vonk-model-cache",
         )
+        self._upstream_executor = ThreadPoolExecutor(
+            max_workers=_UPSTREAM_CHECK_WORKERS, thread_name_prefix="vonk-model-updates"
+        )
+        self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, dict[str, object]] = {}
         self._digest_events: dict[str, threading.Event] = {}
         self._hf_cooldown_until: datetime | None = None
@@ -930,6 +938,7 @@ class ModelCacheService:
         # releasing the service. HTTP clients have bounded read timeouts, so
         # this wait is finite while preventing post-shutdown DB/file writes.
         self._executor.shutdown(wait=True, cancel_futures=True)
+        self._upstream_executor.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._advance_background_operations()
 
@@ -1851,12 +1860,11 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             assert operation is not None
-            repaired = operation.payload.get("repaired_objects", [])
-            if force and (
-                not isinstance(repaired, list)
-                or any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in repaired)
-            ):
-                raise ModelCacheConflict("model_cache.repair_state_invalid", "repair checkpoints are invalid")
+            checkpoint = (
+                ModelCacheRepairCheckpoint.model_validate(operation.payload.get("repair_checkpoint"))
+                if force else None
+            )
+            repaired = checkpoint.completed_objects if checkpoint is not None else []
         if (not force or spec.sha256 in repaired) and self._object_is_verified(spec):
             self._mark_artifact_verified(spec, set_digest)
             return
@@ -1873,9 +1881,11 @@ class ModelCacheService:
                 operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
                 assert operation is not None
                 payload = dict(operation.payload)
-                payload["repaired_objects"] = list(dict.fromkeys([
-                    *payload.get("repaired_objects", []), spec.sha256,
-                ]))
+                checkpoint = ModelCacheRepairCheckpoint.model_validate(payload.get("repair_checkpoint"))
+                payload["repair_checkpoint"] = ModelCacheRepairCheckpoint(
+                    transfer_id=checkpoint.transfer_id,
+                    completed_objects=list(dict.fromkeys([*checkpoint.completed_objects, spec.sha256])),
+                ).model_dump(mode="json")
                 operation.payload = payload
 
     def _download_artifact(
@@ -1893,10 +1903,8 @@ class ModelCacheService:
             with self._session() as session:
                 operation = session.get(ModelCacheOperation, operation_id)
                 assert operation is not None
-                transfer_id = operation.payload.get("repair_transfer_id")
-                if not isinstance(transfer_id, str) or re.fullmatch(r"[0-9a-f]{32}", transfer_id) is None:
-                    raise ModelCacheConflict("model_cache.repair_state_invalid", "repair transfer identity is invalid")
-                partial_owner = "repair-" + transfer_id
+                checkpoint = ModelCacheRepairCheckpoint.model_validate(operation.payload.get("repair_checkpoint"))
+                partial_owner = "repair-" + checkpoint.transfer_id
         part = self._partial_path(partial_owner, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if part.is_symlink():
@@ -3681,8 +3689,7 @@ class ModelCacheService:
                 "model_cache.download_blocked", "insufficient-reserved-storage"
             )
         payload = {
-            "repair_transfer_id": uuid.uuid4().hex,
-            "repaired_objects": [],
+            "repair_checkpoint": ModelCacheRepairCheckpoint(transfer_id=uuid.uuid4().hex, completed_objects=[]).model_dump(mode="json"),
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
             "artifact_set_sha256": digest,
@@ -4383,6 +4390,62 @@ class ModelCacheService:
                 client.close()
         return result
 
+    def _check_upstream_revisions(
+        self, identities: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], dict[str, object]]:
+        """Bound metadata concurrency and total response latency across the page."""
+        ordered = list(dict.fromkeys(identities))
+        results: dict[tuple[str, str], dict[str, object]] = {}
+        pending: dict[Future, tuple[str, str]] = {}
+        deadline = time.monotonic() + _UPSTREAM_CHECK_SECONDS
+        remaining = iter(ordered)
+        exhausted = False
+        while time.monotonic() < deadline:
+            while not exhausted and len(pending) < _UPSTREAM_CHECK_WORKERS:
+                if not self._upstream_slots.acquire(blocking=False):
+                    break
+                key = next(remaining, None)
+                if key is None:
+                    self._upstream_slots.release()
+                    exhausted = True
+                    break
+                try:
+                    future = self._upstream_executor.submit(self._check_upstream_revision, *key)
+                except RuntimeError:
+                    self._upstream_slots.release()
+                    break
+                future.add_done_callback(lambda _: self._upstream_slots.release())
+                pending[future] = key
+            if not pending:
+                break
+            done, _ = wait(pending, timeout=max(0, deadline - time.monotonic()), return_when=FIRST_COMPLETED)
+            if not done:
+                break
+            for future in done:
+                key = pending.pop(future)
+                try:
+                    results[key] = future.result()
+                except Exception:  # noqa: BLE001 - diagnostics must not hide local catalog results
+                    # A diagnostic/provider bug cannot hide the catalog page.
+                    results[key] = {
+                        "repository": key[0], "pinned_revision": key[1],
+                        "latest_revision": None, "status": "check-failed",
+                        "checked_at": _iso(self._clock()),
+                        "error_code": "model_cache.upstream_check_failed",
+                    }
+        for future in pending:
+            future.cancel()
+        for repository, revision in ordered:
+            results.setdefault((repository, revision), {
+                "repository": repository,
+                "pinned_revision": revision,
+                "latest_revision": None,
+                "status": "check-failed",
+                "checked_at": _iso(self._clock()),
+                "error_code": "model_cache.upstream_check_budget_exhausted",
+            })
+        return results
+
     def discover_updates(
         self,
         *,
@@ -4428,7 +4491,7 @@ class ModelCacheService:
                     )
             page = rows[start : start + limit]
             result = []
-            upstream_checks: dict[tuple[str, str], dict[str, object]] = {}
+            upstream_sources: dict[str, list[tuple[str, str]]] = {}
             for row in page:
                 manifest = ArtifactSetManifest.from_document(row.manifest)
                 model_update, recipe_update = self._update_flags(session, row, manifest)
@@ -4455,17 +4518,16 @@ class ModelCacheService:
                     latest_recipe = self._latest_recipe_digest(
                         session, row.recipe_revision_sha256
                     )
-                upstream_revisions = []
+                sources: list[tuple[str, str]] = []
                 if check_upstream:
                     for spec in manifest.artifacts:
                         if spec.kind != "huggingface.file" or spec.revision is None:
                             continue
                         repository = "/".join(urlsplit(spec.source).path.strip("/").split("/")[:2])
                         key = (repository, spec.revision)
-                        if key not in upstream_checks:
-                            upstream_checks[key] = self._check_upstream_revision(*key)
-                        if upstream_checks[key] not in upstream_revisions:
-                            upstream_revisions.append(upstream_checks[key])
+                        if key not in sources:
+                            sources.append(key)
+                upstream_sources[row.artifact_set_sha256] = sources
                 result.append(
                     {
                         "schema_version": SCHEMA_VERSION,
@@ -4478,7 +4540,7 @@ class ModelCacheService:
                         "model_update_candidates": model_update_candidates,
                         "recipe_revision_sha256": row.recipe_revision_sha256,
                         "latest_recipe_revision_sha256": latest_recipe,
-                        "upstream_revisions": upstream_revisions,
+                        "upstream_revisions": [],
                         "model_update_available": model_update,
                         "recipe_update_available": recipe_update,
                         "updated_at": _iso(row.updated_at),
@@ -4488,13 +4550,23 @@ class ModelCacheService:
             if start + limit < total and page:
                 last = page[-1]
                 next_boundary = (_iso(last.updated_at) or "", last.artifact_set_sha256)
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "source_policy": SOURCE_POLICY,
-                "updates": tuple(result),
-                "total": total,
-                "_next_boundary": next_boundary,
-            }
+        # All catalog values above are detached JSON snapshots. Provider I/O
+        # must not retain a DB connection or transaction while waiting.
+        if check_upstream:
+            upstream_checks = self._check_upstream_revisions([
+                key for sources in upstream_sources.values() for key in sources
+            ])
+            for entry in result:
+                entry["upstream_revisions"] = [
+                    upstream_checks[key] for key in upstream_sources[entry["artifact_set_sha256"]]
+                ]
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "source_policy": SOURCE_POLICY,
+            "updates": tuple(result),
+            "total": total,
+            "_next_boundary": next_boundary,
+        }
 
     def storage_summary(self) -> StorageSummary:
         usage = shutil.disk_usage(self._root)

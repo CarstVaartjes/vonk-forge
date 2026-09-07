@@ -62,7 +62,11 @@ The updates endpoint normally returns accepted catalog candidates without
 network access. Explicit checks use
 `GET /api/v1/model-cache/updates?check_upstream=true`, optionally filtered by
 `artifact_set_sha256`. They fetch only repository metadata, once per repository
-and pin within the result page. `upstream_revisions` reports the pinned and
+and pin within the result page. Up to four checks run concurrently after the
+catalog DB session closes, within an eight-second page budget. Unfinished checks
+report `model_cache.upstream_check_budget_exhausted`; accepted catalog candidates
+remain available. Provider rate limiting is reported as a failed check with its
+stable error code. `upstream_revisions` reports the pinned and
 current upstream revisions, check time, and `current`, `update-available` or
 `check-failed`. Provider failure does not hide accepted catalog candidates.
 

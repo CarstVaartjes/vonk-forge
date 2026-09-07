@@ -1435,3 +1435,13 @@ def test_repair_capacity_admission_preserves_verified_object(cache, tmp_path, mo
                              artifact_set_sha256=digest,
                              plan_digest=service.repair_preview(digest)["plan_digest"])
     assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == b"model"
+
+
+def test_repair_checkpoint_requires_exact_nested_contract():
+    from vonk_control.model_cache_contract import ModelCacheRepairCheckpoint
+    valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
+    assert ModelCacheRepairCheckpoint.model_validate(valid).model_dump(mode="json") == valid
+    for invalid in ({"transfer_id": "a" * 32}, dict(valid, transfer_id="../object"),
+                    dict(valid, completed_objects=[7]), dict(valid, legacy=True)):
+        with pytest.raises(ValidationError):
+            ModelCacheRepairCheckpoint.model_validate(invalid)

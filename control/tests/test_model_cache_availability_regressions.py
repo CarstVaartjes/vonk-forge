@@ -845,6 +845,7 @@ def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) 
     latest = "2" * 40
 
     def handler(request):
+        assert sessions.kw["bind"].pool.checkedout() == 0
         calls.append(str(request.url))
         assert request.url.path == "/api/models/acme/model/revision/main"
         return httpx.Response(200, json={"sha": latest})
@@ -903,3 +904,27 @@ def test_inventory_cursor_survives_unchanged_storage_reconciliation(tmp_path: Pa
     assert following["entries"][0]["artifact_set_sha256"] != page["entries"][0]["artifact_set_sha256"]
     assert following["_next_boundary"] is None
     service.close()
+
+
+def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypatch):
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    release = threading.Event()
+    calls = []
+    monkeypatch.setattr("vonk_control.model_cache._UPSTREAM_CHECK_SECONDS", 0.05)
+    def check(repository, revision):
+        calls.append(repository)
+        release.wait(2)
+        return {"status": "current"}
+    monkeypatch.setattr(service, "_check_upstream_revision", check)
+    keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
+    started = time.monotonic()
+    try:
+        result = service._check_upstream_revisions(keys)
+        assert time.monotonic() - started < 0.5
+        assert len(calls) == 4
+        assert list(result) == keys
+        assert all(row["error_code"] == "model_cache.upstream_check_budget_exhausted" for row in result.values())
+    finally:
+        release.set()
+        service.close()

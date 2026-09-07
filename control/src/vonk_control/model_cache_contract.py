@@ -27,6 +27,11 @@ class StrictModel(StrictJSONModel):
     )
 
 
+class ModelCacheRepairCheckpoint(StrictModel):
+    transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    completed_objects: list[Digest]
+
+
 class ModelCacheDownloadRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
