@@ -24,13 +24,11 @@ class ManagedCatalogWithdrawnRecipe:
     """
         Attributes:
             recipe_id (str):
-            model_version_key (Union[None, Unset, str]):
             recipe_uri (Union[None, Unset, str]):
             release_version (Union[None, Unset, str]):
      """
 
     recipe_id: str
-    model_version_key: Union[None, Unset, str] = UNSET
     recipe_uri: Union[None, Unset, str] = UNSET
     release_version: Union[None, Unset, str] = UNSET
 
@@ -40,12 +38,6 @@ class ManagedCatalogWithdrawnRecipe:
 
     def to_dict(self) -> dict[str, Any]:
         recipe_id = self.recipe_id
-
-        model_version_key: Union[None, Unset, str]
-        if isinstance(self.model_version_key, Unset):
-            model_version_key = UNSET
-        else:
-            model_version_key = self.model_version_key
 
         recipe_uri: Union[None, Unset, str]
         if isinstance(self.recipe_uri, Unset):
@@ -65,8 +57,6 @@ class ManagedCatalogWithdrawnRecipe:
         field_dict.update({
             "recipe_id": recipe_id,
         })
-        if model_version_key is not UNSET:
-            field_dict["model_version_key"] = model_version_key
         if recipe_uri is not UNSET:
             field_dict["recipe_uri"] = recipe_uri
         if release_version is not UNSET:
@@ -80,16 +70,6 @@ class ManagedCatalogWithdrawnRecipe:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         recipe_id = d.pop("recipe_id")
-
-        def _parse_model_version_key(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        model_version_key = _parse_model_version_key(d.pop("model_version_key", UNSET))
-
 
         def _parse_recipe_uri(data: object) -> Union[None, Unset, str]:
             if data is None:
@@ -113,7 +93,6 @@ class ManagedCatalogWithdrawnRecipe:
 
         managed_catalog_withdrawn_recipe = cls(
             recipe_id=recipe_id,
-            model_version_key=model_version_key,
             recipe_uri=recipe_uri,
             release_version=release_version,
         )

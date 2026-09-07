@@ -12,6 +12,14 @@ pub enum WorkloadError {
 
 pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 // These bounds carry the compiler's structured argv without treating engine
 // arguments as container-engine options.  Keep the first item non-empty (it
 // is the executable), while subsequent items are opaque values and may be
@@ -20,6 +28,11 @@ pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 const MAX_ARGV_ITEMS: usize = 512;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 const MAX_ARGV_BYTES: usize = 1024 * 1024;
+// A canonical launch can project one mount for each selected model artifact,
+// plus the fixed input and output mounts.  This reuses the existing compiled
+// artifact ceiling rather than imposing a small engine-specific cap.
+pub const MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS: usize = 4096;
+pub const MAX_COMPILED_EXECUTION_PLAN_MOUNTS: usize = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +117,7 @@ pub struct CompiledWorkloadIdentity {
     pub recipe_revision_sha256: String,
     pub execution_sha256: String,
     pub harness_sha256: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub build_input_sha256: Option<String>,
     pub model_artifact_set_sha256: String,
     pub model_artifact_bytes: u64,
@@ -129,14 +143,19 @@ pub struct CompiledEnvironmentEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CompiledRuntimePlacement {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub endpoint_address: Option<IpAddr>,
     pub rank: u32,
     pub role: String,
     pub world_size: u32,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub local_address: Option<IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_address: Option<IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
-    pub port: u16,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub port: Option<u16>,
     pub reserved_memory_bytes: u64,
 }
 
@@ -173,6 +192,7 @@ pub struct ModelArtifactIdentity {
 #[serde(deny_unknown_fields)]
 pub struct CompiledRuntimeImage {
     pub image_digest: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub registry_manifest_digest: Option<String>,
     pub platform_manifest_digest: String,
     pub local_image_config_id: String,
@@ -183,6 +203,7 @@ pub struct CompiledRuntimeImage {
     pub architecture: String,
     pub runtime_interface: String,
     pub source: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub build_id: Option<String>,
     pub distribution_object: DistributionObject,
 }
@@ -234,6 +255,7 @@ pub struct CompiledEndpoint {
 #[serde(deny_unknown_fields)]
 pub struct CompiledJob {
     pub interface: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub input: Option<serde_json::Value>,
     pub output_path: String,
     pub timeout_seconds: u16,
@@ -275,7 +297,7 @@ impl CompiledExecutionPlan {
                 .is_some_and(|value| !lower_hex(value, 64))
             || !lower_hex(&self.identity.model_artifact_set_sha256, 64)
             || self.artifacts.is_empty()
-            || self.artifacts.len() > 4096
+            || self.artifacts.len() > MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS
             || self.runtime.image_digest != self.runtime_image.image_digest
             || self.runtime.placement.rank != self.topology.rank
             || self.runtime.placement.role != self.topology.role
@@ -285,16 +307,39 @@ impl CompiledExecutionPlan {
             || self.topology.node_count == 0
             || self.topology.world_size < self.topology.node_count
             || self.endpoint.is_some() == self.job.is_some()
+            || self.endpoint.is_some() != self.runtime.placement.port.is_some()
         {
             return Err(WorkloadError::Invalid("compiled execution identity"));
         }
-        let mut selected = BTreeSet::new();
-        let mut materialized = BTreeSet::new();
+        let mut physical_by_path = std::collections::BTreeMap::new();
+        let mut file_paths = std::collections::BTreeMap::new();
         let mut by_digest = std::collections::BTreeMap::new();
+        let mut projection_targets = BTreeSet::new();
         for artifact in &self.artifacts {
             artifact.validate()?;
-            if !selected.insert((artifact.selection_id.as_str(), artifact.file_id.as_str()))
-                || !materialized.insert((artifact.selection_id.as_str(), artifact.path.as_str()))
+            let physical = (
+                artifact.file_id.as_str(),
+                artifact.sha256.as_str(),
+                artifact.size_bytes,
+                artifact.model.publisher.as_str(),
+                artifact.model.slug.as_str(),
+                artifact.model.content_sha256.as_str(),
+                artifact.distribution_object.name.as_str(),
+                artifact.distribution_object.sha256.as_str(),
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind.as_str(),
+            );
+            let physical_key = (artifact.selection_id.as_str(), artifact.path.as_str());
+            if let Some(previous) = physical_by_path.insert(physical_key, physical)
+                && previous != physical
+            {
+                return Err(WorkloadError::Invalid(
+                    "compiled model artifact physical identity",
+                ));
+            }
+            let file_key = (artifact.selection_id.as_str(), artifact.file_id.as_str());
+            if let Some(previous_path) = file_paths.insert(file_key, artifact.path.as_str())
+                && previous_path != artifact.path.as_str()
             {
                 return Err(WorkloadError::Invalid("compiled model artifact identity"));
             }
@@ -302,6 +347,12 @@ impl CompiledExecutionPlan {
                 && previous != artifact.size_bytes
             {
                 return Err(WorkloadError::Invalid("compiled model artifact bytes"));
+            }
+            if !projection_targets.insert((artifact.mount.target.as_str(), artifact.path.as_str()))
+            {
+                return Err(WorkloadError::Invalid(
+                    "compiled model artifact mount target",
+                ));
             }
         }
         let total = by_digest
@@ -336,7 +387,7 @@ impl CompiledModelArtifact {
             || !self.roles.is_empty()
                 && (self.roles.windows(2).any(|pair| pair[0] >= pair[1])
                     || self.roles.iter().any(|role| !valid_role(role)))
-            || !valid_name(&self.model.publisher)
+            || !valid_model_publisher(&self.model.publisher)
             || !valid_name(&self.model.slug)
             || !lower_hex(&self.model.content_sha256, 64)
             || self.distribution_object.kind != "model"
@@ -395,7 +446,7 @@ impl CompiledRuntime {
         if self.placement.world_size == 0
             || self.placement.rank >= self.placement.world_size
             || !valid_role(&self.placement.role)
-            || self.placement.port == 0
+            || self.placement.port.is_some_and(|port| port == 0)
             || self.placement.reserved_memory_bytes == 0
         {
             return Err(WorkloadError::Invalid("compiled runtime placement"));
@@ -420,15 +471,19 @@ impl CompiledSecurity {
                 .iter()
                 .any(|value| value != "nvidia.com/gpu=all")
             || !numeric_non_root_user(&self.user)
-            || self.mounts.len() > 4
-            || self.mounts.iter().any(|mount| {
-                !mount.read_only && mount.target != "/outputs"
-                    || mount.read_only
-                        && !(mount.target == "/inputs"
-                            || mount.target == "/models"
-                            || mount.target.starts_with("/models/"))
-                    || !matches!(mount.source.as_str(), "model" | "inputs" | "outputs")
-            })
+            || self.mounts.len() > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
+            || self.mounts.iter().any(|mount| !valid_mount_policy(mount))
+            || self
+                .mounts
+                .iter()
+                .any(|mount| !valid_mount_target(&mount.target))
+            || self
+                .mounts
+                .iter()
+                .map(|mount| mount.target.as_str())
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.mounts.len()
         {
             return Err(WorkloadError::Invalid("compiled security"));
         }
@@ -439,8 +494,19 @@ impl CompiledSecurity {
 impl CompiledTopology {
     fn validate(&self) -> Result<(), WorkloadError> {
         if !valid_name(&self.name)
-            || !matches!(self.mode.as_str(), "single" | "distributed")
-            || !matches!(self.backend.as_str(), "local" | "nccl" | "gloo")
+            || !matches!(
+                self.mode.as_str(),
+                "single"
+                    | "distributed"
+                    | "tensor_parallel"
+                    | "pipeline_parallel"
+                    | "data_parallel"
+                    | "hybrid"
+                    | "ray"
+                    | "mpi"
+            )
+            || self.backend.is_empty()
+            || self.backend.chars().count() > 64
             || self.node_count == 0
             || self.world_size == 0
             || self.rank >= self.world_size
@@ -574,15 +640,34 @@ pub fn materialized_model_path(
 
 fn valid_model_path(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 512
+        && value.chars().count() <= 512
         && !value.contains(['\\', '\0'])
-        && value.split('/').all(|part| {
-            !part.is_empty()
-                && !matches!(part, "." | "..")
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+}
+
+fn valid_mount_target(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.starts_with('/')
+        && value != "/"
+        && !value.contains(['\\', '\0'])
+        && value
+            .split('/')
+            .skip(1)
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+}
+
+fn valid_mount_policy(mount: &MountSpec) -> bool {
+    match mount.source.as_str() {
+        "model" => {
+            mount.read_only && (mount.target == "/models" || mount.target.starts_with("/models/"))
+        }
+        "inputs" => mount.read_only && mount.target == "/inputs",
+        "outputs" => !mount.read_only && mount.target == "/outputs",
+        _ => false,
+    }
 }
 
 impl Placement {
@@ -658,6 +743,10 @@ fn valid_name(value: &str) -> bool {
                     || byte.is_ascii_digit()
                     || matches!(byte, b'.' | b'_' | b'-')
             })
+}
+
+fn valid_model_publisher(value: &str) -> bool {
+    !value.is_empty() && value.chars().count() <= 128 && !value.contains('\0')
 }
 
 fn valid_argv(value: &[String]) -> bool {

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Event
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol import RecipeOperationRequest
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
     AgentCertificate,
@@ -49,6 +52,29 @@ PROBE_RESULT = {
         "nvidia": {"tools": {}},
     },
 }
+
+
+def canonical_install_payload() -> dict[str, object]:
+    compiled_plan = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol"
+            / "tests"
+            / "fixtures"
+            / "compiled-execution-plan-v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload = {
+        "schema_version": 2,
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "plan_digest": "b" * 64,
+        "rank": compiled_plan["runtime"]["placement"]["rank"],
+        "role": compiled_plan["runtime"]["placement"]["role"],
+        "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
+        "compiled_execution_plan": compiled_plan,
+    }
+    RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_INSTALL, payload)
+    return payload
 
 
 @pytest.mark.parametrize(
@@ -282,7 +308,7 @@ def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None
         NODE_A,
         "recipe.install",
         COMMIT,
-        {"schema_version": 1, "recipe": {}},
+        canonical_install_payload(),
     )
     assert stored.kind == "recipe.install"
 
@@ -293,9 +319,10 @@ def test_artifact_distribution_is_negotiated_and_serialized_as_a_mutation(
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
-    first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
+    payload = {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT}
+    first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
     clock.advance(seconds=1)
-    second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
+    second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
     capabilities = ["agent.runtime.rust.v1", operation]
 
     claim = claim_agent(
@@ -483,19 +510,16 @@ def test_package_capabilities_are_not_control_plane_agent_capabilities(
 
 def test_recipe_only_agent_is_not_forced_to_advertise_old_executors(service) -> None:
     jobs, sessions, clock = service
+    install_payload = canonical_install_payload()
+    # The queue stores the exact canonical producer payload. Keep this test
+    # about capability selection while still rejecting retired flat launch
+    # documents at the protocol boundary.
     queued = jobs.enqueue(
         parent(sessions, clock).id,
         NODE_A,
         "recipe.install",
         COMMIT,
-        {
-            "schema_version": 1,
-            "installation_id": "00000000-0000-4000-8000-000000000001",
-            "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-            "recipe_content_sha256": "a" * 64,
-            "plan_digest": "b" * 64,
-            "expected_bytes": 100,
-        },
+        install_payload,
     )
 
     claim = claim_agent(

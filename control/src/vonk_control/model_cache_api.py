@@ -256,7 +256,7 @@ def install_model_cache_routes(
         try:
             result = cache().download_preview(
                 artifact_set_sha256=body.artifact_set_sha256,
-                model_version_sha256=body.model_version_sha256,
+                model_content_sha256=body.model_content_sha256,
                 recipe_revision_sha256=body.recipe_revision_sha256,
                 recipe_revision_id=body.recipe_revision_id,
             )
@@ -287,7 +287,7 @@ def install_model_cache_routes(
                 request_key=body.request_key,
                 plan_digest=body.plan_digest,
                 artifact_set_sha256=body.artifact_set_sha256,
-                model_version_sha256=body.model_version_sha256,
+                model_content_sha256=body.model_content_sha256,
                 recipe_revision_sha256=body.recipe_revision_sha256,
                 recipe_revision_id=body.recipe_revision_id,
             )
@@ -418,18 +418,18 @@ def install_model_cache_routes(
                 limit=limit,
                 boundary=boundary,
             )
-            return {
-                "schema_version": 2,
-                "source_policy": "nas-first",
-                "updates": result["updates"],
-                "total": result["total"],
-                "next_cursor": encode_cursor(
+            return ModelCacheUpdatesResponse(
+                schema_version=2,
+                source_policy="nas-first",
+                updates=list(result["updates"]),
+                total=result["total"],
+                next_cursor=encode_cursor(
                     result.get("_next_boundary"),
                     resource="model-cache-updates",
                     order="updated-at-desc/digest-desc/v1",
                     context=context,
                 ),
-            }
+            )
         except HTTPException:
             raise
         except (OSError, RuntimeError, TypeError, ValueError) as exc:

@@ -145,7 +145,7 @@ class _Inspector:
             warnings=(),
             artifact_set_sha256=MODEL_SET_DIGEST,
             artifact_set_bytes=1024,
-            dependency_model_version_sha256=(),
+            dependency_model_content_sha256=(),
         )
 
 
@@ -461,7 +461,6 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
 
     admission = InstallAdmissionService(
         sessions,
-        sizes=SimpleNamespace(),
         disk_floor_bytes=10,
         compiled_plan_provider=compiler.compile_installation,
     )
@@ -476,7 +475,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
     )
     source = SimpleNamespace(
         objects_for_set=lambda digest: (
-            DistributionObject("model.safetensors", MODEL_DIGEST, 1024, "model"),
+            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
         )
     )
     executor = _TargetExecutor(
@@ -507,7 +506,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     service, sessions, revision_id, recipe_digest, mapping_id, executor, events = _make_service(tmp_path)
     del mapping_id
     request = RunSwitchPreviewRequest(
-        model_version_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]
@@ -598,7 +597,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
 
 def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
     return RunSwitchPreviewRequest(
-        model_version_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]

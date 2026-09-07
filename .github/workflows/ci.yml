@@ -214,6 +214,53 @@ jobs:
             test "$TEST_RESULT" = skipped
           fi
 
+  controller-spark-wire:
+    name: Controller and Spark wire contract
+    needs: changes
+    if: needs.changes.outputs.control == 'true' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve canonical recipe source
+        id: recipe-source
+        run: |
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out canonical recipes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Validate every canonical recipe launch projection
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Exercise Controller requests and Spark results together
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/tests/run_agent_wire_contracts.py -- -q
+
   rust-platform:
     name: Rust platform integration
     needs: changes
@@ -257,10 +304,6 @@ jobs:
             run: >-
               cargo test --locked -p vonk-agent --test recipe_builder
               faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
-          - name: Verify Python protocol parity
-            run: >-
-              uv run --project agent_protocol --frozen pytest -q
-              agent_protocol/tests/test_rust_fixtures.py
           - name: Verify controller host-helper authority
             run: >-
               uv run --project control --frozen pytest -q
@@ -469,7 +512,7 @@ jobs:
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-            pytest --collect-only -q > "$collection"
+            pytest --collect-only -q > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
             awk '
               /^tests\/.*::/ &&
@@ -565,9 +608,10 @@ jobs:
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --project control --frozen --with-editable . \
-            pytest --collect-only -q control/tests > "$collection"
+            pytest --collect-only -q control/tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
-            awk '/^tests\/.*::/' "$collection" |
+            # Every connected wire file runs in the required Linux/Rust lane.
+            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_.*_wire_bridge\.py::/' "$collection" |
               scripts/select-pytest-shard-files \
                 --durations "$timing_file" --max-duration-age-hours 720 \
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
@@ -663,7 +707,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    needs: [changes, lint, rust, rust-quality-gate, rust-tests, rust-platform, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
+    needs: [changes, lint, rust, rust-quality-gate, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -687,6 +731,7 @@ jobs:
           RUST_QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
           RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
+          WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
@@ -708,6 +753,7 @@ jobs:
             --result "rust-quality-gate=$RUST_QUALITY_RESULT" \
             --result "rust-tests=$RUST_TESTS_RESULT" \
             --result "rust-platform=$RUST_PLATFORM_RESULT" \
+            --result "controller-spark-wire=$WIRE_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "web=$WEB_RESULT" \

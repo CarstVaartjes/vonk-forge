@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import tarfile
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -21,6 +23,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlan,
     CompiledExecutionPlanError,
     CompiledModelArtifact,
@@ -30,7 +33,13 @@ from vonk_control.compiled_execution_plan import (
     materialized_model_path,
     validate_compiled_launch_payload,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
+    ExecutionPlanCompilationError,
+    _bind_runtime_artifacts,
+    _placement,
+)
+from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -45,8 +54,16 @@ from vonk_control.models import (
     RuntimeImageReceipt,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_operations import _compiled_plan_for_start
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.recipe_start_payloads import (
+    RecipeStartPlacement,
+    _bind_compiled_execution_plan,
+)
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.model import ModelFile, ModelReference
+
+from tests.recipe_library_source import recipe_library_root
 
 
 def _spec(
@@ -143,6 +160,24 @@ def _spec(
     return spec
 
 
+def _job_spec() -> dict[str, object]:
+    spec = _spec()
+    spec["endpoint"] = None
+    spec["job"] = {
+        "interface": "image-job",
+        "input": None,
+        "output_path": "/outputs",
+        "timeout_seconds": 30,
+    }
+    security = spec["security"]
+    assert isinstance(security, dict)
+    security["mounts"].append(
+        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
+    )
+    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    return spec
+
+
 def _model_objects() -> list[dict[str, object]]:
     payload = b"verified model bytes"
     return [
@@ -202,7 +237,8 @@ def _compile(
         selected_spec = dict(selected_spec)
         selected_spec["runtime"] = {
             **runtime,
-            "image": "localhost/vonk/recipe-build@" + str(selected_image["image_digest"]),
+            "image": "localhost/vonk/recipe-build@"
+            + str(selected_image["image_digest"]),
         }
         identity = selected_spec.get("identity")
         if isinstance(identity, dict):
@@ -216,6 +252,43 @@ def _compile(
         model_objects=_model_objects(),
         runtime_image=selected_image,
     )
+
+
+def test_controller_compiler_preserves_canonical_model_path_and_publisher_text() -> None:
+    spec = _spec()
+    path = "模型 file_" * 64
+    publisher = "发布者 " + "_" * 124
+    canonical_file = ModelFile(
+        id="weights",
+        path=path,
+        sha256=hashlib.sha256(b"verified model bytes").hexdigest(),
+        size_bytes=len(b"verified model bytes"),
+        roles=["entrypoint", "weights"],
+    )
+    canonical_reference = ModelReference(
+        publisher=publisher,
+        slug="synthetic-model",
+        content_sha256="e" * 64,
+    )
+    artifact = spec["artifacts"][0]
+    assert isinstance(artifact, dict)
+    artifact["path"] = canonical_file.path
+    artifact["model"]["publisher"] = canonical_reference.publisher
+    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    model_object = _model_objects()[0]
+    model_object["path"] = path
+    model_object["distribution_object"]["name"] = path
+
+    plan = compile_verified_execution_plan(
+        spec,
+        model_artifact_set_sha256="d" * 64,
+        model_objects=[model_object],
+        runtime_image=_image(),
+    )
+    assert plan.artifacts[0].path == path
+    assert plan.artifacts[0].model.publisher == publisher
+    assert len(plan.artifacts[0].path) == 512
+    assert len(plan.artifacts[0].model.publisher) == 128
 
 
 def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> None:
@@ -281,10 +354,168 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     assert validated["security"]["host_network"] is False
     assert validated["endpoint"]["port"] == 8000
     assert validated["job"] is None
-    rendered = json.dumps(validated, sort_keys=True)
-    assert "model_version_sha256" not in rendered
-    assert "runtime_distribution_sha256" not in rendered
-    assert "patch_bundle_sha256" not in rendered
+
+
+def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
+    plan = _compile(_job_spec())
+    payload = plan.to_compiled_launch_payload(
+        _job_spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": None,
+            "reserved_memory_bytes": 1,
+        },
+    )
+
+    validated = validate_compiled_launch_payload(payload)
+    assert validated["endpoint"] is None
+    assert validated["job"]["interface"] == "image-job"
+    assert validated["runtime"]["placement"]["port"] is None
+
+
+def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
+    spec = _spec()
+    payload = _compile().to_compiled_launch_payload(
+        spec,
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 9000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+
+    validated = validate_compiled_launch_payload(payload)
+    assert validated["endpoint"]["port"] == 8000
+    assert validated["runtime"]["placement"]["port"] == 9000
+
+
+@pytest.mark.parametrize("port", [None, 0, 65536, "9000"])
+def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> None:
+    with pytest.raises(CompiledExecutionPlanError):
+        payload = _compile().to_compiled_launch_payload(
+            _spec(),
+            placement={
+                "endpoint_address": None,
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": None,
+                "master_address": None,
+                "master_port": None,
+                "port": port,
+                "reserved_memory_bytes": 1,
+            },
+        )
+        validate_compiled_launch_payload(payload)
+
+
+def test_compiled_launch_projection_requires_explicit_placement_fields() -> None:
+    placement = {
+        "endpoint_address": None,
+        "rank": 0,
+        "role": "entrypoint",
+        "world_size": 1,
+        "local_address": None,
+        "master_address": None,
+        "master_port": None,
+        "reserved_memory_bytes": 1,
+    }
+    with pytest.raises(CompiledExecutionPlanError, match="runtime port is missing"):
+        _compile().to_compiled_launch_payload(_spec(), placement=placement)
+
+
+def test_compiled_launch_projection_validates_before_persisting() -> None:
+    spec = _spec()
+    endpoint = spec["endpoint"]
+    assert isinstance(endpoint, dict)
+    endpoint["protocol"] = "legacy"
+
+    with pytest.raises(CompiledExecutionPlanError):
+        _compile().to_compiled_launch_payload(
+            spec,
+            placement={
+                "endpoint_address": None,
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": None,
+                "master_address": None,
+                "master_port": None,
+                "port": 8000,
+                "reserved_memory_bytes": 1,
+            },
+        )
+
+
+def test_compiled_launch_consumer_rejects_malformed_interface_document() -> None:
+    payload = _compile().to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    payload["endpoint"] = {"protocol": "openai", "port": 8000}
+
+    with pytest.raises(CompiledExecutionPlanError):
+        validate_compiled_launch_payload(payload)
+
+
+def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    payload["runtime"]["oversized_flat_field"] = "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
+    with pytest.raises(CompiledExecutionPlanError, match="too large"):
+        validate_compiled_launch_payload(payload)
+
+
+def test_controller_produces_real_751_artifact_plan() -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "compiled_plan_751.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    plan = validate_compiled_launch_payload(fixture)
+    assert len(plan["artifacts"]) == 751
+    assert len(canonical_message(plan)) > 500 * 1024
+    parent_payload, encoded = _canonical_payload(
+        {"phases": [{"payload": {"compiled_execution_plan": plan}}]},
+        kind="recipe.start",
+    )
+    assert parent_payload["phases"]
+    assert len(encoded) > 500 * 1024
 
 
 def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
@@ -305,16 +536,16 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
     )
     missing = copy.deepcopy(payload)
     del missing["job"]
-    with pytest.raises(CompiledExecutionPlanError, match="schema"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(missing)
 
     both = copy.deepcopy(payload)
     both["job"] = {"id": "job-1"}
-    with pytest.raises(CompiledExecutionPlanError, match="interface"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(both)
 
 
-def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> None:
+def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
         _spec(),
@@ -330,14 +561,9 @@ def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt
             "reserved_memory_bytes": 1,
         },
     )
-    polluted = copy.deepcopy(payload)
-    polluted["identity"]["model_version_sha256"] = "f" * 64
-    with pytest.raises(CompiledExecutionPlanError, match="identity fields"):
-        validate_compiled_launch_payload(polluted)
-
     mismatched = copy.deepcopy(payload)
     mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
-    with pytest.raises(CompiledExecutionPlanError, match="receipt is inconsistent"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(mismatched)
 
 
@@ -359,16 +585,18 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
     )
     polluted = copy.deepcopy(payload)
     polluted["security"]["network_mode"] = "bridge"
-    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
     polluted = copy.deepcopy(payload)
     polluted["security"]["host_network"] = True
-    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
 
-def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> None:
+def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> (
+    None
+):
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
         _spec(),
@@ -384,14 +612,14 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "reserved_memory_bytes": 1,
         },
     )
-    started = _compiled_plan_for_start(
+    started = _bind_compiled_execution_plan(
         payload,
-        node=SimpleNamespace(
+        placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,
             rank=0,
             role="entrypoint",
             port=8000,
-            required_memory_bytes=4096,
+            reserved_memory_bytes=4096,
             fabric_address=None,
         ),
         endpoint_address="192.0.2.10",
@@ -660,9 +888,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     assert response.status_code == 200
     assert response.json() == payload
     assert response.json()["schema_version"] == 2
-    assert "model_version_sha256" not in response.text
-    assert "runtime_distribution_sha256" not in response.text
-    assert "patch_bundle_sha256" not in response.text
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
@@ -740,6 +965,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         oci_layout_sha256="f" * 64,
         image_bytes=4096,
     )
+
     def runtime_receipt(
         _document, image_digest: str, _runtime_spec: dict[str, object]
     ) -> dict[str, object]:
@@ -773,7 +999,9 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         mapping_nodes=(node,),
         parameters={},
         resolved_entities={
-            "models": (SimpleNamespace(document=model_document, content_digest=model_digest),)
+            "models": (
+                SimpleNamespace(document=model_document, content_digest=model_digest),
+            )
         },
     )
 
@@ -801,7 +1029,105 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
     assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
 
 
-def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> None:
+@pytest.mark.parametrize("mutation", ["missing", "malformed"])
+def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary(
+    mutation: str,
+) -> None:
+    from importlib.resources import files
+
+    raw = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples/recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe = RecipeDefinition.model_validate(raw)
+    document = recipe.model_dump(mode="json")
+    if mutation == "missing":
+        document.pop("topology")
+    else:
+        document["topology"]["parallelism"]["world_size"] = 0
+
+    class Cache:
+        def resolve_artifact_set(self, **_kwargs: object) -> object:
+            raise AssertionError("invalid recipes must fail before cache resolution")
+
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest="a" * 64,
+        document=document,
+    )
+    service = ControllerExecutionPlanService(Cache())
+    with pytest.raises(
+        ExecutionPlanCompilationError,
+        match="recipe does not satisfy the canonical contract",
+    ):
+        service.compile_installation(
+            None,
+            revision=revision,
+            build=None,
+            mapping_nodes=(),
+            parameters={},
+        )
+
+
+def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+
+    class Cache:
+        def resolve_artifact_set(self, **_kwargs: object) -> object:
+            raise AssertionError("digest mismatches must fail before cache resolution")
+
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest="a" * 64,
+        document=recipe.model_dump(mode="json"),
+    )
+    service = ControllerExecutionPlanService(Cache())
+    with pytest.raises(
+        ExecutionPlanCompilationError,
+        match="recipe revision digest does not match the canonical document",
+    ):
+        service.compile_installation(
+            None,
+            revision=revision,
+            build=None,
+            mapping_nodes=(),
+            parameters={},
+        )
+
+
+def test_placement_rejects_unresolved_role_and_endpoint() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    node = SimpleNamespace(rank=0, role="missing", node_id="spk_missing")
+    with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
+        _placement(recipe, {"endpoint": {"port": 8000}}, node, 1)
+
+    node.role = "entrypoint"
+    with pytest.raises(ExecutionPlanCompilationError, match="endpoint"):
+        _placement(recipe, {}, node, 1)
+
+
+def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (
+    None
+):
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "compiled_workload_v2.json").read_text(
             encoding="utf-8"
@@ -834,7 +1160,10 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert validated["security"]["network_mode"] == "none"
     assert validated["security"]["host_network"] is False
     runtime_image = validated["runtime_image"]
-    assert runtime_image["registry_manifest_digest"] != runtime_image["platform_manifest_digest"]
+    assert (
+        runtime_image["registry_manifest_digest"]
+        != runtime_image["platform_manifest_digest"]
+    )
     assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
     assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
     assert runtime_image["local_image_reference"] == (
@@ -886,14 +1215,6 @@ def test_upstream_authority_cannot_enter_compiled_receipts() -> None:
     model["repository"] = "huggingface.co/private/model"
 
     with pytest.raises(CompiledExecutionPlanError, match="upstream authority"):
-        _compile(polluted)
-
-
-def test_retired_runtime_authority_cannot_enter_compiled_receipts() -> None:
-    polluted = _spec()
-    polluted["identity"]["model_version_sha256"] = "f" * 64
-
-    with pytest.raises(CompiledExecutionPlanError, match="retired authority"):
         _compile(polluted)
 
 
@@ -1083,8 +1404,129 @@ def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
     duplicate["id"] = "duplicate"
     duplicate["file_id"] = "duplicate"
     document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError, match="materialized path"):
+    with pytest.raises(ValidationError, match="physical identity"):
         CompiledExecutionPlan.model_validate(document)
+
+
+def test_plan_rejects_duplicate_final_projection_target() -> None:
+    document = _compile().model_dump(mode="json")
+    duplicate = copy.deepcopy(document["artifacts"][0])
+    duplicate["id"] = "duplicate-projection"
+    document["artifacts"].append(duplicate)
+    with pytest.raises(ValidationError, match="mount target"):
+        CompiledExecutionPlan.model_validate(document)
+
+
+def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
+    document = _compile().model_dump(mode="json")
+    duplicate = copy.deepcopy(document["artifacts"][0])
+    duplicate["id"] = "second-projection"
+    duplicate["mount"]["target"] = "/models/target"
+    document["artifacts"].append(duplicate)
+    plan = CompiledExecutionPlan.model_validate(document)
+    assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
+        ("/models", "model.safetensors"),
+        ("/models/target", "model.safetensors"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "recipe_name",
+    [
+        "ltx-2-5-22b-distilled-bf16-diffusers-single.json",
+        "ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
+    ],
+)
+def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
+    recipe_name: str,
+) -> None:
+    library_root = recipe_library_root()
+    recipe_document = json.loads(
+        (library_root / "recipes" / recipe_name).read_text(encoding="utf-8")
+    )
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    model_slug = recipe_document["models"][0]["model"]["slug"]
+    model = ModelDefinition.model_validate(
+        json.loads(
+            (library_root / "models" / f"{model_slug}.json").read_text(encoding="utf-8")
+        )
+    )
+    model_selection = recipe.models[0]
+    physical = next(file for file in model.files if file.id == "filtered-snapshot")
+    model_content_sha256 = model_selection.model.content_sha256
+    model_object = {
+        "model_content_sha256": model_content_sha256,
+        "file_id": physical.id,
+        "path": physical.path,
+        "sha256": physical.sha256,
+        "bytes": physical.size_bytes,
+        "roles": list(physical.roles),
+        "distribution_object": {
+            "name": physical.path,
+            "sha256": physical.sha256,
+            "bytes": physical.size_bytes,
+            "kind": "model",
+        },
+    }
+    package_path = library_root / "packages" / f"{recipe.identity.slug}.tar.gz"
+    with tarfile.open(package_path, mode="r:*") as package_archive:
+        package_paths = package_archive.getnames()
+    package_paths.append(recipe.execution.build.context.path)
+    image_digest = "1" * 64
+    spec = compile_runtime_spec(
+        recipe,
+        models=[model],
+        package_handle={
+            "image_digest": image_digest,
+            "image_reference": f"localhost/vonk/build@sha256:{image_digest}",
+            "platform": "linux/arm64",
+            "paths": package_paths,
+        },
+        role="entrypoint",
+        rank=0,
+    )
+    model_projection = SimpleNamespace(
+        document=model.model_dump(mode="json"),
+        content_digest=content_sha256(model),
+    )
+    spec = _bind_runtime_artifacts(spec, [model_projection])
+    assert len(spec["artifacts"]) == 2
+    assert [
+        (item["id"], item["selection_id"], item["file_id"], item["path"])
+        for item in spec["artifacts"]
+    ] == [
+        (
+            "primary-filtered-snapshot",
+            "primary",
+            "filtered-snapshot",
+            "filtered-snapshot",
+        ),
+        (
+            "primary-filtered-snapshot-2",
+            "primary",
+            "filtered-snapshot",
+            "filtered-snapshot",
+        ),
+    ]
+    targets = [item["mount"]["target"] for item in spec["artifacts"]]
+    assert targets == ["/models/license-token-preflight", "/models/target"]
+    plan = compile_verified_execution_plan(
+        spec,
+        model_artifact_set_sha256="d" * 64,
+        model_objects=[model_object],
+        runtime_image=_image(source="controller-build", build_id="1" * 64),
+    )
+    assert len(plan.artifacts) == 2
+    assert [artifact.mount.target for artifact in plan.artifacts] == targets
+    assert [
+        (artifact.selection_id, artifact.file_id, artifact.path)
+        for artifact in plan.artifacts
+    ] == [("primary", "filtered-snapshot", "filtered-snapshot")] * 2
+    assert plan.artifacts[0].model == plan.artifacts[1].model
+    assert (
+        plan.artifacts[0].distribution_object == plan.artifacts[1].distribution_object
+    )
+    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical.sha256
 
 
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(

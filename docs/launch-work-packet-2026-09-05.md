@@ -42,8 +42,11 @@ meaningful runtime checks remain requirements.
    built on a suitable builder, including a Spark when required. A Spark build
    can export once to the Controller, which distributes the same verified
    image to targets. A registry push is not required. Sparks fetch locally,
-   verify, import, and run; no private registry credential or HF token in their
-   workload payloads.
+   import, and run. Enrolled internal connections and completed caches are
+   trusted: check assignment identity, safe paths, ownership and transfer
+   completion without repeatedly hashing entire model files or image archives.
+   External ingress retains its integrity checks. No private registry
+   credential or HF token belongs in workload payloads.
 5. **Recipe intent survives.** Preserve ordered arguments, values and setting
    bindings. Unknown engine flags and new engine-owned values pass through to
    the pinned runtime. Metadata for known options supplies useful controls;

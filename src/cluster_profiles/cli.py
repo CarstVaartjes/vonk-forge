@@ -228,9 +228,6 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
     recipes = payload.get("recipes")
     if isinstance(recipes, list):
         recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
-        identity = (
-            "uri" if any("uri" in recipe for recipe in recipe_rows) else "recipe_id"
-        )
         if recipe_rows:
             _print_table(
                 recipe_rows,
@@ -239,7 +236,7 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
                     ("qualification", "QUALIFICATION"),
                     ("execution_readiness", "READINESS"),
                     ("node_count", "SPARKS"),
-                    (identity, "URI" if identity == "uri" else "RECIPE ID"),
+                    ("recipe_id", "RECIPE ID"),
                 ),
             )
         else:
@@ -357,9 +354,9 @@ def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
                 print(
                     f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
                 )
-    if diagnostics.get("legacy_generic_ambiguous") is True:
+    if diagnostics.get("failure_details_unavailable") is True:
         print(
-            "diagnosis: legacy helper response is ambiguous; the exact target "
+            "diagnosis: helper did not report the failed stage; the exact target "
             "identity remains the success gate"
         )
     if diagnostics.get("next_action"):

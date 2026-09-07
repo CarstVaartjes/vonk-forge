@@ -1202,9 +1202,9 @@ class ModelCacheSet(Base):
             name="ck_model_cache_sets_artifact_set_digest",
         ),
         CheckConstraint(
-            "model_version_sha256 IS NULL OR "
-            f"({_lower_hex('model_version_sha256', 64)})",
-            name="ck_model_cache_sets_model_version_digest",
+            "model_content_sha256 IS NULL OR "
+            f"({_lower_hex('model_content_sha256', 64)})",
+            name="ck_model_cache_sets_model_content_digest",
         ),
         CheckConstraint(
             "recipe_revision_sha256 IS NULL OR "
@@ -1227,7 +1227,7 @@ class ModelCacheSet(Base):
     )
     artifact_set_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    model_version_sha256: Mapped[str | None] = mapped_column(
+    model_content_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
     recipe_revision_sha256: Mapped[str | None] = mapped_column(
@@ -1963,7 +1963,7 @@ class NodeTelemetrySample(Base):
     # this bounded JSON document carries per-device, per-interface and
     # per-run series plus capability/provenance metadata.
     metrics: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict, server_default="{}"
+        JSON, nullable=False
     )
 
 
@@ -2107,7 +2107,7 @@ class NodeTelemetryRollupMetric(Base):
         String(32), nullable=False, default="unknown", server_default="unknown"
     )
     source: Mapped[str] = mapped_column(
-        String(128), nullable=False, default="legacy", server_default="legacy"
+        String(128), nullable=False, default="controller-derived", server_default="controller-derived"
     )
     measurement_kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default="measured", server_default="measured"
@@ -2274,8 +2274,8 @@ class RecipeInstallation(Base):
             name="ck_recipe_installations_state",
         ),
         CheckConstraint(
-            _nullable_lower_hex("model_version_sha256", 64),
-            name="ck_recipe_installations_model_version_sha256",
+            _nullable_lower_hex("model_content_sha256", 64),
+            name="ck_recipe_installations_model_content_sha256",
         ),
     )
     id: Mapped[str] = mapped_column(
@@ -2286,11 +2286,14 @@ class RecipeInstallation(Base):
         nullable=False,
         index=True,
     )
-    # Persist the exact primary model identity accepted with the immutable
+    # Persist the exact primary model content identity accepted with the immutable
     # recipe revision.  This makes model-to-installation ownership explicit
     # without attempting to infer it from mutable catalog display metadata.
-    model_version_sha256: Mapped[str | None] = mapped_column(
+    model_content_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
+    )
+    model_content_digests: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
     )
     mapping_id: Mapped[str] = mapped_column(
         ForeignKey("cluster_mappings.id", ondelete="RESTRICT"),

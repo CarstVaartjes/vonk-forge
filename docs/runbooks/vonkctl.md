@@ -96,7 +96,7 @@ bounded JSON object with `--input JSON`, `--input-file FILE`, or `--stdin`.
 vonkctl models discover --search qwen --all --json
 vonkctl models show MODEL_ID --json
 vonkctl models compare MODEL_ID MODEL_ID --json
-vonkctl models download --model-version-sha256 MODEL_VERSION_SHA256 \
+vonkctl models download --model-content-sha256 MODEL_CONTENT_SHA256 \
   --recipe-revision-id RECIPE_REVISION_ID --json
 vonkctl models run --input-file run.json --json
 vonkctl models run --input-file run.json --dry-run --json
@@ -139,7 +139,7 @@ vonkctl profiles delete PROFILE_ID --apply --json
 ```
 
 Cache download requests identify an exact immutable artifact set; optional
-`--model-version-sha256` and `--recipe-revision-sha256` flags are available for
+`--model-content-sha256` and `--recipe-revision-sha256` flags are available for
 the common single-selection form. Supplying a recipe revision also includes
 its associated OCI runtime artifact; a model-only request downloads weights
 only. The simple download command previews and applies automatically, while
