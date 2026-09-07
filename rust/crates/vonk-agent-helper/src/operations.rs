@@ -2442,10 +2442,7 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     let selection_layout = components.len() >= 2
         && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) && value != "sha256")
         && valid_model_path_components(&components[1..]);
-    let legacy_layout = components.len() == 2
-        && matches!(components[0], Component::Normal(value) if value == "sha256")
-        && matches!(components[1], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64));
-    if !(new_layout || selection_layout || legacy_layout) {
+    if !(new_layout || selection_layout) {
         return false;
     }
     if target == "/models" {
@@ -3217,7 +3214,7 @@ mod tests {
     }
 
     fn initialize_runtime_fixture(roots: &ManagedRoots) {
-        fs::create_dir_all(runtime_models(roots).join("sha256")).unwrap();
+        fs::create_dir_all(runtime_models(roots).join("primary")).unwrap();
         fs::create_dir_all(
             roots
                 .agent_data
@@ -3235,8 +3232,8 @@ mod tests {
 
     fn artifact_path(roots: &ManagedRoots, key: char) -> PathBuf {
         runtime_models(roots)
-            .join("sha256")
-            .join(key.to_string().repeat(64))
+            .join("primary")
+            .join(format!("artifact-{key}.bin"))
     }
 
     fn runtime_models(roots: &ManagedRoots) -> PathBuf {
@@ -3825,9 +3822,11 @@ mod tests {
             .filter_map(|call| call.last())
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        assert!(paths.iter().any(|path| path.ends_with(
-            "models/sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        )));
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.ends_with("models/primary/artifact-a.bin"))
+        );
         assert!(paths.iter().any(|path| path.ends_with("outputs")));
         assert!(
             paths
@@ -4114,7 +4113,13 @@ mod tests {
                 "/models",
                 true,
             ),
-            (artifact_path(&roots, 'A'), "/models", true),
+            (
+                runtime_models(&roots)
+                    .join("Primary")
+                    .join("artifact-a.bin"),
+                "/models",
+                true,
+            ),
             (model.clone(), "/models", false),
             (model.clone(), "/model", true),
             (model.clone(), "/models/..", true),
@@ -4149,8 +4154,8 @@ mod tests {
         let too_many = (0..4097)
             .map(|index| {
                 let source = runtime_models(&roots)
-                    .join("sha256")
-                    .join(format!("{index:064x}"));
+                    .join("primary")
+                    .join(format!("artifact-{index}.bin"));
                 fs::create_dir(&source).unwrap();
                 (source, format!("/models/artifact-{index}"))
             })
@@ -4200,13 +4205,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_legacy_sha256_model_layout() {
+        let (_temp, roots) = runtime_fixture();
+        let legacy_model = runtime_models(&roots).join("sha256").join("a".repeat(64));
+        fs::create_dir_all(&legacy_model).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(legacy_model, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         {
             let (temp, roots) = runtime_fixture();
             let models = runtime_models(&roots);
             fs::remove_dir_all(&models).unwrap();
             let outside_models = temp.path().join("outside-models");
-            let outside_model = outside_models.join("sha256").join("a".repeat(64));
+            let outside_model = outside_models.join("primary").join("artifact-a.bin");
             fs::create_dir_all(&outside_model).unwrap();
             symlink(&outside_models, &models).unwrap();
 
@@ -4223,10 +4243,10 @@ mod tests {
 
         {
             let (temp, roots) = runtime_fixture();
-            let model_root = runtime_models(&roots).join("sha256");
+            let model_root = runtime_models(&roots).join("primary");
             fs::remove_dir(&model_root).unwrap();
-            let outside_model_root = temp.path().join("outside-sha256");
-            fs::create_dir_all(outside_model_root.join("a".repeat(64))).unwrap();
+            let outside_model_root = temp.path().join("outside-primary");
+            fs::create_dir_all(outside_model_root.join("artifact-a.bin")).unwrap();
             symlink(&outside_model_root, &model_root).unwrap();
 
             let mount = artifact_path(&roots, 'a');
@@ -4255,8 +4275,8 @@ mod tests {
             symlink(&sibling, &installation).unwrap();
             let model = installation
                 .join("models")
-                .join("sha256")
-                .join("a".repeat(64));
+                .join("primary")
+                .join("artifact-a.bin");
             fs::create_dir_all(&model).unwrap();
             assert!(
                 validate_docker_run(
@@ -4313,7 +4333,7 @@ mod tests {
             roots.agent_data.clone(),
             roots.agent_data.join("installations"),
             runtime_models(&roots),
-            runtime_models(&roots).join("sha256"),
+            runtime_models(&roots).join("primary"),
             model,
         ] {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o770)).unwrap();

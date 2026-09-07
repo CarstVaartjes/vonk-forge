@@ -1894,9 +1894,13 @@ def _run_artifact_job(
                 expected_size=int(declaration["size_bytes"]),
             )
             uploaded.append(declaration)
-        client.request("POST", f"/api/v1/artifact-jobs/{_quoted(job_id)}/finalize")
+        client.request(
+            "POST",
+            f"/api/v1/artifact-jobs/{_quoted(job_id)}/finalize",
+        )
         submitted = client.request(
-            "POST", f"/api/v1/artifact-jobs/{_quoted(job_id)}/submit"
+            "POST",
+            f"/api/v1/artifact-jobs/{_quoted(job_id)}/submit",
         )
         return {
             "job": submitted,
@@ -1936,7 +1940,12 @@ def _run_artifact_job(
             "uploaded_inputs": [item[0] for item in inputs],
         }
     if command in {"finalize", "submit"}:
-        return _plan_or_request(args, client, "POST", f"{base}/{command}")
+        return _plan_or_request(
+            args,
+            client,
+            "POST",
+            f"{base}/{command}",
+        )
     if command == "status":
         return client.request("GET", base)
     if command == "result":
@@ -1946,7 +1955,11 @@ def _run_artifact_job(
         if not reason or len(reason) > 512:
             raise ValueError("--reason must be 1-512 non-whitespace characters")
         return _plan_or_request(
-            args, client, "POST", f"{base}/cancel", {"reason": reason}
+            args,
+            client,
+            "POST",
+            f"{base}/cancel",
+            {"reason": reason},
         )
     result = client.request("GET", f"{base}/result")
     outputs = _artifact_output_files(result)
