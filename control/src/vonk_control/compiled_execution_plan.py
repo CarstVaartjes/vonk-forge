@@ -132,7 +132,7 @@ class VerifiedModelObject(_StrictModel):
     """One cache-authorized model file before recipe mount selection.
 
     The model content identity and file ID are part of the lookup key.  A
-    path alone is insufficient because different model versions legitimately
+    path alone is insufficient because different model definitions legitimately
     contain files with the same name, such as ``config.json``.
     """
 
@@ -811,12 +811,6 @@ def compile_verified_execution_plan(
             "runtime model artifact-set digest does not match the cache authority"
         )
     identity = _mapping(spec.get("identity"), "runtime identity")
-    if {
-        "model_version_sha256",
-        "runtime_distribution_sha256",
-        "patch_bundle_sha256",
-    } & set(identity):
-        raise CompiledExecutionPlanError("runtime identity contains retired authority")
     recipe_revision_sha256 = _digest(
         identity.get("recipe_revision_sha256"), "recipe revision digest"
     )

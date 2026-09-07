@@ -12,6 +12,7 @@ import pytest
 
 from cluster_profiles import fleet_qualification_campaign_cli as campaign_cli
 from cluster_profiles.fleet_qualification import EvidenceLedger, QualificationError
+from library_route_fixtures import _library_detail, _recipe
 from cluster_profiles.qualification_locking import node_locks
 
 NODE_A = "spk_" + "1" * 32
@@ -38,7 +39,11 @@ def _reviewed_test_authority(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class _Client:
     def __init__(self, *, catalog_commit: str = "b" * 40) -> None:
-        self.catalog_commit = catalog_commit
+        del catalog_commit
+        self._details = {}
+        for slug in ("a", "b", "c"):
+            detail = _library_detail(_recipe(slug))
+            self._details[str(detail["summary"]["recipe_id"])] = detail
 
     def request(
         self,
@@ -66,48 +71,18 @@ class _Client:
                     for node_id in (NODE_A, NODE_B)
                 ],
             }
-        if (method, path) == ("GET", "/api/v1/catalog/public-recipes"):
+        if (method, path) == ("GET", "/api/v1/library/recipes"):
             return {
-                "repository": "test/recipes",
-                "commit": self.catalog_commit,
-                "recipes": [_recipe("a"), _recipe("b"), _recipe("c")],
+                "schema_version": 2,
+                "generated_at": "2026-09-07T00:00:00Z",
+                "next_cursor": None,
+                "freshness_policy": {},
+                "recipes": [item["summary"] for item in self._details.values()],
             }
+        prefix = "/api/v1/library/recipes/"
+        if method == "GET" and path.startswith(prefix):
+            return self._details[path.removeprefix(prefix)]["detail"]
         raise AssertionError((method, path))
-
-
-def _recipe(slug: str) -> dict[str, object]:
-    return {
-        "publisher": "vonk",
-        "slug": slug,
-        "uri": f"vonk+github://test/recipes/{slug}.json?ref={'b' * 40}&sha256={'c' * 64}",
-        "content_sha256": "c" * 64,
-        "release_version": "1.0.0",
-        "node_count": 1,
-        "topology_roles": [
-            {
-                "name": "entrypoint",
-                "count": 1,
-                "endpoint_owner": True,
-                "disk": {
-                    "image_bytes": 1,
-                    "artifact_bytes": 1,
-                    "staging_bytes": 1,
-                    "cache_bytes": 1,
-                    "rollback_bytes": 0,
-                    "safety_margin_bytes": 1,
-                },
-            }
-        ],
-        "expected_download_bytes": 10,
-        "artifact_count": 0,
-        "artifact_identities": [],
-        "temporary_build_bytes_per_node": 0,
-        "maximum_installed_bytes_per_node": 20,
-        "maximum_runtime_memory_bytes_per_node": 30,
-        "execution_readiness": "executable",
-        "execution_readiness_detail": "complete",
-        "local": {"status": "not-imported"},
-    }
 
 
 def _document() -> dict[str, object]:
@@ -313,19 +288,6 @@ except QualificationError as error:
         )
     assert completed.returncode == 0, completed.stderr
 
-
-def test_preview_rejects_catalog_commit_drift_before_writing_plans(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest_path = _write_manifest(tmp_path)
-    monkeypatch.setenv("VONK_QUALIFICATION_LOCK_DIR", str(tmp_path / "locks"))
-
-    with pytest.raises(QualificationError, match="public catalog drifted"):
-        campaign_cli.run(
-            ["--manifest", str(manifest_path)],
-            client_factory=lambda: _Client(catalog_commit="c" * 40),
-        )
-    assert not (tmp_path / "plans" / "first.json").exists()
 
 
 def test_preview_writes_both_private_plans_and_evidence(

@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {CacheEntryResponse, ControlApi, LibraryModel, ModelCacheOperationResponse, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
-import {modelVersionKey} from "../lib/library-route";
+import {modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord} from "./library-workcell";
 import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 import {availabilityFailure, availabilityRetryable, LibraryAvailabilityFeedback} from "./library-availability-feedback";
@@ -40,13 +40,13 @@ export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComple
         setOperation(await api.retryModelCacheOperation(operation.id, {schema_version: 2, request_key: crypto.randomUUID()}));
         return;
       }
-      const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256});
+      const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_content_sha256: model.model.content_sha256});
       if (plan.blockers.length) { setError(plan.blockers.join("; ")); return; }
       if (force) {
         const repairPlan = await api.previewModelCacheRepair({schema_version: 2, artifact_set_sha256: plan.artifact_set_sha256});
         setOperation(await api.repairModelCache({schema_version: 2, source_policy: "nas-first", artifact_set_sha256: repairPlan.artifact_set_sha256, plan_digest: repairPlan.plan_digest, request_key: crypto.randomUUID()}));
       } else {
-        setOperation(await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()}));
+        setOperation(await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_content_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()}));
       }
     } catch (value) { setError(value instanceof Error ? value.message : "Download to NAS failed"); }
   }
@@ -66,7 +66,7 @@ export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComple
 export function aggregateCacheEntries(models: readonly LibraryModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
   return models.map(model => {
     const files = model.model_document.files;
-    const candidates = (inventory?.entries ?? []).filter(entry => entry.model_version_sha256 === model.model.content_sha256);
+    const candidates = (inventory?.entries ?? []).filter(entry => entry.model_content_sha256 === model.model.content_sha256);
     const artifacts = candidates.flatMap(entry => entry.artifacts);
     const verified = new Set(artifacts.filter(file => file.state === "verified").map(file => `${file.path}|${file.sha256}|${file.actual_bytes}`));
     const complete = files.every(file => verified.has(`${file.path}|${file.sha256}|${file.size_bytes}`));
@@ -101,9 +101,9 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
         setOperation(await api.retryModelCacheOperation(operation.id, {schema_version: 2, request_key: crypto.randomUUID()}));
         return;
       }
-      const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256});
+      const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_content_sha256: model.model.content_sha256});
       if (plan.blockers.length) { setError(plan.blockers.join("; ")); return; }
-      const next = await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()});
+      const next = await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_content_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()});
       setOperationModelDigest(model.model.content_sha256);
       setOperation(next);
     } catch (value) { setError(value instanceof Error ? value.message : "Download to NAS failed"); }
@@ -128,7 +128,7 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
         return <article className="library-cache-row" key={entry.key}>
           <div><h3>{entry.model.model_document.identity.model.title}</h3><p>{entry.model.model_document.identity.version} · {entry.model.model_document.identity.variant} · {entry.model.model.publisher}/{entry.model.model.slug} · {entry.recipeCount ? `${entry.recipeCount} Recipe${entry.recipeCount === 1 ? "" : "s"}` : "No Recipe linked"}</p><span className={`library-cache-status state-${entry.status}`}>{entry.status}</span></div>
           <dl><div><dt>Files</dt><dd>{entry.files.length}</dd></div><div><dt>Complete bytes</dt><dd>{formatBytes(entry.expectedBytes)}</dd></div><div><dt>Verified</dt><dd>{formatBytes(entry.verifiedBytes)}</dd></div></dl>
-          {activeForEntry && operation && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>}<span className="library-cache-actions"><button type="button" className="button" disabled={activeForEntry || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : retryForEntry ? "Retry cache operation" : activeForEntry ? "Downloading to NAS…" : "Download to NAS"}</button>{entry.status === "cached" && <a className="button secondary" href={`/library?view=models&model=${encodeURIComponent(modelVersionKey(entry.model.model))}`} onClick={event => onNavigate(event, `/library?view=models&model=${encodeURIComponent(modelVersionKey(entry.model.model))}`)}>Review Model removal in Models</a>}</span>
+          {activeForEntry && operation && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>}<span className="library-cache-actions"><button type="button" className="button" disabled={activeForEntry || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : retryForEntry ? "Retry cache operation" : activeForEntry ? "Downloading to NAS…" : "Download to NAS"}</button>{entry.status === "cached" && <a className="button secondary" href={`/library?view=models&model=${encodeURIComponent(modelKey(entry.model.model))}`} onClick={event => onNavigate(event, `/library?view=models&model=${encodeURIComponent(modelKey(entry.model.model))}`)}>Review Model removal in Models</a>}</span>
           <details><summary>Show all files</summary><ul>{entry.files.map(file => <li key={file.id}><span>{file.path}</span><small>{formatBytes(file.size_bytes)} · sha256:{file.sha256.slice(0, 12)}…</small></li>)}</ul></details>
         </article>;
       })}

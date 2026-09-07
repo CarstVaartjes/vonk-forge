@@ -22,7 +22,7 @@ type LibraryUninstallModelImpact = {
     cleanup_node_ids?: string[];
     dependent_recipe_ids?: string[];
     effect: "recipe-only" | "recipe-and-unused-model" | "recipe-and-partial-model-cleanup";
-    model_version_sha256?: string;
+    model_content_sha256?: string;
     model_title?: string;
     retained_node_ids?: string[];
   };

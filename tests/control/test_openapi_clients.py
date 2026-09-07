@@ -328,7 +328,8 @@ def test_admin_schema_is_secret_free() -> None:
         "not aggregate node readiness"
         in node_status["properties"]["health_probe_stale"]["description"]
     )
-    assert node_status["properties"]["stale"]["deprecated"] is True
+    assert "stale" not in node_status["properties"]
+    assert "profile" not in node_status["properties"]
     python_node_status = (PYTHON_CLIENT / "models/node_status.py").read_text()
     assert "health_probe_stale: bool" in python_node_status
     assert 'health_probe_stale = d.pop("health_probe_stale")' in python_node_status

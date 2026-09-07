@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from .audit import AuditRecord
 from .auth import Actor
 from .library_contract import Digest, ImageDigest, NodeId, Scalar, Text64, UuidId
+from .recipe_action_plans import SharedCachePolicy
 from .recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -60,7 +61,7 @@ RECIPE_OPERATION_IDS = {
     ): "previewLibraryModelDeletion",
     (
         "post",
-        "/api/v1/library/models/{model_version_sha256}/delete",
+        "/api/v1/library/models/{model_content_sha256}/delete",
     ): "deleteLibraryModel",
 }
 
@@ -252,7 +253,7 @@ class UninstallConsequencesResponse(StrictModel):
 
 
 class UninstallModelImpactResponse(StrictModel):
-    model_version_sha256: Digest
+    model_content_sha256: Digest
     model_title: str = Field(min_length=1, max_length=256)
     effect: str = Field(
         pattern=r"^(recipe-only|recipe-and-unused-model|recipe-and-partial-model-cleanup)$"
@@ -301,20 +302,23 @@ class ModelDeletionNodeImpactResponse(StrictModel):
 
 
 class ModelDeletionPlanResponse(StrictModel):
-    model_version_sha256: Digest
+    model_content_sha256: Digest
     model_title: str = Field(min_length=1, max_length=256)
     allowed: bool
     installations: list[ModelDeletionInstallationImpactResponse] = Field(
         max_length=512
     )
     nodes: list[ModelDeletionNodeImpactResponse] = Field(max_length=1024)
-    bytes_removed: int = Field(ge=0)
+    bytes_removed: int = Field(
+        ge=0,
+        description="Bytes freed from affected installation copies; shared/global cache bytes are excluded.",
+    )
     active_runs: list[UninstallActiveRunResponse] = Field(max_length=128)
     active_run_count: int = Field(ge=0)
     blockers: list[PlanReason] = Field(max_length=32)
     warnings: list[PlanReason] = Field(max_length=32)
-    shared_cache_policy: str = Field(
-        pattern=r"^remove-unreferenced-model-artifacts-only$"
+    shared_cache_policy: SharedCachePolicy = Field(
+        description="Shared/global downloaded model caches remain installed.",
     )
     plan_digest: Digest
 
@@ -418,7 +422,7 @@ class UninstallPreviewRequest(StrictModel):
 
 
 class ModelDeletionPreviewRequest(StrictModel):
-    model_version_sha256: Digest
+    model_content_sha256: Digest
 
 
 class UninstallRequest(StrictModel):
@@ -777,7 +781,7 @@ def install_recipe_operation_routes(
         try:
             return _response(
                 ModelDeletionPlanResponse,
-                asdict(recipes().preview_model_deletion(body.model_version_sha256)),
+                asdict(recipes().preview_model_deletion(body.model_content_sha256)),
             )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
@@ -978,7 +982,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/library/models/{model_version_sha256}/delete",
+        "/api/v1/library/models/{model_content_sha256}/delete",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="deleteLibraryModel",
@@ -986,13 +990,13 @@ def install_recipe_operation_routes(
     def delete_model(
         body: UninstallRequest,
         request: Request,
-        model_version_sha256: str = Path(pattern=_DIGEST),
+        model_content_sha256: str = Path(pattern=_DIGEST),
         actor: Actor = authenticated,
     ):
         administrator(actor)
         try:
             value = recipes().delete_model(
-                model_version_sha256,
+                model_content_sha256,
                 plan_digest=body.plan_digest,
                 actor=actor.subject,
                 request_id=body.request_key,
@@ -1005,7 +1009,7 @@ def install_recipe_operation_routes(
                 actor.subject,
                 "model.delete",
                 None,
-                (model_version_sha256, value.plan_digest, *value.nodes),
+                (model_content_sha256, value.plan_digest, *value.nodes),
             )
         )
         return operation(value)

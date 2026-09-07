@@ -512,7 +512,7 @@ jobs:
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-            pytest --collect-only -q > "$collection"
+            pytest --collect-only -q > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
             awk '
               /^tests\/.*::/ &&
@@ -608,7 +608,7 @@ jobs:
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --project control --frozen --with-editable . \
-            pytest --collect-only -q control/tests > "$collection"
+            pytest --collect-only -q control/tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
             # The connected wire file runs in its required Linux/Rust lane.
             awk '/^tests\/.*::/ && $0 !~ /^tests\/test_install_start_wire_bridge\.py::/' "$collection" |

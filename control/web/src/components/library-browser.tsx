@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
 import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
-import {modelVersionKey} from "../lib/library-route";
+import {modelKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import {LibraryCacheView} from "./library-cache-view";
 import {LibraryModelsView} from "./library-models-view";
@@ -18,7 +18,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, 
   const records = useMemo(() => buildLibraryRecipeRecords(snapshot), [snapshot]);
   useEffect(() => { setFilters(libraryFiltersFromSearch(new URL(path, location.origin).searchParams)); }, [path]);
   useEffect(() => {
-    if (!filters.model || snapshot.models.some(model => modelVersionKey(model.model) === filters.model)) return;
+    if (!filters.model || snapshot.models.some(model => modelKey(model.model) === filters.model)) return;
     const next = {...filters, model: ""};
     setFilters(next);
     if (onNavigatePath) {

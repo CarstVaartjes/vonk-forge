@@ -296,10 +296,6 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     assert validated["security"]["host_network"] is False
     assert validated["endpoint"]["port"] == 8000
     assert validated["job"] is None
-    rendered = json.dumps(validated, sort_keys=True)
-    assert "model_version_sha256" not in rendered
-    assert "runtime_distribution_sha256" not in rendered
-    assert "patch_bundle_sha256" not in rendered
 
 
 def test_compiled_launch_projection_validates_before_persisting() -> None:
@@ -411,9 +407,7 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
         validate_compiled_launch_payload(both)
 
 
-def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> (
-    None
-):
+def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
         _spec(),
@@ -429,11 +423,6 @@ def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt
             "reserved_memory_bytes": 1,
         },
     )
-    polluted = copy.deepcopy(payload)
-    polluted["identity"]["model_version_sha256"] = "f" * 64
-    with pytest.raises(CompiledExecutionPlanError):
-        validate_compiled_launch_payload(polluted)
-
     mismatched = copy.deepcopy(payload)
     mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
     with pytest.raises(CompiledExecutionPlanError):
@@ -761,9 +750,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     assert response.status_code == 200
     assert response.json() == payload
     assert response.json()["schema_version"] == 2
-    assert "model_version_sha256" not in response.text
-    assert "runtime_distribution_sha256" not in response.text
-    assert "patch_bundle_sha256" not in response.text
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
@@ -995,14 +981,6 @@ def test_upstream_authority_cannot_enter_compiled_receipts() -> None:
     model["repository"] = "huggingface.co/private/model"
 
     with pytest.raises(CompiledExecutionPlanError, match="upstream authority"):
-        _compile(polluted)
-
-
-def test_retired_runtime_authority_cannot_enter_compiled_receipts() -> None:
-    polluted = _spec()
-    polluted["identity"]["model_version_sha256"] = "f" * 64
-
-    with pytest.raises(CompiledExecutionPlanError, match="retired authority"):
         _compile(polluted)
 
 

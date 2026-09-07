@@ -10421,23 +10421,6 @@
             ],
             "description": "Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.",
             "title": "Probe Age Seconds"
-          },
-          "profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile"
-          },
-          "stale": {
-            "deprecated": true,
-            "description": "Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node readiness.",
-            "title": "Stale",
-            "type": "boolean"
           }
         },
         "required": [
@@ -10447,9 +10430,7 @@
           "lifecycle",
           "healthy",
           "health_probe_stale",
-          "stale",
           "labels",
-          "profile",
           "memory_available_bytes",
           "disk_available_bytes"
         ],
@@ -25748,7 +25729,7 @@
     },
     "/api/v1/nodes/status": {
       "get": {
-        "description": "Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.",
+        "description": "Returns the node health-probe projection. The health_probe_stale field refers only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.",
         "operationId": "getNodeStatuses",
         "responses": {
           "200": {

@@ -86,7 +86,7 @@ class SparkGroup(_StrictModel):
 
 class RunSwitchPreviewRequest(_StrictModel):
     schema_version: Literal[2] = 2
-    model_version_sha256: Digest
+    model_content_sha256: Digest
     recipe_revision_id: UuidId
     spark_group: SparkGroup
     alias: Alias
@@ -345,7 +345,7 @@ class RunSwitchPlan(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
     action: Literal["run", "switch", "stop"]
-    model_version_sha256: Digest | None
+    model_content_sha256: Digest | None
     recipe_revision_id: UuidId | None
     recipe_content_sha256: Digest | None
     alias: Alias | None

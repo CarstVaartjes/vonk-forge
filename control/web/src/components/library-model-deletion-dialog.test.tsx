@@ -17,13 +17,13 @@ function plan(overrides: Partial<LibraryModelDeletionPlan> = {}): LibraryModelDe
     bytes_removed: 120 * GIB,
     installations: [{installation_id: "installation-chat", installed_bytes: 120 * GIB, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
     model_title: "Qwen 3 BF16",
-    model_version_sha256: digest,
+    model_content_sha256: digest,
     nodes: [
       {installation_ids: ["installation-chat"], installed_bytes: 60 * GIB, node_id: "node-alpha", recipe_ids: ["recipe-chat"]},
       {installation_ids: ["installation-chat"], installed_bytes: 60 * GIB, node_id: "node-beta", recipe_ids: ["recipe-chat"]},
     ],
     plan_digest: "plan-one",
-    shared_cache_policy: "Only exact model files referenced solely by these installations are removed. Unrelated immutable caches stay on each Spark.",
+    shared_cache_policy: "retain-shared-download-cache",
     warnings: [],
     ...overrides,
   };
@@ -37,7 +37,7 @@ function renderDialog(api: ControlApi, onRefresh = vi.fn(async () => undefined))
   return {onRefresh, ...render(<LibraryModelDeletionDialog
     api={api}
     modelTitle="Qwen 3 BF16"
-    modelVersionSha256={digest}
+    modelContentSha256={digest}
     nodeNames={{"node-alpha": "Aurora", "node-beta": "Borealis"}}
     onClose={vi.fn()}
     onRefresh={onRefresh}
@@ -56,12 +56,13 @@ test("blocks model deletion while showing exact active runs and multi-Spark impa
   const api = {previewLibraryModelDeletion: vi.fn(async () => preview)} as unknown as ControlApi;
   renderDialog(api);
 
-  const dialog = await screen.findByRole("dialog", {name: "Delete Qwen 3 BF16 from Sparks"});
-  expect(within(dialog).getByText("1 recipe installation across 2 Sparks will be removed.")).toBeVisible();
-  expect(within(dialog).getByRole("heading", {name: "1 active run blocks deletion"})).toBeVisible();
+  const dialog = await screen.findByRole("dialog", {name: "Remove Qwen 3 BF16 installation copies"});
+  expect(within(dialog).getByText("1 recipe installation across 2 Sparks will have their copies removed.")).toBeVisible();
+  expect(within(dialog).getByText(/120\.0 GiB of installation copies will be freed/)).toBeVisible();
+  expect(within(dialog).getByRole("heading", {name: "1 active run blocks removing installation copies"})).toBeVisible();
   expect(within(dialog).getByText("model_delete.active_runs")).toBeVisible();
-  expect(within(dialog).getByText(/Only exact model files/)).toBeVisible();
-  expect(within(dialog).getByRole("button", {name: "Delete model and dependent recipes"})).toBeDisabled();
+  expect(within(dialog).getByText(/Shared and global downloaded model caches remain available/)).toBeVisible();
+  expect(within(dialog).getByRole("button", {name: "Remove installation copies"})).toBeDisabled();
 });
 
 test("keeps one request key across an ambiguous deletion retry and reports completion", async () => {
@@ -72,16 +73,16 @@ test("keeps one request key across an ambiguous deletion retry and reports compl
   const user = userEvent.setup();
   const {onRefresh} = renderDialog(api);
 
-  const dialog = await screen.findByRole("dialog", {name: "Delete Qwen 3 BF16 from Sparks"});
+  const dialog = await screen.findByRole("dialog", {name: "Remove Qwen 3 BF16 installation copies"});
   await user.click(within(dialog).getByRole("checkbox"));
-  await user.click(within(dialog).getByRole("button", {name: "Delete model and dependent recipes"}));
+  await user.click(within(dialog).getByRole("button", {name: "Remove installation copies"}));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent("response lost after dispatch");
-  await user.click(within(dialog).getByRole("button", {name: "Retry deletion request"}));
+  await user.click(within(dialog).getByRole("button", {name: "Retry removing installation copies"}));
 
   await waitFor(() => expect(deleteLibraryModel).toHaveBeenCalledTimes(2));
   expect(deleteLibraryModel.mock.calls[0][1].request_key).toBe(deleteLibraryModel.mock.calls[1][1].request_key);
   expect(deleteLibraryModel).toHaveBeenLastCalledWith(digest, {plan_digest: "plan-one", request_key: expect.any(String)}, expect.any(AbortSignal));
-  expect(await within(dialog).findByRole("region", {name: "Delete model operation progress"})).toHaveTextContent("Operation complete");
+  expect(await within(dialog).findByRole("region", {name: "Remove installation copies operation progress"})).toHaveTextContent("Operation complete");
   expect(onRefresh).toHaveBeenCalledTimes(1);
 });
 
@@ -94,10 +95,10 @@ test("requires a fresh preview and request key after a stale-plan rejection", as
   const user = userEvent.setup();
   renderDialog(api);
 
-  const dialog = await screen.findByRole("dialog", {name: "Delete Qwen 3 BF16 from Sparks"});
+  const dialog = await screen.findByRole("dialog", {name: "Remove Qwen 3 BF16 installation copies"});
   await user.click(within(dialog).getByRole("checkbox"));
-  await user.click(within(dialog).getByRole("button", {name: "Delete model and dependent recipes"}));
-  await user.click(await within(dialog).findByRole("button", {name: "Review fresh preview"}));
+  await user.click(within(dialog).getByRole("button", {name: "Remove installation copies"}));
+  await user.click(await within(dialog).findByRole("button", {name: "Review fresh removal preview"}));
 
   await waitFor(() => expect(previewLibraryModelDeletion).toHaveBeenCalledTimes(2));
   expect(within(dialog).getByRole("checkbox")).not.toBeChecked();

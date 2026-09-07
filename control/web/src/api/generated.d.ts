@@ -1140,7 +1140,7 @@ export interface paths {
         };
         /**
          * Read explicit node health-probe evidence
-         * @description Returns the legacy node health-probe projection. Its stale fields refer only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.
+         * @description Returns the node health-probe projection. The health_probe_stale field refers only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.
          */
         get: operations["getNodeStatuses"];
         put?: never;
@@ -5137,14 +5137,6 @@ export interface components {
              * @description Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.
              */
             probe_age_seconds?: number | null;
-            /** Profile */
-            profile: string | null;
-            /**
-             * Stale
-             * @deprecated
-             * @description Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node readiness.
-             */
-            stale: boolean;
         };
         /**
          * OperationCheckpoint

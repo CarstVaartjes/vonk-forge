@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -72,6 +73,7 @@ from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
     RecipeRunObservation,
+    _recipe_model_identities,
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
 )
@@ -177,6 +179,61 @@ def _synthetic_model_content_sha256() -> str:
         .read_text()
     )
     return content_sha256(ModelDefinition.model_validate(document))
+
+
+def test_recipe_model_identities_include_canonical_companion_dependencies() -> None:
+    primary_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    companion_document = json.loads(json.dumps(primary_document))
+    companion_document["identity"]["slug"] = "synthetic-companion"
+    companion_document["identity"]["model"]["slug"] = "synthetic-companion"
+    companion_document["identity"]["family"]["slug"] = "synthetic-companion"
+    companion = ModelDefinition.model_validate(companion_document)
+    companion_digest = content_sha256(companion)
+    primary_document["dependencies"] = [
+        {
+            "kind": "model",
+            "publisher": companion.identity.publisher,
+            "slug": companion.identity.slug,
+            "content_sha256": companion_digest,
+        }
+    ]
+    primary = ModelDefinition.model_validate(primary_document)
+    primary_digest = content_sha256(primary)
+    recipe_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    recipe_document["models"][0]["model"] = {
+        "kind": "model",
+        "publisher": primary.identity.publisher,
+        "slug": primary.identity.slug,
+        "content_sha256": primary_digest,
+    }
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    revisions = iter(
+        (
+            SimpleNamespace(document=primary.model_dump(mode="json")),
+            SimpleNamespace(document=companion.model_dump(mode="json")),
+        )
+    )
+
+    class RevisionSession:
+        def scalar(self, _statement: object) -> object:
+            return next(revisions)
+
+    identities = _recipe_model_identities(
+        RevisionSession(), recipe.model_dump(mode="json")
+    )
+
+    assert identities == (
+        (primary_digest, f"{primary.identity.publisher}/{primary.identity.slug}"),
+        (companion_digest, f"{companion.identity.publisher}/{companion.identity.slug}"),
+    )
 
 
 class _CanonicalModelCache:
@@ -2840,7 +2897,7 @@ def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
         )
     assert [child.payload["cleanup_model_content_sha256"] for child in children] == [
         None,
-        preview.model_impact.model_version_sha256,
+        preview.model_impact.model_content_sha256,
     ]
 
 
@@ -2857,14 +2914,18 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
         service, mapping_id, build_id, nodes, request_id="d" * 35 + "1"
     )
     uninstall = service.preview_uninstall(installation.owner_id)
-    model_digest = uninstall.model_impact.model_version_sha256
+    model_digest = uninstall.model_impact.model_content_sha256
 
     preview = service.preview_model_deletion(model_digest)
 
     assert preview.allowed is True
-    assert preview.model_version_sha256 == model_digest
-    assert preview.shared_cache_policy == "remove-unreferenced-model-artifacts-only"
+    assert preview.model_content_sha256 == model_digest
+    assert preview.shared_cache_policy == "retain-shared-download-cache"
     assert preview.bytes_removed == 480
+    assert preview.warnings[0].detail == (
+        "Only affected installation copies are removed; reusable downloaded model "
+        "cache remains retained."
+    )
     assert [item.installation_id for item in preview.installations] == sorted(
         [installation.owner_id, second_installation.owner_id]
     )
@@ -2972,7 +3033,7 @@ def test_model_deletion_requires_explicit_stop_for_every_active_run(
     )
     model_digest = service.preview_uninstall(
         installation.owner_id
-    ).model_impact.model_version_sha256
+    ).model_impact.model_content_sha256
 
     preview = service.preview_model_deletion(model_digest)
 
