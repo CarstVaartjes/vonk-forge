@@ -4,25 +4,24 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping
+from importlib import resources
 from pathlib import Path
 from typing import Any, Self
 
 import pytest
 
 from cluster_profiles.fleet_qualification import (
-    Blocker,
     EvidenceLedger,
     OperationMonitor,
     QualificationError,
     QualificationRunner,
     RunnerOptions,
     ServiceSmokeAdapter,
-    _artifact_identities,
-    _temporary_build_bytes,
     build_plan,
     legal_blockers,
     load_policy,
 )
+from library_route_fixtures import _library_detail, _recipe, _recipe_digest
 from cluster_profiles.qualification_fixtures import (
     FixtureRegistry,
     RecipeFixture,
@@ -64,6 +63,15 @@ class _Client:
             key: list(value) if isinstance(value, list) else value
             for key, value in responses.items()
         }
+        self._library: dict[str, dict[str, object]] = {}
+        page = self.responses.get(("GET", "/api/v1/library/recipes"))
+        if isinstance(page, Mapping) and isinstance(page.get("recipes"), list):
+            for recipe in page["recipes"]:
+                if not isinstance(recipe, Mapping):
+                    continue
+                detail = _library_detail(recipe)
+                summary = detail["summary"]
+                self._library[str(summary["recipe_id"])] = detail
         self.calls: list[tuple[str, str, object, object]] = []
 
     def request(
@@ -76,10 +84,160 @@ class _Client:
         query: object = None,
     ) -> dict[str, object]:
         self.calls.append((method, path, payload, query))
-        value = self.responses[(method, path)]
+        if method == "GET" and path == "/api/v1/library/recipes" and self._library:
+            return {
+                "schema_version": 2,
+                "generated_at": "2026-09-07T00:00:00Z",
+                "next_cursor": None,
+                "freshness_policy": {},
+                "recipes": [item["summary"] for item in self._library.values()],
+            }
+        if method == "GET" and path.startswith("/api/v1/library/recipes/"):
+            recipe_id = path.rsplit("/", 1)[-1]
+            if recipe_id in self._library:
+                value = self._library[recipe_id]["detail"]
+            else:
+                value = self.responses.get((method, path))
+                if not isinstance(value, Mapping):
+                    value = {}
+                selected = value.get("selected_revision")
+                selected_id = selected.get("id") if isinstance(selected, Mapping) else None
+                value = _library_detail(
+                    _recipe("tiny", recipe_id=recipe_id, revision_id=selected_id if isinstance(selected_id, str) else None),
+                    **_detail_overrides(value),
+                )["detail"]
+        else:
+            value = self.responses[(method, path)]
         if isinstance(value, list):
             value = value.pop(0)
         return dict(value)
+
+
+def _detail_overrides(value: Mapping[str, object]) -> dict[str, object]:
+    """Preserve operational observations while upgrading a detail fixture."""
+    overrides = {
+        key: value[key]
+        for key in ("placement", "reasons")
+        if key in value
+    }
+    state = value.get("operational_state")
+    if isinstance(state, Mapping):
+        mappings = []
+        for mapping in state.get("mappings", []):
+            if not isinstance(mapping, Mapping):
+                continue
+            mappings.append(
+                {
+                    "generation": int(mapping.get("generation", 0)),
+                    "mapping_id": str(mapping.get("mapping_id", "mapping")),
+                    "nodes": list(mapping.get("nodes", [])),
+                    "recipe_revision_id": str(mapping.get("recipe_revision_id", "revision")),
+                    "state": str(mapping.get("state", "ready")),
+                    "topology_name": str(mapping.get("topology_name", "solo")),
+                }
+            )
+        installations = []
+        for installation in state.get("installations", []):
+            if not isinstance(installation, Mapping):
+                continue
+            installations.append(
+                {
+                    "installation_id": str(installation.get("installation_id", "installation")),
+                    "mapping_id": str(installation.get("mapping_id", "mapping")),
+                    "node_ids": list(installation.get("node_ids", [])),
+                    "recipe_build_id": str(installation.get("recipe_build_id", "build")),
+                    "recipe_revision_id": str(installation.get("recipe_revision_id", "revision")),
+                    "state": str(installation.get("state", "installed")),
+                }
+            )
+        overrides["operational_state"] = {
+            "builds": list(state.get("builds", [])),
+            "mappings": mappings,
+            "installations": installations,
+            "runs": list(state.get("runs", [])),
+        }
+    placement = value.get("placement")
+    if isinstance(placement, list):
+        upgraded = []
+        for group in placement:
+            if not isinstance(group, Mapping):
+                continue
+            recommendations = []
+            for recommendation in group.get("recommendations", []):
+                if not isinstance(recommendation, Mapping):
+                    continue
+                nodes = []
+                for node in recommendation.get("nodes", []):
+                    if not isinstance(node, Mapping):
+                        continue
+                    node_id = str(node.get("node_id"))
+                    nodes.append(
+                        {
+                            "node_id": node_id,
+                            "rank": int(node.get("rank", 0)),
+                            "role": str(node.get("role", "entrypoint")),
+                            "endpoint_owner": int(node.get("rank", 0)) == 0,
+                            "artifact_reuse_bytes": 0,
+                            "disk_free_bytes": 500_000_000_000,
+                            "disk_required_bytes": 0,
+                            "disk_reserved_bytes": 0,
+                            "disk_free_after_bytes": 500_000_000_000,
+                            "memory_available_bytes": 120_000_000_000,
+                            "memory_required_bytes": 0,
+                            "memory_reserved_bytes": 0,
+                            "memory_free_after_bytes": 120_000_000_000,
+                            "memory_kind": "unified",
+                            "inventory_age_seconds": 0.0,
+                            "inventory_observed_at": "2026-09-07T00:00:00Z",
+                            "telemetry_age_seconds": 0.0,
+                            "telemetry_observed_at": "2026-09-07T00:00:00Z",
+                            "fabric_address": None,
+                        }
+                    )
+                recommendations.append(
+                    {
+                        "eligible": bool(recommendation.get("eligible", True)),
+                        "install_state": "not_present",
+                        "load_state": "not_loaded",
+                        "installation_ids": list(recommendation.get("installation_ids", [])),
+                        "mapping_id": recommendation.get("mapping_id"),
+                        "node_ids": list(recommendation.get("node_ids", [])),
+                        "nodes": nodes,
+                        "preview_targets": [],
+                        "reasons": [],
+                        "recipe_build_id": recommendation.get("recipe_build_id"),
+                        "recipe_revision_id": "10000000-0000-4000-8000-000000000000",
+                        "run_ids": [],
+                        "score": {
+                            "active_run_count": 0,
+                            "artifact_reuse_bytes": 0,
+                            "exact_install_complete": False,
+                            "exact_install_partial": False,
+                            "maximum_telemetry_age_seconds": 0.0,
+                            "minimum_disk_headroom_bytes": 0,
+                            "minimum_memory_headroom_bytes": 0,
+                        },
+                        "topology_name": "solo",
+                    }
+                )
+            upgraded.append(
+                {
+                    "candidate_node_ids": sorted({node_id for item in recommendations for node_id in item["node_ids"]}),
+                    "evaluated_group_count": len(recommendations),
+                    "evidence_counts": {"builds": 0, "installation_members": 0, "installations": 0, "mapping_members": 0, "mappings": 0, "run_members": 0, "runs": 0, "truncated_collections": []},
+                    "limits": {},
+                    "node_count": 1,
+                    "reasons": [],
+                    "recommendations": recommendations,
+                    "rejected_evidence_truncated": False,
+                    "rejected_groups": [],
+                    "rejected_nodes": [],
+                    "search_complete": True,
+                    "topology_name": "solo",
+                }
+            )
+        overrides["placement"] = upgraded
+    return overrides
 
 
 def _fleet(count: int = 2) -> dict[str, object]:
@@ -99,38 +257,6 @@ def _fleet(count: int = 2) -> dict[str, object]:
         ],
     }
 
-
-def _recipe(slug: str, *, nodes: int = 1, local: object = None) -> dict[str, object]:
-    return {
-        "publisher": "vonk",
-        "slug": slug,
-        "uri": "vonk+github://CarstVaartjes/vonk-forge-recipes/recipes/"
-        + slug
-        + ".json?ref="
-        + "b" * 40
-        + "&sha256="
-        + "c" * 64,
-        "content_sha256": "c" * 64,
-        "release_version": "1.0.0",
-        "node_count": nodes,
-        "topology_roles": [
-            {
-                "name": "solo",
-                "count": nodes,
-                "endpoint_owner": True,
-                "disk": _role_disk()["solo"],
-            }
-        ],
-        "expected_download_bytes": 10,
-        "artifact_count": 0,
-        "artifact_identities": [],
-        "temporary_build_bytes_per_node": 0,
-        "maximum_installed_bytes_per_node": 20,
-        "maximum_runtime_memory_bytes_per_node": 30,
-        "execution_readiness": "executable",
-        "execution_readiness_detail": "complete",
-        "local": local or {"status": "not-imported"},
-    }
 
 
 def _role_disk(
@@ -164,7 +290,6 @@ def _campaign_plan(
         intent_recipes.append(
             {
                 "key": item.get("key"),
-                "uri": item.get("uri"),
                 "content_sha256": item.get("content_sha256"),
                 "release_version": item.get("release_version"),
                 "node_count": item.get("node_count"),
@@ -219,51 +344,6 @@ def _campaign_plan(
     }
 
 
-def test_exact_capacity_projection_accepts_full_immutable_artifacts() -> None:
-    artifact = {
-        "id": "weights",
-        "kind": "huggingface.snapshot",
-        "repository": "owner/model",
-        "revision": "a" * 40,
-        "download_bytes": 10,
-        "installed_bytes": 20,
-        "roles": ["entrypoint"],
-    }
-    document = {
-        "visual_recipe": {},
-        "artifacts": [artifact],
-        "build": {"resources": {"temporary_bytes": 30}},
-    }
-    identity = {
-        "kind": artifact["kind"],
-        "repository": artifact["repository"],
-        "revision": artifact["revision"],
-        "include_paths": [],
-    }
-    expected_sha256 = hashlib.sha256(
-        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-    assert _artifact_identities(document) == [
-        {
-            "artifact_id": "weights",
-            "identity_sha256": expected_sha256,
-            "download_bytes": 10,
-            "installed_bytes": 20,
-            "roles": ["entrypoint"],
-        }
-    ]
-    assert _temporary_build_bytes(document) == 30
-
-
-def test_capacity_helpers_accept_public_visual_build_projection() -> None:
-    document = {
-        "visual_recipe": {
-            "build": {"temporary_bytes": 40},
-        }
-    }
-
-    assert _temporary_build_bytes(document) == 40
 
 
 def test_ledger_is_hash_chained_durable_and_resumable(tmp_path: Path) -> None:
@@ -309,168 +389,18 @@ def test_ledger_rejects_tampering_and_partial_records(tmp_path: Path) -> None:
         EvidenceLedger(path)
 
 
-def test_plan_previews_import_and_classifies_wide_and_policy_blockers() -> None:
-    supported = _recipe("tiny")
-    supported["artifact_count"] = 1
-    supported["artifact_identities"] = [
-        {
-            "artifact_id": "weights",
-            "identity_sha256": "d" * 64,
-            "download_bytes": 10,
-            "installed_bytes": 20,
-            "roles": ["solo"],
-        }
-    ]
-    supported["temporary_build_bytes_per_node"] = 30
-    wide = _recipe("eight", nodes=8)
-    denied = _recipe("denied")
-    client = _Client(
-        {
-            ("GET", "/api/v1/fleet"): _fleet(),
-            ("GET", "/api/v1/catalog/public-recipes"): {
-                "repository": "CarstVaartjes/vonk-forge-recipes",
-                "commit": "b" * 40,
-                "recipes": [supported, wide, denied],
-            },
-            ("POST", "/api/v1/catalog/imports/public/preview"): {
-                **supported,
-                "source": "recipe_library",
-            },
-        }
-    )
-
-    plan = build_plan(
-        client,
-        RunnerOptions(jurisdiction="NL"),
-        {
-            "vonk/denied": Blocker(
-                "license", "operator.policy_block", "Non-commercial dependency"
-            )
-        },
-    )
-
-    recipes = {item["key"]: item for item in plan["recipes"]}
-    assert recipes["vonk/tiny"]["planned_actions"][0] == "import"
-    assert RunnerOptions().cleanup == "stop"
-    assert "warm-redeploy-smoke" in recipes["vonk/tiny"]["planned_actions"]
-    assert "retain-installation" in recipes["vonk/tiny"]["planned_actions"]
-    assert recipes["vonk/tiny"]["artifact_identities"] == supported["artifact_identities"]
-    assert recipes["vonk/tiny"]["temporary_build_bytes_per_node"] == 30
-    assert recipes["vonk/eight"]["blockers"][0]["classification"] == "topology"
-    assert recipes["vonk/denied"]["blockers"][0]["classification"] == "license"
-    assert [call[:2] for call in client.calls].count(
-        ("POST", "/api/v1/catalog/imports/public/preview")
-    ) == 1
-    assert all(
-        call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
-    )
-
-
-def test_plan_rejects_import_preview_with_wrong_disk_role_before_digest() -> None:
-    recipe = _recipe("flux-2-klein-4b-nvfp4-comfyui-single")
-    recipe["topology_roles"] = [
-        {
-            "name": "entrypoint",
-            "count": 1,
-            "endpoint_owner": True,
-            "disk": _role_disk(image=5_000_000_000)["solo"],
-        }
-    ]
-    preview = json.loads(json.dumps(recipe))
-    preview["topology_roles"] = [
-        {
-            "name": "worker",
-            "count": 1,
-            "endpoint_owner": False,
-            "disk": _role_disk(image=5_000_000_000)["solo"],
-        }
-    ]
-    client = _Client(
-        {
-            ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/catalog/public-recipes"): {
-                "repository": "CarstVaartjes/vonk-forge-recipes",
-                "commit": "b" * 40,
-                "recipes": [recipe],
-            },
-            ("POST", "/api/v1/catalog/imports/public/preview"): preview,
-        }
-    )
-
-    with pytest.raises(
-        QualificationError,
-        match="lacks exact disk requirements for every topology role: missing 'entrypoint'",
-    ):
-        build_plan(client, RunnerOptions(jurisdiction="NL"), {})
-
-    assert all(
-        call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
-    )
-
-
-@pytest.mark.parametrize(
-    ("drift", "expected"),
-    [
-        ("artifacts", "artifact identities changed during planning"),
-        ("temporary", "temporary build bytes changed during planning"),
-    ],
-)
-def test_plan_rejects_empty_first_import_capacity_projection(
-    drift: str, expected: str
-) -> None:
-    recipe = _recipe("first-import")
-    recipe["artifact_count"] = 1
-    recipe["artifact_identities"] = [
-        {
-            "artifact_id": "weights",
-            "identity_sha256": "d" * 64,
-            "download_bytes": 10,
-            "installed_bytes": 20,
-            "roles": ["solo"],
-        }
-    ]
-    recipe["temporary_build_bytes_per_node"] = 30
-    preview = json.loads(json.dumps(recipe))
-    if drift == "artifacts":
-        preview["artifact_identities"] = []
-    else:
-        preview["temporary_build_bytes_per_node"] = 0
-    client = _Client(
-        {
-            ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/catalog/public-recipes"): {
-                "repository": "CarstVaartjes/vonk-forge-recipes",
-                "commit": "b" * 40,
-                "recipes": [recipe],
-            },
-            ("POST", "/api/v1/catalog/imports/public/preview"): preview,
-        }
-    )
-
-    with pytest.raises(QualificationError, match=expected):
-        build_plan(client, RunnerOptions(jurisdiction="NL"), {})
 
 
 def test_plan_reads_exact_role_disk_from_top_level_library_topology() -> None:
     recipe_id = "00000000-0000-4000-8000-000000000001"
     revision_id = "00000000-0000-4000-8000-000000000002"
     disk = _role_disk(image=5, artifacts=7, staging=11, safety=13)["solo"]
-    recipe = _recipe(
-        "current",
-        local={
-            "status": "current",
-            "recipe_id": recipe_id,
-            "revision_number": 2,
-            "content_sha256": "c" * 64,
-        },
-    )
-    recipe["topology_roles"] = [
-        {"name": "entrypoint", "count": 1, "endpoint_owner": True, "disk": disk}
-    ]
+    recipe = _recipe("current", recipe_id=recipe_id, revision_id=revision_id)
+    recipe["topology"]["roles"][0]["resources"]["disk"] = disk
     client = _Client(
         {
             ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/catalog/public-recipes"): {
+            ("GET", "/api/v1/library/recipes"): {
                 "repository": "CarstVaartjes/vonk-forge-recipes",
                 "commit": "b" * 40,
                 "recipes": [recipe],
@@ -507,12 +437,11 @@ def test_intent_digest_ignores_observed_fleet_drift_but_evidence_snapshot_change
         client = _Client(
             {
                 ("GET", "/api/v1/fleet"): fleet,
-                ("GET", "/api/v1/catalog/public-recipes"): {
+                ("GET", "/api/v1/library/recipes"): {
                     "repository": "CarstVaartjes/vonk-forge-recipes",
                     "commit": "b" * 40,
                     "recipes": [recipe],
                 },
-                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
             }
         )
         return build_plan(client, RunnerOptions(jurisdiction="NL"), {})
@@ -535,24 +464,17 @@ def test_intent_digest_binds_catalog_authority_and_fixture_manifest() -> None:
         client = _Client(
             {
                 ("GET", "/api/v1/fleet"): fleet,
-                ("GET", "/api/v1/catalog/public-recipes"): {
+                ("GET", "/api/v1/library/recipes"): {
                     "repository": "CarstVaartjes/vonk-forge-recipes",
                     "commit": commit,
                     "recipes": [recipe],
                 },
-                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
             }
         )
         fixtures = FixtureRegistry({}, {}, {}, manifest_sha256=fixture_sha)
         return build_plan(client, RunnerOptions(jurisdiction="NL"), {}, fixtures)
 
     baseline = planned(commit="b" * 40, authority="a" * 40, fixture_sha="f" * 64)
-    assert (
-        planned(commit="c" * 40, authority="a" * 40, fixture_sha="f" * 64)[
-            "plan_digest"
-        ]
-        != baseline["plan_digest"]
-    )
     assert (
         planned(commit="b" * 40, authority="c" * 40, fixture_sha="f" * 64)[
             "plan_digest"
@@ -581,7 +503,7 @@ def test_node_pins_require_explicit_single_spark_recipes_and_known_authority() -
     client = _Client(
         {
             ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/catalog/public-recipes"): {
+            ("GET", "/api/v1/library/recipes"): {
                 "repository": "test",
                 "commit": "b" * 40,
                 "recipes": [_recipe("tiny")],
@@ -595,7 +517,7 @@ def test_node_pins_require_explicit_single_spark_recipes_and_known_authority() -
     dual_client = _Client(
         {
             ("GET", "/api/v1/fleet"): _fleet(2),
-            ("GET", "/api/v1/catalog/public-recipes"): {
+            ("GET", "/api/v1/library/recipes"): {
                 "repository": "test",
                 "commit": "b" * 40,
                 "recipes": [dual],
@@ -623,12 +545,11 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
         client = _Client(
             {
                 ("GET", "/api/v1/fleet"): _fleet(2),
-                ("GET", "/api/v1/catalog/public-recipes"): {
+                ("GET", "/api/v1/library/recipes"): {
                     "repository": "test",
                     "commit": "b" * 40,
                     "recipes": [recipe],
                 },
-                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
             }
         )
         return build_plan(
@@ -646,12 +567,11 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
         _Client(
             {
                 ("GET", "/api/v1/fleet"): _fleet(2),
-                ("GET", "/api/v1/catalog/public-recipes"): {
+                ("GET", "/api/v1/library/recipes"): {
                     "repository": "test",
                     "commit": "b" * 40,
                     "recipes": [recipe],
                 },
-                ("POST", "/api/v1/catalog/imports/public/preview"): recipe,
             }
         ),
         RunnerOptions(selected_recipes=frozenset({"vonk/tiny"})),
@@ -664,38 +584,6 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
     assert "allowed_node_ids" not in unpinned["campaign_intent"]["options"]
 
 
-@pytest.mark.parametrize(
-    ("lane", "expected_code"),
-    [
-        ("artifact", "fixture.recipe_digest_mismatch"),
-        ("service", "service_fixture.recipe_digest_mismatch"),
-    ],
-)
-def test_plan_blocks_fixture_digest_drift_before_import(
-    lane: str, expected_code: str
-) -> None:
-    fixtures = _fixture_registry(lane)
-    key = "vonk/tiny"
-    publisher, slug = key.split("/", 1)
-    recipe = _recipe(slug)
-    recipe["publisher"] = publisher
-    recipe["content_sha256"] = "0" * 64
-    client = _Client(
-        {
-            ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/catalog/public-recipes"): {
-                "repository": "CarstVaartjes/vonk-forge-recipes",
-                "commit": "b" * 40,
-                "recipes": [recipe],
-            },
-        }
-    )
-
-    plan = build_plan(client, RunnerOptions(jurisdiction="NL"), {}, fixtures)
-
-    assert plan["recipes"][0]["blockers"][0]["code"] == expected_code
-    assert all("imports/public" not in call[1] for call in client.calls)
-
 
 def test_apply_rejects_actionable_plan_tampering_and_option_drift(
     tmp_path: Path,
@@ -703,7 +591,6 @@ def test_apply_rejects_actionable_plan_tampering_and_option_drift(
     options = RunnerOptions(jurisdiction="NL")
     item = {
         "key": "vonk/tiny",
-        "uri": _recipe("tiny")["uri"],
         "content_sha256": "c" * 64,
         "release_version": "1.0.0",
         "node_count": 1,
@@ -757,7 +644,6 @@ def test_transient_blocker_is_retried_under_same_campaign_intent(
     options = RunnerOptions()
     blocked_item = {
         "key": "vonk/tiny",
-        "uri": _recipe("tiny")["uri"],
         "content_sha256": "c" * 64,
         "release_version": "1.0.0",
         "node_count": 1,
@@ -849,11 +735,11 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
         items.append(
             {
                 "key": f"vonk/{slug}",
-                "content_sha256": f"{index:064x}",
+                "content_sha256": _recipe_digest(),
                 "node_count": 1,
                 "blockers": [],
-                "local_recipe_id": recipe_id,
-                "local_revision_id": revision_id,
+                "recipe_id": recipe_id,
+                "recipe_revision_id": revision_id,
                 "maximum_installed_bytes_per_node": size,
                 "expected_download_bytes": size,
                 "temporary_build_bytes_per_node": temporary[slug],
@@ -864,7 +750,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
         responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
-                "content_sha256": f"{index:064x}",
+                "content_sha256": _recipe_digest(),
             },
             "visual_recipe": {},
             "operational_state": {"installations": []},
@@ -1046,11 +932,11 @@ def test_node_pin_filters_capacity_and_resume_rejects_candidate_escape(
     revision_id = "10000000-0000-4000-8000-000000000091"
     item = {
         "key": "vonk/tiny",
-        "content_sha256": "9" * 64,
+        "content_sha256": _recipe_digest(),
         "node_count": 1,
         "blockers": [],
-        "local_recipe_id": recipe_id,
-        "local_revision_id": revision_id,
+        "recipe_id": recipe_id,
+        "recipe_revision_id": revision_id,
         "maximum_installed_bytes_per_node": 20,
         "expected_download_bytes": 10,
         "temporary_build_bytes_per_node": 0,
@@ -1062,7 +948,7 @@ def test_node_pin_filters_capacity_and_resume_rejects_candidate_escape(
         return {
             "selected_revision": {
                 "id": revision_id,
-                "content_sha256": "9" * 64,
+                "content_sha256": _recipe_digest(),
             },
             "visual_recipe": {},
             "operational_state": {"installations": []},
@@ -1152,11 +1038,11 @@ def test_pinned_lane_only_blocks_uncertain_installation_on_its_node(
     revision_id = "10000000-0000-4000-8000-000000000093"
     item = {
         "key": "vonk/tiny",
-        "content_sha256": "a" * 64,
+        "content_sha256": _recipe_digest(),
         "node_count": 1,
         "blockers": [],
-        "local_recipe_id": recipe_id,
-        "local_revision_id": revision_id,
+        "recipe_id": recipe_id,
+        "recipe_revision_id": revision_id,
         "maximum_installed_bytes_per_node": 20,
         "expected_download_bytes": 10,
         "temporary_build_bytes_per_node": 0,
@@ -1173,7 +1059,7 @@ def test_pinned_lane_only_blocks_uncertain_installation_on_its_node(
     detail = {
         "selected_revision": {
             "id": revision_id,
-            "content_sha256": "a" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {},
         "operational_state": {"installations": [uncertain_installation]},
@@ -1249,8 +1135,7 @@ def test_apply_honors_persisted_capacity_execution_order(
     items = [
         {
             "key": f"vonk/{slug}",
-            "uri": _recipe(slug)["uri"],
-            "content_sha256": f"{index:064x}",
+            "content_sha256": _recipe_digest(),
             "release_version": "1.0.0",
             "node_count": 1,
             "blockers": [],
@@ -1299,11 +1184,11 @@ def test_capacity_plan_binds_staging_build_and_controller_safety_floor(
     revision_id = "10000000-0000-4000-8000-000000000101"
     item = {
         "key": "vonk/staging",
-        "content_sha256": "1" * 64,
+        "content_sha256": _recipe_digest(),
         "node_count": 1,
         "blockers": [],
-        "local_recipe_id": recipe_id,
-        "local_revision_id": revision_id,
+        "recipe_id": recipe_id,
+        "recipe_revision_id": revision_id,
         "maximum_installed_bytes_per_node": 40,
         "expected_download_bytes": 20,
         "temporary_build_bytes_per_node": 7,
@@ -1327,7 +1212,7 @@ def test_capacity_plan_binds_staging_build_and_controller_safety_floor(
     detail = {
         "selected_revision": {
             "id": revision_id,
-            "content_sha256": "1" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {},
         "operational_state": {"installations": []},
@@ -1381,11 +1266,11 @@ def test_capacity_search_explores_recipe_order_for_transient_peaks(
         items.append(
             {
                 "key": f"vonk/{slug}",
-                "content_sha256": f"{index:064x}",
+                "content_sha256": _recipe_digest(),
                 "node_count": 1,
                 "blockers": [],
-                "local_recipe_id": recipe_id,
-                "local_revision_id": revision_id,
+                "recipe_id": recipe_id,
+                "recipe_revision_id": revision_id,
                 "maximum_installed_bytes_per_node": persistent,
                 "expected_download_bytes": persistent,
                 "temporary_build_bytes_per_node": temporary,
@@ -1396,7 +1281,7 @@ def test_capacity_search_explores_recipe_order_for_transient_peaks(
         responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
-                "content_sha256": f"{index:064x}",
+                "content_sha256": _recipe_digest(),
             },
             "visual_recipe": {},
             "operational_state": {"installations": []},
@@ -1439,11 +1324,11 @@ def test_dual_capacity_charges_build_temp_to_rank_zero_builder(
     revision_id = "10000000-0000-4000-8000-000000000201"
     item = {
         "key": "vonk/dual-builder",
-        "content_sha256": "2" * 64,
+        "content_sha256": _recipe_digest(),
         "node_count": 2,
         "blockers": [],
-        "local_recipe_id": recipe_id,
-        "local_revision_id": revision_id,
+        "recipe_id": recipe_id,
+        "recipe_revision_id": revision_id,
         "maximum_installed_bytes_per_node": 1,
         "expected_download_bytes": 1,
         "temporary_build_bytes_per_node": 100,
@@ -1456,7 +1341,7 @@ def test_dual_capacity_charges_build_temp_to_rank_zero_builder(
     detail = {
         "selected_revision": {
             "id": revision_id,
-            "content_sha256": "2" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {},
         "operational_state": {"installations": []},
@@ -1504,8 +1389,7 @@ def test_failed_capacity_provider_blocks_dependent_before_mutation(
     items = [
         {
             "key": f"vonk/{slug}",
-            "uri": _recipe(slug)["uri"],
-            "content_sha256": f"{index:064x}",
+            "content_sha256": _recipe_digest(),
             "release_version": "1.0.0",
             "node_count": 1,
             "blockers": [],
@@ -1600,11 +1484,11 @@ def test_capacity_resume_replans_when_dedup_provider_becomes_ineligible(
         revision_id = f"10000000-0000-4000-8000-{index:012d}"
         item = {
             "key": f"vonk/{slug}",
-            "content_sha256": f"{index:064x}",
+            "content_sha256": _recipe_digest(),
             "node_count": 1,
             "blockers": [],
-            "local_recipe_id": recipe_id,
-            "local_revision_id": revision_id,
+            "recipe_id": recipe_id,
+            "recipe_revision_id": revision_id,
             "maximum_installed_bytes_per_node": 20,
             "expected_download_bytes": 10,
             "temporary_build_bytes_per_node": 0,
@@ -1615,7 +1499,7 @@ def test_capacity_resume_replans_when_dedup_provider_becomes_ineligible(
         responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
-                "content_sha256": f"{index:064x}",
+                "content_sha256": _recipe_digest(),
             },
             "visual_recipe": {},
             "operational_state": {"installations": []},
@@ -1731,7 +1615,7 @@ def test_apply_rejects_placement_escape_before_mapping_or_build(
             ("GET", f"/api/v1/library/recipes/{recipe_id}"): {
                 "selected_revision": {
                     "id": revision_id,
-                    "content_sha256": "9" * 64,
+                    "content_sha256": _recipe_digest(),
                 },
                 "operational_state": {},
             }
@@ -1757,7 +1641,7 @@ def test_apply_rejects_placement_escape_before_mapping_or_build(
             "d" * 64,
             {
                 "key": key,
-                "content_sha256": "9" * 64,
+                "content_sha256": _recipe_digest(),
                 "node_count": 1,
             },
         )
@@ -1774,8 +1658,7 @@ def test_apply_continues_after_recipe_failure_but_exits_nonzero(
     items = [
         {
             "key": f"vonk/{slug}",
-            "uri": _recipe(slug)["uri"],
-            "content_sha256": f"{index:064x}",
+            "content_sha256": _recipe_digest(),
             "release_version": "1.0.0",
             "node_count": 1,
             "blockers": [],
@@ -1825,185 +1708,53 @@ def test_apply_continues_after_recipe_failure_but_exits_nonzero(
     assert any(row["event"] == "run.residency-inventoried" for row in ledger.records)
 
 
-def test_apply_isolates_import_preparation_failure_and_runs_healthy_recipe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    options = RunnerOptions()
-    node_id = "spk_" + "1" * 32
-    healthy_recipe_id = "00000000-0000-4000-8000-000000000301"
-    healthy_revision_id = "10000000-0000-4000-8000-000000000301"
-    items = []
-    for index, slug in enumerate(("broken-import", "healthy"), start=1):
-        items.append(
-            {
-                "key": f"vonk/{slug}",
-                "uri": _recipe(slug)["uri"],
-                "content_sha256": f"{index:064x}",
-                "release_version": "1.0.0",
-                "node_count": 1,
-                "blockers": [],
-                "maximum_installed_bytes_per_node": 1,
-                "expected_download_bytes": 1,
-                "temporary_build_bytes_per_node": 0,
-                "disk_requirements_by_role": _role_disk(image=1),
-                "artifact_identities": [],
-            }
-        )
-    plan = _campaign_plan(items, options)
-    fleet = _fleet(1)
-    fleet["nodes"][0]["id"] = node_id
-    detail = {
-        "selected_revision": {
-            "id": healthy_revision_id,
-            "content_sha256": f"{2:064x}",
-        },
-        "visual_recipe": {},
-        "operational_state": {"installations": []},
-        "placement": [
-            {
-                "recommendations": [
-                    {
-                        "eligible": True,
-                        "node_ids": [node_id],
-                        "nodes": [{"node_id": node_id, "role": "solo", "rank": 0}],
-                        "installation_ids": [],
-                    }
-                ]
-            }
-        ],
+
+
+def test_model_documents_supply_territorial_license_metadata() -> None:
+    from cluster_profiles.generated_control.models.model_definition import ModelDefinition
+
+    model = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    model["license"]["territorial_restrictions"] = {
+        "denied_jurisdictions": ["EU", "GB", "KR"],
+        "notice": "Not licensed in the denied territories.",
     }
-    ledger = EvidenceLedger(tmp_path / "prepare-isolation.jsonl")
-    runner = QualificationRunner(
-        _Client(
-            {
-                ("GET", f"/api/v1/library/recipes/{healthy_recipe_id}"): detail,
-                ("GET", "/api/v1/fleet"): fleet,
-                ("GET", "/api/v1/library"): {
-                    "models": [],
-                    "unlinked_recipes": [],
-                    "next_cursor": None,
-                },
-            }
-        ),
-        ledger,
-        options,
-    )
-    invoked: list[str] = []
+    recipe = _recipe("restricted")
+    from cluster_profiles.generated_control.models.recipe_definition import RecipeDefinition
 
-    def ensure_import(
-        _digest_value: str, item: Mapping[str, object]
-    ) -> tuple[str, str]:
-        if item["key"] == "vonk/broken-import":
-            raise RuntimeError("catalog import unavailable")
-        return healthy_recipe_id, healthy_revision_id
-
-    def apply_recipe(digest: str, item: Mapping[str, object]) -> None:
-        invoked.append(str(item["key"]))
-        ledger.append(
-            "recipe.succeeded",
-            plan_digest=digest,
-            recipe=str(item["key"]),
-        )
-
-    monkeypatch.setattr(runner, "_ensure_import", ensure_import)
-    monkeypatch.setattr(runner, "_apply_recipe", apply_recipe)
-
-    with pytest.raises(QualificationError, match="completed with 1 failed"):
-        runner.apply(plan, str(plan["plan_digest"]))
-
-    assert invoked == ["vonk/healthy"]
-    failed = next(
-        row
-        for row in ledger.records
-        if row["event"] == "recipe.failed" and row.get("recipe") == "vonk/broken-import"
-    )
-    assert failed["payload"]["phase"] == "capacity-preparation"
-
-
-def test_plan_classifies_definite_memory_blocker_without_importing() -> None:
-    recipe = _recipe("too-large")
-    recipe["maximum_runtime_memory_bytes_per_node"] = 130_000_000_000
-    client = _Client(
-        {
-            ("GET", "/api/v1/fleet"): _fleet(),
-            ("GET", "/api/v1/catalog/public-recipes"): {
-                "repository": "CarstVaartjes/vonk-forge-recipes",
-                "commit": "b" * 40,
-                "recipes": [recipe],
-            },
-        }
-    )
-
-    plan = build_plan(client, RunnerOptions(jurisdiction="NL"), {})
-
-    assert plan["recipes"][0]["blockers"][0]["code"] == "resource.memory_exceeds_fleet"
-    assert all("imports/public" not in call[1] for call in client.calls)
-
-
-def test_restricted_license_metadata_does_not_create_territorial_blockers() -> None:
-    recipe = {
-        "model_license": {
-            "territorial_restrictions": {
-                "denied_jurisdictions": ["EU", "GB", "KR"],
-                "notice": "Not licensed in the denied territories.",
-            }
-        }
-    }
-
-    assert legal_blockers(recipe, None) == []
-    assert legal_blockers(recipe, "NL") == []
-    assert legal_blockers(recipe, "US") == []
+    definition = RecipeDefinition.from_dict(recipe)
+    document = ModelDefinition.from_dict(model)
+    assert legal_blockers(definition, None, model_documents=(document,)) == []
+    assert legal_blockers(definition, "NL", model_documents=(document,)) == []
+    assert legal_blockers(definition, "US", model_documents=(document,)) == []
 
 
 def test_plan_reads_current_library_detail_for_revision_and_license() -> None:
     recipe = _recipe(
         "restricted",
-        local={
-            "status": "current",
-            "recipe_id": "00000000-0000-4000-8000-000000000001",
-            "revision_number": 2,
-            "content_sha256": "c" * 64,
-        },
+        recipe_id="00000000-0000-4000-8000-000000000001",
+        revision_id="00000000-0000-4000-8000-000000000002",
     )
     client = _Client(
         {
             ("GET", "/api/v1/fleet"): _fleet(),
-            ("GET", "/api/v1/catalog/public-recipes"): {
+            ("GET", "/api/v1/library/recipes"): {
                 "repository": "CarstVaartjes/vonk-forge-recipes",
                 "commit": "b" * 40,
                 "recipes": [recipe],
             },
-            (
-                "GET",
-                "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001",
-            ): {
-                "topology_roles": recipe["topology_roles"],
-                "artifact_identities": [],
-                "temporary_build_bytes_per_node": 0,
-                "selected_revision": {
-                    "id": "00000000-0000-4000-8000-000000000002",
-                    "content_sha256": "c" * 64,
-                },
-                "visual_recipe": {
-                    "model_license": {
-                        "territorial_restrictions": {
-                            "denied_jurisdictions": ["EU"],
-                            "notice": "Excluded territory",
-                        }
-                    }
-                },
-            },
+            ("GET", "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001"): {},
         }
     )
 
     plan = build_plan(client, RunnerOptions(jurisdiction="NL"), {})
     item = plan["recipes"][0]
 
-    assert item["local_revision_id"] == "00000000-0000-4000-8000-000000000002"
+    assert item["recipe_revision_id"] == "00000000-0000-4000-8000-000000000002"
     assert item["blockers"] == []
-    assert all(
-        call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
-    )
 
 
 def test_policy_is_additive_and_strict(tmp_path: Path) -> None:
@@ -2220,72 +1971,6 @@ def test_apply_records_static_blockers_without_mutation(tmp_path: Path) -> None:
     assert ledger.completed_recipes(str(plan["plan_digest"])) == set()
 
 
-def test_apply_does_not_block_after_import_for_territorial_license_metadata(
-    tmp_path: Path,
-) -> None:
-    options = RunnerOptions(jurisdiction="NL")
-    plan = _campaign_plan(
-        [
-            {
-                "key": "vonk/restricted",
-                "uri": _recipe("restricted")["uri"],
-                "content_sha256": "c" * 64,
-                "local_recipe_id": None,
-                "local_revision_id": None,
-                "blockers": [],
-                "node_count": 1,
-                "release_version": "1.0.0",
-            }
-        ],
-        options,
-    )
-    digest = str(plan["plan_digest"])
-    client = _Client(
-        {
-            ("POST", "/api/v1/catalog/imports/public"): {
-                "recipe_id": "00000000-0000-4000-8000-000000000001",
-                "id": "00000000-0000-4000-8000-000000000002",
-                "content_sha256": "c" * 64,
-            },
-            (
-                "GET",
-                "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001",
-            ): {
-                "selected_revision": {
-                    "id": "00000000-0000-4000-8000-000000000002",
-                    "content_sha256": "c" * 64,
-                },
-                "visual_recipe": {
-                    "model_license": {
-                        "territorial_restrictions": {
-                            "denied_jurisdictions": ["EU"],
-                            "notice": "Excluded territory",
-                        }
-                    }
-                },
-            },
-            ("GET", "/api/v1/library"): {
-                "models": [],
-                "unlinked_recipes": [],
-                "next_cursor": None,
-            },
-            ("GET", "/api/v1/fleet"): _fleet(1),
-        }
-    )
-    ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
-
-    runner = QualificationRunner(client, ledger, options)
-    invoked: list[str] = []
-    runner._prepare_capacity_campaign = lambda *_args: None
-    runner._residency_inventory = lambda *_args: {}
-    runner._apply_recipe = lambda _digest, item: invoked.append(str(item["key"]))
-
-    result = runner.apply(plan, digest)
-
-    assert result["blocked"] == 0
-    assert result["succeeded"] == 1
-    assert invoked == ["vonk/restricted"]
-
 
 def test_resume_never_uninstalls_a_preexisting_installation(tmp_path: Path) -> None:
     digest = "d" * 64
@@ -2329,7 +2014,7 @@ def test_resume_never_uninstalls_a_preexisting_installation(tmp_path: Path) -> N
     detail = {
         "selected_revision": {
             "id": "revision-1",
-            "content_sha256": "c" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {"interfaces": [{"adapter": "openai-chat"}]},
         "operational_state": {
@@ -2363,10 +2048,10 @@ def test_resume_never_uninstalls_a_preexisting_installation(tmp_path: Path) -> N
         digest,
         {
             "key": key,
-            "content_sha256": "c" * 64,
+            "content_sha256": _recipe_digest(),
             "node_count": 1,
-            "local_recipe_id": "recipe-1",
-            "local_revision_id": "revision-1",
+            "recipe_id": "recipe-1",
+            "recipe_revision_id": "revision-1",
         },
     )
 
@@ -2400,7 +2085,7 @@ def test_final_residency_is_per_revision_and_includes_stale_retained_installs(
     detail = {
         "selected_revision": {
             "id": selected_revision,
-            "content_sha256": "c" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "operational_state": {"installations": installations},
     }
@@ -2450,9 +2135,9 @@ def test_final_residency_is_per_revision_and_includes_stale_retained_installs(
             "recipes": [
                 {
                     "key": "vonk/tiny",
-                    "content_sha256": "c" * 64,
-                    "local_recipe_id": recipe_id,
-                    "local_revision_id": selected_revision,
+                    "content_sha256": _recipe_digest(),
+                    "recipe_id": recipe_id,
+                    "recipe_revision_id": selected_revision,
                 }
             ]
         },
@@ -2501,7 +2186,7 @@ def test_warm_smoke_failure_always_attempts_release_and_preserves_primary_error(
     detail = {
         "selected_revision": {
             "id": "revision-1",
-            "content_sha256": "c" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {"interfaces": [{"adapter": "openai-chat"}]},
         "operational_state": {
@@ -2541,10 +2226,10 @@ def test_warm_smoke_failure_always_attempts_release_and_preserves_primary_error(
             digest,
             {
                 "key": key,
-                "content_sha256": "c" * 64,
+                "content_sha256": _recipe_digest(),
                 "node_count": 1,
-                "local_recipe_id": "recipe-1",
-                "local_revision_id": "revision-1",
+                "recipe_id": "recipe-1",
+                "recipe_revision_id": "revision-1",
             },
         )
 
@@ -2586,7 +2271,7 @@ def test_initial_smoke_failure_always_attempts_release_and_preserves_primary_err
     detail = {
         "selected_revision": {
             "id": "revision-1",
-            "content_sha256": "c" * 64,
+            "content_sha256": _recipe_digest(),
         },
         "visual_recipe": {"interfaces": [{"adapter": "openai-chat"}]},
         "operational_state": {
@@ -2626,10 +2311,10 @@ def test_initial_smoke_failure_always_attempts_release_and_preserves_primary_err
             digest,
             {
                 "key": key,
-                "content_sha256": "c" * 64,
+                "content_sha256": _recipe_digest(),
                 "node_count": 1,
-                "local_recipe_id": "recipe-1",
-                "local_revision_id": "revision-1",
+                "recipe_id": "recipe-1",
+                "recipe_revision_id": "revision-1",
             },
         )
 

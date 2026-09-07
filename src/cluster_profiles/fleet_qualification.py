@@ -1870,11 +1870,11 @@ class QualificationRunner:
                 detail = self.client.request(
                     "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
                 )
-                selected_revision = detail.get("selected_revision")
+                parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
+                selected_revision = parsed_detail.recipe
                 if (
-                    not isinstance(selected_revision, Mapping)
-                    or selected_revision.get("id") != revision_id
-                    or selected_revision.get("content_sha256")
+                    selected_revision.recipe_revision_id != revision_id
+                    or selected_revision.content_sha256
                     != item.get("content_sha256")
                 ):
                     raise QualificationError(
@@ -1893,7 +1893,6 @@ class QualificationRunner:
                 )
                 self._preflight_failed.add(key)
                 continue
-            _parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
             restrictions = legal_blockers(
                 detail_definition,
                 self.options.jurisdiction,
@@ -3603,16 +3602,15 @@ class QualificationRunner:
         detail = self.client.request(
             "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
         )
-        selected_revision = detail.get("selected_revision")
+        parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
+        selected_revision = parsed_detail.recipe
         if (
-            not isinstance(selected_revision, Mapping)
-            or selected_revision.get("id") != revision_id
-            or selected_revision.get("content_sha256") != item.get("content_sha256")
+            selected_revision.recipe_revision_id != revision_id
+            or selected_revision.content_sha256 != item.get("content_sha256")
         ):
             raise QualificationError(
                 f"{key} selected revision changed after campaign planning"
             )
-        _parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
         restrictions = legal_blockers(
             detail_definition,
             self.options.jurisdiction,
