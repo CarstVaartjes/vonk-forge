@@ -1238,8 +1238,11 @@ class RecipeImageAvailabilityService:
                     operation.state = "succeeded"
                     operation.result = result
                     operation.updated_at = self._clock()
-                    operation.payload = dict(operation.payload) | {"stage": "available"}
-                    operation.payload = dict(operation.payload) | {
+                    completed_payload = dict(operation.payload)
+                    completed_payload.pop("failure", None)
+                    completed_payload.pop("retry_after_at", None)
+                    operation.payload = completed_payload | {
+                        "stage": "available",
                         "claim_owner": None,
                         "claim_until": None,
                     }
