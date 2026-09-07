@@ -6,7 +6,6 @@ on:
     paths:
       - .dockerignore
       - .github/workflows/dev-images.yml
-      - config/execution-harnesses/**
       - control/**
       - deploy/compose/**
       - inventory/wheels/**

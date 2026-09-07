@@ -58,7 +58,6 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
                 "agent_protocol/",
                 "tests/control/",
                 "src/cluster_profiles/",
-                "config/execution-harnesses/",
                 "inventory/wheels/",
             ),
             (

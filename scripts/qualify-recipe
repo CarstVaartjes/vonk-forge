@@ -27,7 +27,7 @@ from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
-_ARCHIVE_PAYLOAD_PREFIXES = ("image/", "oci/", "weights/", "runtime-distributions/", "patch-bundles/", "execution-harnesses/")
+_ARCHIVE_PAYLOAD_PREFIXES = ("image/", "oci/", "weights/", "runtime-distributions/", "patch-bundles/")
 SUPPORTED_CHECKS = frozenset({
     "endpoint.healthy", "chat.nonempty", "chat.output-cap", "completion.nonempty",
     "completion.output-cap", "embedding.nonempty", "tools.called", "inference.completed",

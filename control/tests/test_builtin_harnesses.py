@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from importlib.resources import files
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 from vonk_control.harnesses.canonical import compile_canonical_harness
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -31,8 +32,17 @@ BUILTINS = (
     "comfyui",
     "pytorch-pipeline",
 )
-HARNESS_ROOT = Path(__file__).resolve().parents[2] / "config/execution-harnesses"
 
+HARNESS_DIGESTS = {
+    "vllm": "830a82426fa7d2c0e60b7f97ffb9dbb915cb3ca39ff223001e14680722ce3a21",
+    "sglang": "84aa4bedf389781bf04e918c41b1e620d6374ec66abe716c8db0ba5816890b5b",
+    "tensorrt-llm": "57c2740f442490c0aa5630b62c744fc2b3bc5effdad8975067cc5e5acdc5a640",
+    "llama-cpp": "1c4929805cfdcf8252be42f1b68d954c63ff97f5891888912c41bacd67e59b0e",
+    "ds4": "0901d9143a2662b9be0bda5acb6b388088c43202e749168d4357a0ab26412984",
+    "diffusers": "847152170e23e363dd235a29dd175663712a2575d5f7885bf250e2e3ab79775e",
+    "comfyui": "dd282726724e54c890b282c6e1cc020a1d280937cb59fdb5f310e428b4f3c5f0",
+    "pytorch-pipeline": "83a9c39e8036710224d4b8639b7208634dab8460c7da78774397b8ec75190c1c",
+}
 OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}
 ENTRYPOINTS = {
     "vllm": ["vllm", "serve", "/models"],
@@ -97,14 +107,17 @@ def _example(name: str) -> dict[str, object]:
     )
 
 
-def test_config_contains_exactly_the_canonical_builtin_harness_assets() -> None:
-    paths = sorted(HARNESS_ROOT.glob("*.json"))
+def test_platform_metadata_contains_exactly_the_canonical_builtin_harnesses() -> None:
+    assert tuple(metadata.slug for metadata in CANONICAL_HARNESSES) == BUILTINS
+    assert all(metadata.compiler_slug == metadata.slug for metadata in CANONICAL_HARNESSES)
 
-    assert {path.stem for path in paths} == set(BUILTINS)
-    for path in paths:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        assert document["kind"] == "execution-harness"
-        assert document["compiler_slug"] == path.stem
+
+@pytest.mark.parametrize("slug", BUILTINS)
+def test_platform_metadata_preserves_stable_harness_identity_digest(slug: str) -> None:
+    metadata = next(item for item in CANONICAL_HARNESSES if item.slug == slug)
+
+    assert metadata.content_sha256 == HARNESS_DIGESTS[slug]
+    assert metadata.content_sha256 == hashlib.sha256(metadata.document_bytes()).hexdigest()
 
 
 @pytest.fixture(scope="module")
