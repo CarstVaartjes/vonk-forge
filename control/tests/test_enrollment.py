@@ -220,6 +220,7 @@ def evidence(
         "hardware_fingerprint": "hardware-fingerprint",
         "agent_digest": "a" * 64,
         "boot_id": "b9e9b12a-63e4-4cb5-83f3-4d963d321ec8",
+        "observation_receipt_public_key": "c" * 64,
     }
     result.update(overrides)
     return result
@@ -345,6 +346,17 @@ def test_enrollment_pins_and_explicit_reenrollment_rotates_receipt_key(service) 
         )
         assert node.observation_receipt_public_key == "2" * 64
         assert stored.observation_receipt_public_key == "2" * 64
+
+
+def test_enrollment_rejects_receipt_less_evidence(service) -> None:
+    enrollment, _, _, _ = service
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    submitted = evidence(request)
+    submitted.pop("observation_receipt_public_key")
+
+    with pytest.raises(EnrollmentDenied, match="evidence fields are invalid"):
+        enrollment.submit(grant.token, request, submitted)
 
 
 def test_reenrollment_replaces_existing_active_identity_and_replay_is_idempotent(

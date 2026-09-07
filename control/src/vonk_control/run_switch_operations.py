@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -27,6 +28,8 @@ from .cluster_mappings import (
     ClusterMappingPlan,
     ClusterMappingService,
 )
+from .model_cache import ModelCacheService
+from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -53,6 +56,7 @@ from .preparation_contract import (
     RuntimeImagePreparation,
     TargetAssetState,
 )
+from .recipe_builds import RecipeBuildPlan
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .resource_planning import (
@@ -66,6 +70,7 @@ from .resource_planning import (
 )
 from .run_switch_contract import (
     ArtifactStorageImpact,
+    ArtifactVerificationResult,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
@@ -139,7 +144,7 @@ class ArtifactInspection:
     # present on one target.
     artifact_set_sha256: str | None = None
     artifact_set_bytes: int | None = None
-    dependency_model_version_sha256: tuple[str, ...] = ()
+    dependency_model_content_sha256: tuple[str, ...] = ()
 
 
 class RunSwitchArtifactInspector(Protocol):
@@ -149,7 +154,7 @@ class RunSwitchArtifactInspector(Protocol):
         self,
         session: Session,
         *,
-        model_version_sha256: str,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -315,28 +320,6 @@ def _as_reason(
 
 def _safe_mapping(value: object) -> Mapping[str, object] | None:
     return value if isinstance(value, Mapping) else None
-
-
-def _manifest_value(value: object, key: str) -> object:
-    if isinstance(value, Mapping):
-        return value.get(key)
-    return getattr(value, key, None)
-
-
-def _manifest_artifact_size(manifest: object, digest: str) -> int:
-    artifacts = _manifest_value(manifest, "artifacts")
-    if isinstance(artifacts, Sequence) and not isinstance(
-        artifacts, (str, bytes, bytearray)
-    ):
-        for item in artifacts:
-            if _manifest_value(item, "sha256") != digest:
-                continue
-            size = _manifest_value(item, "expected_bytes")
-            if size is None:
-                size = _manifest_value(item, "download_bytes")
-            if type(size) is int and size > 0:
-                return size
-    raise RuntimeError("model-cache artifact size is unavailable")
 
 
 def _required_int(value: object) -> int | None:
@@ -677,10 +660,10 @@ class DatabaseRunSwitchArtifactInspector:
     plan.  Construction without the provider therefore fails explicitly.
     """
 
-    def __init__(self, model_cache: object | None = None) -> None:
+    def __init__(self, model_cache: ModelCacheService | None = None) -> None:
         self._model_cache = model_cache
 
-    def bind_model_cache(self, model_cache: object) -> None:
+    def bind_model_cache(self, model_cache: ModelCacheService) -> None:
         """Attach the Controller model-cache authority after startup wiring."""
 
         self._model_cache = model_cache
@@ -689,7 +672,7 @@ class DatabaseRunSwitchArtifactInspector:
         self,
         session: Session,
         *,
-        model_version_sha256: str,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -700,7 +683,7 @@ class DatabaseRunSwitchArtifactInspector:
         return self._inspect_model_cache(
             session,
             model_cache=self._model_cache,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             node_ids=node_ids,
             retention=retention,
@@ -711,8 +694,8 @@ class DatabaseRunSwitchArtifactInspector:
         self,
         session: Session,
         *,
-        model_cache: object,
-        model_version_sha256: str,
+        model_cache: ModelCacheService,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -725,71 +708,46 @@ class DatabaseRunSwitchArtifactInspector:
         contradictory provider becomes a blocker.
         """
 
-        resolve = getattr(model_cache, "resolve_artifact_set", None)
-        preview = getattr(model_cache, "download_preview", None)
-        if not callable(resolve) or not callable(preview):
-            raise TypeError("model-cache manifest provider is unavailable")
         try:
-            manifest = resolve(
-                model_version_sha256=model_version_sha256,
+            manifest = model_cache.resolve_artifact_set(
+                model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
             )
-            preview_value = preview(
-                model_version_sha256=model_version_sha256,
+            preview_document = model_cache.download_preview(
+                model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
+            )
+            preview = ModelCacheDownloadPreviewResponse.model_validate(
+                {
+                    key: value
+                    for key, value in preview_document.items()
+                    if not key.startswith("_")
+                }
             )
         except Exception as error:
             raise RuntimeError(f"model-cache exact manifest is unavailable: {error}") from error
-        artifact_set_sha256 = _manifest_value(manifest, "digest")
-        if artifact_set_sha256 is None:
-            artifact_set_sha256 = _manifest_value(preview_value, "artifact_set_sha256")
-        artifacts = _manifest_value(manifest, "artifacts")
-        if not _is_hex_digest(artifact_set_sha256) or not isinstance(artifacts, Sequence):
-            raise RuntimeError("model-cache exact manifest identity is invalid")
-        model_digests: list[str] = []
-        artifact_bytes = 0
-        seen: set[str] = set()
-        for item in artifacts:
-            digest = _manifest_value(item, "sha256")
-            size = _manifest_value(item, "expected_bytes")
-            if size is None:
-                size = _manifest_value(item, "download_bytes")
-            if not _is_hex_digest(digest) or type(size) is not int or size <= 0:
-                raise RuntimeError("model-cache artifact identity is invalid")
-            if digest not in seen:
-                model_digests.append(digest)
-                artifact_bytes += size
-                seen.add(digest)
-        if not model_digests or artifact_bytes < 1:
-            raise RuntimeError("model-cache exact manifest has no artifacts")
-        manifest_model_digest = _manifest_value(manifest, "model_version_sha256")
-        if manifest_model_digest not in (None, model_version_sha256):
+        artifact_set_sha256 = manifest.digest
+        if preview.artifact_set_sha256 != artifact_set_sha256:
+            raise RuntimeError("model-cache download preview does not match its manifest")
+        if manifest.model_content_sha256 != model_content_sha256:
             raise RuntimeError("model-cache manifest model identity does not match the request")
-        manifest_bytes = _manifest_value(manifest, "expected_bytes")
-        if manifest_bytes is not None and manifest_bytes != artifact_bytes:
-            raise RuntimeError("model-cache manifest byte total does not match its artifacts")
-        missing_nas_bytes = _manifest_value(preview_value, "new_bytes")
-        if type(missing_nas_bytes) is not int or missing_nas_bytes < 0:
-            raise RuntimeError("model-cache download preview has no bounded byte total")
-        blockers: list[RunSwitchReason] = []
-        raw_preview_blockers = _manifest_value(preview_value, "blockers")
-        if isinstance(raw_preview_blockers, Sequence) and not isinstance(
-            raw_preview_blockers, (str, bytes, bytearray)
-        ):
-            for raw in raw_preview_blockers:
-                detail = str(raw).strip()
-                if detail:
-                    blockers.append(
-                        _as_reason(
-                            "run-switch.nas-download-blocked",
-                            detail,
-                            scope="artifact",
-                            node_ids=node_ids,
-                        )
-                    )
+        # The cache authority validates the manifest.  Consume its exact typed
+        # fields, including empty support files and shared physical objects.
         expected_by_digest = {
-            digest: _manifest_artifact_size(manifest, digest) for digest in model_digests
+            artifact.sha256: artifact.expected_bytes for artifact in manifest.artifacts
         }
+        model_digests = tuple(expected_by_digest)
+        artifact_bytes = manifest.expected_bytes
+        missing_nas_bytes = preview.new_bytes
+        blockers = [
+            _as_reason(
+                "run-switch.nas-download-blocked",
+                detail,
+                scope="artifact",
+                node_ids=node_ids,
+            )
+            for detail in preview.blockers
+        ]
         reused = 0
         missing_spark = 0
         reclaimable = 0
@@ -825,21 +783,8 @@ class DatabaseRunSwitchArtifactInspector:
                     node_ids=node_ids,
                 )
             )
-        dependency_versions = _manifest_value(manifest, "model_versions")
-        raw_dependencies = (
-            dependency_versions
-            if isinstance(dependency_versions, Sequence)
-            and not isinstance(dependency_versions, (str, bytes, bytearray))
-            else ()
-        )
         dependencies = tuple(
-            sorted(
-                value
-                for value in raw_dependencies
-                if isinstance(value, str)
-                and value != model_version_sha256
-                and _is_hex_digest(value)
-            )
+            sorted(set(manifest.model_content_digests) - {model_content_sha256})
         )
         return ArtifactInspection(
             required_bytes=artifact_bytes * len(node_ids),
@@ -857,7 +802,7 @@ class DatabaseRunSwitchArtifactInspector:
             warnings=tuple(warnings),
             artifact_set_sha256=artifact_set_sha256,
             artifact_set_bytes=artifact_bytes,
-            dependency_model_version_sha256=dependencies,
+            dependency_model_content_sha256=dependencies,
         )
 
 
@@ -892,6 +837,15 @@ class RecipeLifecyclePhaseExecutor:
         if build_id is None or revision_id is None:
             raise RunSwitchOperationConflict(
                 "run-switch.container-build-identity-unavailable"
+            )
+        expected_build_id = _string_or_none(plan.build.build_id)
+        expected_build_input = _string_or_none(plan.build.build_input_sha256)
+        if (
+            expected_build_id is not None
+            and expected_build_id != build_id
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.container-build-plan-invalid"
             )
         with self._sessions() as session:
             build = session.get(RecipeBuild, build_id)
@@ -947,25 +901,57 @@ class RecipeLifecyclePhaseExecutor:
                 )
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
-        preview_build = getattr(self._lifecycle, "preview_build", None)
+            source_bundle_sha256 = build.source_bundle_sha256
+            stored_plan = build.plan
+            if (
+                expected_build_input is not None
+                and expected_build_input != build_input_sha256
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
         start_build = getattr(self._lifecycle, "build", None)
-        if not callable(preview_build) or not callable(start_build):
+        if not callable(start_build):
             raise RunSwitchOperationConflict(
                 "run-switch.container-build-executor-unavailable"
             )
-        try:
-            build_plan = preview_build(revision_id, builder_node_id)
-        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
-            raise RunSwitchOperationConflict(
-                f"run-switch.container-build-plan-unavailable: {error}"
-            ) from error
-        if (
-            getattr(build_plan, "build_id", None) != build_id
-            or getattr(build_plan, "build_input_sha256", None) != build_input_sha256
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.container-build-plan-changed"
-            )
+        # Preview already selected and persisted the exact executable build
+        # plan in ``RecipeBuild.plan``.  Re-running preview here would admit
+        # mutable builder evidence a second time and could derive a different
+        # build id/input digest between preview and apply.  Consume the
+        # durable producer record instead; the lifecycle build primitive still
+        # validates the current builder runtime and resource admission before
+        # it queues the child.
+        with self._sessions() as session:
+            revision = session.get(CatalogDocumentRevision, revision_id)
+            if (
+                not isinstance(stored_plan, Mapping)
+                or stored_plan.get("build_id") != build_id
+                or stored_plan.get("recipe_revision_id") != revision_id
+                or stored_plan.get("source_bundle_sha256") != source_bundle_sha256
+                or stored_plan.get("build_input_sha256") != build_input_sha256
+                or revision is None
+                or revision.kind != "recipe"
+                or revision.state != "active"
+                or stored_plan.get("recipe_content_sha256") != revision.content_digest
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
+            try:
+                build_plan = RecipeBuildPlan(
+                    build_id=build_id,
+                    recipe_revision_id=revision_id,
+                    recipe_content_sha256=revision.content_digest,
+                    builder_node_id=builder_node_id,
+                    source_bundle_sha256=source_bundle_sha256,
+                    build_input_sha256=build_input_sha256,
+                    agent_payload=dict(stored_plan),
+                )
+            except (TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.container-build-plan-invalid: {error}"
+                ) from error
         child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
         try:
             value = start_build(
@@ -1299,7 +1285,7 @@ class RunSwitchOperationService:
         artifact_phase_executor: RunSwitchArtifactPhaseExecutor | None = None,
         phase_executor: RunSwitchPhaseExecutor | None = None,
         model_capability_summary: Any | None = None,
-        model_cache: object | None = None,
+        model_cache: ModelCacheService | None = None,
         inventory_max_age_seconds: int = 300,
         memory_floor_bytes: int = 4_000_000_000,
     ) -> None:
@@ -1384,9 +1370,9 @@ class RunSwitchOperationService:
                 ]
             )
             model_digest = (
-                installation.model_version_sha256
+                installation.model_content_sha256
                 if installation is not None
-                else _string_or_none(run.plan.get("model_version_sha256"))
+                else _string_or_none(run.plan.get("model_content_sha256"))
             )
             recipe_digest = revision.content_digest if revision is not None else None
             _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
@@ -1497,7 +1483,7 @@ class RunSwitchOperationService:
                 "schema_version": 2,
                 "generated_at": now,
                 "action": "stop",
-                "model_version_sha256": model_digest,
+                "model_content_sha256": model_digest,
                 "recipe_revision_id": revision.id if revision is not None else None,
                 "recipe_content_sha256": recipe_digest,
                 "alias": run.alias,
@@ -1696,7 +1682,7 @@ class RunSwitchOperationService:
 
         return RunSwitchOperationProvider(self)
 
-    def bind_model_cache(self, model_cache: object) -> None:
+    def bind_model_cache(self, model_cache: ModelCacheService) -> None:
         """Bind the authoritative NAS cache after production composition."""
 
         binder = getattr(self._artifacts, "bind_model_cache", None)
@@ -1759,7 +1745,7 @@ class RunSwitchOperationService:
             recipe_model_digest = (
                 model_ref.get("content_sha256") if isinstance(model_ref, Mapping) else None
             )
-            if recipe_model_digest != request.model_version_sha256:
+            if recipe_model_digest != request.model_content_sha256:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_recipe_mismatch",
@@ -1770,7 +1756,7 @@ class RunSwitchOperationService:
             _model_document, model_documents, model_caps, recipe_caps, document_blockers = self._resolve_documents(
                 session,
                 revision,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 requested_recipe_digest=revision.content_digest,
             )
             blockers.extend(document_blockers)
@@ -1833,7 +1819,7 @@ class RunSwitchOperationService:
                 warnings.extend(current_fit_warnings)
             inspection = self._inspect_artifacts(
                 session,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 revision.id,
                 group,
                 retention=request.retention,
@@ -1853,7 +1839,7 @@ class RunSwitchOperationService:
             installation = self._matching_installation(
                 session,
                 revision.id,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 mapping,
                 group,
             )
@@ -2076,7 +2062,7 @@ class RunSwitchOperationService:
                 "schema_version": 2,
                 "generated_at": now,
                 "action": request.action,
-                "model_version_sha256": request.model_version_sha256,
+                "model_content_sha256": request.model_content_sha256,
                 "recipe_revision_id": revision.id,
                 "recipe_content_sha256": revision.content_digest,
                 "alias": request.alias,
@@ -2186,7 +2172,7 @@ class RunSwitchOperationService:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_revision_unavailable",
-                        "The exact model version selected for this run is not resolved in local catalog authority.",
+                        "The exact model definition selected for this run is not resolved in local catalog authority.",
                         scope="model",
                     )
                 )
@@ -2301,7 +2287,7 @@ class RunSwitchOperationService:
                     RecipeInstallation.recipe_revision_id == revision_id,
                     RecipeInstallation.mapping_id == mapping.id,
                     RecipeInstallation.mapping_generation == mapping.generation,
-                    RecipeInstallation.model_version_sha256 == model_digest,
+                    RecipeInstallation.model_content_sha256 == model_digest,
                     RecipeInstallation.state.in_(("installed", "installing", "partial")),
                 )
                 .order_by(RecipeInstallation.state.desc(), RecipeInstallation.updated_at.desc())
@@ -2999,12 +2985,12 @@ class RunSwitchOperationService:
         )
         model = ModelArtifactPreparation(
             artifact_set_sha256=artifact_set_digest,
-            model_version_sha256=primary_model_digest,
+            model_content_sha256=primary_model_digest,
             recipe_revision_sha256=revision.content_digest,
             artifact_count=max(1, len(model_digests)),
             artifact_set_bytes=artifact_set_bytes,
-            dependency_model_version_sha256=sorted(
-                set(inspection.dependency_model_version_sha256)
+            dependency_model_content_sha256=sorted(
+                set(inspection.dependency_model_content_sha256)
             ),
             completeness=model_completeness,
             controller=model_controller,
@@ -3534,7 +3520,7 @@ class RunSwitchOperationService:
         try:
             inspection = self._artifacts.inspect(
                 session,
-                model_version_sha256=model_digest,
+                model_content_sha256=model_digest,
                 recipe_revision_id=revision_id,
                 node_ids=tuple(node.node_id for node in group.nodes),
                 retention=retention,
@@ -3574,7 +3560,7 @@ class RunSwitchOperationService:
                 reclaimable_digests=inspection.reclaimable_digests,
                 artifact_set_sha256=inspection.artifact_set_sha256,
                 artifact_set_bytes=inspection.artifact_set_bytes,
-                dependency_model_version_sha256=inspection.dependency_model_version_sha256,
+                dependency_model_content_sha256=inspection.dependency_model_content_sha256,
                 freshness=inspection.freshness,
                 blockers=(
                     *inspection.blockers,
@@ -5219,6 +5205,21 @@ def _validate_artifact_execution(
             )
         return
     if phase.kind == "verify":
+        try:
+            verification = ArtifactVerificationResult.model_validate(result, strict=True)
+        except (TypeError, ValidationError) as error:
+            if (
+                plan.recipe_build_id is not None
+                and isinstance(result, Mapping)
+                and result.get("verified_build_id") != plan.recipe_build_id
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-build-verification-mismatch"
+                ) from error
+            raise RunSwitchOperationConflict(
+                "run-switch.artifact-verification-result-invalid"
+            ) from error
+        result = verification.model_dump(mode="python")
         if result.get("verified") is not True:
             raise RunSwitchOperationConflict(
                 "run-switch.artifact-digest-verification-failed"
@@ -5249,14 +5250,14 @@ def _validate_artifact_execution(
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-layout-verification-mismatch"
                 )
-        elif plan.recipe_build_id is not None:
+        if verification.verified_build_id != plan.recipe_build_id:
             # A build performed by the same high-level operation has no OCI
             # output digest at preview time.  The distribution adapter must
-            # bind its verification receipt to the exact durable build row.
-            if result.get("verified_build_id") != plan.recipe_build_id:
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-build-verification-mismatch"
-                )
+            # bind its verification receipt to the exact durable build row;
+            # published-image plans must carry an explicit null build ID.
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-build-verification-mismatch"
+            )
     elif phase.kind == "cleanup":
         if result.get("scope") != "spark-local":
             raise RunSwitchOperationConflict(

@@ -32,7 +32,7 @@ class RunSwitchPreviewRequest:
     """
         Attributes:
             alias (str):
-            model_version_sha256 (str):
+            model_content_sha256 (str):
             recipe_revision_id (str):
             spark_group (SparkGroup): A complete, rank-labelled Spark group selected by the operator.
             action (Union[Unset, RunSwitchPreviewRequestAction]):  Default: 'run'.
@@ -43,7 +43,7 @@ class RunSwitchPreviewRequest:
      """
 
     alias: str
-    model_version_sha256: str
+    model_content_sha256: str
     recipe_revision_id: str
     spark_group: 'SparkGroup'
     action: Union[Unset, RunSwitchPreviewRequestAction] = 'run'
@@ -60,7 +60,7 @@ class RunSwitchPreviewRequest:
         from ..models.spark_group import SparkGroup
         alias = self.alias
 
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256 = self.model_content_sha256
 
         recipe_revision_id = self.recipe_revision_id
 
@@ -87,7 +87,7 @@ class RunSwitchPreviewRequest:
 
         field_dict.update({
             "alias": alias,
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "recipe_revision_id": recipe_revision_id,
             "spark_group": spark_group,
         })
@@ -111,7 +111,7 @@ class RunSwitchPreviewRequest:
         d = dict(src_dict)
         alias = d.pop("alias")
 
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_content_sha256 = d.pop("model_content_sha256")
 
         recipe_revision_id = d.pop("recipe_revision_id")
 
@@ -156,7 +156,7 @@ class RunSwitchPreviewRequest:
 
         run_switch_preview_request = cls(
             alias=alias,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             spark_group=spark_group,
             action=action,

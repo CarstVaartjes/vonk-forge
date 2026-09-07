@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
+from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
 from vonk_control.inventory_repository import (
@@ -36,7 +36,9 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build",
+    *,
+    denied_jurisdictions: tuple[str, ...] = (),
+    recipe_mode: str = "build",
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
@@ -86,7 +88,8 @@ def _seed_canonical_catalog(
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode,
+        denied_jurisdictions=denied_jurisdictions,
+        recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
     model_digest = content_sha256(model)
@@ -185,13 +188,14 @@ def _seed_canonical_catalog(
             ]
         )
         session.flush()
-        stored_model_revision = session.get(
-            CatalogDocumentRevision, MODEL_REVISION_ID
-        )
+        stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
-        assert content_sha256(
-            ModelDefinition.model_validate(stored_model_revision.document)
-        ) == stored_model_revision.content_digest
+        assert (
+            content_sha256(
+                ModelDefinition.model_validate(stored_model_revision.document)
+            )
+            == stored_model_revision.content_digest
+        )
         stored_recipe_revision = session.get(
             CatalogDocumentRevision, RECIPE_REVISION_ID
         )
@@ -231,13 +235,14 @@ def _compiled_plan(
     rank: int,
     model_digest: str,
     recipe_digest: str,
-    build_input: str,
+    build_input: str | None,
+    build_id: str | None,
     image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
     image_digest = image_digest or "sha256:" + "1" * 64
     layout_digest = "2" * 64
-    return {
+    payload = {
         "schema_version": 2,
         "identity": {
             "recipe_revision_sha256": recipe_digest,
@@ -292,11 +297,14 @@ def _compiled_plan(
             "image_bytes": 30,
             "architecture": "linux-arm64",
             "runtime_interface": "vonk.runtime.v1",
-            "source": "controller-build",
-            "build_id": "test-build",
-            "registry_manifest_digest": None,
+            "source": "controller-build" if build_id is not None else "published",
+            "build_id": build_id,
+            "registry_manifest_digest": None if build_id is not None else image_digest,
             "platform_manifest_digest": image_digest,
             "local_image_config_id": "sha256:" + "4" * 64,
+            "local_image_reference": (
+                f"localhost/vonk/compiled-runtime-{layout_digest}@{image_digest}"
+            ),
             "runtime_interface_label": "v1",
             "distribution_object": {
                 "name": "image.oci.tar",
@@ -338,6 +346,7 @@ def _compiled_plan(
         },
         "job": None,
     }
+    return CompiledExecutionPlan.model_validate(payload).model_dump(mode="json")
 
 
 def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
@@ -346,7 +355,7 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
     build = kwargs["build"]
     resolved_entities = kwargs["resolved_entities"]
     model_revision = resolved_entities["models"][0]
-    build_input = build.build_input_sha256 if build is not None else "b" * 64
+    build_input = build.build_input_sha256 if build is not None else None
     execution = revision.document.get("execution", {})
     image = execution.get("image") if isinstance(execution, dict) else None
     image_digest = (
@@ -361,16 +370,16 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
             model_digest=model_revision.content_digest,
             recipe_digest=revision.content_digest,
             build_input=build_input,
+            build_id=build.id if build is not None else None,
             image_digest=image_digest,
         )
         for node in mapping_nodes
     }
 
 
-def _service(sessions, sizes, **kwargs):
+def _service(sessions, **kwargs):
     return InstallAdmissionService(
         sessions,
-        sizes=sizes,
         compiled_plan_provider=_compiled_plan_provider,
         **kwargs,
     )
@@ -460,16 +469,15 @@ def setup(
                 updated_at=now,
             )
         )
-    sizes = StaticArtifactSizeResolver((ArtifactSize(MODEL_SOURCE, "3" * 64, 70),))
-    return sessions, now, node_id, mapping_id, build_id, sizes
+    return sessions, now, node_id, mapping_id, build_id
 
 
 def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
-    sessions, now, _node, mapping, _build, sizes = setup(
+    sessions, now, _node, mapping, _build = setup(
         tmp_path, free=100, recipe_mode="image"
     )
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     )
     plan = service.plan_install(mapping, None, now=now)
     assert plan.allowed is True
@@ -477,7 +485,7 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     assert plan.nodes[0].free_after_bytes == 10
 
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=11
+        sessions, inventory_max_age=300, disk_floor_bytes=11
     )
     blocked = service.plan_install(mapping, None, now=now)
     assert blocked.allowed is False
@@ -488,14 +496,14 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
 def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estimates(
     tmp_path, free: int, allowed: bool
 ) -> None:
-    sessions, now, _node, mapping, _build, sizes = setup(
+    sessions, now, _node, mapping, _build = setup(
         tmp_path, free=free, recipe_mode="image", disk_estimates=(1, 1)
     )
     with sessions.begin() as session:
         for artifact in session.scalars(select(NodeArtifact)):
             session.delete(artifact)
     plan = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, None, now=now)
     assert plan.allowed is allowed
     assert plan.nodes[0].required_download_bytes == 100
@@ -506,14 +514,14 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
-    sessions, now, _node, mapping, _build, sizes = setup(
+    sessions, now, _node, mapping, _build = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
         recipe_mode="image",
     )
 
     unconfigured = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, None, now=now)
     assert unconfigured.allowed is True
     assert not any(
@@ -524,8 +532,9 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
         "install.license_territorial_restrictions_informational"
     )
 
+
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=80)
+    sessions, now, node, mapping, build = setup(tmp_path, free=80)
     with sessions.begin() as session:
         session.add(
             NodeArtifact(
@@ -541,7 +550,7 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
             )
         )
     plan = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now)
     assert plan.allowed is True
     assert plan.nodes[0].reused_bytes == 100
@@ -549,9 +558,9 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
 
 
 def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> None:
-    sessions, now, _node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, _node, mapping, build = setup(tmp_path, free=200)
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     )
     plan = service.plan_install(mapping, build, now=now)
     installation_id = service.accept_install(plan, actor="admin", now=now)
@@ -565,13 +574,16 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         assert installation.mapping_id == mapping
         assert installation.recipe_build_id == build
         assert installation.mapping_generation == 1
+        assert installation.model_content_digests == [
+            installation.model_content_sha256
+        ]
         assert reservation.amount_bytes == plan.nodes[0].required_bytes
 
 
 def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     )
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
@@ -598,21 +610,21 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
 
 
 def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
-    sessions, now, _node, mapping, build, sizes = setup(
+    sessions, now, _node, mapping, build = setup(
         tmp_path, free=200, observed_age=301
     )
     stale = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now)
     assert any(
         item.code == "install.stale_inventory" for item in stale.nodes[0].blockers
     )
 
-    sessions, now, _node, mapping, build, sizes = setup(
+    sessions, now, _node, mapping, build = setup(
         tmp_path / "read-only", free=200, read_only=True
     )
     blocked = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now)
     assert any(
         item.code == "install.artifact_store_read_only"
@@ -621,9 +633,9 @@ def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
 
 
 def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     )
     original = service.plan_install(mapping, build, now=now)
     InventoryRepository(sessions, clock=lambda: now).record(
@@ -642,9 +654,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
         )
     )
 
-    refreshed = service.plan_install(
-        mapping, build, now=now + timedelta(seconds=1)
-    )
+    refreshed = service.plan_install(mapping, build, now=now + timedelta(seconds=1))
 
     assert refreshed.allowed is True
     assert refreshed.nodes[0].inventory_observed_at != (
@@ -657,9 +667,9 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
 def test_apply_revalidates_but_tolerates_nonblocking_reservation_noise(
     tmp_path,
 ) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     )
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
@@ -683,21 +693,21 @@ def test_apply_revalidates_but_tolerates_nonblocking_reservation_noise(
 
 
 def test_install_topology_uses_authenticated_inventory_capabilities(tmp_path) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
         registered.capabilities = []
 
     plan = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now)
 
     assert plan.allowed is True
 
 
 def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
-    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
@@ -719,7 +729,7 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
     )
 
     plan = _service(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now + timedelta(seconds=1))
 
     assert plan.allowed is False
@@ -727,7 +737,7 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
 
 
 def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
-    sessions, _now, _node, _mapping, build, _sizes = setup(tmp_path, free=200)
+    sessions, _now, _node, _mapping, build = setup(tmp_path, free=200)
     with pytest.raises(IntegrityError), sessions.begin() as session:
         row = session.get(RecipeBuild, build)
         assert row is not None
@@ -735,7 +745,7 @@ def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
 
 
 def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
-    sessions, _now, _node, mapping, _build, _sizes = setup(tmp_path, free=200)
+    sessions, _now, _node, mapping, _build = setup(tmp_path, free=200)
     with (
         pytest.raises(ValueError, match="mapping.ready_immutable"),
         sessions.begin() as session,

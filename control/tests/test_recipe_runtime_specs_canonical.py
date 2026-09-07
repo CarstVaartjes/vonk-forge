@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from copy import deepcopy
 from importlib.resources import files
-from pathlib import Path
 
 import pytest
-
-contracts = pytest.importorskip("vonk_forge_contracts")
+import vonk_forge_contracts as contracts
 from vonk_control.harnesses.canonical import (
     _scalar,
     _validate_argv_size,
@@ -20,6 +17,8 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
+
+from .recipe_library_source import recipe_library_root
 
 
 def _example(name: str) -> dict[str, object]:
@@ -187,12 +186,9 @@ def test_canonical_argv_json_and_utf8_bounds() -> None:
         _validate_argv_size(["x" * 65536] * 16 + ["x"])
 
 
-def test_final_recipe_corpus_all_roles_if_published_checkout_is_configured() -> None:
-    """Run against the producer's published 84 recipe checkout when supplied."""
-    root_value = os.environ.get("VONK_FINAL_RECIPE_ROOT")
-    if not root_value:
-        pytest.skip("set VONK_FINAL_RECIPE_ROOT to the published recipe checkout")
-    root = Path(root_value)
+def test_current_recipe_corpus_compiles_every_role() -> None:
+    """Compile every role from the current canonical recipe checkout."""
+    root = recipe_library_root()
     recipe_files = sorted((root / "recipes").glob("*.json"))
     assert recipe_files
     model_documents: dict[tuple[str, str], object] = {}
@@ -314,10 +310,7 @@ def test_security_is_in_execution_projection_and_build_input_is_separate(model: 
 
 
 def _published_recipe_context(name: str) -> tuple[object, list[object], dict[str, object]]:
-    root_value = os.environ.get("VONK_FINAL_RECIPE_ROOT")
-    if not root_value:
-        pytest.skip("set VONK_FINAL_RECIPE_ROOT to the published recipe checkout")
-    root = Path(root_value)
+    root = recipe_library_root()
     recipe = contracts.RecipeDefinition.model_validate(
         json.loads((root / "recipes" / f"{name}.json").read_text(encoding="utf-8"))
     )
@@ -413,14 +406,11 @@ def test_published_ds4_keeps_target_and_drafter_mount_roles() -> None:
     }
     argv = spec["runtime"]["entrypoint"]
     assert argv[argv.index("--model") + 1].startswith("/models/target/")
-    assert argv[argv.index("--draft-model") + 1].startswith("/models/drafter/")
+    assert argv[argv.index("--mtp-model") + 1].startswith("/models/drafter/")
 
 
 def test_published_pipeline_has_output_contract() -> None:
-    root_value = os.environ.get("VONK_FINAL_RECIPE_ROOT")
-    if not root_value:
-        pytest.skip("set VONK_FINAL_RECIPE_ROOT to the published recipe checkout")
-    root = Path(root_value)
+    root = recipe_library_root()
     path = next(
         path
         for path in sorted((root / "recipes").glob("*.json"))

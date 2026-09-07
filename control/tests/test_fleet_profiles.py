@@ -84,11 +84,11 @@ def _exact_preparation(
         {
             "model": {
                 "artifact_set_sha256": model_digest,
-                "model_version_sha256": "b" * 64,
+                "model_content_sha256": "b" * 64,
                 "recipe_revision_sha256": "c" * 64,
                 "artifact_count": 1,
                 "artifact_set_bytes": 100,
-                "dependency_model_version_sha256": [],
+                "dependency_model_content_sha256": [],
                 "completeness": "complete",
                 "controller": controller_model,
                 "targets": [

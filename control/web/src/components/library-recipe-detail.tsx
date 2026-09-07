@@ -21,15 +21,15 @@ export function LibraryRecipeAuthority({api, detail, snapshot, onRefresh: _onRef
   const [runError, setRunError] = useState("");
   const [runStarting, setRunStarting] = useState(false);
   const nodeName = useLibraryNodeName();
-  const modelVersionSha256 = documents[0]?.selection.model.content_sha256;
+  const modelContentSha256 = documents[0]?.selection.model.content_sha256;
   const alias = detail.definition.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
   const nodeNames = Object.fromEntries(detail.placement.flatMap(placement => placement.recommendations.flatMap(group => group.nodes.map(node => [node.node_id, nodeName(node.node_id)] as const))));
   async function run(group: LibraryPlacementGroup) {
-    if (runStarting || !modelVersionSha256) return;
+    if (runStarting || !modelContentSha256) return;
     setRunStarting(true); setRunError(""); setRunPlan(undefined);
     const requestKey = crypto.randomUUID();
     const nodes = group.nodes.map(node => ({node_id: node.node_id, rank: node.rank, role: node.role, endpoint_owner: node.endpoint_owner}));
-    const input: RunSwitchPreviewRequest = {schema_version: 2, model_version_sha256: modelVersionSha256, recipe_revision_id: detail.recipe.recipe_revision_id, spark_group: {nodes}, alias, action: "run", retention: "retain-cached", invocation: {origin: "web.library", context: {recipe_id: detail.recipe.recipe_id, node_ids: nodes.map(node => node.node_id).join(",")}}};
+    const input: RunSwitchPreviewRequest = {schema_version: 2, model_content_sha256: modelContentSha256, recipe_revision_id: detail.recipe.recipe_revision_id, spark_group: {nodes}, alias, action: "run", retention: "retain-cached", invocation: {origin: "web.library", context: {recipe_id: detail.recipe.recipe_id, node_ids: nodes.map(node => node.node_id).join(",")}}};
     try {
       const plan = await api.previewRecipeRunSwitch(input); setRunPlan(plan);
       if (!plan.allowed || plan.blockers.length) { setRunError("The Controller needs attention before this Recipe can run."); return; }

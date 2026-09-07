@@ -1,16 +1,60 @@
 # Launch implementation and evidence
 
-Updated 2026-09-06. This replaces the earlier status snapshot. Platform
-integration is `codex/interface-integration`
-(latest checked remote main `0ab88b4f` is included). Local checks, publication,
-Controller deployment and physical Spark execution remain separate results.
-No local result below claims a deployed Controller or NVIDIA workload.
+Updated 2026-09-07. The current integration branch is
+`codex/launch-run-operation-repair`, based on remote main `cb6edee0`.
+[PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614) carries the combined
+Controller/Spark contract and trusted-cache corrections. Local checks,
+publication, Controller deployment and physical Spark execution remain
+separate results.
+
+## Current checkpoint
+
+- Platform work is on the integration branch, not yet published or deployed.
+  Earlier CI runs do not cover its subsequent commits.
+- Public contracts v1.0.5 are published at recipes commit
+  `d55389b5cc144d0483cf89b95770198c6125cb15` (PR76). Model, Recipe, and nested
+  capabilities require exact integer schema tags. All 92 Models, 85 Recipes,
+  and 109 compiled role projections pass, including the 751-file Model.
+- Canonical Model content references now connect cache persistence, all selected
+  and companion Model ownership, Run/Switch, deletion, the API, CLI, and web.
+  Generated clients use those same fields. Families, versions, and capabilities
+  remain data in ModelDefinition. Private cache manifests use strict Pydantic
+  structure and the public ModelReference type.
+- Spark downloads use one shared object path across artifact sets. Installation
+  materializes selected files from that cache, retries clean up their own partial
+  files, and repeated selections retain their distinct mounts. Removing an
+  installation keeps reusable downloads; API and UI previews describe that
+  retention and report installation-copy bytes.
+- The old recipe parser and package assets, flat recovery conversion, duplicate
+  enrollment DTO, unused artifact-size resolver, and obsolete model mount layout
+  are removed. Current Library acceptance uses ordinary published catalog inputs
+  and fresh PostgreSQL.
+- CLI qualification uses the current Library API. Selected file IDs are exact;
+  download totals deduplicate shared object bytes across Models.
+- Current checks include 432 Rust tests across 40 executables in unprivileged
+  ARM64 OrbStack, 300 composed Controller/database/protocol/CLI tests, and all
+  catalog role projections. Full Controller and web checks found remaining
+  test fixtures and one action-label type mismatch; their corrections and the
+  combined rerun are underway. Actual uninstall producer-to-Rust wire coverage
+  and the corrected development lifecycle canary are being completed.
+- Three exact changes remain pending automatic-review approval: deleting old
+  catalog ModelGroup/ModelVersion schema branches and seed/test documents;
+  removing repeated full-file hashes at trusted internal handoffs; and removing
+  the qualification CLI's duplicate territorial metadata check. These removals
+  have not been performed. Current runtime does not consume the old Model entity
+  documents. Active platform harness/runtime wire contracts remain supported.
+- The NAS Controller is unchanged. Backups and a fresh database are prepared;
+  device identities have not been copied and no selected Model download has
+  started. Deployment follows successful publication and acceptance.
+
+The detailed evidence below records earlier implementation checkpoints; this
+current checkpoint takes precedence for release and deployment status.
 
 ## Published results
 
 | Component | Verified result |
 |---|---|
-| Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
+| Recipes | [PR76](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/76) merged at `d55389b5cc144d0483cf89b95770198c6125cb15`; [v1.0.5 publication](https://github.com/CarstVaartjes/vonk-forge-recipes/actions/runs/34109170382) succeeded with strict schema tags and unchanged 92 Models and 85 Recipes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
 | Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |

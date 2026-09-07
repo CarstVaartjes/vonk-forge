@@ -35,9 +35,9 @@ class ModelArtifactPreparation:
             artifact_set_sha256 (str):
             completeness (ModelArtifactPreparationCompleteness):
             controller (ControllerAssetState): Availability of one immutable asset in Controller/NAS storage.
-            model_version_sha256 (str):
+            model_content_sha256 (str):
             targets (list['TargetAssetState']):
-            dependency_model_version_sha256 (Union[Unset, list[str]]):
+            dependency_model_content_sha256 (Union[Unset, list[str]]):
             recipe_revision_sha256 (Union[None, Unset, str]):
      """
 
@@ -46,9 +46,9 @@ class ModelArtifactPreparation:
     artifact_set_sha256: str
     completeness: ModelArtifactPreparationCompleteness
     controller: 'ControllerAssetState'
-    model_version_sha256: str
+    model_content_sha256: str
     targets: list['TargetAssetState']
-    dependency_model_version_sha256: Union[Unset, list[str]] = UNSET
+    dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
     recipe_revision_sha256: Union[None, Unset, str] = UNSET
 
 
@@ -68,7 +68,7 @@ class ModelArtifactPreparation:
 
         controller = self.controller.to_dict()
 
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256 = self.model_content_sha256
 
         targets = []
         for targets_item_data in self.targets:
@@ -77,9 +77,9 @@ class ModelArtifactPreparation:
 
 
 
-        dependency_model_version_sha256: Union[Unset, list[str]] = UNSET
-        if not isinstance(self.dependency_model_version_sha256, Unset):
-            dependency_model_version_sha256 = self.dependency_model_version_sha256
+        dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.dependency_model_content_sha256, Unset):
+            dependency_model_content_sha256 = self.dependency_model_content_sha256
 
 
 
@@ -98,11 +98,11 @@ class ModelArtifactPreparation:
             "artifact_set_sha256": artifact_set_sha256,
             "completeness": completeness,
             "controller": controller,
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "targets": targets,
         })
-        if dependency_model_version_sha256 is not UNSET:
-            field_dict["dependency_model_version_sha256"] = dependency_model_version_sha256
+        if dependency_model_content_sha256 is not UNSET:
+            field_dict["dependency_model_content_sha256"] = dependency_model_content_sha256
         if recipe_revision_sha256 is not UNSET:
             field_dict["recipe_revision_sha256"] = recipe_revision_sha256
 
@@ -131,7 +131,7 @@ class ModelArtifactPreparation:
 
 
 
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_content_sha256 = d.pop("model_content_sha256")
 
         targets = []
         _targets = d.pop("targets")
@@ -143,7 +143,7 @@ class ModelArtifactPreparation:
             targets.append(targets_item)
 
 
-        dependency_model_version_sha256 = cast(list[str], d.pop("dependency_model_version_sha256", UNSET))
+        dependency_model_content_sha256 = cast(list[str], d.pop("dependency_model_content_sha256", UNSET))
 
 
         def _parse_recipe_revision_sha256(data: object) -> Union[None, Unset, str]:
@@ -162,9 +162,9 @@ class ModelArtifactPreparation:
             artifact_set_sha256=artifact_set_sha256,
             completeness=completeness,
             controller=controller,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             targets=targets,
-            dependency_model_version_sha256=dependency_model_version_sha256,
+            dependency_model_content_sha256=dependency_model_content_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
         )
 

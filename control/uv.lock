@@ -1238,13 +1238,17 @@ version = "2.2.0"
 source = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
+    { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:65b8b1486d983dc87f0035edfbe33a12c1c54ad69b95ca15be785ba2b8214dff" },
+    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:238f85a15791ec9a9b3b7c3d383bef39f6dd00c70124f75f3e8d00ea8f172cfc" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "jsonschema", specifier = "==4.25.1" }]
+requires-dist = [
+    { name = "jsonschema", specifier = "==4.25.1" },
+    { name = "pydantic", specifier = "==2.13.4" },
+]
 
 [[package]]
 name = "vonk-cluster-profiles"
@@ -1336,7 +1340,7 @@ dev = [
 [[package]]
 name = "vonk-forge-public-contracts"
 version = "0.1.0"
-source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#807957c9bae653f618d98fb27620f69bf736fe37" }
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#d55389b5cc144d0483cf89b95770198c6125cb15" }
 dependencies = [
     { name = "pydantic" },
 ]
