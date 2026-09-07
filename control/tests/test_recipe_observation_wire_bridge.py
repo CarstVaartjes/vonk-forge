@@ -60,4 +60,3 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     assert parsed.schema_version == 2
     assert len(parsed.runs) == 1
     assert parsed.runs[0].helper_receipt.signature.algorithm == "ed25519"
-
