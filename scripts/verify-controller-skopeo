@@ -10,19 +10,19 @@ controller_image=$1
 source_reference=$2
 architecture=$3
 case "$architecture" in
-  linux/amd64) expected_child=sha256:9f6b762ce968b90b509c3bfa58f3d7abdbd1e0789340989db1572a1156fef116 ;;
-  linux/arm64) expected_child=sha256:75ab1f75f046d1597502a1ef838000d8462bfdf32976f2966658728a76853a49 ;;
+  linux/amd64) expected_child=sha256:abded792af33493f9aaa08132f564d3f9c12818193c0adc0a62f44ed84a04eda ;;
+  linux/arm64) expected_child=sha256:8ec3bf7d7bc514b7178db838b2e289ea5eca7bd065ce6a67b9f04cef3c85eba9 ;;
   *) echo "unsupported architecture: $architecture" >&2; exit 2 ;;
 esac
 if [[ "$source_reference" != *@sha256:* ]]; then
   echo "source must be digest pinned" >&2
   exit 2
 fi
-test "$source_reference" = "quay.io/skopeo/stable@sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc"
+test "$source_reference" = "quay.io/skopeo/stable@sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c"
 
 labels=$(docker image inspect --format '{{index .Config.Labels "io.vonk.skopeo.index-digest"}} {{index .Config.Labels "io.vonk.skopeo.'"${architecture#linux/}"'-digest"}}' "$controller_image")
 read -r index_label child_label <<<"$labels"
-test "$index_label" = sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc
+test "$index_label" = sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c
 test "$child_label" = "$expected_child"
 test "$(docker image inspect --format '{{.Architecture}}' "$controller_image")" = "${architecture#linux/}"
 source_child=$(skopeo inspect --tls-verify=true \

@@ -43,6 +43,13 @@ from vonk_agent_protocol import (
     SignedPackageObjectReceipt,
     canonical_message,
 )
+from vonk_agent_protocol.enrollment import (
+    ActivateRequest,
+    EnrollmentBootstrapResponse,
+    EnrollmentSubmitRequest,
+    IssuedCertificateResponse,
+    RenewRequest,
+)
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
@@ -96,6 +103,7 @@ from .models import (
     RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
+from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_operations import (
     RecipeRunObservation,
@@ -123,9 +131,6 @@ _UUID4_TEXT = (
 )
 _IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
-_MAX_CSR_BYTES = 16 * 1024
-_MAX_EVIDENCE_FIELDS = 8
-_MAX_EVIDENCE_BYTES = 8 * 1024
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
@@ -329,36 +334,6 @@ class GrantRequest(StrictJSONModel):
         return self
 
 
-class EnrollmentSubmitRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    grant_token: str = Field(min_length=43, max_length=64)
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    evidence: dict[str, str] = Field(min_length=6, max_length=_MAX_EVIDENCE_FIELDS)
-
-    @field_validator("evidence")
-    @classmethod
-    def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        expected = {
-            "node_id",
-            "csr_public_key_fingerprint",
-            "host_key_fingerprint",
-            "hardware_fingerprint",
-            "agent_digest",
-            "boot_id",
-            "observation_receipt_public_key",
-        }
-        receipt_key = "observation_receipt_public_key"
-        if set(evidence) != expected or any(
-            not value.strip() for value in evidence.values()
-        ):
-            raise ValueError("evidence fields are invalid")
-        if _DIGEST.fullmatch(evidence[receipt_key]) is None:
-            raise ValueError("observation receipt public key is invalid")
-        if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
-            raise ValueError("evidence is too large")
-        return evidence
-
-
 _ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
@@ -381,19 +356,6 @@ class EnrollmentGrantResponse(StrictJSONModel):
         "https://install.vonkforge.ai/spark",
         "https://install.vonkforge.ai/dev/spark",
     ]
-
-
-class EnrollmentBootstrapResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    controller_endpoint: str = Field(min_length=1, max_length=2048)
-    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
-    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    ca_pem: str = Field(min_length=1, max_length=64 * 1024)
-    controller_address: str | None = None
-    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
-    host_helper_authority_public_key: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
 
 
 class EnrollmentSummary(StrictJSONModel):
@@ -928,18 +890,6 @@ class TelemetryRequest(StrictJSONModel):
         return self
 
 
-class RenewRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
-class ActivateRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    generation: int = Field(ge=1)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
 def _wire(value: object) -> object:
     return json.loads(canonical_message(value))
 
@@ -948,17 +898,17 @@ def _now(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _issued_response(issued: object) -> dict[str, object]:
-    return {
-        "node_id": issued.node_id,
-        "certificate_pem": issued.certificate_pem.decode("ascii"),
-        "chain_pem": issued.chain_pem.decode("ascii"),
-        "serial": issued.serial,
-        "fingerprint": issued.fingerprint,
-        "not_before": _now(issued.not_before).isoformat(),
-        "not_after": _now(issued.not_after).isoformat(),
-        "generation": issued.generation,
-    }
+def _issued_response(issued: IssuedCertificate) -> IssuedCertificateResponse:
+    return IssuedCertificateResponse(
+        node_id=issued.node_id,
+        certificate_pem=issued.certificate_pem.decode("ascii"),
+        chain_pem=issued.chain_pem.decode("ascii"),
+        serial=issued.serial,
+        fingerprint=issued.fingerprint,
+        not_before=_now(issued.not_before).isoformat(),
+        not_after=_now(issued.not_after).isoformat(),
+        generation=issued.generation,
+    )
 
 
 def _json_response(value: object, *, status_code: int = 200) -> Response:
@@ -1832,7 +1782,7 @@ def install_agent_routes(
             ).model_dump(exclude_none=True, exclude_defaults=True)
         )
 
-    @agent.post("/enroll")
+    @agent.post("/enroll", response_model=IssuedCertificateResponse)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1890,7 +1840,7 @@ def install_agent_routes(
             ) from None
         try:
             outcome = required.enrollment.submit(
-                submitted.grant_token, csr_bytes, submitted.evidence
+                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except EnrollmentIssuanceUncertain as error:
             token_identifier = hashlib.sha256(
@@ -2686,7 +2636,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/renew")
+    @agent.post("/renew", response_model=IssuedCertificateResponse)
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)

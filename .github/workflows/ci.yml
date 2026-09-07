@@ -259,7 +259,7 @@ jobs:
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen --with-editable .
-          python scripts/tests/run_install_start_wire_bridge.py -- -q
+          python scripts/tests/run_agent_wire_contracts.py -- -q
 
   rust-platform:
     name: Rust platform integration
@@ -610,8 +610,8 @@ jobs:
           uv run --python 3.12 --project control --frozen --with-editable . \
             pytest --collect-only -q control/tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
-            # The connected wire file runs in its required Linux/Rust lane.
-            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_install_start_wire_bridge\.py::/' "$collection" |
+            # Every connected wire file runs in the required Linux/Rust lane.
+            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_.*_wire_bridge\.py::/' "$collection" |
               scripts/select-pytest-shard-files \
                 --durations "$timing_file" --max-duration-age-hours 720 \
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
