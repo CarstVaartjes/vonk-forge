@@ -5,6 +5,8 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_CLIENT = ROOT / "src/cluster_profiles/generated_control"
@@ -253,6 +255,9 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert not (
         PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py"
     ).exists()
+    assert operations["getJobLog"]["x-vonk-streaming-transport"] is True
+    assert "getJobLog" not in typescript
+    assert not (PYTHON_CLIENT / "api/default/get_job_log.py").exists()
 
 
 def test_admin_schema_is_secret_free() -> None:
@@ -265,9 +270,9 @@ def test_admin_schema_is_secret_free() -> None:
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/logs",
         "/api/v1/jobs/{job_id}/resume",
-        "/api/v1/nodes/status",
         "/api/v1/nodes/{node_id}/telemetry",
     }
+    assert "/api/v1/nodes/status" not in schema["paths"]
     assert all(path.startswith("/api/v1/") for path in schema["paths"])
     operation_list = [
         operation
@@ -571,7 +576,7 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
     for name in (
         "TelemetryCapability",
-        "TelemetryDetails",
+        "TelemetryDetails-Output",
         "TelemetryMetricSummary",
         "TelemetryMetrics",
         "TelemetryPoint",
@@ -591,21 +596,21 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
     point = schema["TelemetryPoint"]
     assert point["properties"]["details"] == {
-        "$ref": "#/components/schemas/TelemetryDetails"
+        "$ref": "#/components/schemas/TelemetryDetails-Output"
     }
-    assert point["properties"]["metrics"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryMetrics"},
-        {"type": "null"},
-    ]
+    assert point["properties"]["metrics"] == {
+        "$ref": "#/components/schemas/TelemetryMetrics"
+    }
+    assert "metrics" in point["required"]
     history = schema["TelemetryHistoryResponse"]
     assert history["properties"]["points"]["items"]["anyOf"] == [
         {"$ref": "#/components/schemas/TelemetryPoint"},
         {"$ref": "#/components/schemas/TelemetryRollupPoint"},
     ]
-    assert history["properties"]["metadata"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryHistoryMetadata"},
-        {"type": "null"},
-    ]
+    assert history["properties"]["metadata"] == {
+        "$ref": "#/components/schemas/TelemetryHistoryMetadata"
+    }
+    assert "metadata" in history["required"]
     assert schema["TelemetryCurrentResponse"]["properties"]["schema_version"][
         "const"
     ] == 2
@@ -623,13 +628,17 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
     assert 'TelemetryHistoryResponse: {[key: string]: unknown};' not in typescript
 
 
-def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
+def test_generated_telemetry_models_consume_current_pydantic_documents() -> None:
     from cluster_profiles.generated_control.models.telemetry_history_response import (
         TelemetryHistoryResponse,
     )
     from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
+    from vonk_control.fleet_projection import (
+        TelemetryHistoryResponse as HistoryProducer,
+        TelemetryPoint as PointProducer,
+    )
 
-    legacy_document = {
+    incomplete_document = {
         "id": "00000000-0000-4000-8000-000000000001",
         "node_id": "spk_" + "1" * 32,
         "boot_id": "00000000-0000-4000-8000-000000000002",
@@ -639,13 +648,12 @@ def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
         "gap_samples": 0,
         "details": {},
     }
-    legacy = TelemetryPoint.from_dict(legacy_document)
-    assert legacy.details.to_dict() == {}
-    assert "metrics" not in legacy.to_dict()
+    with pytest.raises(KeyError, match="metrics"):
+        TelemetryPoint.from_dict(incomplete_document)
 
-    rich = TelemetryPoint.from_dict(
-        {
-            **legacy_document,
+    producer = PointProducer.model_validate_json(
+        json.dumps({
+            **incomplete_document,
             "metrics": {
                 "schema_version": 2,
                 "series": [
@@ -656,6 +664,7 @@ def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
                         "measurement_kind": "measured",
                         "observed_at": "2026-09-05T00:00:00Z",
                         "scope": "accelerator",
+                        "device_id": "0",
                         "source": "fixture",
                         "support_status": "available",
                         "unit": "percent",
@@ -670,26 +679,44 @@ def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
                     "collector_version": "1",
                 },
             },
-        }
+        })
     )
+    rich = TelemetryPoint.from_dict(json.loads(producer.model_dump_json()))
     assert rich.metrics is not None
     assert rich.metrics.schema_version == 2
     assert rich.metrics.series[0].key == "gpu.utilization_percent"
 
-    history = TelemetryHistoryResponse.from_dict(
-        {
+    history_producer = HistoryProducer.model_validate_json(
+        json.dumps({
             "schema_version": 1,
-            "node_id": legacy.node_id,
+            "node_id": rich.node_id,
             "start": "2026-09-05T00:00:00Z",
             "end": "2026-09-05T00:01:00Z",
             "resolution": "raw",
             "maximum_points": 2,
             "points": [rich.to_dict()],
-        }
+            "metadata": {
+                "requested_start": "2026-09-05T00:00:00Z",
+                "requested_end": "2026-09-05T00:01:00Z",
+                "actual_start": "2026-09-05T00:00:00Z",
+                "actual_end": "2026-09-05T00:00:00Z",
+                "requested_resolution": "raw",
+                "actual_resolution": "raw",
+                "point_count": 1,
+                "coverage_seconds": 0.0,
+                "gap_samples": 0,
+                "downsampled": False,
+            },
+        })
+    )
+    history = TelemetryHistoryResponse.from_dict(
+        json.loads(history_producer.model_dump_json())
     )
     assert history.schema_version == 1
     assert isinstance(history.points[0], TelemetryPoint)
     assert history.points[0].metrics is not None
+    assert history.metadata.point_count == 1
+    assert HistoryProducer.model_validate_json(json.dumps(history.to_dict())) == history_producer
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:
@@ -702,7 +729,7 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "get_job_log": (401, 403, 404, 503),
+        "list_job_logs": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }
