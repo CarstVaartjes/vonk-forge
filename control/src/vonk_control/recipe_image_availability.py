@@ -1466,7 +1466,7 @@ class RecipeImageAvailabilityService:
                 raw_total = detail.get("total_bytes", detail.get("expected_bytes"))
                 if type(raw_total) is int and raw_total >= 0:
                     total_bytes = raw_total
-                raw_rate = detail.get("bytes_per_second", detail.get("rate"))
+                raw_rate = detail.get("bytes_per_second")
                 bytes_per_second = (
                     float(raw_rate) if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool) and raw_rate >= 0 else None
                 )

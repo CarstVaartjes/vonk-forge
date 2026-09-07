@@ -44,7 +44,6 @@ from .operation_contract import (
     OperationEvidenceProvenance,
     OperationFailureEvidence,
     OperationMemberProgress,
-    OperationProgress,
     OperationRecovery,
     OperationRecoveryAction,
     normalize_operation_progress,
@@ -273,6 +272,8 @@ class AgentsResponse(StrictModel):
 
 class JobOperationProgress(StrictModel):
     phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     completed_bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
@@ -721,37 +722,14 @@ def decode_offset(
 def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
-    phase = value.get("phase")
-    if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
-        return None
-    recognized = {
-        "completed_bytes",
-        "bytes_done",
-        "bytes_completed",
-        "total_bytes",
-        "bytes_total",
-        "bytes_per_second",
-        "rate_bytes_per_second",
-        "rate",
-        "eta_seconds",
-        "checkpoint",
-        "members",
-        "total_bytes_known",
-        "total_unknown",
-    }
     try:
-        # Validate the durable wire values before the compatibility normalizer
-        # runs. Pydantic's default coercion would turn malformed strings such as
-        # ``"100"`` into an apparently valid byte counter.
-        OperationProgress.model_validate(value, strict=True)
         normalized = normalize_operation_progress(value)
     except (TypeError, ValueError):
-        # Unknown extension fields from older agents must not make the whole
-        # job status unavailable; retain the stable phase only.
-        if recognized.intersection(value):
-            return None
-        normalized = {"phase": phase}
-    return JobOperationProgress(**normalized)
+        return None
+    try:
+        return JobOperationProgress.model_validate(normalized, strict=True)
+    except (TypeError, ValueError):
+        return None
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
