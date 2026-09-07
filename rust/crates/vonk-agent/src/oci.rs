@@ -2256,13 +2256,11 @@ mod tests {
         let cached = data
             .path()
             .join("distribution")
-            .join(&plan.identity.execution_sha256)
             .join("models")
             .join(&plan.identity.model_artifact_set_sha256);
-        fs::create_dir_all(cached.join("primary")).unwrap();
-        fs::create_dir_all(cached.join("secondary")).unwrap();
-        fs::write(cached.join("primary/config.json"), b"primary").unwrap();
-        fs::write(cached.join("secondary/config.json"), b"secondary").unwrap();
+        fs::create_dir_all(&cached).unwrap();
+        fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
+        fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
 
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
@@ -2273,11 +2271,56 @@ mod tests {
         assert_eq!(removed, 16);
         assert!(!installation.exists());
         assert_eq!(
-            fs::read(cached.join("primary/config.json")).unwrap(),
+            fs::read(cached.join(&plan.artifacts[0].sha256)).unwrap(),
             b"primary"
         );
         assert_eq!(
-            fs::read(cached.join("secondary/config.json")).unwrap(),
+            fs::read(cached.join(&plan.artifacts[1].sha256)).unwrap(),
+            b"secondary"
+        );
+    }
+
+    #[test]
+    fn explicit_auxiliary_model_cleanup_removes_selected_install_and_retains_shared_other_install()
+    {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "3".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
+
+        let mut other_value = compiled_plan();
+        other_value["identity"]["model_artifact_bytes"] = json!(7);
+        other_value["artifacts"] = json!([other_value["artifacts"][0].clone()]);
+        let other_plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(other_value).unwrap();
+        let other_id = "cb555393-764b-4eb6-8f15-b416d2894290".to_owned();
+        let (_, other_installation, _) =
+            persisted_plan_installation(data.path(), other_id.clone(), other_plan);
+        authorize_installation(&other_installation, &"4".repeat(64));
+
+        let cached = data
+            .path()
+            .join("distribution")
+            .join("models")
+            .join(&plan.identity.model_artifact_set_sha256);
+        fs::create_dir_all(&cached).unwrap();
+        fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
+        fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
+
+        let runner = NoProcess;
+        let removed = runtime(data.path(), &runner)
+            .uninstall_model(&[(installation_id, recipe_digest)], &"f".repeat(64))
+            .unwrap();
+
+        assert_eq!(removed, 16);
+        assert!(!installation.exists());
+        assert!(other_installation.exists());
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[0].sha256)).unwrap(),
+            b"primary"
+        );
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[1].sha256)).unwrap(),
             b"secondary"
         );
     }
@@ -2291,10 +2334,9 @@ mod tests {
         let cached = data
             .path()
             .join("distribution")
-            .join(&plan.identity.execution_sha256)
             .join("models")
             .join(&plan.identity.model_artifact_set_sha256)
-            .join("primary/config.json");
+            .join(&plan.artifacts[0].sha256);
         fs::create_dir_all(cached.parent().unwrap()).unwrap();
         fs::write(&cached, b"primary").unwrap();
 
