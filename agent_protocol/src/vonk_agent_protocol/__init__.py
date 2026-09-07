@@ -39,9 +39,11 @@ from .host_helper import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from .recipe_jobs import (
+    RecipeJobEvidence,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
+    RecipeJobOutputManifest,
     RecipeJobOutputMapping,
     RecipeJobRunRequest,
     RecipeJobRunResult,
@@ -104,9 +106,11 @@ __all__ = [
     "PackageReleaseGraph",
     "PackageReleaseLock",
     "RecipeInstallPayload",
+    "RecipeJobEvidence",
     "RecipeJobFile",
     "RecipeJobInputFile",
     "RecipeJobOutputLimits",
+    "RecipeJobOutputManifest",
     "RecipeJobOutputMapping",
     "RecipeJobRunRequest",
     "RecipeJobRunResult",
