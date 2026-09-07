@@ -105,29 +105,10 @@ def _controller_known_capabilities() -> frozenset[str]:
     return frozenset(evaluate(assignments["_KNOWN_CAPABILITIES"]))
 
 
-def test_rust_claim_capabilities_have_a_safe_controller_intersection() -> None:
-    """Ensure the required runtime contract exists on both sides.
-
-    The Controller deliberately negotiates the intersection: a newer agent may
-    advertise capabilities an older Controller does not know yet, and those
-    optional capabilities are ignored for that session.  Only the required
-    runtime capabilities must overlap; Controller-only orchestration remains
-    an intentional boundary.
-    """
-    advertised = _rust_claim_capabilities()
+def test_rust_claim_capabilities_cover_current_controller_contract() -> None:
+    """Every current Controller operation must be advertised by the Rust agent."""
+    advertised = set(_rust_claim_capabilities())
     known = _controller_known_capabilities()
     assert advertised, "Rust agent must advertise at least one capability"
-    required_overlap = {
-        "agent.runtime.rust.v1",
-        "runtime.vonk.v1",
-    }
-    assert required_overlap <= set(advertised) & known
-    assert known - set(advertised) == {
-        "node.probe",
-        "release.install",
-        "workload.health",
-        "workload.prepare",
-        "workload.start",
-        "workload.stop",
-        "workload.verify",
-    }
+    assert {"agent.runtime.rust.v1", "runtime.vonk.v1"} <= known
+    assert known <= advertised, f"Controller capabilities absent from Rust: {known - advertised}"
