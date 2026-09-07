@@ -795,7 +795,7 @@ def test_fleet_enrollments_all_follows_continuation_cursors() -> None:
     ("argv", "method", "path"),
     [
         (
-            ("fleet", "profile", "spk/node", "--display-name", "Studio", "--apply"),
+            ("fleet", "node-profile", "spk/node", "--display-name", "Studio", "--apply"),
             "PATCH",
             "/api/v1/nodes/spk%2Fnode/profile",
         ),
@@ -940,7 +940,7 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
         ("cache", "repair", "artifact-set-1", "preview"),
         ("fleet", "enroll", "--ttl-seconds", "901"),
         ("fleet", "re-enroll", "spk_NOT_HEX"),
-        ("fleet", "profile", "node", "--display-name", "   "),
+        ("fleet", "node-profile", "node", "--display-name", "   "),
         ("fleet", "upgrade", "preview", "--node-id", "spk_NOT_HEX"),
     ],
 )

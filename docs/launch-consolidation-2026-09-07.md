@@ -76,6 +76,27 @@ empty/raw/streaming routes. Python and TypeScript clients are regenerated from
 the actual API. Rust Serde remains handwritten and is checked against the
 shared protocol using actual producer/consumer wire tests.
 
+## Final source review and checks
+
+The follow-up audit found 34 registered worktrees. All current worker commits
+and the remaining documentation-only retirement review are integrated. Older
+staged harness variants are superseded; generated SBOM differences are replaced
+by regeneration from this integration. The original checkout remains protected,
+except its AGENTS.md was explicitly updated at the user's request.
+
+The API review is recorded in [API and goal alignment](audits/2026-09-07-api-goal-alignment.md).
+It records remaining product gaps rather than treating generated schema coverage
+as complete CLI parity or application recovery.
+
+- Full Controller/protocol run: 2,350 passed, three skipped; three failures were
+  corrected in the subsequent focused checks (browser fixture/build pin and a
+  distribution fixture without its required plan).
+- Final changed API, CLI, Fleet persistence, Run/Switch and distribution cases:
+  203 passed. Schema graph and generated-client checks: 24 passed.
+- Browser: 217 passed; production build passed.
+- Actual OrbStack Controller/worker image checks: two passed.
+- Retired asset/wheel checks: six passed. Pinned Ruff and diff checks passed.
+
 ## Publication and deployment boundary
 
 The integration targets remote platform `main`, last verified at `1ed542a1`.

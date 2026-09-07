@@ -1634,7 +1634,7 @@ class RunSwitchOperationService:
                 ):
                     raise RunSwitchOperationConflict("run-switch request key was already used")
                 return self._operation_view(existing)
-            progress = dict(previous.result) if isinstance(previous.result, Mapping) else {}
+            progress = _read_progress(previous.result)
             raw_retry = previous.payload.get("retry", {})
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
             operator_retries = retry.get("operator_retries")
@@ -4522,7 +4522,7 @@ def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
 def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
     """Keep family result data and add bounded generic failure evidence."""
 
-    result = dict(operation.result) if operation.result is not None else {}
+    result = operation.result.model_dump(mode="json") if operation.result is not None else {}
     if operation.state == "failed":
         retryable = bool(result.get("retryable") is True)
         result.update(

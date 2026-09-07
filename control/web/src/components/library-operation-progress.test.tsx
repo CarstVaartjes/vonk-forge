@@ -19,6 +19,8 @@ test("narrows operation result before reading a job identity", () => {
     evidence: {elapsed_milliseconds: 10, peak_memory_bytes: null},
     exit_code: 0,
     job_id: "00000000-0000-4000-8000-000000000503",
+    run_id: "00000000-0000-4000-8000-000000000504",
+    schema_version: 1,
     output_manifest: {
       files: [],
       manifest_sha256: "b".repeat(64),

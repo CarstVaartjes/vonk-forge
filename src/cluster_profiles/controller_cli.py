@@ -349,7 +349,7 @@ def add_controller_commands(
     _add_json(metrics_workloads)
 
     profile = fleet_commands.add_parser(
-        "node-profile", aliases=["profile"], help="Rename a Fleet node"
+        "node-profile", help="Rename a Fleet node"
     )
     profile.add_argument("node_id")
     profile.add_argument("--display-name", required=True)
@@ -1601,7 +1601,7 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
         )
     if command == "metrics":
         return _run_metric_command(args, client, args.metrics_command)
-    if command in {"profile", "node-profile"}:
+    if command == "node-profile":
         display_name = args.display_name.strip()
         if (
             not display_name

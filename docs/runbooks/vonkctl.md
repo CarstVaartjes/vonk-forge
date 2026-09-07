@@ -65,10 +65,9 @@ continuing. Repeat `--node-id SPARK_ID` to target a subset; omitting it selects
 every eligible Spark.
 
 `fleet current` shows observed workloads and placements, while `fleet state`
-shows the current Spark roster, capacity, and freshness. The old
-`fleet profile` spelling remains accepted as a compatibility alias for the
-single-node display-name edit; saved whole-fleet profiles use the separate
-`profiles` command group.
+shows the current Spark roster, capacity, and freshness. Use `fleet node-profile`
+for the single-node display-name edit; saved whole-fleet profiles use the
+separate `profiles` command group.
 
 Spark metrics are returned by the Controller with their units, source,
 freshness, support status, and aggregation metadata intact. Use the current

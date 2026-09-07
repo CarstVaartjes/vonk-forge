@@ -127,7 +127,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
     const path = new URL(request.url).pathname;
-    if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
+    if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
     if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
     if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({

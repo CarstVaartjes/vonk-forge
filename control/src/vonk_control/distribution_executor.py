@@ -68,10 +68,14 @@ def _phase_receipt(
     try:
         normalized = dict(value)
         if phase is not None:
+            if "phase" in normalized and normalized["phase"] != phase.kind:
+                raise ValueError("phase receipt belongs to a different phase")
             normalized.setdefault("phase", phase.kind)
             subphase = getattr(phase, "subphase", None)
             if subphase is None and phase.kind in {"transfer", "verify"}:
                 subphase = "target-copy"
+            if "subphase" in normalized and normalized["subphase"] != subphase:
+                raise ValueError("phase receipt belongs to a different subphase")
             normalized.setdefault("subphase", subphase)
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):

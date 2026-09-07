@@ -448,7 +448,7 @@ test("blocks primary and browser-history navigation while enrollment credentials
   const pendingGrant = new Promise<Awaited<ReturnType<ControlApi["createEnrollmentGrant"]>>>(resolve => { releaseGrant = resolve; });
   const api = control(async () => snapshot([])) as ControlApi;
   api.createEnrollmentGrant = vi.fn(() => pendingGrant);
-  api.librarySnapshot = vi.fn().mockResolvedValue({schema_version: 1, generated_at: NOW.toISOString(), freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null});
+  api.librarySnapshot = vi.fn().mockResolvedValue({schema_version: 2, generated_at: NOW.toISOString(), freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null});
   render(<App api={api}/>);
   await flush();
 

@@ -55,7 +55,31 @@ Those commands require the candidate, compose, Controller, and acceptance
 environment described by the acceptance workflow. Never substitute synthetic
 success for missing environment inputs.
 
-## Schema and compatibility policy
+## Current contracts only: no legacy compatibility
+
+This is a first internal release, not a migration. Keep one current definition
+and one current execution path for each document and operation. Remove retired
+parsers, DTOs, database models/tables, endpoints, CLI compatibility aliases,
+fixtures, packaged assets, and callers together. Do not retain deprecated
+constructors, old field names, dual readers/writers, or fallback shapes merely
+to keep old tests or old worktrees working. In particular, `fleet node-profile`
+is the current command; remove the obsolete `fleet profile` alias.
+
+Published Model and Recipe structures are defined by the canonical Pydantic
+package in vonk-forge-recipes. Controller APIs and Controller/Spark messages
+use their authoritative nested Pydantic models. Validate persisted contract
+JSON on reads and writes; malformed data must not become empty/default state.
+Generate OpenAPI and Python/TypeScript clients from the current API. Rust Serde
+types must match the shared models and pass connected producer/consumer tests.
+Allow engine-owned content through its declared extension fields; do not
+introduce an exhaustive engine-argument allowlist.
+
+Update producers, consumers, documentation and meaningful tests together.
+A current document's version number is not a reason to introduce another
+version reader. Historical audit documents may remain clearly marked as
+history; they must not be imported, packaged as active configuration, or used
+as instructions to restore old behavior.
+
 
 This is a greenfield deployment. Active installer, release-publication,
 catalog, recovery, and authority paths use schema 2. Do not add schema-1

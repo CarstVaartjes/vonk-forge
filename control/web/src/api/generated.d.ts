@@ -10408,6 +10408,24 @@ export interface operations {
                     "application/json": components["schemas"]["AuthSession"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Invalid login request */
             422: {
                 headers: {
@@ -10415,6 +10433,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginRequestInvalid"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -10434,6 +10461,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
             };
             /** @description Unprocessable Entity */
             422: {
@@ -10462,6 +10507,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthSession"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Unprocessable Entity */

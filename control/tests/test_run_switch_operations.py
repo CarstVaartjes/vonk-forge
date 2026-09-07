@@ -2073,6 +2073,8 @@ def test_operation_read_rejects_malformed_persisted_result(
         previous_state = job.state
     with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
         service.get(operation.operation_id)
+    with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
+        service.retry(operation.operation_id, request_key=str(uuid.uuid4()), actor="admin")
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
         assert job is not None
