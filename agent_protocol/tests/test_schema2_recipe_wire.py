@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
+    CompiledJobInput,
 )
 
 PLAN = json.loads(
@@ -273,6 +274,21 @@ def _rust_compiled_plan_accepts(probe: Path, value: dict[str, object]) -> bool:
     return completed.returncode == 0
 
 
+def _rust_compiled_plan_round_trip(
+    probe: Path, value: dict[str, object]
+) -> dict[str, object] | None:
+    completed = subprocess.run(
+        [str(probe)],
+        input=json.dumps(value, ensure_ascii=False) + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return json.loads(completed.stdout)
+
+
 def test_python_compiled_plan_producer_crosses_rust_parser(
     compiled_plan_wire_probe: Path,
 ) -> None:
@@ -293,6 +309,56 @@ def test_python_compiled_plan_producer_crosses_rust_parser(
     value = copy.deepcopy(PLAN)
     value["artifacts"][0]["model"]["publisher"] = "p" * 129
     assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, value)
+
+
+def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
+    compiled_plan_wire_probe: Path,
+) -> None:
+    input_value = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["application/json"],
+        "max_bytes": 1024,
+        "slots": [
+            {
+                "id": "document",
+                "label": "Document",
+                "description": "A JSON document to process",
+                "media_types": ["application/json"],
+                "extensions": [".json"],
+                "min_files": 1,
+                "max_files": 1,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 1024,
+            }
+        ],
+    }
+    CompiledJobInput.model_validate(input_value)
+    value = copy.deepcopy(PLAN)
+    value["endpoint"] = None
+    value["runtime"]["placement"]["port"] = None
+    value["job"] = {
+        "interface": "artifact-job",
+        "input": input_value,
+        "output_path": "/outputs",
+        "timeout_seconds": 60,
+    }
+    authored = CompiledExecutionPlan.parse(value).to_mapping()
+    returned = _rust_compiled_plan_round_trip(compiled_plan_wire_probe, authored)
+    assert returned == authored
+    assert CompiledExecutionPlan.parse(returned).to_mapping() == authored
+
+    for mutation in (
+        lambda item: item.update(declared_content={"vendor": "free-form"}),
+        lambda item: item.pop("required"),
+        lambda item: item.update(max_bytes="1024"),
+        lambda item: item["slots"][0].update(max_total_bytes=2048),
+    ):
+        invalid = copy.deepcopy(value)
+        mutation(invalid["job"]["input"])
+        with pytest.raises(AgentProtocolError):
+            CompiledExecutionPlan.parse(invalid)
+        assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, invalid)
 
 
 def test_plan_rejects_non_boolean_security_values() -> None:

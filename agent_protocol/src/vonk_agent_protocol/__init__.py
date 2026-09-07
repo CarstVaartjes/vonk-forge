@@ -40,6 +40,8 @@ from .build_import import (
 from .compiled_execution_plan import (
     CompiledExecutionPlan,
     CompiledExecutionPlanError,
+    CompiledJobInput,
+    CompiledJobInputSlot,
     validate_compiled_execution_plan,
 )
 from .distribution import (
@@ -173,6 +175,8 @@ __all__ = [
     "Compatibility",
     "CompiledExecutionPlan",
     "CompiledExecutionPlanError",
+    "CompiledJobInput",
+    "CompiledJobInputSlot",
     "ComponentDescriptor",
     "ComponentEvidence",
     "ComponentSource",
