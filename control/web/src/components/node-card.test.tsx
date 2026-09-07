@@ -1,5 +1,6 @@
 import {render, screen, within} from "@testing-library/react";
 import type {TelemetryHistory, VisualFleetNode} from "../api/types";
+import {historyMetadata, telemetryMetrics} from "../test-fixtures/telemetry";
 import {NodeCard} from "./node-card";
 
 const GIB = 1024 ** 3;
@@ -30,7 +31,7 @@ function completeNode(): VisualFleetNode {
         gpu_utilization_percent: 73, gpu_memory_total_bytes: 100 * GIB, gpu_memory_free_bytes: 70 * GIB,
         temperature_c: 42.5, power_watts: 18.25,
         network_receive_bytes_per_second: 1024, network_transmit_bytes_per_second: 512,
-        gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+        gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"}, metrics: telemetryMetrics(),
       },
     },
     installed: [{
@@ -107,6 +108,7 @@ test("does not draw a flat line for an isolated offline sample", () => {
     end: "2026-08-15T12:00:00Z",
     resolution: "raw",
     maximum_points: 60,
+    metadata: historyMetadata("2026-08-15T11:00:00Z", "2026-08-15T12:00:00Z", "raw", 1),
     points: [{...completeNode().telemetry!.sample, id: "isolated", observed_at: "2026-08-15T11:55:00Z", gpu_utilization_percent: 44}],
   };
   render(<NodeCard node={projected} now={NOW} selected={false} history={isolated} onEdit={() => undefined} onSelect={() => undefined}/>);
@@ -128,6 +130,7 @@ test("labels the last observed time when an offline Spark has historical samples
     end: "2026-08-15T12:00:00Z",
     resolution: "raw",
     maximum_points: 60,
+    metadata: historyMetadata("2026-08-15T11:00:00Z", "2026-08-15T12:00:00Z", "raw", 2),
     points: [
       {...template, id: "history-1", observed_at: "2026-08-15T11:50:00Z", gpu_utilization_percent: 40},
       {...template, id: "history-2", observed_at: "2026-08-15T11:59:59Z", gpu_utilization_percent: 44},
@@ -156,6 +159,7 @@ test("uses a friendly hostname fallback and renders an accessible live trend", (
     end: "2026-08-15T12:00:00Z",
     resolution: "raw",
     maximum_points: 60,
+    metadata: historyMetadata("2026-08-15T11:00:00Z", "2026-08-15T12:00:00Z", "raw", 2),
     points: [18, 42].map((gpu, index) => ({...projected.telemetry!.sample, id: `00000000-0000-4000-8000-00000000000${index + 2}`, sequence: index + 3, gpu_utilization_percent: gpu})),
   };
   render(<NodeCard node={projected} now={NOW} selected={false} history={history} onEdit={() => undefined} onSelect={() => undefined}/>);

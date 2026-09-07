@@ -1,6 +1,7 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, RichTelemetryPoint, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryMetrics, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
+import {historyMetadata} from "../test-fixtures/telemetry";
 import {sparklinePath} from "./sparkline";
 import {NodeDetail} from "./node-detail";
 
@@ -57,6 +58,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
     end,
     resolution: "raw",
     maximum_points: 360,
+    metadata: historyMetadata("2026-08-15T11:00:00.000Z", "2026-08-15T12:00:00.000Z", "raw", 2),
     points: [{
       id: "sample-1", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 1,
       observed_at: "2026-08-15T11:30:00Z", received_at: "2026-08-15T11:30:01Z",
