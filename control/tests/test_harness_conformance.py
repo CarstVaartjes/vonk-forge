@@ -64,6 +64,15 @@ def test_conformance_fixture_uses_canonical_pydantic_definitions() -> None:
     assert request.runtime_spec["identity"]["recipe_revision_sha256"]
 
 
+def test_artifact_job_uses_production_nullable_placement() -> None:
+    request = _fixture_request("diffusers")
+
+    assert request.launch_payload["endpoint"] is None
+    assert request.launch_payload["job"] is not None
+    assert request.placement["port"] is None
+    assert request.placement["reserved_memory_bytes"] > 0
+
+
 def test_conformance_rejects_unknown_harness() -> None:
     with pytest.raises(HarnessConformanceError, match="unknown execution harness"):
         run_synthetic_conformance("legacy-harness")
