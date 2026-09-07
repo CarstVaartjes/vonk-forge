@@ -623,7 +623,7 @@ class RecipeImageAvailabilityService:
                 retryable=True,
                 recovery_actions=("retry",),
             ) from error
-        model_versions = manifest_document.get("model_versions")
+        model_content_digests = manifest_document["model_content_digests"]
         artifacts = manifest_document.get("artifacts")
         return {
             "id": operation.id,
@@ -631,9 +631,7 @@ class RecipeImageAvailabilityService:
             "state": operation.state,
             "artifact_set_sha256": artifact_set_sha256,
             "plan_digest": plan_digest,
-            "model_versions": [item for item in model_versions if isinstance(item, str)]
-            if isinstance(model_versions, list)
-            else [],
+            "model_content_digests": model_content_digests,
             "artifacts": [dict(item) for item in artifacts if isinstance(item, Mapping)]
             if isinstance(artifacts, list)
             else [],
@@ -957,11 +955,11 @@ class RecipeImageAvailabilityService:
                     Job.state == "running",
                 ).with_for_update()
             ))
-            rows = list(session.scalars(
-                select(Job).where(
+            candidate_ids = list(session.scalars(
+                select(Job.id).where(
                     Job.kind == OPERATION_KIND,
                     Job.state.in_(("queued", "running", "partial")),
-                ).order_by(Job.updated_at, Job.id).limit(limit * 8).with_for_update(skip_locked=True)
+                ).order_by(Job.updated_at, Job.id).limit(limit * 8)
             ))
             active_builds = 0
             active_pulls = 0
@@ -984,7 +982,16 @@ class RecipeImageAvailabilityService:
                     active_builds += 1
                 else:
                     active_pulls += 1
-            for operation in rows:
+            for operation_id in candidate_ids:
+                operation = session.scalar(
+                    select(Job).where(
+                        Job.id == operation_id,
+                        Job.kind == OPERATION_KIND,
+                        Job.state.in_(("queued", "running", "partial")),
+                    ).with_for_update(skip_locked=True)
+                )
+                if operation is None:
+                    continue
                 payload = operation.payload if isinstance(operation.payload, Mapping) else {}
                 if not self._retry_due(payload, now):
                     continue
@@ -1459,7 +1466,7 @@ class RecipeImageAvailabilityService:
                 raw_total = detail.get("total_bytes", detail.get("expected_bytes"))
                 if type(raw_total) is int and raw_total >= 0:
                     total_bytes = raw_total
-                raw_rate = detail.get("bytes_per_second", detail.get("rate"))
+                raw_rate = detail.get("bytes_per_second")
                 bytes_per_second = (
                     float(raw_rate) if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool) and raw_rate >= 0 else None
                 )

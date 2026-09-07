@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -15,6 +16,7 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     derive_build_input_identity,
 )
+from vonk_forge_contracts import ModelDefinition
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -38,43 +40,44 @@ def _sessions():
 def _model_document(
     *, path: str, file_digest: str, roles: list[str]
 ) -> dict[str, object]:
-    return {
-        "kind": "model",
-        "source": {"repository": "owner/model", "revision": "a" * 40},
-        "files": [
-            {
-                "id": "weights",
-                "path": path,
-                "sha256": file_digest,
-                "size_bytes": 12,
-                "roles": roles,
-            }
-        ],
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    document["identity"]["publisher"] = "owner"
+    document["identity"]["slug"] = "model"
+    document["identity"]["model"]["publisher"] = "owner"
+    document["identity"]["model"]["slug"] = "model"
+    document["source"] = {
+        "repository": "https://huggingface.co/owner/model",
+        "revision": "a" * 40,
     }
+    document["files"] = [
+        {
+            "id": "weights",
+            "path": path,
+            "sha256": file_digest,
+            "size_bytes": 12,
+            "roles": roles,
+        }
+    ]
+    return ModelDefinition.model_validate(document).model_dump(mode="json")
 
 
 def _recipe_document(model_digest: str) -> dict[str, object]:
-    return {
-        "kind": "recipe",
-        "models": [
-            {
-                "id": "primary",
-                "model": {
-                    "kind": "model",
-                    "publisher": "owner",
-                    "slug": "model",
-                    "content_sha256": model_digest,
-                },
-                "files": [
-                    {
-                        "id": "weights-selector",
-                        "file_id": "weights",
-                        "roles": ["model"],
-                    }
-                ],
-            }
-        ],
-    }
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    document["identity"]["publisher"] = "owner"
+    document["identity"]["slug"] = "recipe"
+    document["models"][0]["model"]["publisher"] = "owner"
+    document["models"][0]["model"]["slug"] = "model"
+    document["models"][0]["model"]["content_sha256"] = model_digest
+    document["models"][0]["files"][0]["file_id"] = "weights"
+    return document
 
 
 def _add_active(
@@ -152,12 +155,13 @@ def test_canonical_recipe_resolution_uses_selected_file_identity_and_provenance(
 
     service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
     first = service.resolve_artifact_set(recipe_revision_id=recipe.id)
-    assert first.model_version_sha256 == model_digest
+    assert first.model_content_sha256 == model_digest
     assert first.recipe_revision_sha256 == _digest(recipe_document)
     assert first.artifacts[0].path == "weights/model.safetensors"
     assert first.artifacts[0].expected_bytes == 12
 
-    editorial = {**recipe_document, "editorial_note": "release note"}
+    editorial = json.loads(json.dumps(recipe_document))
+    editorial["metadata"]["description"] = "Updated release description."
     with sessions.begin() as session:
         edited = _add_active(
             session,
