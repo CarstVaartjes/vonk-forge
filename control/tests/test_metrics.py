@@ -190,6 +190,31 @@ def test_metric_labels_are_allowlisted_and_unknown_values_collapse() -> None:
     assert "user-supplied" not in text and "surprise" not in text
 
 
+def test_job_count_snapshot_replaces_previous_states() -> None:
+    metrics = MetricsRegistry()
+    metrics.replace_job_counts([("recipe.run-switch.v2", "queued", 2)])
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="queued"} 2' in metrics.render()
+
+    metrics.replace_job_counts([("recipe.run-switch.v2", "running", 1)])
+    text = metrics.render()
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="running"} 1' in text
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="queued"}' not in text
+
+    metrics.replace_job_counts([])
+    assert "vonk_jobs{" not in metrics.render()
+
+
+def test_job_count_snapshot_aggregates_unknown_kinds() -> None:
+    metrics = MetricsRegistry()
+    metrics.replace_job_counts(
+        [
+            ("unknown-a", "queued", 2),
+            ("unknown-b", "queued", 3),
+        ]
+    )
+    assert 'vonk_jobs{kind="other",state="queued"} 5' in metrics.render()
+
+
 def test_metrics_endpoint_is_separately_authenticated() -> None:
     class Jobs:
         def list(self): return []

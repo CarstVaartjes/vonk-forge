@@ -1743,10 +1743,13 @@ def production_app() -> FastAPI:
         operational_metrics.refresh()
         refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
-            for kind, state, count in session.execute(
-                select(Job.kind, Job.state, func.count()).group_by(Job.kind, Job.state)
-            ):
-                metrics.set_job_count(kind, state, count)
+            metrics.replace_job_counts(
+                session.execute(
+                    select(Job.kind, Job.state, func.count()).group_by(
+                        Job.kind, Job.state
+                    )
+                )
+            )
         backup_marker = settings.state_path / "last-successful-backup.epoch"
         if backup_marker.is_file() and not backup_marker.is_symlink():
             try:

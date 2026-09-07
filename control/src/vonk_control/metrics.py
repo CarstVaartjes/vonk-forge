@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -133,6 +133,7 @@ class MetricsRegistry:
                 int | None,
                 int | None,
                 float | None,
+                float | None,
             ],
         ] = {}
         for node in snapshot.nodes:
@@ -160,6 +161,17 @@ class MetricsRegistry:
         bounded = int(self._number(count, "job count"))
         with self._lock:
             self._jobs[(safe_kind, safe_state)] = bounded
+
+    def replace_job_counts(self, rows: Iterable[tuple[str, str, int]]) -> None:
+        """Atomically replace job counts with bounded, aggregated labels."""
+
+        jobs: dict[tuple[str, str], int] = defaultdict(int)
+        for kind, state, count in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            safe_state = state if state in _JOB_STATES else "other"
+            jobs[(safe_kind, safe_state)] += int(self._number(count, "job count"))
+        with self._lock:
+            self._jobs = dict(jobs)
 
     def set_route_state(self, state: str) -> None:
         if state not in _ROUTE_STATES:
