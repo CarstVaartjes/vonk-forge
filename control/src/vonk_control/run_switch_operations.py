@@ -4853,7 +4853,6 @@ def _merge_progress_evidence(
             _progress_int(payload.get(key))
             for key in (
                 "completed_bytes",
-                "bytes_done",
                 "copied_bytes",
                 "downloaded_bytes",
             )
@@ -4872,7 +4871,7 @@ def _merge_progress_evidence(
     reported_total = next(
         (
             _progress_int(payload.get(key))
-            for key in ("total_bytes", "bytes_total")
+            for key in ("total_bytes",)
             if _progress_int(payload.get(key)) is not None
         ),
         None,
@@ -4900,16 +4899,12 @@ def _merge_progress_evidence(
             continue
         target = existing.setdefault(node_id, {"node_id": node_id})
         completed = _progress_int(item.get("completed_bytes"))
-        if completed is None:
-            completed = _progress_int(item.get("bytes_done"))
         if completed is not None:
             target["completed_bytes"] = max(
                 _progress_int(target.get("completed_bytes")) or 0,
                 completed,
             )
         total = _progress_int(item.get("total_bytes"))
-        if total is None:
-            total = _progress_int(item.get("bytes_total"))
         if total is not None:
             target["total_bytes"] = total
         member_phase = _progress_phase(item.get("phase"))
