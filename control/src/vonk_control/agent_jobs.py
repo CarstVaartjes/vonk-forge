@@ -952,7 +952,8 @@ class AgentJobService:
             )
             try:
                 attempt.progress = validate_progress_update(
-                    attempt.progress, message.progress
+                    attempt.progress,
+                    message.progress.model_dump(mode="json"),
                 )
             except (TypeError, ValueError) as error:
                 raise ValueError(f"operation progress is invalid: {error}") from error
