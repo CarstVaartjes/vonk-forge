@@ -955,11 +955,11 @@ class RecipeImageAvailabilityService:
                     Job.state == "running",
                 ).with_for_update()
             ))
-            rows = list(session.scalars(
-                select(Job).where(
+            candidate_ids = list(session.scalars(
+                select(Job.id).where(
                     Job.kind == OPERATION_KIND,
                     Job.state.in_(("queued", "running", "partial")),
-                ).order_by(Job.updated_at, Job.id).limit(limit * 8).with_for_update(skip_locked=True)
+                ).order_by(Job.updated_at, Job.id).limit(limit * 8)
             ))
             active_builds = 0
             active_pulls = 0
@@ -982,7 +982,16 @@ class RecipeImageAvailabilityService:
                     active_builds += 1
                 else:
                     active_pulls += 1
-            for operation in rows:
+            for operation_id in candidate_ids:
+                operation = session.scalar(
+                    select(Job).where(
+                        Job.id == operation_id,
+                        Job.kind == OPERATION_KIND,
+                        Job.state.in_(("queued", "running", "partial")),
+                    ).with_for_update(skip_locked=True)
+                )
+                if operation is None:
+                    continue
                 payload = operation.payload if isinstance(operation.payload, Mapping) else {}
                 if not self._retry_due(payload, now):
                     continue
