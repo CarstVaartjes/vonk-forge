@@ -46,7 +46,6 @@ def _client(role: str, *, agent_upgrades=None):
         jobs=jobs,
         tokens=codec,
         audits=audits,
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         agent_upgrades=agent_upgrades,
     )
@@ -99,7 +98,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
         jobs=jobs,
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         browser_auth=service,
         agent_upgrades=agent_upgrades,

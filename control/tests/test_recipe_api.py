@@ -470,7 +470,6 @@ def setup():
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         recipe_operations=recipes,
     )

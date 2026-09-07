@@ -30,6 +30,7 @@ def _fleet_snapshot(
     telemetry: str | None = "live",
     online_state: str = "online",
     certificate_state: str = "valid",
+    gpu_utilization: float | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
         id="00000000-0000-4000-8000-000000000001",
@@ -38,6 +39,7 @@ def _fleet_snapshot(
         sequence=1,
         observed_at=NOW,
         received_at=NOW,
+        gpu_utilization_percent=gpu_utilization,
         gap_samples=0,
         details=TelemetryDetails(),
         metrics=telemetry_metrics(),
@@ -113,6 +115,7 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="fresh"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1' in text
     assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}} 15000' in text
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
     assert "vonk_node_ready" not in text
     assert "probe" not in text.lower()
     assert "192.168." not in text and "node.local" not in text
@@ -135,6 +138,17 @@ def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 1' in text
     assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}}' not in text
+
+
+def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
+    metrics = MetricsRegistry()
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
+    text = metrics.render()
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 42.5' in text
+
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=None))
+    text = metrics.render()
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
 
 
 def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
@@ -176,6 +190,31 @@ def test_metric_labels_are_allowlisted_and_unknown_values_collapse() -> None:
     assert "user-supplied" not in text and "surprise" not in text
 
 
+def test_job_count_snapshot_replaces_previous_states() -> None:
+    metrics = MetricsRegistry()
+    metrics.replace_job_counts([("recipe.run-switch.v2", "queued", 2)])
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="queued"} 2' in metrics.render()
+
+    metrics.replace_job_counts([("recipe.run-switch.v2", "running", 1)])
+    text = metrics.render()
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="running"} 1' in text
+    assert 'vonk_jobs{kind="recipe.run-switch.v2",state="queued"}' not in text
+
+    metrics.replace_job_counts([])
+    assert "vonk_jobs{" not in metrics.render()
+
+
+def test_job_count_snapshot_aggregates_unknown_kinds() -> None:
+    metrics = MetricsRegistry()
+    metrics.replace_job_counts(
+        [
+            ("unknown-a", "queued", 2),
+            ("unknown-b", "queued", 3),
+        ]
+    )
+    assert 'vonk_jobs{kind="other",state="queued"} 5' in metrics.render()
+
+
 def test_metrics_endpoint_is_separately_authenticated() -> None:
     class Jobs:
         def list(self): return []
@@ -187,7 +226,6 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         metrics=metrics,
         metrics_token="metrics-token-long",
     )
@@ -214,7 +252,6 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=lambda: fleet_state,
         metrics=metrics,
         metrics_token="metrics-token-long",
         metrics_refresh=lambda: refresh_fleet_metrics(metrics, fleet_state),

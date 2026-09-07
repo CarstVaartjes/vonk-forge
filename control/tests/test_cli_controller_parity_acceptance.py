@@ -524,7 +524,6 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
         jobs=_Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"authority_revision": "1" * 64, "nodes": []},
         now=lambda: 10,
         model_cache=cache,
         run_switch_operations=run_switch,
@@ -615,7 +614,6 @@ def test_uncertain_cache_submission_reuses_request_key_against_same_app() -> Non
         jobs=_Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         model_cache=cache,
         operations=OperationApiServices(
             endpoint=lambda _alias: {},
@@ -759,7 +757,6 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
         jobs=_Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         model_cache=cache,
         recipe_operations=lifecycle,

@@ -221,7 +221,6 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
