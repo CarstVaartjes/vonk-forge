@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib
 import json
+from importlib.resources import files
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_CLIENT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_CLIENT = ROOT / "control/web/src/api/generated.d.ts"
+PACKAGED_CLI_OPENAPI = files("cluster_profiles.schemas").joinpath("control-openapi.json")
 
 
 def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -17,6 +19,13 @@ def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
         for method, operation in path.items()
         if method in {"delete", "get", "patch", "post", "put"}
     }
+
+
+def test_cli_packages_the_generated_admin_openapi_contract() -> None:
+    schema = json.loads(PACKAGED_CLI_OPENAPI.read_text())
+    assert "/api/v1/artifact-jobs/{job_id}" in schema["paths"]
+    assert "/api/v1/auth/login" not in schema["paths"]
+    assert schema["openapi"].startswith("3.1.")
 
 
 def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None:
@@ -319,7 +328,8 @@ def test_admin_schema_is_secret_free() -> None:
         "not aggregate node readiness"
         in node_status["properties"]["health_probe_stale"]["description"]
     )
-    assert node_status["properties"]["stale"]["deprecated"] is True
+    assert "stale" not in node_status["properties"]
+    assert "profile" not in node_status["properties"]
     python_node_status = (PYTHON_CLIENT / "models/node_status.py").read_text()
     assert "health_probe_stale: bool" in python_node_status
     assert 'health_probe_stale = d.pop("health_probe_stale")' in python_node_status

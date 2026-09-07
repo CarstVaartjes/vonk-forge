@@ -20,7 +20,7 @@ from .models import (
     ClusterMappingNode,
     NodeInventorySnapshot,
 )
-from .recipe_contract import RecipeContractError, recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -94,7 +94,7 @@ class ClusterMappingService:
             capabilities = _topology_capabilities(session, nodes)
         try:
             topology = recipe_topology(document)
-        except RecipeContractError as error:
+        except RecipeRuntimeSpecError as error:
             raise ClusterMappingError("mapping.topology_invalid", str(error)) from error
         expected_count = topology.get("node_count")
         if expected_count != len(nodes):

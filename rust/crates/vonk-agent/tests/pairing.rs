@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 use chrono::{TimeZone, Utc};
 use rcgen::string::Ia5String;
@@ -15,8 +15,8 @@ use vonk_agent::{
         persist_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
     },
     pair::{
-        EnrollmentEvidence, EnrollmentOutcome, EnrollmentResponse, IssuedResponse, PairingError,
-        complete_pairing_with, pair, validate_enrollment_response, validate_issued,
+        EnrollmentEvidence, IssuedResponse, PairingError, pair, validate_enrollment_response,
+        validate_issued,
     },
 };
 
@@ -110,7 +110,7 @@ fn identity_is_persisted_atomically_with_private_modes() {
 }
 
 #[test]
-fn pending_identity_is_reused_for_approval_pickup() {
+fn pending_identity_is_reused_after_interrupted_enrollment() {
     let directory = tempdir().unwrap();
     let pending = generate_pending(NODE_ID).unwrap();
     persist_pending(directory.path(), &pending).unwrap();
@@ -151,79 +151,13 @@ fn unexpected_pairing_status_is_reported_without_exposing_the_body() {
 }
 
 #[test]
-fn pending_enrollment_never_publishes_credentials() {
-    let outcome = validate_enrollment_response(
+fn obsolete_pending_enrollment_response_is_rejected() {
+    let error = validate_enrollment_response(
         202,
         br#"{"id":"2a73f0fe-ecaa-4ce7-a840-35fcb488f63e","node_id":"spk_0123456789abcdef0123456789abcdef","state":"pending-approval"}"#,
         NODE_ID,
-    )
-    .unwrap();
-    assert_eq!(
-        outcome,
-        EnrollmentOutcome::Pending(EnrollmentResponse {
-            id: "2a73f0fe-ecaa-4ce7-a840-35fcb488f63e".to_owned(),
-            node_id: NODE_ID.to_owned(),
-            state: "pending-approval".to_owned(),
-        })
-    );
-}
-
-#[tokio::test]
-async fn pairing_waits_for_human_approval_until_the_certificate_is_issued() {
-    let mut attempts = 0_u8;
-    let mut observed = Vec::new();
-
-    complete_pairing_with(
-        3,
-        Duration::ZERO,
-        || {
-            attempts += 1;
-            let attempt = attempts;
-            async move {
-                Ok(if attempt < 3 {
-                    EnrollmentOutcome::Pending(EnrollmentResponse {
-                        id: "enrollment-1".to_owned(),
-                        node_id: NODE_ID.to_owned(),
-                        state: "pending-approval".to_owned(),
-                    })
-                } else {
-                    EnrollmentOutcome::Issued
-                })
-            }
-        },
-        |pending| observed.push((pending.id.clone(), pending.state.clone())),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(attempts, 3);
-    assert_eq!(
-        observed,
-        vec![
-            ("enrollment-1".to_owned(), "pending-approval".to_owned()),
-            ("enrollment-1".to_owned(), "pending-approval".to_owned()),
-        ]
-    );
-}
-
-#[tokio::test]
-async fn pairing_has_a_bounded_approval_wait() {
-    let error = complete_pairing_with(
-        2,
-        Duration::ZERO,
-        || async {
-            Ok(EnrollmentOutcome::Pending(EnrollmentResponse {
-                id: "enrollment-1".to_owned(),
-                node_id: NODE_ID.to_owned(),
-                state: "pending-approval".to_owned(),
-            }))
-        },
-        |_| {},
-    )
-    .await
-    .unwrap_err();
-
-    assert!(matches!(error, PairingError::ApprovalTimeout));
+    ).unwrap_err();
+    assert!(matches!(error, PairingError::Status(202)));
 }
 
 #[tokio::test]

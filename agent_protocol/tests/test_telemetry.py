@@ -130,3 +130,15 @@ def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
     unknown["samples"][0]["metrics"]["unexpected"] = True  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
         TelemetryReport.parse(unknown)
+
+
+@pytest.mark.parametrize("path", [("samples",), ("samples", 0, "metrics", "series")])
+def test_report_rejects_malformed_collection_shapes(path: tuple[object, ...]) -> None:
+    malformed = report()
+    target: object = malformed
+    for key in path[:-1]:
+        target = target[key]  # type: ignore[index]
+    target[path[-1]] = "invalid"  # type: ignore[index]
+
+    with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
+        TelemetryReport.parse(malformed)

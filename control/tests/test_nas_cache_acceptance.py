@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ from vonk_control.models import (
     FleetProfile,
     RecipeBuild,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32
@@ -73,7 +75,7 @@ def _artifact(
     path: str,
     payload: bytes,
     *,
-    model_version_sha256: str,
+    model_content_sha256: str,
     token: str,
 ) -> dict[str, object]:
     source = root / f"{artifact_id}.source"
@@ -87,7 +89,7 @@ def _artifact(
         "sha256": hashlib.sha256(payload).hexdigest(),
         "download_bytes": len(payload),
         "roles": ["model" if artifact_id == "weights" else "auxiliary"],
-        "model_version_sha256": model_version_sha256,
+        "model_content_sha256": model_content_sha256,
     }
 
 
@@ -95,12 +97,12 @@ def _download(
     cache: ModelCacheService,
     artifacts: list[dict[str, object]],
     *,
-    model_version_sha256: str,
+    model_content_sha256: str,
     recipe_revision_sha256: str,
     request_key: str,
 ):
     preview = cache.download_preview(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_revision_sha256,
         artifacts=artifacts,
     )
@@ -108,7 +110,7 @@ def _download(
         actor="acceptance",
         request_key=request_key,
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_revision_sha256,
         artifacts=artifacts,
     )
@@ -122,7 +124,7 @@ def _download(
 def _seed_recipe_reference(
     sessions,
     *,
-    model_version_sha256: str,
+    model_content_sha256: str,
     recipe_revision_sha256: str,
     profile: bool,
 ) -> str:
@@ -130,26 +132,21 @@ def _seed_recipe_reference(
     revision_id = str(uuid4())
     publisher = "vonk-forge"
     slug = f"acceptance-{recipe_id[:8]}"
-    document = {
-        "schema_version": 2,
-        "kind": "recipe",
-        "identity": {"publisher": publisher, "slug": slug},
-        "models": [
-            {
-                "id": "primary",
-                "model": {
-                    "kind": "model",
-                    "publisher": publisher,
-                    "slug": "acceptance-model",
-                    "content_sha256": model_version_sha256,
-                },
-                "files": [],
-            }
-        ],
+    document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    document["identity"] = {"publisher": publisher, "slug": slug}
+    document["models"][0]["model"] = {
+        "kind": "model",
+        "publisher": publisher,
+        "slug": "acceptance-model",
+        "content_sha256": model_content_sha256,
     }
-    recipe_digest = hashlib.sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    definition = RecipeDefinition.model_validate(document)
+    document = definition.model_dump(mode="json")
+    recipe_digest = content_sha256(definition)
     with sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -307,7 +304,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
             "weights",
             "weights/model.bin",
             model_payload,
-            model_version_sha256=model_pin,
+            model_content_sha256=model_pin,
             token=token,
         ),
         _artifact(
@@ -315,20 +312,20 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
             "tokenizer",
             "tokenizer.json",
             auxiliary_payload,
-            model_version_sha256=model_pin,
+            model_content_sha256=model_pin,
             token=token,
         ),
     ]
     artifact_set_sha256 = _download(
         cache,
         artifacts,
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         recipe_revision_sha256=recipe_pin,
         request_key="00000000-0000-4000-8000-000000000101",
     )
     _seed_recipe_reference(
         sessions,
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         recipe_revision_sha256=recipe_pin,
         profile=True,
     )
@@ -435,19 +432,19 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
         "weights",
         "weights/model.bin",
         model_payload,
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         token="hf_never_forwarded",
     )
     artifact_set_sha256 = _download(
         cache,
         [artifact],
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         recipe_revision_sha256=recipe_pin,
         request_key="00000000-0000-4000-8000-000000000103",
     )
     revision_id = _seed_recipe_reference(
         sessions,
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         recipe_revision_sha256=recipe_pin,
         profile=False,
     )
@@ -513,13 +510,13 @@ def test_empty_support_file_can_be_cached_and_served_as_an_immutable_object(
         "metadata",
         "config/empty.json",
         b"",
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         token="hf_never_forwarded",
     )
     set_digest = _download(
         cache,
         [empty],
-        model_version_sha256=model_pin,
+        model_content_sha256=model_pin,
         recipe_revision_sha256="8" * 64,
         request_key="00000000-0000-4000-8000-000000000104",
     )
@@ -564,12 +561,12 @@ def test_empty_weight_file_is_rejected_before_transfer(controller, tmp_path: Pat
         "weights",
         "weights/empty.bin",
         b"",
-        model_version_sha256="a" * 64,
+        model_content_sha256="a" * 64,
         token="hf_never_forwarded",
     )
     with pytest.raises(ModelCacheResolutionError) as error:
         cache.download_preview(
-            model_version_sha256="a" * 64,
+            model_content_sha256="a" * 64,
             artifacts=[artifact],
         )
     assert error.value.code == "model_cache.artifact_invalid"
@@ -584,13 +581,13 @@ def test_empty_support_file_requires_the_canonical_empty_digest(
         "metadata",
         "config/empty.json",
         b"",
-        model_version_sha256="b" * 64,
+        model_content_sha256="b" * 64,
         token="hf_never_forwarded",
     )
     artifact["sha256"] = "0" * 64
     with pytest.raises(ModelCacheResolutionError) as error:
         cache.download_preview(
-            model_version_sha256="b" * 64,
+            model_content_sha256="b" * 64,
             artifacts=[artifact],
         )
     assert error.value.code == "model_cache.artifact_invalid"
@@ -603,21 +600,21 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
         "metadata",
         "config/metadata.json",
         b"",
-        model_version_sha256="c" * 64,
+        model_content_sha256="c" * 64,
         token="hf_never_forwarded",
     )
     expected = b"declared metadata"
     artifact["sha256"] = hashlib.sha256(expected).hexdigest()
     artifact["download_bytes"] = len(expected)
     preview = cache.download_preview(
-        model_version_sha256="c" * 64,
+        model_content_sha256="c" * 64,
         artifacts=[artifact],
     )
     operation = cache.start_download(
         actor="acceptance",
         request_key="00000000-0000-4000-8000-000000000105",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256="c" * 64,
+        model_content_sha256="c" * 64,
         artifacts=[artifact],
     )
     for _ in range(3):

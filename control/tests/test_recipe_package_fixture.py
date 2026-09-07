@@ -23,7 +23,6 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
@@ -31,6 +30,7 @@ from vonk_control.recipe_packages import (
     load_recipe_package,
 )
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -161,7 +161,7 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
             files[member.name] = stream.read()
     recipe = json.loads(files["recipe.json"])
     recipe["metadata"]["description"] += " (package sync fixture revision)"
-    digest = recipe_content_sha256(recipe)
+    digest = content_sha256(RecipeDefinition.model_validate(recipe))
     files["recipe.json"] = _canonical(recipe) + b"\n"
     manifest = json.loads(files["manifest.json"])
     manifest["recipe_content_sha256"] = digest

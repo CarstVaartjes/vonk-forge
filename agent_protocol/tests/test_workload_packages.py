@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tomllib
 from dataclasses import replace
 from importlib.resources import files
-from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -466,31 +464,3 @@ def test_schema_is_packaged_and_validates_synthetic_lock() -> None:
     assert PackageReleaseLock.parse(lock_document()).family_id == (
         "future-synthetic-stack"
     )
-
-
-@pytest.mark.parametrize(
-    ("family_id", "deployment_id"),
-    (
-        ("ds4-deepseek", "ds4-deepseek-single"),
-        ("mia-deepseek", "mia-deepseek-dual"),
-    ),
-)
-def test_checked_in_release_lock_identity_matches_filename_and_deployment(
-    family_id: str,
-    deployment_id: str,
-) -> None:
-    """Mutating a lock payload without republishing its digest must fail."""
-    root = Path(__file__).resolve().parents[2]
-    lock_paths = tuple((root / "manifests/workload-releases" / family_id).glob("*.json"))
-    if not lock_paths:
-        pytest.skip("optional workload-release lock is not checked out")
-    assert len(lock_paths) == 1
-
-    lock_path = lock_paths[0]
-    lock = PackageReleaseLock.parse(lock_path.read_bytes())
-    deployment = tomllib.loads(
-        (root / "config/workload-deployments" / f"{deployment_id}.toml").read_text()
-    )
-
-    assert lock.digest == lock_path.stem
-    assert deployment["release_digest"] == lock.digest

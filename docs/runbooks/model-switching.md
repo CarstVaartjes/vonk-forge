@@ -14,7 +14,7 @@ has passed its source and placement gates.
 Open the private browser and choose `Library`. It groups recipes by exact model
 version and shows the accepted revision, cluster placement, node freshness,
 runtime state, and available actions. A model-family label is for navigation;
-the content-addressed model-version and recipe revision remain authoritative.
+the content-addressed model-definition and recipe revision remain authoritative.
 
 ## Select a reviewed recipe
 

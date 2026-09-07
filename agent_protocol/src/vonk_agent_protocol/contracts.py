@@ -15,8 +15,13 @@ from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import BaseModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
+MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
+MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
+)
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -136,6 +141,8 @@ def canonical_message(value: Any) -> bytes:
 
 
 def _to_wire(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _to_wire(value.model_dump(mode="python"))
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, datetime):
@@ -205,9 +212,14 @@ def _validate_safe_keys(
                 and isinstance(path[2], int)
                 and key == "name"
             )
+            typed_compiled_plan_key = (
+                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                and path[:1] == ("compiled_execution_plan",)
+            )
             if _is_path_key(key) and not (
                 typed_recipe_build_key
                 or typed_distribution_object_name
+                or typed_compiled_plan_key
                 or (
                     operation is AgentOperation.RECIPE_JOB_RUN
                     and path == ("output_limits",)
@@ -277,6 +289,9 @@ def _validate_safe_keys(
                 and ("/" in value or "\\" in value)
                 and _typed_result_string(path, value)
             )
+        ) or (
+            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            and path[:1] == ("compiled_execution_plan",)
         ):
             return
         elif "/" in value or "\\" in value:
@@ -444,6 +459,25 @@ def _model_identity(value: str) -> bool:
     )
 
 
+def parse_model_identity(value: str) -> tuple[str, str]:
+    """Parse the canonical result identity ``repository@revision``."""
+
+    if not isinstance(value, str) or not _model_identity(value):
+        raise AgentProtocolError("model identity is invalid")
+    repository, _marker, revision = value.rpartition("@")
+    return repository, revision
+
+
+def format_model_identity(
+    publisher: str, slug: str, content_sha256: str
+) -> str:
+    """Format the catalog model identity used by result evidence."""
+
+    value = f"{publisher}/{slug}@{content_sha256}"
+    parse_model_identity(value)
+    return value
+
+
 def _safe_model_query(query: str) -> bool:
     if not query:
         return True
@@ -476,6 +510,7 @@ def _validate_bounded_document(
     name: str,
     operation: AgentOperation | None = None,
     typed_result_strings: bool = False,
+    maximum_bytes: int = MAX_DOCUMENT_BYTES,
 ) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
@@ -485,7 +520,7 @@ def _validate_bounded_document(
         typed_result_strings=typed_result_strings,
     )
     copied = _canonical_copy(value, name=name)
-    if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
+    if len(canonical_message(copied)) > maximum_bytes:
         raise AgentProtocolError(f"{name} is too large")
     return copied
 
@@ -1006,9 +1041,27 @@ class AgentClaim:
             self.payload_digest
         ):
             raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
-        payload = _validate_bounded_document(
-            self.payload, name="payload", operation=self.operation
+        maximum_bytes = (
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            else MAX_DOCUMENT_BYTES
         )
+        payload = _validate_bounded_document(
+            self.payload,
+            name="payload",
+            operation=self.operation,
+            maximum_bytes=maximum_bytes,
+        )
+        if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}:
+            from .recipe_operations import RecipeInstallPayload, RecipeStartPayload
+
+            try:
+                typed_payload = json.loads(canonical_message(payload))
+                (
+                    RecipeInstallPayload if self.operation is AgentOperation.RECIPE_INSTALL else RecipeStartPayload
+                ).model_validate(typed_payload)
+            except Exception as error:
+                raise AgentProtocolError("recipe operation payload is invalid") from error
         if (
             hashlib.sha256(canonical_message(payload)).hexdigest()
             != self.payload_digest
