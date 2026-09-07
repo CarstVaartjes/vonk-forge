@@ -18,6 +18,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
 from vonk_control.models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -114,26 +115,40 @@ class ModelCacheManifestProvider:
         if self.fail:
             raise RuntimeError("trusted catalog manifest unavailable")
         model_digest = str(kwargs["model_content_sha256"])
-        return SimpleNamespace(
-            digest=MODEL_ARTIFACT_SET,
+        return ArtifactSetManifest(
             model_content_sha256=model_digest,
-            expected_bytes=1024,
-            model_content_sha256s=(model_digest,),
+            recipe_revision_sha256="b" * 64,
+            model_content_digests=(model_digest,),
             artifacts=(
-                SimpleNamespace(
+                ArtifactSpec(
+                    key="primary:weights",
+                    artifact_id="weights",
+                    path="weights.safetensors",
+                    kind="huggingface",
+                    repository="vonk-forge/primary",
+                    source="https://huggingface.co/vonk-forge/primary/resolve/main/weights.safetensors",
+                    revision="0" * 40,
                     sha256=MODEL_ARTIFACT,
                     expected_bytes=1024,
+                    roles=("weights",),
+                    model_content_sha256=model_digest,
                 ),
             ),
         )
 
-    def download_preview(self, **_kwargs):
-        if self.fail:
-            raise RuntimeError("trusted catalog manifest unavailable")
+    def download_preview(self, **kwargs):
+        manifest = self.resolve_artifact_set(**kwargs)
         return {
-            "artifact_set_sha256": MODEL_ARTIFACT_SET,
+            "schema_version": 2,
+            "artifact_set_sha256": manifest.digest,
+            "plan_digest": "a" * 64,
+            "source_policy": "nas-first",
+            "artifact_count": len(manifest.artifacts),
+            "expected_bytes": manifest.expected_bytes,
+            "already_cached_bytes": manifest.expected_bytes - self.missing_nas_bytes,
             "new_bytes": self.missing_nas_bytes,
             "blockers": [],
+            "warnings": [],
         }
 
 
@@ -550,8 +565,11 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     ]
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
-    assert plan.preparation.model.artifact_set_sha256 == MODEL_ARTIFACT_SET
-    assert plan.storage.artifact_set_sha256 == MODEL_ARTIFACT_SET
+    expected_manifest = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=plan.preparation.model.model_content_sha256
+    )
+    assert plan.preparation.model.artifact_set_sha256 == expected_manifest.digest
+    assert plan.storage.artifact_set_sha256 == expected_manifest.digest
     assert plan.storage.artifact_set_bytes == plan.preparation.model.artifact_set_bytes
     assert "run-switch.nas-coverage-unknown" not in {
         reason.code for reason in plan.blockers

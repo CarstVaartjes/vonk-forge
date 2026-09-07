@@ -256,7 +256,7 @@ def test_controller_routine_uninstall_payload_crosses_rust_and_back(
     assert service.get(operation.id).state == "succeeded"
 
 
-def test_controller_explicit_multi_model_cleanup_payload_crosses_rust_and_back(
+def test_controller_explicit_multi_installation_cleanup_payload_crosses_rust_and_back(
     tmp_path: Path, install_start_wire_probe: Path
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)

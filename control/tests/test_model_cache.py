@@ -46,8 +46,9 @@ from vonk_control.models import (
     FleetProfile,
     ModelCacheArtifact,
 )
+from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -310,14 +311,24 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
     ]
 
 
-def test_model_only_download_resolves_canonical_dependency_closure(cache) -> None:
+@pytest.mark.parametrize("shared_object", [False, True])
+def test_canonical_dependency_closure_reaches_run_switch(cache, shared_object: bool) -> None:
     service, sessions = cache
     companion = _canonical_model(
         publisher="vonk-forge",
         slug="companion",
         file_id="encoder",
-        file_digest="2" * 64,
+        file_digest=("3" if shared_object else "2") * 64,
     )
+    companion_document = companion.model_dump(mode="json")
+    companion_document["files"].append({
+        "id": "empty-config",
+        "path": "config/empty.txt",
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "size_bytes": 0,
+        "roles": ["config"],
+    })
+    companion = ModelDefinition.model_validate(companion_document)
     companion_digest = content_sha256(companion)
     primary = _canonical_model(
         publisher="vonk-forge",
@@ -334,16 +345,25 @@ def test_model_only_download_resolves_canonical_dependency_closure(cache) -> Non
         ],
     )
     primary_digest = content_sha256(primary)
+    recipe_document = _canonical_recipe(primary_digest)
+    recipe_document["models"][0]["model"]["slug"] = "primary"
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
     with sessions.begin() as session:
         for index, (definition, digest, slug) in enumerate(
-            ((primary, primary_digest, "primary"), (companion, companion_digest, "companion")),
+            (
+                (primary, primary_digest, "primary"),
+                (companion, companion_digest, "companion"),
+                (recipe, recipe_digest, recipe.identity.slug),
+            ),
             start=41,
         ):
+            kind = definition.kind
             root_id = f"00000000-0000-0000-0000-0000000000{index:02d}"
             session.add(
                 CatalogDocument(
                     id=root_id,
-                    kind="model",
+                    kind=kind,
                     publisher="vonk-forge",
                     slug=slug,
                     title=slug,
@@ -356,7 +376,7 @@ def test_model_only_download_resolves_canonical_dependency_closure(cache) -> Non
                 CatalogDocumentRevision(
                     id=f"00000000-0000-0000-0000-0000000000{index + 10:02d}",
                     document_id=root_id,
-                    kind="model",
+                    kind=kind,
                     publisher="vonk-forge",
                     slug=slug,
                     revision_number=1,
@@ -378,6 +398,26 @@ def test_model_only_download_resolves_canonical_dependency_closure(cache) -> Non
         primary_digest,
         companion_digest,
     }
+
+    inspector = DatabaseRunSwitchArtifactInspector(service)
+    with sessions() as session:
+        inspection = inspector.inspect(
+            session,
+            model_content_sha256=primary_digest,
+            recipe_revision_id="00000000-0000-0000-0000-000000000053",
+            node_ids=("spk_" + "9" * 32,),
+            retention="retain",
+            now=NOW,
+        )
+    # Real ModelDefinition -> cache service -> Run/Switch, including companion
+    # identity, empty support files and one-copy accounting of shared bytes.
+    assert inspection.dependency_model_content_sha256 == (companion_digest,)
+    assert inspection.artifact_set_sha256 == manifest.digest
+    assert inspection.artifact_set_bytes == (3 if shared_object else 6)
+    assert inspection.required_bytes == inspection.artifact_set_bytes
+    assert inspection.missing_nas_bytes == inspection.artifact_set_bytes
+    assert set(inspection.artifact_digests) == {item.sha256 for item in manifest.artifacts}
+    assert hashlib.sha256(b"").hexdigest() in inspection.artifact_digests
 
 
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
