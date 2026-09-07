@@ -312,20 +312,21 @@ class EnrollmentSubmitRequest(BaseModel):
     @field_validator("evidence")
     @classmethod
     def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        legacy = {
+        expected = {
             "node_id",
             "csr_public_key_fingerprint",
             "host_key_fingerprint",
             "hardware_fingerprint",
             "agent_digest",
             "boot_id",
+            "observation_receipt_public_key",
         }
         receipt_key = "observation_receipt_public_key"
-        if set(evidence) not in (legacy, legacy | {receipt_key}) or any(
+        if set(evidence) != expected or any(
             not value.strip() for value in evidence.values()
         ):
             raise ValueError("evidence fields are invalid")
-        if receipt_key in evidence and _DIGEST.fullmatch(evidence[receipt_key]) is None:
+        if _DIGEST.fullmatch(evidence[receipt_key]) is None:
             raise ValueError("observation receipt public key is invalid")
         if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
             raise ValueError("evidence is too large")
