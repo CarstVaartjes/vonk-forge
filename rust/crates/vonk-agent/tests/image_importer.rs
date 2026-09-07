@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use std::fs;
+use std::{
+    fs,
+    os::unix::fs::{PermissionsExt, symlink},
+};
 
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -111,11 +114,117 @@ fn verified_archive_is_reused_by_its_immutable_digest() {
     let importer = ImageImporter {
         data_root: root.path(),
     };
+    let stale_partial = root
+        .path()
+        .join("oci-archives")
+        .join(&request.oci_layout_sha256)
+        .with_extension(format!("partial.{}", std::process::id()));
+    fs::create_dir_all(stale_partial.parent().unwrap()).unwrap();
+    fs::write(&stale_partial, b"stale failed copy").unwrap();
     let cached = importer
         .retain_verified_archive(&request, &archive)
         .unwrap();
+    assert!(stale_partial.exists());
     assert_eq!(
         importer.verified_cached_archive(&request).unwrap(),
         Some(cached)
+    );
+}
+
+#[test]
+fn external_retention_verifies_before_publishing_cache() {
+    let root = tempdir().unwrap();
+    let archive = root.path().join("image.docker.tar");
+    let payload = b"external archive payload";
+    fs::write(&archive, payload).unwrap();
+    let request = RecipeImageImportRequest {
+        build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        image_bytes: payload.len() as u64,
+        image_digest: format!("sha256:{}", "d".repeat(64)),
+        kind: "recipe.image.import.v1".to_owned(),
+        mapping_generation: 1,
+        mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+        oci_layout_sha256: "e".repeat(64),
+        schema_version: 1,
+        source_node_id: format!("spk_{}", "1".repeat(32)),
+    };
+    let importer = ImageImporter {
+        data_root: root.path(),
+    };
+
+    assert!(
+        importer
+            .retain_verified_archive(&request, &archive)
+            .is_err()
+    );
+
+    let cache = root.path().join("oci-archives");
+    assert!(!cache.join(&request.oci_layout_sha256).exists());
+    assert!(
+        fs::read_dir(cache)
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".partial."))
+    );
+}
+
+#[test]
+fn trusted_distribution_retention_reuses_final_metadata_without_hashing() {
+    let root = tempdir().unwrap();
+    let digest = "a".repeat(64);
+    let archive = root.path().join("oci-archives").join(&digest);
+    fs::create_dir_all(archive.parent().unwrap()).unwrap();
+    fs::write(&archive, b"payload with a different digest").unwrap();
+    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let retained = ImageImporter {
+        data_root: root.path(),
+    }
+    .retain_verified_distribution_archive(
+        &digest,
+        &format!("sha256:{}", "b".repeat(64)),
+        fs::metadata(&archive).unwrap().len(),
+        &archive,
+    )
+    .unwrap();
+
+    assert_eq!(retained, archive);
+}
+
+#[test]
+fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
+    let root = tempdir().unwrap();
+    let digest = "c".repeat(64);
+    let source = root.path().join("distribution").join(&digest);
+    let destination = root.path().join("oci-archives").join(&digest);
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&source, b"trusted payload").unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    let importer = ImageImporter {
+        data_root: root.path(),
+    };
+    importer
+        .retain_verified_distribution_archive(
+            &digest,
+            &format!("sha256:{}", "d".repeat(64)),
+            15,
+            &source,
+        )
+        .unwrap();
+    assert!(!source.exists());
+    assert!(destination.is_file());
+
+    let symlink_source = root.path().join("distribution").join("symlink");
+    symlink(&destination, &symlink_source).unwrap();
+    assert!(
+        importer
+            .retain_verified_distribution_archive(
+                &"e".repeat(64),
+                &format!("sha256:{}", "f".repeat(64)),
+                15,
+                &symlink_source,
+            )
+            .is_err()
     );
 }

@@ -212,7 +212,7 @@ class CanonicalCanaryFixture(NamedTuple):
     publisher: str
     slug: str
     recipe_content_sha256: str
-    model_version_sha256: str
+    model_content_sha256: str
     role: str
     serving_check: dict[str, object]
     recipe: dict[str, object]
@@ -396,7 +396,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         publisher=recipe_contract.identity.publisher,
         slug=recipe_contract.identity.slug,
         recipe_content_sha256=entry["content_sha256"],
-        model_version_sha256=model_reference.content_sha256,
+        model_content_sha256=model_reference.content_sha256,
         role=roles[0].name,
         serving_check=check,
         recipe=recipe,
@@ -1969,13 +1969,13 @@ class SparkLifecycle:
                 detail.get("definition") != fixture.recipe
                 or not isinstance(selected_model, dict)
                 or selected_model.get("content_sha256")
-                != fixture.model_version_sha256
+                != fixture.model_content_sha256
             ):
                 raise LifecycleError("synthetic canary canonical closure differs")
             completed.append("recipe-resolved")
             run_request = {
                 "schema_version": 2,
-                "model_version_sha256": fixture.model_version_sha256,
+                "model_content_sha256": fixture.model_content_sha256,
                 "recipe_revision_id": revision_id,
                 "spark_group": {
                     "nodes": [

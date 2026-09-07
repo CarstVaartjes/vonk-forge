@@ -34,24 +34,24 @@ class RecipeImageAvailabilityChild:
         Attributes:
             id (str):
             kind (RecipeImageAvailabilityChildKind):
+            model_content_digests (list[str]):
             progress (OperationProgress): Canonical progress payload persisted on the current operation attempt.
             state (RecipeImageAvailabilityChildState):
             artifact_set_sha256 (Union[None, Unset, str]):
             artifacts (Union[Unset, list['RecipeImageAvailabilityArtifact']]):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
-            model_versions (Union[Unset, list[str]]):
             plan_digest (Union[None, Unset, str]):
             request_key (Union[None, Unset, str]):
      """
 
     id: str
     kind: RecipeImageAvailabilityChildKind
+    model_content_digests: list[str]
     progress: 'OperationProgress'
     state: RecipeImageAvailabilityChildState
     artifact_set_sha256: Union[None, Unset, str] = UNSET
     artifacts: Union[Unset, list['RecipeImageAvailabilityArtifact']] = UNSET
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
-    model_versions: Union[Unset, list[str]] = UNSET
     plan_digest: Union[None, Unset, str] = UNSET
     request_key: Union[None, Unset, str] = UNSET
 
@@ -66,6 +66,10 @@ class RecipeImageAvailabilityChild:
         id = self.id
 
         kind: str = self.kind
+
+        model_content_digests = self.model_content_digests
+
+
 
         progress = self.progress.to_dict()
 
@@ -94,12 +98,6 @@ class RecipeImageAvailabilityChild:
         else:
             failure = self.failure
 
-        model_versions: Union[Unset, list[str]] = UNSET
-        if not isinstance(self.model_versions, Unset):
-            model_versions = self.model_versions
-
-
-
         plan_digest: Union[None, Unset, str]
         if isinstance(self.plan_digest, Unset):
             plan_digest = UNSET
@@ -118,6 +116,7 @@ class RecipeImageAvailabilityChild:
         field_dict.update({
             "id": id,
             "kind": kind,
+            "model_content_digests": model_content_digests,
             "progress": progress,
             "state": state,
         })
@@ -127,8 +126,6 @@ class RecipeImageAvailabilityChild:
             field_dict["artifacts"] = artifacts
         if failure is not UNSET:
             field_dict["failure"] = failure
-        if model_versions is not UNSET:
-            field_dict["model_versions"] = model_versions
         if plan_digest is not UNSET:
             field_dict["plan_digest"] = plan_digest
         if request_key is not UNSET:
@@ -149,6 +146,9 @@ class RecipeImageAvailabilityChild:
         kind = check_recipe_image_availability_child_kind(d.pop("kind"))
 
 
+
+
+        model_content_digests = cast(list[str], d.pop("model_content_digests"))
 
 
         progress = OperationProgress.from_dict(d.pop("progress"))
@@ -201,9 +201,6 @@ class RecipeImageAvailabilityChild:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        model_versions = cast(list[str], d.pop("model_versions", UNSET))
-
-
         def _parse_plan_digest(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -227,12 +224,12 @@ class RecipeImageAvailabilityChild:
         recipe_image_availability_child = cls(
             id=id,
             kind=kind,
+            model_content_digests=model_content_digests,
             progress=progress,
             state=state,
             artifact_set_sha256=artifact_set_sha256,
             artifacts=artifacts,
             failure=failure,
-            model_versions=model_versions,
             plan_digest=plan_digest,
             request_key=request_key,
         )

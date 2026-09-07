@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import canonical_message
 from vonk_control.operation_contract import (
+    OperationMemberProgress,
     OperationPhase,
     OperationProgress,
     OperationRecoveryAction,
@@ -49,6 +50,37 @@ def test_progress_makes_unknown_totals_explicit_and_accepts_wire_aliases() -> No
         phase="download", completed_bytes=10, total_bytes=100, total_bytes_known=True
     )
     assert known.model_dump(mode="json")["total_bytes"] == 100
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("total_unknown", "true"),
+        ("total_bytes_known", 1),
+        ("bytes_done", "10"),
+        ("bytes_total", True),
+        ("rate", "10.5"),
+    ],
+)
+def test_progress_compact_aliases_reject_coercible_values(
+    field: str, value: object
+) -> None:
+    with pytest.raises(ValidationError, match=field):
+        OperationProgress.model_validate({"phase": "download", field: value})
+
+
+def test_progress_nested_checkpoint_and_members_are_strict() -> None:
+    with pytest.raises(ValidationError):
+        OperationProgress.model_validate(
+            {
+                "phase": "transfer",
+                "checkpoint": {"key": "shard", "sequence": "1"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        OperationMemberProgress.model_validate(
+            {"member_id": "node", "phase": "transfer", "completed_bytes": "1"}
+        )
 
 
 def test_checkpoint_and_bytes_updates_are_monotonic() -> None:

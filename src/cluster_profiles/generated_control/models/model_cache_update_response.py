@@ -30,10 +30,10 @@ class ModelCacheUpdateResponse:
     """
         Attributes:
             artifact_set_sha256 (str):
-            latest_model_version_sha256 (Union[None, str]):
+            latest_model_content_sha256 (Union[None, str]):
             latest_recipe_revision_sha256 (Union[None, str]):
+            model_content_sha256 (Union[None, str]):
             model_update_available (bool):
-            model_version_sha256 (Union[None, str]):
             recipe_revision_sha256 (Union[None, str]):
             recipe_update_available (bool):
             model_update_ambiguous (Union[Unset, bool]):  Default: False.
@@ -45,10 +45,10 @@ class ModelCacheUpdateResponse:
      """
 
     artifact_set_sha256: str
-    latest_model_version_sha256: Union[None, str]
+    latest_model_content_sha256: Union[None, str]
     latest_recipe_revision_sha256: Union[None, str]
+    model_content_sha256: Union[None, str]
     model_update_available: bool
-    model_version_sha256: Union[None, str]
     recipe_revision_sha256: Union[None, str]
     recipe_update_available: bool
     model_update_ambiguous: Union[Unset, bool] = False
@@ -68,16 +68,16 @@ class ModelCacheUpdateResponse:
         from ..models.model_cache_update_response_model_update_candidates_item import ModelCacheUpdateResponseModelUpdateCandidatesItem
         artifact_set_sha256 = self.artifact_set_sha256
 
-        latest_model_version_sha256: Union[None, str]
-        latest_model_version_sha256 = self.latest_model_version_sha256
+        latest_model_content_sha256: Union[None, str]
+        latest_model_content_sha256 = self.latest_model_content_sha256
 
         latest_recipe_revision_sha256: Union[None, str]
         latest_recipe_revision_sha256 = self.latest_recipe_revision_sha256
 
-        model_update_available = self.model_update_available
+        model_content_sha256: Union[None, str]
+        model_content_sha256 = self.model_content_sha256
 
-        model_version_sha256: Union[None, str]
-        model_version_sha256 = self.model_version_sha256
+        model_update_available = self.model_update_available
 
         recipe_revision_sha256: Union[None, str]
         recipe_revision_sha256 = self.recipe_revision_sha256
@@ -124,10 +124,10 @@ class ModelCacheUpdateResponse:
 
         field_dict.update({
             "artifact_set_sha256": artifact_set_sha256,
-            "latest_model_version_sha256": latest_model_version_sha256,
+            "latest_model_content_sha256": latest_model_content_sha256,
             "latest_recipe_revision_sha256": latest_recipe_revision_sha256,
+            "model_content_sha256": model_content_sha256,
             "model_update_available": model_update_available,
-            "model_version_sha256": model_version_sha256,
             "recipe_revision_sha256": recipe_revision_sha256,
             "recipe_update_available": recipe_update_available,
         })
@@ -156,12 +156,12 @@ class ModelCacheUpdateResponse:
         d = dict(src_dict)
         artifact_set_sha256 = d.pop("artifact_set_sha256")
 
-        def _parse_latest_model_version_sha256(data: object) -> Union[None, str]:
+        def _parse_latest_model_content_sha256(data: object) -> Union[None, str]:
             if data is None:
                 return data
             return cast(Union[None, str], data)
 
-        latest_model_version_sha256 = _parse_latest_model_version_sha256(d.pop("latest_model_version_sha256"))
+        latest_model_content_sha256 = _parse_latest_model_content_sha256(d.pop("latest_model_content_sha256"))
 
 
         def _parse_latest_recipe_revision_sha256(data: object) -> Union[None, str]:
@@ -172,15 +172,15 @@ class ModelCacheUpdateResponse:
         latest_recipe_revision_sha256 = _parse_latest_recipe_revision_sha256(d.pop("latest_recipe_revision_sha256"))
 
 
-        model_update_available = d.pop("model_update_available")
-
-        def _parse_model_version_sha256(data: object) -> Union[None, str]:
+        def _parse_model_content_sha256(data: object) -> Union[None, str]:
             if data is None:
                 return data
             return cast(Union[None, str], data)
 
-        model_version_sha256 = _parse_model_version_sha256(d.pop("model_version_sha256"))
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256"))
 
+
+        model_update_available = d.pop("model_update_available")
 
         def _parse_recipe_revision_sha256(data: object) -> Union[None, str]:
             if data is None:
@@ -260,10 +260,10 @@ class ModelCacheUpdateResponse:
 
         model_cache_update_response = cls(
             artifact_set_sha256=artifact_set_sha256,
-            latest_model_version_sha256=latest_model_version_sha256,
+            latest_model_content_sha256=latest_model_content_sha256,
             latest_recipe_revision_sha256=latest_recipe_revision_sha256,
+            model_content_sha256=model_content_sha256,
             model_update_available=model_update_available,
-            model_version_sha256=model_version_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
             recipe_update_available=recipe_update_available,
             model_update_ambiguous=model_update_ambiguous,

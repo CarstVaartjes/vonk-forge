@@ -7,7 +7,8 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
+from ...models.agent_upgrade_package_request import AgentUpgradePackageRequest
+from ...models.bounded_error_response import BoundedErrorResponse
 from typing import cast
 
 
@@ -31,13 +32,34 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     if response.status_code == 200:
-        response_200 = GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet.from_dict(response.json())
+        response_200 = AgentUpgradePackageRequest.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -45,7 +67,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -58,7 +80,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -66,7 +88,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]
+        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]
      """
 
 
@@ -84,7 +106,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -92,7 +114,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
+        Union[AgentUpgradePackageRequest, BoundedErrorResponse]
      """
 
 
@@ -105,7 +127,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+) -> Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -113,7 +135,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]
+        Response[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]
      """
 
 
@@ -131,7 +153,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet]:
+) -> Optional[Union[AgentUpgradePackageRequest, BoundedErrorResponse]]:
     """ Current Agent Upgrade
 
     Raises:
@@ -139,7 +161,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
+        Union[AgentUpgradePackageRequest, BoundedErrorResponse]
      """
 
 
