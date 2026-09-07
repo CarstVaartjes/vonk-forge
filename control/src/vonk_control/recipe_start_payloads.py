@@ -48,46 +48,46 @@ def build_recipe_start_payload(
 ) -> dict[str, object]:
     """Build and validate one complete current schema-2 start payload."""
 
-    payload: dict[str, object] = {
-        "schema_version": 2,
-        "run_id": run_id,
-        "installation_id": installation_id,
-        "recipe_revision_id": recipe_revision_id,
-        "recipe_content_sha256": recipe_content_sha256,
-        "mapping_id": mapping_id,
-        "mapping_generation": mapping_generation,
-        "image_digest": image_digest,
-        "plan_digest": plan_digest,
-        "alias": alias,
-        "rank": placement.rank,
-        "role": placement.role,
-        "port": placement.port,
-        "reserved_memory_bytes": placement.reserved_memory_bytes,
-        "endpoint_address": endpoint_address,
-        "world_size": world_size,
-        "compiled_execution_plan": _bind_compiled_execution_plan(
-            compiled_execution_plan,
-            placement=placement,
-            endpoint_address=compiled_endpoint_address,
-            master_address=master_address,
-            master_port=master_port,
-            world_size=world_size,
-        ),
-        "local_address": local_address,
-        "master_address": master_address,
-        "master_port": master_port,
-    }
-    if phase is not None:
-        payload.update(
-            {
-                "phase": phase,
-                "start_deadline": start_deadline,
-                "run_generation": run_generation,
-            }
-        )
     try:
+        payload: dict[str, object] = {
+            "schema_version": 2,
+            "run_id": run_id,
+            "installation_id": installation_id,
+            "recipe_revision_id": recipe_revision_id,
+            "recipe_content_sha256": recipe_content_sha256,
+            "mapping_id": mapping_id,
+            "mapping_generation": mapping_generation,
+            "image_digest": image_digest,
+            "plan_digest": plan_digest,
+            "alias": alias,
+            "rank": placement.rank,
+            "role": placement.role,
+            "port": placement.port,
+            "reserved_memory_bytes": placement.reserved_memory_bytes,
+            "endpoint_address": endpoint_address,
+            "world_size": world_size,
+            "compiled_execution_plan": _bind_compiled_execution_plan(
+                compiled_execution_plan,
+                placement=placement,
+                endpoint_address=compiled_endpoint_address,
+                master_address=master_address,
+                master_port=master_port,
+                world_size=world_size,
+            ),
+            "local_address": local_address,
+            "master_address": master_address,
+            "master_port": master_port,
+        }
+        if phase is not None:
+            payload.update(
+                {
+                    "phase": phase,
+                    "start_deadline": start_deadline,
+                    "run_generation": run_generation,
+                }
+            )
         RecipeStartPayload.model_validate(payload)
-    except Exception as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise RecipeStartPayloadError("recipe start payload is invalid") from error
     return payload
 
