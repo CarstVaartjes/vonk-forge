@@ -369,12 +369,6 @@ def _harness_digest(slug: str) -> str:
     return canonical_harness(slug).content_sha256
 
 
-def canonical_harness_document(slug: str) -> dict[str, object]:
-    """Return a detached legacy evidence projection for one built-in harness."""
-
-    return canonical_harness(slug).document()
-
-
 def compile_canonical_harness(
     recipe: RecipeDefinition,
     models: tuple[ModelDefinition, ...],
@@ -464,4 +458,4 @@ def compile_canonical_harness(
     return projection, tuple(artifact for artifact, _mount in mounts), image_digest
 
 
-__all__ = ["canonical_harness_document", "compile_canonical_harness"]
+__all__ = ["compile_canonical_harness"]

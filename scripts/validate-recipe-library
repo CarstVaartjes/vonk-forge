@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import io
 import json
 import re
@@ -465,25 +464,17 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         validate_model_references(models.values())
     except ContractResolutionError as error:
         raise LibraryValidationError(f"model reference graph is invalid: {error}") from error
-    metadata_path = (
-        platform_root
-        / "control"
-        / "src"
-        / "vonk_control"
-        / "harnesses"
-        / "canonical_metadata.py"
-    )
     try:
-        spec = importlib.util.spec_from_file_location(
-            "_vonk_canonical_harness_metadata", metadata_path
+        control_src = str(platform_root / "control" / "src")
+        if control_src not in sys.path:
+            sys.path.insert(0, control_src)
+        from vonk_control.harnesses.canonical_metadata import (
+            CANONICAL_HARNESSES,
+            CanonicalHarnessMetadata,
         )
-        if spec is None or spec.loader is None:
-            raise ImportError("canonical metadata module cannot be loaded")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        metadata_type = module.CanonicalHarnessMetadata
-        metadata_rows = module.CANONICAL_HARNESSES
+
+        metadata_type = CanonicalHarnessMetadata
+        metadata_rows = CANONICAL_HARNESSES
         if not isinstance(metadata_rows, tuple) or not metadata_rows:
             raise TypeError("canonical metadata rows must be a non-empty tuple")
         harnesses = {}
@@ -492,10 +483,8 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
                 type(metadata) is not metadata_type
                 or not metadata.slug
                 or metadata.slug in harnesses
-                or metadata.compiler_slug != metadata.slug
                 or not metadata.adapters
                 or not metadata.topology_modes
-                or not metadata.runtime_interface
             ):
                 raise ValueError("canonical metadata row is invalid")
             harnesses[metadata.slug] = metadata

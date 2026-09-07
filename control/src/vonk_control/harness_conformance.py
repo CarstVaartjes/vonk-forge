@@ -12,7 +12,7 @@ from .catalog_contract import (
     catalog_content_sha256,
 )
 from .harnesses import BUILTIN_HARNESS_SLUGS, HarnessProjection, HarnessRegistry
-from .harnesses.canonical import canonical_harness_document
+from .harnesses.canonical_metadata import canonical_harness
 from .harnesses.common import HarnessCompileError
 from .schema_resources import read_runtime_schema
 
@@ -517,7 +517,7 @@ def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
 
 def _builtin_harness_document(slug: str) -> dict[str, object]:
     try:
-        return canonical_harness_document(slug)
+        return canonical_harness(slug).model_dump(mode="json")
     except ValueError as error:
         raise HarnessConformanceError("unknown execution harness") from error
 
