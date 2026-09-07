@@ -756,7 +756,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/models/{model_version_sha256}/delete": {
+    "/api/v1/library/models/{model_content_sha256}/delete": {
         parameters: {
             query?: never;
             header?: never;
@@ -2349,8 +2349,8 @@ export interface components {
             expected_bytes: number;
             /** Last Error */
             last_error?: string | null;
-            /** Model Version Sha256 */
-            model_version_sha256: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
             /** Protected */
             protected: boolean;
             /** Protected Reasons */
@@ -2483,8 +2483,8 @@ export interface components {
         CompatibilityIdentity: {
             /** Hardware Profile Sha256 */
             hardware_profile_sha256?: string | null;
-            /** Model Version Sha256 */
-            model_version_sha256: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Parameters Sha256 */
             parameters_sha256: string;
             /** Recipe Revision Sha256 */
@@ -4159,8 +4159,6 @@ export interface components {
         };
         /** ManagedCatalogWithdrawnRecipe */
         ManagedCatalogWithdrawnRecipe: {
-            /** Model Version Key */
-            model_version_key?: string | null;
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Uri */
@@ -4307,10 +4305,10 @@ export interface components {
              */
             completeness: "complete" | "incomplete" | "unknown";
             controller: components["schemas"]["ControllerAssetState"];
-            /** Dependency Model Version Sha256 */
-            dependency_model_version_sha256?: string[];
-            /** Model Version Sha256 */
-            model_version_sha256: string;
+            /** Dependency Model Content Sha256 */
+            dependency_model_content_sha256?: string[];
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Recipe Revision Sha256 */
             recipe_revision_sha256?: string | null;
             /** Targets */
@@ -4335,8 +4333,8 @@ export interface components {
         ModelCacheDownloadPreviewRequest: {
             /** Artifact Set Sha256 */
             artifact_set_sha256?: string | null;
-            /** Model Version Sha256 */
-            model_version_sha256?: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256?: string | null;
             /** Recipe Revision Id */
             recipe_revision_id?: string | null;
             /** Recipe Revision Sha256 */
@@ -4389,8 +4387,8 @@ export interface components {
         ModelCacheDownloadRequest: {
             /** Artifact Set Sha256 */
             artifact_set_sha256?: string | null;
-            /** Model Version Sha256 */
-            model_version_sha256?: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256?: string | null;
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Revision Id */
@@ -4672,10 +4670,12 @@ export interface components {
         ModelCacheUpdateResponse: {
             /** Artifact Set Sha256 */
             artifact_set_sha256: string;
-            /** Latest Model Version Sha256 */
-            latest_model_version_sha256: string | null;
+            /** Latest Model Content Sha256 */
+            latest_model_content_sha256: string | null;
             /** Latest Recipe Revision Sha256 */
             latest_recipe_revision_sha256: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
             /**
              * Model Update Ambiguous
              * @default false
@@ -4695,8 +4695,6 @@ export interface components {
             model_update_to?: {
                 [key: string]: unknown;
             } | null;
-            /** Model Version Sha256 */
-            model_version_sha256: string | null;
             /** Recipe Revision Sha256 */
             recipe_revision_sha256: string | null;
             /** Recipe Update Available */
@@ -4844,27 +4842,34 @@ export interface components {
             allowed: boolean;
             /** Blockers */
             blockers: components["schemas"]["PlanReason"][];
-            /** Bytes Removed */
+            /**
+             * Bytes Removed
+             * @description Bytes freed from affected installation copies; shared/global cache bytes are excluded.
+             */
             bytes_removed: number;
             /** Installations */
             installations: components["schemas"]["ModelDeletionInstallationImpactResponse"][];
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Model Title */
             model_title: string;
-            /** Model Version Sha256 */
-            model_version_sha256: string;
             /** Nodes */
             nodes: components["schemas"]["ModelDeletionNodeImpactResponse"][];
             /** Plan Digest */
             plan_digest: string;
-            /** Shared Cache Policy */
-            shared_cache_policy: string;
+            /**
+             * Shared Cache Policy
+             * @description Shared/global downloaded model caches remain installed.
+             * @constant
+             */
+            shared_cache_policy: "retain-shared-download-cache";
             /** Warnings */
             warnings: components["schemas"]["PlanReason"][];
         };
         /** ModelDeletionPreviewRequest */
         ModelDeletionPreviewRequest: {
-            /** Model Version Sha256 */
-            model_version_sha256: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string;
         };
         /** ModelFamily */
         ModelFamily: {
@@ -5886,8 +5891,8 @@ export interface components {
             key: string;
             /** Kind */
             kind: string;
-            /** Model Version Sha256 */
-            model_version_sha256?: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256?: string | null;
             /** Path */
             path: string;
             /** Repository */
@@ -5915,8 +5920,8 @@ export interface components {
              * @enum {string}
              */
             kind: "model-cache" | "runtime-image";
-            /** Model Versions */
-            model_versions?: string[];
+            /** Model Content Sha256S */
+            model_content_sha256s?: string[];
             /** Plan Digest */
             plan_digest?: string | null;
             progress: components["schemas"]["OperationProgress"];
@@ -6009,10 +6014,10 @@ export interface components {
             local_image_config_id?: string | null;
             /** Model Child Id */
             model_child_id?: string | null;
+            /** Model Content Sha256S */
+            model_content_sha256s?: string[];
             /** Model Digest */
             model_digest?: string | null;
-            /** Model Versions */
-            model_versions?: string[];
             /** Oci Archive Sha256 */
             oci_archive_sha256: string;
             /** Platform Manifest Digest */
@@ -6724,8 +6729,8 @@ export interface components {
             /** Alias */
             alias: string;
             invocation?: components["schemas"]["InvocationMetadata"];
-            /** Model Version Sha256 */
-            model_version_sha256: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Plan Digest */
             plan_digest?: string | null;
             /** Recipe Revision Id */
@@ -6867,8 +6872,8 @@ export interface components {
             mapping: components["schemas"]["MappingSelection"] | null;
             /** Model Capabilities */
             model_capabilities: components["schemas"]["CapabilityEvidence"][];
-            /** Model Version Sha256 */
-            model_version_sha256: string | null;
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
             /** Phases */
             phases: components["schemas"]["RunSwitchPhase"][];
             /** Plan Digest */
@@ -6923,8 +6928,8 @@ export interface components {
             /** Alias */
             alias: string;
             invocation?: components["schemas"]["InvocationMetadata"];
-            /** Model Version Sha256 */
-            model_version_sha256: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /**
@@ -7902,10 +7907,10 @@ export interface components {
             dependent_recipe_ids: string[];
             /** Effect */
             effect: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string;
             /** Model Title */
             model_title: string;
-            /** Model Version Sha256 */
-            model_version_sha256: string;
             /** Retained Node Ids */
             retained_node_ids: string[];
         };
@@ -10850,7 +10855,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                model_version_sha256: string;
+                model_content_sha256: string;
             };
             cookie?: never;
         };

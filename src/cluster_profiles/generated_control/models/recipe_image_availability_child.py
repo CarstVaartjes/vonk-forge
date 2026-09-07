@@ -39,7 +39,7 @@ class RecipeImageAvailabilityChild:
             artifact_set_sha256 (Union[None, Unset, str]):
             artifacts (Union[Unset, list['RecipeImageAvailabilityArtifact']]):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
-            model_versions (Union[Unset, list[str]]):
+            model_content_sha256s (Union[Unset, list[str]]):
             plan_digest (Union[None, Unset, str]):
             request_key (Union[None, Unset, str]):
      """
@@ -51,7 +51,7 @@ class RecipeImageAvailabilityChild:
     artifact_set_sha256: Union[None, Unset, str] = UNSET
     artifacts: Union[Unset, list['RecipeImageAvailabilityArtifact']] = UNSET
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
-    model_versions: Union[Unset, list[str]] = UNSET
+    model_content_sha256s: Union[Unset, list[str]] = UNSET
     plan_digest: Union[None, Unset, str] = UNSET
     request_key: Union[None, Unset, str] = UNSET
 
@@ -94,9 +94,9 @@ class RecipeImageAvailabilityChild:
         else:
             failure = self.failure
 
-        model_versions: Union[Unset, list[str]] = UNSET
-        if not isinstance(self.model_versions, Unset):
-            model_versions = self.model_versions
+        model_content_sha256s: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.model_content_sha256s, Unset):
+            model_content_sha256s = self.model_content_sha256s
 
 
 
@@ -127,8 +127,8 @@ class RecipeImageAvailabilityChild:
             field_dict["artifacts"] = artifacts
         if failure is not UNSET:
             field_dict["failure"] = failure
-        if model_versions is not UNSET:
-            field_dict["model_versions"] = model_versions
+        if model_content_sha256s is not UNSET:
+            field_dict["model_content_sha256s"] = model_content_sha256s
         if plan_digest is not UNSET:
             field_dict["plan_digest"] = plan_digest
         if request_key is not UNSET:
@@ -201,7 +201,7 @@ class RecipeImageAvailabilityChild:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        model_versions = cast(list[str], d.pop("model_versions", UNSET))
+        model_content_sha256s = cast(list[str], d.pop("model_content_sha256s", UNSET))
 
 
         def _parse_plan_digest(data: object) -> Union[None, Unset, str]:
@@ -232,7 +232,7 @@ class RecipeImageAvailabilityChild:
             artifact_set_sha256=artifact_set_sha256,
             artifacts=artifacts,
             failure=failure,
-            model_versions=model_versions,
+            model_content_sha256s=model_content_sha256s,
             plan_digest=plan_digest,
             request_key=request_key,
         )

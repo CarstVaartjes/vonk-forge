@@ -7,6 +7,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
@@ -30,13 +31,14 @@ class ModelDeletionPlanResponse:
             active_runs (list['UninstallActiveRunResponse']):
             allowed (bool):
             blockers (list['PlanReason']):
-            bytes_removed (int):
+            bytes_removed (int): Bytes freed from affected installation copies; shared/global cache bytes are excluded.
             installations (list['ModelDeletionInstallationImpactResponse']):
+            model_content_sha256 (str):
             model_title (str):
-            model_version_sha256 (str):
             nodes (list['ModelDeletionNodeImpactResponse']):
             plan_digest (str):
-            shared_cache_policy (str):
+            shared_cache_policy (Literal['retain-shared-download-cache']): Shared/global downloaded model caches remain
+                installed.
             warnings (list['PlanReason']):
      """
 
@@ -46,11 +48,11 @@ class ModelDeletionPlanResponse:
     blockers: list['PlanReason']
     bytes_removed: int
     installations: list['ModelDeletionInstallationImpactResponse']
+    model_content_sha256: str
     model_title: str
-    model_version_sha256: str
     nodes: list['ModelDeletionNodeImpactResponse']
     plan_digest: str
-    shared_cache_policy: str
+    shared_cache_policy: Literal['retain-shared-download-cache']
     warnings: list['PlanReason']
 
 
@@ -89,9 +91,9 @@ class ModelDeletionPlanResponse:
 
 
 
-        model_title = self.model_title
+        model_content_sha256 = self.model_content_sha256
 
-        model_version_sha256 = self.model_version_sha256
+        model_title = self.model_title
 
         nodes = []
         for nodes_item_data in self.nodes:
@@ -121,8 +123,8 @@ class ModelDeletionPlanResponse:
             "blockers": blockers,
             "bytes_removed": bytes_removed,
             "installations": installations,
+            "model_content_sha256": model_content_sha256,
             "model_title": model_title,
-            "model_version_sha256": model_version_sha256,
             "nodes": nodes,
             "plan_digest": plan_digest,
             "shared_cache_policy": shared_cache_policy,
@@ -176,9 +178,9 @@ class ModelDeletionPlanResponse:
             installations.append(installations_item)
 
 
-        model_title = d.pop("model_title")
+        model_content_sha256 = d.pop("model_content_sha256")
 
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_title = d.pop("model_title")
 
         nodes = []
         _nodes = d.pop("nodes")
@@ -192,7 +194,9 @@ class ModelDeletionPlanResponse:
 
         plan_digest = d.pop("plan_digest")
 
-        shared_cache_policy = d.pop("shared_cache_policy")
+        shared_cache_policy = cast(Literal['retain-shared-download-cache'] , d.pop("shared_cache_policy"))
+        if shared_cache_policy != 'retain-shared-download-cache':
+            raise ValueError(f"shared_cache_policy must match const 'retain-shared-download-cache', got '{shared_cache_policy}'")
 
         warnings = []
         _warnings = d.pop("warnings")
@@ -211,8 +215,8 @@ class ModelDeletionPlanResponse:
             blockers=blockers,
             bytes_removed=bytes_removed,
             installations=installations,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
-            model_version_sha256=model_version_sha256,
             nodes=nodes,
             plan_digest=plan_digest,
             shared_cache_policy=shared_cache_policy,

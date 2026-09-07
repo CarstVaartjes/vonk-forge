@@ -43,7 +43,9 @@ def _library_detail(
     **overrides: object,
 ) -> dict[str, object]:
     """Build the current generated Library list/detail transport shape."""
-    from cluster_profiles.generated_control.models.recipe_definition import RecipeDefinition
+    from cluster_profiles.generated_control.models.recipe_definition import (
+        RecipeDefinition,
+    )
 
     definition = RecipeDefinition.from_dict(recipe)
     canonical = definition.to_dict()

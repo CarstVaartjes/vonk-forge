@@ -24,14 +24,14 @@ class CompatibilityIdentity:
     """ Immutable inputs for an exceptional reusable preparation artifact.
 
         Attributes:
-            model_version_sha256 (str):
+            model_content_sha256 (str):
             parameters_sha256 (str):
             recipe_revision_sha256 (str):
             runtime_image_digest (str):
             hardware_profile_sha256 (Union[None, Unset, str]):
      """
 
-    model_version_sha256: str
+    model_content_sha256: str
     parameters_sha256: str
     recipe_revision_sha256: str
     runtime_image_digest: str
@@ -42,7 +42,7 @@ class CompatibilityIdentity:
 
 
     def to_dict(self) -> dict[str, Any]:
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256 = self.model_content_sha256
 
         parameters_sha256 = self.parameters_sha256
 
@@ -60,7 +60,7 @@ class CompatibilityIdentity:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "parameters_sha256": parameters_sha256,
             "recipe_revision_sha256": recipe_revision_sha256,
             "runtime_image_digest": runtime_image_digest,
@@ -75,7 +75,7 @@ class CompatibilityIdentity:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_content_sha256 = d.pop("model_content_sha256")
 
         parameters_sha256 = d.pop("parameters_sha256")
 
@@ -94,7 +94,7 @@ class CompatibilityIdentity:
 
 
         compatibility_identity = cls(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             parameters_sha256=parameters_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
             runtime_image_digest=runtime_image_digest,

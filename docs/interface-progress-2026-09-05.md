@@ -9,46 +9,43 @@ separate results.
 
 ## Current checkpoint
 
-- The current platform changes are on the integration branch, not yet published
-  or deployed. Earlier green CI runs do not cover its subsequent commits.
-- All 85 Recipes and 92 Model records pass the current public contracts. All
-  109 compiled launch projections pass, including the 751-file model, large
-  launch messages, and LTX files projected to multiple declared mounts.
-- Removed the old recipe parser and schema/package assets, unused artifact-size
-  resolver, flat recovery-start conversion, duplicate pairing DTO, retired
-  status aliases, and duplicate historical catalog tests. Recovery now produces
-  the current compiled Start contract directly. Enrollment uses one shared
-  required evidence structure in the real Rust producer and Controller.
-- Current catalog acceptance uses the normal recipe-library checkout and fresh
-  PostgreSQL: two tests pass, including actual package serving and offline reuse.
-  It no longer requires a separate frozen-test receipt or alternate import route.
-- Controller wire models enforce JSON scalar types and closed structure.
-  The current recipe compiler cases run by default rather than through an
-  optional fixture environment. Open content, including engine arguments,
-  remains governed by its declared flexible fields.
-- The complete Rust workspace passed all 424 tests as an ordinary user in an
-  isolated ARM64 OrbStack container. The connected Python/Rust protocol suite
-  passed 519 tests, and the packaged protocol/CLI verification passed 83 tests.
-- The latest disposable lifecycle canary passed image build and distribution,
-  then exposed a model-cache handoff error: distribution used its authority-plan
-  directory and a flat file path, while installation expected its execution-plan
-  directory and a selection-scoped path. The shared cache handoff and a composed
-  distribution-to-install regression are being corrected. Full lifecycle
-  acceptance remains pending.
-- CLI JSON validation now uses generated Controller OpenAPI for requests before
-  transport and for success/error responses. Timestamp, UUID, and tuple JSON
-  decoding remains native while numeric contract tags stay exact. The combined
-  CLI, current Library/PostgreSQL, and strict JSON tests pass: 151 tests.
-  The expanded source/contract verifier passes all 86 tests.
-- Remaining model-domain cleanup spans cache/database identities, deletion
-  planning and execution, public API/CLI/UI fields, and old catalog ModelGroup
-  and ModelVersion admission. Canonical ModelDefinition family/version metadata
-  stays. Companion Model downloads and every selected Model's installation
-  ownership must remain correct; replacing names alone is insufficient.
-- CLI qualification is being moved entirely to the current Library API.
-- The NAS Controller is unchanged. Rollback backups and a fresh database are
-  prepared; device identities have not been copied. No selected Model download
-  has started. Deployment follows successful publication and acceptance.
+- Platform work is on the integration branch, not yet published or deployed.
+  Earlier CI runs do not cover its subsequent commits.
+- Public contracts v1.0.5 are published at recipes commit
+  `d55389b5cc144d0483cf89b95770198c6125cb15` (PR76). Model, Recipe, and nested
+  capabilities require exact integer schema tags. All 92 Models, 85 Recipes,
+  and 109 compiled role projections pass, including the 751-file Model.
+- Canonical Model content references now connect cache persistence, all selected
+  and companion Model ownership, Run/Switch, deletion, the API, CLI, and web.
+  Generated clients use those same fields. Families, versions, and capabilities
+  remain data in ModelDefinition. Private cache manifests use strict Pydantic
+  structure and the public ModelReference type.
+- Spark downloads use one shared object path across artifact sets. Installation
+  materializes selected files from that cache, retries clean up their own partial
+  files, and repeated selections retain their distinct mounts. Removing an
+  installation keeps reusable downloads; API and UI previews describe that
+  retention and report installation-copy bytes.
+- The old recipe parser and package assets, flat recovery conversion, duplicate
+  enrollment DTO, unused artifact-size resolver, and obsolete model mount layout
+  are removed. Current Library acceptance uses ordinary published catalog inputs
+  and fresh PostgreSQL.
+- CLI qualification uses the current Library API. Selected file IDs are exact;
+  download totals deduplicate shared object bytes across Models.
+- Current checks include 432 Rust tests across 40 executables in unprivileged
+  ARM64 OrbStack, 300 composed Controller/database/protocol/CLI tests, and all
+  catalog role projections. Full Controller and web checks found remaining
+  test fixtures and one action-label type mismatch; their corrections and the
+  combined rerun are underway. Actual uninstall producer-to-Rust wire coverage
+  and the corrected development lifecycle canary are being completed.
+- Three exact changes remain pending automatic-review approval: deleting old
+  catalog ModelGroup/ModelVersion schema branches and seed/test documents;
+  removing repeated full-file hashes at trusted internal handoffs; and removing
+  the qualification CLI's duplicate territorial metadata check. These removals
+  have not been performed. Current runtime does not consume the old Model entity
+  documents. Active platform harness/runtime wire contracts remain supported.
+- The NAS Controller is unchanged. Backups and a fresh database are prepared;
+  device identities have not been copied and no selected Model download has
+  started. Deployment follows successful publication and acceptance.
 
 The detailed evidence below records earlier implementation checkpoints; this
 current checkpoint takes precedence for release and deployment status.
@@ -57,7 +54,7 @@ current checkpoint takes precedence for release and deployment status.
 
 | Component | Verified result |
 |---|---|
-| Recipes | [PR75](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/75) merged at `2bd0b1ecf4163fa961791d972968a3a420ecc85d`; v1.0.4 publication `34052695195` succeeded with 92 Models and 85 Recipes. It repairs two GLM build-source representations after the v1.0.3 refresh. |
+| Recipes | [PR76](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/76) merged at `d55389b5cc144d0483cf89b95770198c6125cb15`; [v1.0.5 publication](https://github.com/CarstVaartjes/vonk-forge-recipes/actions/runs/34109170382) succeeded with strict schema tags and unchanged 92 Models and 85 Recipes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
 | Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |

@@ -9,10 +9,10 @@ import threading
 from pathlib import Path
 
 import pytest
+from library_route_fixtures import _library_detail, _recipe
 
 from cluster_profiles import fleet_qualification_campaign_cli as campaign_cli
 from cluster_profiles.fleet_qualification import EvidenceLedger, QualificationError
-from library_route_fixtures import _library_detail, _recipe
 from cluster_profiles.qualification_locking import node_locks
 
 NODE_A = "spk_" + "1" * 32

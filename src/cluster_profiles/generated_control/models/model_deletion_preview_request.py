@@ -20,23 +20,23 @@ T = TypeVar("T", bound="ModelDeletionPreviewRequest")
 class ModelDeletionPreviewRequest:
     """
         Attributes:
-            model_version_sha256 (str):
+            model_content_sha256 (str):
      """
 
-    model_version_sha256: str
+    model_content_sha256: str
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256 = self.model_content_sha256
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
         })
 
         return field_dict
@@ -46,10 +46,10 @@ class ModelDeletionPreviewRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_content_sha256 = d.pop("model_content_sha256")
 
         model_deletion_preview_request = cls(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
         )
 
         return model_deletion_preview_request
