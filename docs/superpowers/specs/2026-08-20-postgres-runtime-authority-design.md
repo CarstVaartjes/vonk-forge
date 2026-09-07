@@ -15,18 +15,17 @@ and a singleton current-head row. Each revision stores the allowlisted control
 documents currently represented by the runtime checkout, including the default
 topology document. Proposal previews are persisted in PostgreSQL and are
 applied with a locked compare-and-swap against the current head. The resulting
-revision identifier continues to travel through reconciliation and worker
-authority messages, but it is a database revision rather than a Git commit.
+revision identifier continues to travel through reconciliation messages, but it
+is a database revision rather than a Git commit.
 
 This is a fresh deployment model; no Git-shaped identifier or compatibility
-layer is required. Reconciliation and worker authority messages use opaque
-database revision IDs. Change submission creates a database revision with no
-branch or pull request. Git signing keys, Git policy files, repository paths,
-and Git-specific runtime services are removed from production startup and
-Compose.
+layer is required. Reconciliation messages use opaque database revision IDs.
+Change submission creates a database revision with no branch or pull request.
+Git signing keys, Git policy files, repository paths, and Git-specific runtime
+services are removed from production startup and Compose.
 
 The database authority store is used by dashboard and fleet projections,
-reconciliation authority, update topology selection, and worker authority.
+reconciliation authority, and update topology selection.
 Existing PostgreSQL recipe/catalog tables remain the source for recipe data;
 the authority document store is only for the remaining platform authority
 documents until those are represented by their dedicated relational models.
@@ -52,8 +51,8 @@ ephemeral.
 3. Proposal preview and submission survive an API restart because their state
    is persisted in PostgreSQL.
 4. Stale proposal bases are rejected using a database compare-and-swap.
-5. Dashboard, reconciliation, and worker authority use opaque database
-   revisions and never invoke Git or expose Git commit terminology.
+5. Dashboard and reconciliation use opaque database revisions and never invoke
+   Git or expose Git commit terminology.
 6. Compose has no repository bind mount, repository GID, Git signing secret,
    or repository-related environment variable.
 7. Tests cover database authority behavior and assert the production Compose

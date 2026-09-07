@@ -162,7 +162,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "litellm-master-key",
         "grafana-admin-password",
         "agent-proxy-auth",
-        "worker-api-token",
         "hermes-api-key",
     }
     assert {item["file"] for item in generated["ed25519_pkcs8_pem"]} == {

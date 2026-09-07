@@ -184,32 +184,25 @@ def test_production_callers_use_current_recipe_worker_and_result_consumers() -> 
         "bind_reconciliation_result_consumer",
         "WorkerAuthorityService",
         "HttpWorkerAuthority",
-        "install_worker_authority_routes",
     ):
         assert retired not in api_source
         assert retired not in worker_source
 
 
-def test_production_worker_settings_load_only_worker_authority_secrets(
+def test_production_worker_settings_loads_current_secrets(
     tmp_path,
     monkeypatch,
 ) -> None:
     database = tmp_path / "database-url"
-    token = tmp_path / "worker-api-token"
     database.write_text("postgresql://control:test@postgres/control")
-    token.write_text("w" * 32)
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_INTERNAL_API_URL", "http://control-api:8000")
     monkeypatch.setenv("VONK_STATE_PATH", str(tmp_path / "state"))
 
     settings = WorkerSettings.from_env_and_secrets()
 
     assert settings.database_url == database.read_text()
-    assert settings.internal_api_token == b"w" * 32
-    assert settings.internal_api_url == "http://control-api:8000"
     assert settings.state_path == tmp_path / "state"
     assert settings.agent_artifact_root == Path("/state/agent-artifacts")
     assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
@@ -224,29 +217,6 @@ def test_production_worker_settings_load_only_worker_authority_secrets(
         "agent_ca_credential_path",
     ):
         assert not hasattr(settings, forbidden)
-
-
-def test_production_worker_settings_reject_raw_or_cross_origin_authority(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    database = tmp_path / "database-url"
-    database.write_text("postgresql://control:test@postgres/control")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_WORKER_API_TOKEN", "w" * 32)
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_INTERNAL_API_URL", "http://127.0.0.1:8000/path")
-
-    with pytest.raises(SettingsError):
-        WorkerSettings.from_env_and_secrets()
-
-    token = tmp_path / "worker-api-token"
-    token.write_text("w" * 32)
-    monkeypatch.delenv("VONK_WORKER_API_TOKEN")
-    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
-    with pytest.raises(SettingsError, match="fixed HTTP origin"):
-        WorkerSettings.from_env_and_secrets()
 
 
 @pytest.mark.parametrize(
@@ -272,12 +242,9 @@ def test_production_worker_settings_bound_artifact_maintenance(
     message,
 ) -> None:
     database = tmp_path / "database-url"
-    token = tmp_path / "worker-api-token"
     database.write_text("postgresql://control:test@postgres/control")
-    token.write_text("w" * 32)
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     monkeypatch.setenv(name, value)
 
