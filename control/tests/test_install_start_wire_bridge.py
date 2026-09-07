@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
-from control.tests.test_recipe_operations import (
+from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
