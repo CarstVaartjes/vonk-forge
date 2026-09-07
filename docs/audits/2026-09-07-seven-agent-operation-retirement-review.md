@@ -3,7 +3,7 @@
 Snapshot reviewed: platform commit `6651e420b`. This document is a review
 packet only. It does not apply the blocked deletion.
 
-## Decision requested
+## Authorized removal
 
 Remove these seven Python-era operation names from the Controller and shared
 protocol:
@@ -24,15 +24,17 @@ reconciliation requests even when generic jobs are enabled. Current Fleet,
 Run/Switch, and Recipe lifecycle services create the operations the Rust agent
 does accept.
 
-The removal is breaking for any persisted old reconciliation graph. This is a
-greenfield deployment, so the proposed implementation rejects or removes that
-old state instead of adding a reader, alias, migration shim, or second enum.
+The user explicitly authorized this removal after the safety differences below
+were disclosed. The removal is breaking for any persisted old reconciliation
+graph. This is a greenfield deployment, so the proposed implementation rejects
+or removes that old state instead of adding a reader, alias, migration shim, or
+second enum.
 
 ## Complete old path and current owner
 
 | Concern | Old producer, router, or consumer | Current owner after removal |
 | --- | --- | --- |
-| Operation vocabulary and payload/result shapes | `agent_protocol/src/vonk_agent_protocol/contracts.py`: `AgentOperation`, seven payload classes, node-probe result classes, payload/result registries, and schema mutation code | The same registry contains only the Rust-advertised upgrade, artifact, build/import, install/start/stop/uninstall/cleanup, inventory, package, and job operations. Every retained operation has one Pydantic payload and result type. |
+| Operation vocabulary and payload/result shapes | `agent_protocol/src/vonk_agent_protocol/contracts.py`: `AgentOperation`, seven payload classes, node-probe result classes, payload/result registries, and schema mutation code | The same registry contains only the Rust-advertised `agent.upgrade.v1`, `artifact.distribution.v1`, Recipe build/image-import/install/start/stop/uninstall/model-cleanup, and Recipe job-run operations. Inventory and package-helper documents remain separate typed HTTP/wire contracts; they are not `AgentOperation` members. Every retained operation has one Pydantic payload and result type. |
 | Graph authoring and persisted barrier validation | `control/src/vonk_control/orchestration.py`: `ReconciliationOrchestrator`, graph parsing, `_IMPLEMENTED_OPERATIONS`, and `validate_persisted_resolved_plan` stop/install/gate barriers | `RunSwitchOperationService` produces a digest-bound current plan. `RecipeOperationService` rechecks that digest and locks the affected run or installation before enqueueing each current operation. |
 | Old graph scheduler and result consumer | `control/src/vonk_control/agent_reconciliation.py`: primary and compensation dispatch, evidence checks, publication ownership, cancellation, and result-driven graph advancement | `control/src/vonk_control/recipe_operation_worker.py`, `recipe_operations.py`, `run_switch_operations.py`, and `fleet_profiles.py` advance current install/start/stop and Run/Switch state. Exact recipe result consumers update `InstallationNode` and `RunNode`. |
 | Agent queue admission and claim | `control/src/vonk_control/agent_jobs.py`: seven capability sets, automatic-reclaim set, `node.probe` result conversion, reconciliation authority checks, and the `Job.reconciliation_id` target-lock branch | The generic queue, attempt fence, lease, parent aggregation, and current operation result consumers remain. Current recipe mutations lock `RecipeInstallation`/`RecipeRun`, bind `mapping_generation` and `plan_digest`, and use resource reservations. |
@@ -92,18 +94,29 @@ services and tests.
 
 ### Route authority persistence
 
-Do not delete the `Reconciliation` row type or current route-publication
-authority merely because their names predate Recipe routes. `recipe_routes.py`
-uses a synthetic `Reconciliation` row for the current compiled route authority.
-Keep `Reconciliation`, `RoutePublicationOwner`, current `RoutePublication`
-records, the owner lock, activation marker validation, and
-`publish_compiled`/compiled withdrawal.
+`recipe_routes.py` currently creates a fake `Reconciliation` containing a
+schema-1 empty graph solely to satisfy foreign keys from `RoutePublication` and
+`RoutePublicationOwner`. It is not a general current persistence model. Its
+fields are old graph state: `graph`, `graph_digest`, `resolved_plan`,
+`current_phase`, compensation completion generation, and terminal reason.
 
-Old `ReconciliationOperation`, compensation/cancellation graph state, old
-`RouteBundleRequest`/`AcceptedEndpointEvidence`, and old `publish`/`withdraw`
-paths can be deleted only after their callers are removed. Historical migration
-bytes may remain inert; current runtime code must not read or write the retired
-graph.
+The cleanup must replace that fake row in the same scope. Introduce a small
+current Recipe route-authority identity, or make the current
+`RoutePublication` itself the authority record. Point the singleton owner at
+that current authority with no `Reconciliation` foreign key. Keep the owner row
+lock, activation marker validation, generations, plan/evidence/route digests,
+lease window, activation acknowledgement, and `publish_compiled`/compiled
+withdrawal behavior unchanged. Rename the internal marker identity from
+`reconciliation_id` to `authority_id` without a dual reader if the marker is
+part of the removed graph vocabulary.
+
+After that replacement, delete `Reconciliation`,
+`ReconciliationCompletionGeneration`, `ReconciliationOperation`, and
+`ReconciliationCancellation` runtime models and current database tables.
+Historical migration bytes may remain inert, but a current-head migration must
+leave a newly upgraded database with only the current route-authority tables
+and no old graph foreign keys. Current runtime code must not read or write a
+retired graph.
 
 ## Exact coordinated patch boundary
 
@@ -137,6 +150,13 @@ graph.
 - `control/src/vonk_control/route_runtime.py`: only old evidence types and
   workload-verify publication/withdrawal. Retain compiled route support and
   locks.
+- `control/src/vonk_control/models.py` and a new current-head migration:
+  replace the fake schema-1 `Reconciliation` row/FKs with a small current Recipe
+  route-authority record, then remove the old graph, operation, completion, and
+  cancellation runtime models/tables.
+- `control/src/vonk_control/recipe_routes.py`: project current activation state
+  directly into the new route authority/publication records instead of writing
+  an empty schema-1 graph.
 - `control/src/vonk_control/dashboard.py`, `operation_api.py`, and `metrics.py`:
   old node-probe fields and seven labels. Project current inventory/telemetry/
   readiness instead of aliases.
@@ -150,8 +170,8 @@ graph.
   current consumers, and failure sanitization.
 - Recipe install/start/stop/uninstall/model-cleanup, Run/Switch, Fleet profile,
   recovery, inventory, telemetry, and exact observation services.
-- `Reconciliation` and current compiled route-authority persistence until that
-  deliberately reused substrate is separately replaced.
+- Current Recipe route-authority/publication records after they are decoupled
+  from the old `Reconciliation` graph.
 - Recipe row locks, plan and mapping-generation fences, resource reservations,
   route-owner lock, activation acknowledgement, and signed readiness checks.
 
@@ -177,9 +197,13 @@ graph.
 7. Prove current concurrency: conflicting Run/Switch applies serialize, stale
    plan and mapping generation fail, and route publication remains protected by
    its singleton owner lock.
-8. Run a source/schema scan proving none of the seven strings, old graph route,
-   or old DTOs remain outside explicit rejection tests and historical evidence.
-9. Regenerate and verify OpenAPI, Python clients, TypeScript types, wheels, and
+8. Prove a current compiled route can publish, renew, withdraw, and recover
+   using the new current authority record without constructing a
+   `Reconciliation` or schema-1 graph.
+9. Run a source/schema/database scan proving none of the seven strings, old
+   graph route, old runtime models/tables, or old DTOs remain outside explicit
+   rejection tests and inert historical migrations/evidence.
+10. Regenerate and verify OpenAPI, Python clients, TypeScript types, wheels, and
    supply-chain manifests only after the source composition is complete.
 
 The intermediate commit `5b80a7074` is not mergeable. It removes the shared
