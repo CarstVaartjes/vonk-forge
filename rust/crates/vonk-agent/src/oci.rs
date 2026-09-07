@@ -1248,7 +1248,20 @@ fn materialize_compiled_models(
         .join("models")
         .join(&plan.identity.model_artifact_set_sha256);
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
+    let mut physical_by_path: BTreeMap<(String, String), PathBuf> = BTreeMap::new();
     for artifact in &plan.artifacts {
+        let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
+        let destination = destination_root
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        if physical_by_path.contains_key(&physical_key) {
+            // The workload validator proved this is the same receipt-bound
+            // physical object. Its first projection performed the only source
+            // and destination hash verification; this projection only adds a
+            // second OCI mount intent.
+            materialized.push(destination);
+            continue;
+        }
         let source = scoped_root
             .join(&artifact.selection_id)
             .join(&artifact.path);
@@ -1264,9 +1277,6 @@ fn materialize_compiled_models(
             return Err(OciError::Artifact);
         }
 
-        let destination = destination_root
-            .join(&artifact.selection_id)
-            .join(&artifact.path);
         if !destination.starts_with(&destination_root) {
             return Err(OciError::Artifact);
         }
@@ -1305,6 +1315,7 @@ fn materialize_compiled_models(
             fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
             fs::rename(&temporary, &destination)?;
         }
+        physical_by_path.insert(physical_key, destination.clone());
         materialized.push(destination);
     }
     File::open(&destination_root)?.sync_all()?;

@@ -288,13 +288,30 @@ impl CompiledExecutionPlan {
         {
             return Err(WorkloadError::Invalid("compiled execution identity"));
         }
-        let mut selected = BTreeSet::new();
-        let mut materialized = BTreeSet::new();
+        let mut physical_by_path = std::collections::BTreeMap::new();
+        let mut file_paths = std::collections::BTreeMap::new();
         let mut by_digest = std::collections::BTreeMap::new();
         for artifact in &self.artifacts {
             artifact.validate()?;
-            if !selected.insert((artifact.selection_id.as_str(), artifact.file_id.as_str()))
-                || !materialized.insert((artifact.selection_id.as_str(), artifact.path.as_str()))
+            let physical = (
+                artifact.file_id.as_str(),
+                artifact.sha256.as_str(),
+                artifact.size_bytes,
+                artifact.model.content_sha256.as_str(),
+                artifact.distribution_object.name.as_str(),
+                artifact.distribution_object.sha256.as_str(),
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind.as_str(),
+            );
+            let physical_key = (artifact.selection_id.as_str(), artifact.path.as_str());
+            if let Some(previous) = physical_by_path.insert(physical_key, physical)
+                && previous != physical
+            {
+                return Err(WorkloadError::Invalid("compiled model artifact physical identity"));
+            }
+            let file_key = (artifact.selection_id.as_str(), artifact.file_id.as_str());
+            if let Some(previous_path) = file_paths.insert(file_key, artifact.path.as_str())
+                && previous_path != artifact.path.as_str()
             {
                 return Err(WorkloadError::Invalid("compiled model artifact identity"));
             }

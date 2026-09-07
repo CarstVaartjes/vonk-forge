@@ -207,7 +207,12 @@ pub fn project(
     for artifact in &plan.artifacts {
         let source = model_source(paths, artifact)?;
         let target = model_target(artifact)?;
-        if !source_paths.insert(source.clone()) || !target_paths.insert(target.clone()) {
+        // A physical file may be projected at more than one model target.
+        // Workload validation has already proved that repeated source paths
+        // carry the exact same receipt-bound object; retain every distinct
+        // target mount while reusing that source.
+        source_paths.insert(source.clone());
+        if !target_paths.insert(target.clone()) {
             return Err(CompiledOciError::Invalid("duplicate materialized path"));
         }
         mounts.push(OciMount {

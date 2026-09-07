@@ -303,18 +303,45 @@ class CompiledExecutionPlan(_StrictModel):
     @model_validator(mode="after")
     def artifact_set_bytes_are_exact(self) -> CompiledExecutionPlan:
         by_digest: dict[str, int] = {}
+        by_physical: dict[tuple[str, str], tuple[object, ...]] = {}
+        selected: dict[tuple[str, str], str] = {}
+        projection_ids: set[str] = set()
+        mount_paths: set[tuple[str, str]] = set()
         for artifact in self.artifacts:
-            previous = by_digest.setdefault(artifact.sha256, artifact.bytes)
-            if previous != artifact.bytes:
+            if artifact.id in projection_ids:
+                raise ValueError("compiled model artifact projections must be unique")
+            projection_ids.add(artifact.id)
+            physical = (
+                artifact.file_id,
+                artifact.sha256,
+                artifact.bytes,
+                artifact.model.publisher,
+                artifact.model.slug,
+                artifact.model.content_sha256,
+                artifact.distribution_object.name,
+                artifact.distribution_object.sha256,
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind,
+            )
+            physical_key = (artifact.selection_id, artifact.path)
+            previous = by_physical.get(physical_key)
+            if previous is not None and previous != physical:
+                raise ValueError("compiled model artifact physical identity conflicts")
+            by_physical[physical_key] = physical
+            selected_key = (artifact.selection_id, artifact.file_id)
+            previous_path = selected.get(selected_key)
+            if previous_path is not None and previous_path != artifact.path:
+                raise ValueError("compiled model artifact file identity conflicts")
+            selected[selected_key] = artifact.path
+            previous_bytes = by_digest.setdefault(artifact.sha256, artifact.bytes)
+            if previous_bytes != artifact.bytes:
                 raise ValueError("one model digest cannot have multiple byte counts")
+            mount_path = (artifact.mount.target, artifact.path)
+            if mount_path in mount_paths:
+                raise ValueError("compiled model artifacts repeat a mount target")
+            mount_paths.add(mount_path)
         if sum(by_digest.values()) != self.model_artifact_set_bytes:
             raise ValueError("model artifact-set bytes do not match selected receipts")
-        keys = [(item.selection_id, item.file_id) for item in self.artifacts]
-        if len(keys) != len(set(keys)):
-            raise ValueError("compiled model artifacts repeat a selected file")
-        paths = [(item.selection_id, item.path) for item in self.artifacts]
-        if len(paths) != len(set(paths)):
-            raise ValueError("compiled model artifacts repeat a materialized path")
         return self
 
     def reusable_identity_document(self) -> dict[str, object]:
@@ -816,6 +843,7 @@ def compile_verified_execution_plan(
 
     artifacts: list[CompiledModelArtifact] = []
     selected_keys: set[tuple[str, str]] = set()
+    selected_physical: dict[tuple[str, str], tuple[object, ...]] = {}
     for raw in raw_artifacts:
         item = _mapping(raw, "runtime model artifact")
         allowed = {
@@ -863,7 +891,28 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model selection identity is invalid"
             )
-        selected_keys.add((model_identity, file_id))
+        physical = (
+            model_identity,
+            file_id,
+            path,
+            source.sha256,
+            source.bytes,
+            model.get("publisher"),
+            model.get("slug"),
+            source.distribution_object.name,
+            source.distribution_object.sha256,
+            source.distribution_object.bytes,
+            source.distribution_object.kind,
+        )
+        physical_key = (selection_id, path)
+        previous_physical = selected_physical.get(physical_key)
+        if previous_physical is not None and previous_physical != physical:
+            raise CompiledExecutionPlanError(
+                "runtime model artifact physical identity conflicts"
+            )
+        selected_physical[physical_key] = physical
+        selected_key = (model_identity, file_id)
+        selected_keys.add(selected_key)
         artifact_data = {
             "id": item.get("id"),
             "selection_id": selection_id,
@@ -978,8 +1027,8 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     if not isinstance(artifacts, Sequence) or isinstance(artifacts, (str, bytes)) or not artifacts:
         raise CompiledExecutionPlanError("compiled launch model artifacts are invalid")
     by_digest: dict[str, int] = {}
-    selected: set[tuple[object, object]] = set()
-    paths: set[tuple[object, object]] = set()
+    selected: dict[tuple[str, str], tuple[object, ...]] = {}
+    paths: set[tuple[str, str]] = set()
     for raw in artifacts:
         artifact = _mapping(raw, "compiled launch model artifact")
         if set(artifact) != {
@@ -1023,19 +1072,32 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
             _safe_path(path, absolute=False)
         except ValueError as error:
             raise CompiledExecutionPlanError("compiled launch model path is invalid") from error
-        selected_key = (selection_id, file_id)
-        path_key = (selection_id, path)
-        if selected_key in selected or path_key in paths:
-            raise CompiledExecutionPlanError("compiled launch model selection is duplicated")
-        selected.add(selected_key)
+        model = _mapping(artifact.get("model"), "compiled launch model identity")
+        if set(model) != {"publisher", "slug", "content_sha256"}:
+            raise CompiledExecutionPlanError("compiled launch model identity is invalid")
+        model_digest = _digest(model.get("content_sha256"), "compiled launch model identity")
+        physical = (
+            file_id,
+            digest,
+            size,
+            model_digest,
+            distribution.name,
+            distribution.sha256,
+            distribution.bytes,
+            distribution.kind,
+        )
+        physical_key = (selection_id, path)
+        previous_physical = selected.get(physical_key)
+        if previous_physical is not None and previous_physical != physical:
+            raise CompiledExecutionPlanError("compiled launch model physical identity conflicts")
+        selected[physical_key] = physical
+        path_key = (mount["target"], path)
+        if path_key in paths:
+            raise CompiledExecutionPlanError("compiled launch model mount target is duplicated")
         paths.add(path_key)
         previous = by_digest.setdefault(digest, size)
         if previous != size:
             raise CompiledExecutionPlanError("compiled launch model digest has conflicting sizes")
-        model = _mapping(artifact.get("model"), "compiled launch model identity")
-        if set(model) != {"publisher", "slug", "content_sha256"}:
-            raise CompiledExecutionPlanError("compiled launch model identity is invalid")
-        _digest(model.get("content_sha256"), "compiled launch model identity")
         if distribution.name != path:
             raise CompiledExecutionPlanError("compiled launch model receipt path is inconsistent")
     if sum(by_digest.values()) != artifact_bytes:
