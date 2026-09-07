@@ -139,12 +139,6 @@ class RecipeStartPayload(_StrictPayload):
             or self.run_generation is not None
         ):
             raise ValueError("single-node start phases are invalid")
-        if self.world_size > 1 and (
-            self.phase is None
-            or self.start_deadline is None
-            or self.run_generation is None
-        ):
-            raise ValueError("distributed starts require a phase envelope")
         if self.phase is not None:
             try:
                 deadline = datetime.fromisoformat(self.start_deadline or "")
