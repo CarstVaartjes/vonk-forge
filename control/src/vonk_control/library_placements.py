@@ -120,6 +120,17 @@ class LibraryPlacementService:
             raise KeyError(application_id)
         return self._application(result, raw)
 
+    def retry(self, application_id: str, *, request_key: str, actor: str) -> LibraryPlacementApplication:
+        self.application(application_id)  # Reject non-placement application identities.
+        try:
+            result = self._profiles.retry(application_id, request_key=request_key, actor=actor)
+        except FleetProfileConflict as error:
+            raise LibraryPlacementConflict(str(error)) from error
+        metadata = result.progress.library_placement
+        if metadata is None:
+            raise LibraryPlacementConflict("Persisted placement intent is unavailable")
+        return self._application(result, metadata)
+
     def _prepare(
         self, value: LibraryPlacementPreviewRequest, *, actor: str
     ) -> _PreparedPlacement:
@@ -353,6 +364,8 @@ class LibraryPlacementService:
         ).model_copy(update={"library_placement": None})
         return LibraryPlacementApplication(
             id=result.id,
+            attempt=result.attempt,
+            retry_of_application_id=result.retry_of_application_id,
             state=result.state,
             recipe_id=recipe_id,
             recipe_revision_id=metadata.recipe_revision_id,
@@ -365,6 +378,7 @@ class LibraryPlacementService:
             current_operation_id=result.current_operation_id,
             status_reason=result.status_reason,
             progress=progress,
+            result=result.result,
             locations=locations,
             created_at=result.created_at,
             updated_at=result.updated_at,
