@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    InventoryRequest,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -598,48 +599,6 @@ def _agent_upgrade_request_material(
             "a custom agent package requires its node-bound repair manifest"
         )
     return package, None
-
-
-class InventoryRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
-    observed_at: datetime
-    disk_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    disk_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_count: int = Field(ge=0, le=64, strict=True)
-    artifact_store_read_only: bool
-    capabilities: list[str] = Field(max_length=64)
-    fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(
-        default=None, ge=1, le=1_000_000, strict=True
-    )
-    nvidia_driver_version: str = Field(min_length=1, max_length=256)
-    container_runtime_version: str = Field(min_length=1, max_length=256)
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def parse_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
-
-    @model_validator(mode="after")
-    def internally_consistent(self) -> InventoryRequest:
-        if (
-            self.disk_free_bytes > self.disk_total_bytes
-            or self.host_memory_free_bytes > self.host_memory_total_bytes
-            or self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
-            or (self.fabric_address is None) != (self.fabric_bandwidth_mbps is None)
-            or len(self.capabilities) != len(set(self.capabilities))
-            or any(
-                re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", item) is None
-                for item in self.capabilities
-            )
-        ):
-            raise ValueError("inventory evidence is inconsistent")
-        return self
 
 
 class RecipeRunObservationRequest(StrictJSONModel):
@@ -1735,31 +1694,29 @@ def install_agent_routes(
         response_model=EnrollmentBootstrapResponse,
         responses=bounded_error_responses(503),
     )
-    def enrollment_bootstrap(setup_schema: Literal["1", "2"] = "1") -> Response:
+    def enrollment_bootstrap() -> Response:
         required = _require_services(services)
         if required.bootstrap is None:
             raise HTTPException(
                 status_code=503,
                 detail="agent enrollment bootstrap is unavailable",
             )
-        helper_public_key = None
-        if setup_schema == "2":
-            if required.host_runtime_authority is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
-            helper_public_key = required.host_runtime_authority.public_key_document.get(
-                "public_key"
+        if required.host_runtime_authority is None:
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
             )
-            if (
-                not isinstance(helper_public_key, str)
-                or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
-            ):
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
+        helper_public_key = required.host_runtime_authority.public_key_document.get(
+            "public_key"
+        )
+        if (
+            not isinstance(helper_public_key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
+            )
         return _json_response(
             EnrollmentBootstrapResponse(
                 controller_endpoint=required.bootstrap.controller_endpoint,
@@ -1769,7 +1726,7 @@ def install_agent_routes(
                 controller_address=required.bootstrap.controller_address,
                 service_hostnames=list(required.bootstrap.service_hostnames),
                 host_helper_authority_public_key=helper_public_key,
-            ).model_dump(exclude_none=True, exclude_defaults=True)
+            )
         )
 
     @agent.post("/enroll", response_model=IssuedCertificateResponse)
