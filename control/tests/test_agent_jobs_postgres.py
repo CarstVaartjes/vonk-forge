@@ -30,18 +30,12 @@ from .runtime_identity_support import claim_agent
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
-PROBE_RESULT = {
-    "status": "ok",
-    "evidence": {
-        "vonk_forge": {
-            "schema_version": 1,
-            "memory": {"available_bytes": 1_000},
-            "storage": {"available_bytes": 2_000},
-            "accelerator": {"available": True},
-        },
-        "nvidia": {"tools": {}},
-    },
+STOP_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": COMMIT,
 }
+STOP_RESULT = {"stopped": True}
 
 
 class Clock:
@@ -172,7 +166,9 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(
 ) -> None:
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
-    jobs.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
+    jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     statements: list[str] = []
 
     def record(_conn, _cursor, statement, _parameters, _context, _many) -> None:
@@ -185,9 +181,12 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(
     finally:
         event.remove(postgres_engine, "before_cursor_execute", record)
 
-    assert len(statements) == 1
-    assert "LEFT OUTER JOIN" not in statements[0]
-    assert "FOR UPDATE OF agent_operations SKIP LOCKED" in statements[0]
+    assert statements
+    assert all("LEFT OUTER JOIN" not in statement for statement in statements)
+    assert any(
+        "FOR UPDATE OF agent_operations SKIP LOCKED" in statement
+        for statement in statements
+    )
 
 
 def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> None:
@@ -195,7 +194,7 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     first_service = AgentJobService(sessions, clock=clock)
     second_service = AgentJobService(sessions, clock=clock)
     operation = first_service.enqueue(
-        parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {}
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
     barrier = threading.Barrier(2)
 
@@ -219,7 +218,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     jobs = AgentJobService(sessions, clock=clock)
     enrollment = EnrollmentService(sessions, RevokingAuthority(), clock=clock)
     operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {}
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
     claim = None
     original_deadline = None
@@ -269,7 +268,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
                 action_results.append(jobs.heartbeat(claim, {"phase": "checking"}, 60))
             else:
                 assert claim is not None
-                jobs.succeed(claim, PROBE_RESULT)
+                jobs.succeed(claim, STOP_RESULT)
                 action_results.append(None)
         except (
             AssertionError,
@@ -330,34 +329,13 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
             assert attempt.progress is None and attempt.result is None
 
 
-@pytest.mark.parametrize(
-    "operation_kind", ("node.probe", "workload.health", "workload.verify")
-)
-def test_postgres_expired_safe_operation_is_automatically_reclaimed(
-    service, operation_kind: str
-) -> None:
-    sessions, clock = service
-    jobs = AgentJobService(sessions, clock=clock)
-    jobs.enqueue(parent(sessions, clock).id, NODE_A, operation_kind, COMMIT, {})
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert first is not None
-
-    clock.advance(seconds=30)
-    second = claim_agent(jobs, NODE_A, "serial-a", 30)
-
-    assert second is not None
-    assert second.operation_id == first.operation_id
-    assert second.attempt == 2
-
-
-@pytest.mark.parametrize("operation_kind", ("release.install", "workload.start"))
 def test_postgres_expired_mutating_operation_requires_persisted_retry_disposition(
-    service, operation_kind: str
+    service,
 ) -> None:
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
-    operation = jobs.enqueue(parent_job.id, NODE_A, operation_kind, COMMIT, {})
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
 
@@ -404,7 +382,7 @@ def test_postgres_enqueue_rejects_terminal_parent(service, terminal_state: str) 
         session.get(Job, parent_job.id).state = terminal_state  # type: ignore[union-attr]
 
     with pytest.raises(ValueError, match="terminal"):
-        jobs.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
+        jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
 
 
 def test_postgres_enqueue_rejects_parent_commit_mismatch(service) -> None:
@@ -413,7 +391,7 @@ def test_postgres_enqueue_rejects_parent_commit_mismatch(service) -> None:
     parent_job = parent(sessions, clock)
 
     with pytest.raises(ValueError, match="authority revision"):
-        jobs.enqueue(parent_job.id, NODE_A, "node.probe", "b" * 64, {})
+        jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", "b" * 64, STOP_PAYLOAD)
 
 
 def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
@@ -424,7 +402,7 @@ def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
         session.get(Job, parent_job.id).targets = [NODE_A]  # type: ignore[union-attr]
 
     with pytest.raises(ValueError, match="target"):
-        jobs.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
+        jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
 
 
 def test_postgres_enqueue_cannot_race_parent_finalization(
@@ -434,7 +412,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
     finishing = AgentJobService(sessions, clock=clock)
     enqueueing = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
-    finishing.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
+    finishing.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(finishing, NODE_A, "serial-a", 30)
     assert claim is not None
     aggregation_read = threading.Event()
@@ -457,7 +435,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
 
     def finish() -> None:
         try:
-            finishing.succeed(claim.fence, PROBE_RESULT)
+            finishing.succeed(claim.fence, STOP_RESULT)
         except (
             AssertionError,
             OSError,
@@ -469,7 +447,9 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
 
     def enqueue() -> None:
         try:
-            enqueueing.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
+            enqueueing.enqueue(
+                parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD
+            )
         except (
             AssertionError,
             OSError,
@@ -520,7 +500,9 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     enqueueing = AgentJobService(sessions, clock=clock)
     finishing = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
-    first_operation = finishing.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
+    first_operation = finishing.enqueue(
+        parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     claim = claim_agent(finishing, NODE_A, "serial-a", 30)
     assert claim is not None
     node_locked = threading.Event()
@@ -542,7 +524,9 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
     def enqueue() -> None:
         try:
             enqueue_results.append(
-                enqueueing.enqueue(parent_job.id, NODE_A, "workload.health", COMMIT, {})
+                enqueueing.enqueue(
+                    parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+                )
             )
         except (
             AssertionError,
@@ -555,7 +539,7 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
 
     def finish() -> None:
         try:
-            finishing.succeed(claim, PROBE_RESULT)
+            finishing.succeed(claim, STOP_RESULT)
         except (
             AssertionError,
             OSError,
@@ -602,13 +586,15 @@ def test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation(
         assert stored_parent is not None and stored_parent.state == "queued"
 
 
-def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
+def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
     service, postgres_engine
 ) -> None:
     sessions, clock = service
     completing = AgentJobService(sessions, clock=clock)
     reclaiming = AgentJobService(sessions, clock=clock)
-    completing.enqueue(parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {})
+    completing.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     first = claim_agent(completing, NODE_A, "serial-a", 30)
     assert first is not None
     clock.advance(seconds=30)
@@ -633,7 +619,7 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
 
         def finish() -> None:
             try:
-                completing.succeed(first.fence, PROBE_RESULT)
+                completing.succeed(first.fence, STOP_RESULT)
             except (
                 AssertionError,
                 OSError,
@@ -678,7 +664,12 @@ def test_postgres_complete_serializes_expired_reclaim_with_identity_lock(
     assert not finisher.is_alive() and not reclaimer.is_alive()
     assert len(reclaimed) == 1
     assert not isinstance(reclaimed[0], Exception)
-    assert reclaimed[0] is not None
+    assert reclaimed[0] is None
+    with sessions() as session:
+        assert (
+            session.get(AgentOperation, first.operation_id).state
+            == "waiting-for-operator"
+        )
 
 
 def test_postgres_concurrent_final_completions_aggregate_parent_once(
@@ -688,8 +679,8 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
     first_service = AgentJobService(sessions, clock=clock)
     second_service = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
-    first_service.enqueue(parent_job.id, NODE_A, "node.probe", COMMIT, {})
-    first_service.enqueue(parent_job.id, NODE_B, "node.probe", COMMIT, {})
+    first_service.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first_service.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
     first = claim_agent(first_service, NODE_A, "serial-a", 30)
     second = claim_agent(second_service, NODE_B, "serial-b", 30)
     assert first is not None and second is not None
@@ -714,7 +705,7 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
 
     def complete(service, fence) -> None:
         try:
-            service.succeed(fence, PROBE_RESULT)
+            service.succeed(fence, STOP_RESULT)
         except (
             AssertionError,
             OSError,

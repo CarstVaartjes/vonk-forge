@@ -17,14 +17,17 @@ from vonk_control.models import (
     AgentOperationAttempt,
     Base,
     Job,
-    Reconciliation,
-    ReconciliationOperation,
 )
 
 from .runtime_identity_support import claim_agent
 
 NODE_ID = "spk_" + "a" * 32
 COMMIT = "a" * 64
+STOP_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": COMMIT,
+}
 
 
 class Clock:
@@ -84,26 +87,6 @@ def _claim(service: AgentJobService):
     return claim
 
 
-def _link_reconciliation(
-    sessions: sessionmaker[Session], clock: Clock, parent_id: str
-) -> str:
-    reconciliation_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        session.add(
-            Reconciliation(
-                id=reconciliation_id,
-                authority_revision=COMMIT,
-                status="planned",
-                summary={},
-                created_at=clock.now,
-            )
-        )
-        parent = session.get(Job, parent_id)
-        assert parent is not None
-        parent.reconciliation_id = reconciliation_id
-    return reconciliation_id
-
-
 def _result(claim, state: str, result: dict[str, object]) -> AgentResult:
     return AgentResult(
         schema_version=1,
@@ -129,9 +112,9 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
             session,
             _parent_id(sessions),
             NODE_ID,
-            "workload.stop",
+            "recipe.stop",
             COMMIT,
-            {"workload_id": "model"},
+            STOP_PAYLOAD,
             operation_id=operation_id,
         )
         assert stored.id == operation_id
@@ -159,9 +142,9 @@ def test_result_consumer_can_be_late_bound_exactly_once_before_activity(queue) -
     service.enqueue(
         _parent_id(sessions),
         NODE_ID,
-        "workload.stop",
+        "recipe.stop",
         COMMIT,
-        {"workload_id": "model"},
+        STOP_PAYLOAD,
     )
     claim = _claim(service)
     message = _result(
@@ -202,9 +185,9 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
         service.enqueue(
             _parent_id(sessions),
             NODE_ID,
-            "workload.stop",
+            "recipe.stop",
             COMMIT,
-            {"workload_id": "model"},
+            STOP_PAYLOAD,
         )
     elif activity == "claim":
         assert claim_agent(service, NODE_ID, "serial-a", 30) is None
@@ -213,9 +196,9 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
         bootstrap.enqueue(
             _parent_id(sessions),
             NODE_ID,
-            "workload.stop",
+            "recipe.stop",
             COMMIT,
-            {"workload_id": "model"},
+            STOP_PAYLOAD,
         )
         claim = _claim(bootstrap)
         service.record_result(
@@ -235,19 +218,12 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
     (
         (
             "succeeded",
-            {
-                "status": "ok",
-                "evidence": {
-                    "action": "stop",
-                    "workload_id": "model",
-                    "evidence_digest": "e" * 64,
-                },
-            },
+            {"stopped": True},
         ),
         ("failed", {"status": "failed", "error_code": "service_failed"}),
         (
             "waiting-for-operator",
-            {"status": "waiting-for-operator", "reason": "inspect_console"},
+            {"reason": "inspect_console", "uncertain": True},
         ),
     ),
 )
@@ -277,9 +253,9 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
     service.enqueue(
         _parent_id(sessions),
         NODE_ID,
-        "workload.stop",
+        "recipe.stop",
         COMMIT,
-        {"workload_id": "model"},
+        STOP_PAYLOAD,
     )
     claim = _claim(service)
     message = _result(claim, state, result)
@@ -320,9 +296,9 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
     service.enqueue(
         _parent_id(sessions),
         NODE_ID,
-        "workload.stop",
+        "recipe.stop",
         COMMIT,
-        {"workload_id": "model"},
+        STOP_PAYLOAD,
     )
     claim = _claim(service)
 
@@ -331,7 +307,7 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
             _result(
                 claim,
                 "succeeded",
-                {"status": "ok", "evidence": {"evidence_digest": "f" * 64}},
+                {"stopped": True},
             )
         )
 
@@ -349,60 +325,13 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
         assert parent is not None and parent.result is None
 
 
-def test_linked_reconciliation_job_bypasses_generic_parent_terminalization(
-    queue,
-) -> None:
-    """First-wave completion must not mark an orchestrated parent terminal."""
-    sessions, clock = queue
-    parent_id = _parent_id(sessions)
-    reconciliation_id = _link_reconciliation(sessions, clock, parent_id)
-    service = AgentJobService(sessions, clock=clock)
-    operation = service.enqueue(
-        parent_id,
-        NODE_ID,
-        "workload.stop",
-        COMMIT,
-        {"workload_id": "model"},
-    )
-    with sessions.begin() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        parent = session.get(Job, parent_id)
-        assert reconciliation is not None and parent is not None
-        reconciliation.status = "running"
-        reconciliation.current_phase = "dispatching"
-        parent.state = "running"
-        session.add(
-            ReconciliationOperation(
-                reconciliation_id=reconciliation_id,
-                graph_operation_id="model:stop",
-                role="primary",
-                agent_operation_id=operation.id,
-                expected_payload_digest=operation.payload_digest,
-                state="queued",
-            )
-        )
-    claim = _claim(service)
-
-    service.record_result(
-        _result(
-            claim,
-            "succeeded",
-            {"status": "ok", "evidence": {"evidence_digest": "e" * 64}},
-        )
-    )
-
-    with sessions() as session:
-        parent = session.get(Job, parent_id)
-        operation = session.get(AgentOperation, claim.operation_id)
-        assert operation is not None and operation.state == "succeeded"
-        assert parent is not None and parent.state == "running"
-
-
-def test_generic_worker_claim_skips_jobs_linked_to_reconciliation(queue) -> None:
-    """A generic worker claiming the linked parent races the orchestrator."""
+def test_generic_worker_claim_skips_current_agent_operation_parent(queue) -> None:
+    """Agent-backed parents must remain owned by the current agent queue."""
     sessions, clock = queue
     linked_id = _parent_id(sessions)
-    _link_reconciliation(sessions, clock, linked_id)
+    AgentJobService(sessions, clock=clock).enqueue(
+        linked_id, NODE_ID, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     with sessions.begin() as session:
         linked = session.get(Job, linked_id)
         assert linked is not None
@@ -422,7 +351,7 @@ def test_generic_worker_claim_skips_jobs_linked_to_reconciliation(queue) -> None
 def test_invalid_result_is_no_write_and_never_reaches_consumer(
     queue, invalidity: str
 ) -> None:
-    """Relaxing the active fence checks would unlock reconciliation state."""
+    """Invalid fenced results must not mutate attempts or reach consumers."""
     sessions, clock = queue
     consumed: list[AgentResult] = []
     service = AgentJobService(
@@ -435,9 +364,9 @@ def test_invalid_result_is_no_write_and_never_reaches_consumer(
     service.enqueue(
         _parent_id(sessions),
         NODE_ID,
-        "workload.stop",
+        "recipe.stop",
         COMMIT,
-        {"workload_id": "model"},
+        STOP_PAYLOAD,
     )
     claim = _claim(service)
     message = _result(claim, "failed", {"status": "failed", "error_code": "failed"})
@@ -450,7 +379,9 @@ def test_invalid_result_is_no_write_and_never_reaches_consumer(
             certificate.revoked_at = clock.now
             certificate.state = "revoked"
     else:
-        message = AgentResult(**{**message.__dict__, "fence": str(uuid.uuid4())})
+        message = AgentResult.model_validate(
+            message.model_dump() | {"fence": str(uuid.uuid4())}
+        )
 
     with pytest.raises(StaleAgentAttempt):
         service.record_result(message)
