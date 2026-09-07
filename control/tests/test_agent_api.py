@@ -3793,6 +3793,11 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         {
             "schema_version": 1,
             "kind": "recipe.image.import.v1",
+            "build_id": "00000000-0000-4000-8000-000000000010",
+            "mapping_id": "00000000-0000-4000-8000-000000000011",
+            "mapping_generation": 1,
+            "source_node_id": NODE_A,
+            "image_digest": "sha256:" + "b" * 64,
             "oci_layout_sha256": digest,
             "image_bytes": len(payload),
         },

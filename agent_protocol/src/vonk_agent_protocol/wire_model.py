@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from typing import Annotated, Any
 
@@ -62,7 +62,7 @@ class StrictJSONModel(BaseModel):
         return _wrap_numeric_literals(deepcopy(handler(source_type)))
 
 
-class WireModel(StrictJSONModel):
+class WireModel(StrictJSONModel, Mapping[str, Any]):
     """Immutable JSON message with exact structure and scalar types."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
@@ -71,6 +71,29 @@ class WireModel(StrictJSONModel):
         if name in self.__class__.model_fields:
             raise AttributeError(f"{self.__class__.__name__} is immutable")
         super().__setattr__(name, value)
+
+    def __getitem__(self, key: str) -> Any:
+        if key in self.__class__.model_fields:
+            return getattr(self, key)
+        try:
+            return self.model_extra[key]
+        except (KeyError, TypeError):
+            raise KeyError(key) from None
+
+    def __iter__(self) -> Iterator[str]:
+        # Mapping consumers in the Controller use this as the wire view.  Keep
+        # omitted defaults omitted, matching ``model_dump(exclude_unset=True)``
+        # used by canonical_message.
+        declared = (
+            name
+            for name in self.__class__.model_fields
+            if name in self.model_fields_set
+        )
+        extras = iter(self.model_extra or {})
+        return iter((*declared, *extras))
+
+    def __len__(self) -> int:
+        return len(self.model_fields_set) + len(self.model_extra or {})
 
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
