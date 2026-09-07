@@ -2,42 +2,40 @@
 
 from __future__ import annotations
 
-import types
-from collections.abc import Mapping
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from copy import deepcopy
+from typing import Any
 
-from pydantic import BaseModel, model_validator
-
-
-def _literal_values(annotation: Any) -> tuple[Any, ...] | None:
-    """Return exact Literal values, or ``None`` for a mixed union.
-
-    A non-Literal branch remains authoritative for a union such as
-    ``Literal[1] | int``.  Only a Literal-only annotation, optionally with
-    ``None``, has enough information for this boundary check.
-    """
-
-    origin = get_origin(annotation)
-    if origin is Literal:
-        return get_args(annotation)
-    if origin is Annotated:
-        return _literal_values(get_args(annotation)[0])
-    if origin in (Union, types.UnionType):
-        values: list[Any] = []
-        for item in get_args(annotation):
-            if item is type(None):
-                values.append(None)
-                continue
-            nested = _literal_values(item)
-            if nested is None:
-                return None
-            values.extend(nested)
-        return tuple(values)
-    return None
+from pydantic import BaseModel, GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
 
-def _exact_literal(value: object, literals: tuple[Any, ...]) -> bool:
-    return any(type(value) is type(item) and value == item for item in literals)
+def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:
+    if any(type(item) in (bool, int, float) for item in expected) and not any(
+        type(value) is type(item) and value == item for item in expected
+    ):
+        raise ValueError("literal must use its exact JSON scalar type")
+    return value
+
+
+def _wrap_numeric_literals(schema: CoreSchema) -> CoreSchema:
+    if not isinstance(schema, dict):
+        return schema
+    if schema.get("type") == "literal":
+        expected = tuple(schema.get("expected", ()))
+        if any(type(item) in (bool, int, float) for item in expected):
+            return core_schema.no_info_before_validator_function(
+                lambda value: _check_literal_type(value, expected), schema
+            )
+        return schema
+    for key, nested in tuple(schema.items()):
+        if isinstance(nested, dict):
+            schema[key] = _wrap_numeric_literals(nested)
+        elif isinstance(nested, list):
+            schema[key] = [
+                _wrap_numeric_literals(item) if isinstance(item, dict) else item
+                for item in nested
+            ]
+    return schema
 
 
 class StrictJSONModel(BaseModel):
@@ -49,36 +47,8 @@ class StrictJSONModel(BaseModel):
     match.  String enum and literal handling remains Pydantic's responsibility.
     """
 
-    @model_validator(mode="before")
     @classmethod
-    def reject_numeric_literal_coercion(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        for name, field in cls.model_fields.items():
-            literals = _literal_values(field.annotation)
-            if literals is None:
-                continue
-            if not any(type(item) in (bool, int, float) for item in literals):
-                continue
-            keys = {name}
-            has_alias = False
-            if field.alias:
-                keys.add(field.alias)
-                has_alias = field.alias != name
-            validation_alias = field.validation_alias
-            if isinstance(validation_alias, str):
-                keys.add(validation_alias)
-                has_alias = has_alias or validation_alias != name
-            else:
-                choices = getattr(validation_alias, "choices", ())
-                string_choices = {
-                    choice for choice in choices if isinstance(choice, str)
-                }
-                keys.update(string_choices)
-                has_alias = has_alias or bool(choices)
-            if has_alias and not cls.model_config.get("validate_by_name", False):
-                keys.discard(name)
-            for key in keys:
-                if key in value and not _exact_literal(value[key], literals):
-                    raise ValueError(f"{name} must use its exact JSON scalar type")
-        return value
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return _wrap_numeric_literals(deepcopy(handler(source_type)))

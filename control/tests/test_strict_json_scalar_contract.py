@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from typing import Literal
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -10,6 +13,11 @@ from vonk_control.agent_api import (
     AgentGrantResponse,
     GrantRequest,
     RecipeRunObservationsRequest,
+)
+from vonk_control.library_contract import (
+    FreshnessPolicy,
+    LibraryRecipeIdentity,
+    LibrarySnapshot,
 )
 from vonk_control.model_cache_contract import ModelCacheEvictionPreviewRequest
 from vonk_control.operation_contract import AvailabilityOperationFailure
@@ -67,6 +75,64 @@ def test_numeric_literal_check_honors_alias_input_names() -> None:
         _AliasedLiteralProbe.model_validate({"wire_tag": True})
     with pytest.raises(ValidationError):
         _AliasedLiteralProbe.model_validate({"tag": 1})
+
+
+def test_library_snapshot_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
+    snapshot = LibrarySnapshot(
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        models=[],
+        unlinked_recipes=[],
+        next_cursor=None,
+        freshness_policy=FreshnessPolicy(),
+    )
+    wire = snapshot.model_dump_json()
+    restored = LibrarySnapshot.model_validate_json(wire)
+    assert restored.generated_at == snapshot.generated_at
+
+    for invalid in (True, 2.0):
+        payload = snapshot.model_dump(mode="json")
+        payload["schema_version"] = invalid
+        with pytest.raises(ValidationError):
+            LibrarySnapshot.model_validate_json(json.dumps(payload))
+
+    mapping = snapshot.model_dump()
+    assert LibrarySnapshot.model_validate(mapping).generated_at == snapshot.generated_at
+
+
+def test_library_identity_json_roundtrip_preserves_uuid_wire_text() -> None:
+    identity = LibraryRecipeIdentity(
+        recipe_id="123e4567-e89b-12d3-a456-426614174000",
+        recipe_revision_id="123e4567-e89b-12d3-a456-426614174001",
+        publisher="publisher",
+        slug="recipe",
+        content_sha256="a" * 64,
+        title="Recipe",
+        description="Description",
+    )
+    restored = LibraryRecipeIdentity.model_validate_json(identity.model_dump_json())
+    assert restored.recipe_id == identity.recipe_id
+
+
+def test_strict_literal_hook_preserves_json_native_representations() -> None:
+    class Wire(StrictJSONModel):
+        model_config = ConfigDict(strict=True)
+        schema_version: Literal[2]
+        observed_at: datetime
+        identity: UUID
+        values: tuple[int, ...]
+
+    wire = {
+        "schema_version": 2,
+        "observed_at": "2026-09-07T09:14:18Z",
+        "identity": "123e4567-e89b-12d3-a456-426614174000",
+        "values": [1, 2],
+    }
+    parsed = Wire.model_validate_json(json.dumps(wire))
+    assert parsed.observed_at == datetime(2026, 9, 7, 9, 14, 18, tzinfo=UTC)
+    assert parsed.identity == UUID(wire["identity"])
+    assert parsed.values == (1, 2)
+    with pytest.raises(ValidationError):
+        Wire.model_validate(wire)
 
 
 def test_representative_wire_models_reject_scalar_coercion() -> None:
