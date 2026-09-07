@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 
 import httpx
@@ -19,7 +20,10 @@ from vonk_control.distribution import (
     ModelCacheVerifiedObjectSource,
 )
 from vonk_control.model_cache import (
+    ArtifactSetManifest,
+    ArtifactSpec,
     ModelCacheConflict,
+    ModelCacheResolutionError,
     ModelCacheService,
     _retry_after_seconds,
     _retryable_failure,
@@ -43,8 +47,54 @@ from vonk_control.models import (
     ModelCacheArtifact,
 )
 from vonk_control.worker import Worker
+from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
+
+
+def _canonical_model(
+    *,
+    publisher: str,
+    slug: str,
+    file_id: str,
+    file_digest: str,
+    dependencies: list[dict[str, str]] | None = None,
+) -> ModelDefinition:
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    document["identity"]["publisher"] = publisher
+    document["identity"]["slug"] = slug
+    document["identity"]["model"]["publisher"] = publisher
+    document["identity"]["model"]["slug"] = slug
+    document["source"] = {
+        "repository": f"https://huggingface.co/{publisher}/{slug}",
+        "revision": "0" * 40,
+    }
+    document["files"] = [
+        {
+            "id": file_id,
+            "path": f"{file_id}.safetensors",
+            "sha256": file_digest,
+            "size_bytes": 3,
+            "roles": ["weights"],
+        }
+    ]
+    document["dependencies"] = dependencies or []
+    return ModelDefinition.model_validate(document)
+
+
+def _canonical_recipe(model_digest: str) -> dict[str, object]:
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    document["models"][0]["model"]["content_sha256"] = model_digest
+    return document
 
 
 @pytest.fixture
@@ -66,7 +116,7 @@ def _artifact(
     *,
     artifact_id: str = "weights",
     path: str = "weights.bin",
-    model_version_sha256: str = "a" * 64,
+    model_content_sha256: str = "a" * 64,
 ) -> dict[str, object]:
     source = root / f"{artifact_id}.source"
     source.write_bytes(data)
@@ -78,7 +128,7 @@ def _artifact(
         "sha256": hashlib.sha256(data).hexdigest(),
         "download_bytes": len(data),
         "roles": ["model" if artifact_id == "weights" else "auxiliary"],
-        "model_version_sha256": model_version_sha256,
+        "model_content_sha256": model_content_sha256,
     }
 
 
@@ -86,19 +136,19 @@ def _download(
     service: ModelCacheService,
     artifacts: list[dict[str, object]],
     *,
-    model_version_sha256: str,
+    model_content_sha256: str,
     request_key: str,
     interrupt_after_bytes: int | None = None,
 ):
     preview = service.download_preview(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
         artifacts=artifacts,
     )
     operation = service.start_download(
         actor="test",
         request_key=request_key,
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
         artifacts=artifacts,
         interrupt_after_bytes=interrupt_after_bytes,
     )
@@ -108,29 +158,113 @@ def _download(
     return operation
 
 
+def _manifest_document(tmp_path: Path) -> dict[str, object]:
+    data = b"manifest bytes"
+    source = tmp_path / "manifest.source"
+    source.write_bytes(data)
+    artifact = ArtifactSpec(
+        key="weights",
+        artifact_id="weights",
+        path="weights.bin",
+        kind="file",
+        repository=None,
+        source=source.as_uri(),
+        revision=None,
+        sha256=hashlib.sha256(data).hexdigest(),
+        expected_bytes=len(data),
+        roles=("model",),
+        model_content_sha256="a" * 64,
+    )
+    return ArtifactSetManifest(
+        model_content_sha256="a" * 64,
+        recipe_revision_sha256=None,
+        model_content_digests=("a" * 64,),
+        artifacts=(artifact,),
+        model_definition_ref=ModelReference(
+            publisher="vonk-forge", slug="manifest-model", content_sha256="a" * 64
+        ),
+    ).document()
+
+
+def test_cache_manifest_requires_exact_canonical_field_sets(tmp_path: Path) -> None:
+    document = _manifest_document(tmp_path)
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest shape is invalid"):
+        ArtifactSetManifest.from_document({**document, "unexpected": True})
+    missing = dict(document)
+    missing.pop("model_content_digests")
+    with pytest.raises(ModelCacheResolutionError, match="manifest shape is invalid"):
+        ArtifactSetManifest.from_document(missing)
+
+
+@pytest.mark.parametrize("schema_version", [True, 2.0])
+def test_cache_manifest_requires_native_schema_version_type(
+    tmp_path: Path, schema_version: object
+) -> None:
+    document = _manifest_document(tmp_path)
+    document["schema_version"] = schema_version
+
+    with pytest.raises(ModelCacheResolutionError) as error:
+        ArtifactSetManifest.from_document(document)
+    assert error.value.code == "model_cache.schema_unsupported"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("download_bytes", 1.0), ("download_bytes", True), ("roles", ("model",))],
+)
+def test_cache_manifest_rejects_coercible_artifact_types(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    document = _manifest_document(tmp_path)
+    artifact = dict(document["artifacts"][0])
+    artifact[field] = value
+    document["artifacts"] = [artifact]
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest"):
+        ArtifactSetManifest.from_document(document)
+
+
+@pytest.mark.parametrize("mutation", ["extra", "missing"])
+def test_cache_manifest_artifact_dto_requires_exact_fields(
+    tmp_path: Path, mutation: str
+) -> None:
+    document = _manifest_document(tmp_path)
+    artifact = dict(document["artifacts"][0])
+    if mutation == "extra":
+        artifact["unexpected"] = True
+    else:
+        artifact.pop("roles")
+    document["artifacts"] = [artifact]
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest"):
+        ArtifactSetManifest.from_document(document)
+
+
 def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:
     service, sessions = cache
-    document = {
-        "schema_version": 2,
-        "kind": "model",
-        "identity": {"publisher": "vonk-forge", "slug": "canonical-model"},
-        "source": {
-            "repository": "https://huggingface.co/vonk-forge/canonical-model",
-            "revision": "0" * 40,
-        },
-        "files": [
-            {
-                "id": "weights",
-                "path": "weights.bin",
-                "sha256": "1" * 64,
-                "size_bytes": 3,
-                "roles": ["weights"],
-            }
-        ],
-    }
-    digest = hashlib.sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    document["identity"]["publisher"] = "vonk-forge"
+    document["identity"]["slug"] = "canonical-model"
+    document["identity"]["model"]["publisher"] = "vonk-forge"
+    document["identity"]["model"]["slug"] = "canonical-model"
+    document["source"]["repository"] = "https://huggingface.co/vonk-forge/canonical-model"
+    document["source"]["revision"] = "0" * 40
+    document["files"] = [
+        {
+            "id": "weights",
+            "path": "weights.bin",
+            "sha256": "1" * 64,
+            "size_bytes": 3,
+            "roles": ["weights"],
+        }
+    ]
+    document = ModelDefinition.model_validate(document).model_dump(mode="json")
+    digest = content_sha256(ModelDefinition.model_validate(document))
     with sessions.begin() as session:
         root = CatalogDocument(
             id="00000000-0000-0000-0000-000000000031",
@@ -162,18 +296,88 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
             )
         )
 
-    manifest = service.resolve_artifact_set(model_version_sha256=digest)
-    assert manifest.model_version_sha256 == digest
-    assert manifest.model_version_ref == {
+    manifest = service.resolve_artifact_set(model_content_sha256=digest)
+    assert manifest.model_content_sha256 == digest
+    assert manifest.model_definition_ref is not None
+    assert manifest.model_definition_ref.model_dump(mode="json") == {
         "kind": "model",
         "publisher": "vonk-forge",
         "slug": "canonical-model",
         "content_sha256": digest,
-        "artifact_key": None,
     }
     assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
         ("weights.bin", 3, ("weights",))
     ]
+
+
+def test_model_only_download_resolves_canonical_dependency_closure(cache) -> None:
+    service, sessions = cache
+    companion = _canonical_model(
+        publisher="vonk-forge",
+        slug="companion",
+        file_id="encoder",
+        file_digest="2" * 64,
+    )
+    companion_digest = content_sha256(companion)
+    primary = _canonical_model(
+        publisher="vonk-forge",
+        slug="primary",
+        file_id="weights",
+        file_digest="3" * 64,
+        dependencies=[
+            {
+                "kind": "model",
+                "publisher": "vonk-forge",
+                "slug": "companion",
+                "content_sha256": companion_digest,
+            }
+        ],
+    )
+    primary_digest = content_sha256(primary)
+    with sessions.begin() as session:
+        for index, (definition, digest, slug) in enumerate(
+            ((primary, primary_digest, "primary"), (companion, companion_digest, "companion")),
+            start=41,
+        ):
+            root_id = f"00000000-0000-0000-0000-0000000000{index:02d}"
+            session.add(
+                CatalogDocument(
+                    id=root_id,
+                    kind="model",
+                    publisher="vonk-forge",
+                    slug=slug,
+                    title=slug,
+                    created_by="test",
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            session.add(
+                CatalogDocumentRevision(
+                    id=f"00000000-0000-0000-0000-0000000000{index + 10:02d}",
+                    document_id=root_id,
+                    kind="model",
+                    publisher="vonk-forge",
+                    slug=slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=definition.model_dump(mode="json"),
+                    content_digest=digest,
+                    projected={},
+                    created_by="test",
+                    created_at=NOW,
+                )
+            )
+
+    manifest = service.resolve_artifact_set(model_content_sha256=primary_digest)
+
+    assert manifest.model_content_sha256 == primary_digest
+    assert manifest.model_content_digests == tuple(sorted((primary_digest, companion_digest)))
+    assert {item.model_content_sha256 for item in manifest.artifacts} == {
+        primary_digest,
+        companion_digest,
+    }
 
 
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
@@ -181,19 +385,19 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
 ) -> None:
     service, sessions = cache
     model_a = "a" * 64
-    primary = _artifact(tmp_path, b"primary model bytes", model_version_sha256=model_a)
+    primary = _artifact(tmp_path, b"primary model bytes", model_content_sha256=model_a)
     auxiliary = _artifact(
         tmp_path,
         b"tokenizer auxiliary bytes",
         artifact_id="tokenizer",
         path="tokenizer.json",
-        model_version_sha256=model_a,
+        model_content_sha256=model_a,
     )
 
     first = _download(
         service,
         [primary, auxiliary],
-        model_version_sha256=model_a,
+        model_content_sha256=model_a,
         request_key="00000000-0000-4000-8000-000000000001",
     )
     assert first.state == "succeeded"
@@ -254,12 +458,12 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     ) == b"model "
 
     model_b = "b" * 64
-    primary_b = dict(primary, model_version_sha256=model_b)
-    auxiliary_b = dict(auxiliary, model_version_sha256=model_b)
+    primary_b = dict(primary, model_content_sha256=model_b)
+    auxiliary_b = dict(auxiliary, model_content_sha256=model_b)
     second = _download(
         service,
         [primary_b, auxiliary_b],
-        model_version_sha256=model_b,
+        model_content_sha256=model_b,
         request_key="00000000-0000-4000-8000-000000000002",
     )
     assert second.state == "succeeded"
@@ -275,7 +479,7 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
 ) -> None:
     service, _sessions = cache
     model = "9" * 64
-    primary = _artifact(tmp_path, b"shared payload", model_version_sha256=model)
+    primary = _artifact(tmp_path, b"shared payload", model_content_sha256=model)
     alias = dict(
         primary,
         artifact_id="weights-alias",
@@ -286,7 +490,7 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     operation = _download(
         service,
         [primary, alias],
-        model_version_sha256=model,
+        model_content_sha256=model,
         request_key="00000000-0000-4000-8000-000000000015",
     )
     assert operation.state == "succeeded"
@@ -303,11 +507,11 @@ def test_operation_transfer_progress_counts_only_missing_objects(
 ) -> None:
     service, _sessions = cache
     model = "7" * 64
-    cached = _artifact(tmp_path, b"cached", artifact_id="cached", model_version_sha256=model)
+    cached = _artifact(tmp_path, b"cached", artifact_id="cached", model_content_sha256=model)
     first = _download(
         service,
         [cached],
-        model_version_sha256=model,
+        model_content_sha256=model,
         request_key="00000000-0000-4000-8000-000000000016",
     )
     assert first.progress["downloaded_bytes"] == len(b"cached")
@@ -317,10 +521,10 @@ def test_operation_transfer_progress_counts_only_missing_objects(
         b"new object",
         artifact_id="missing",
         path="missing.bin",
-        model_version_sha256=model,
+        model_content_sha256=model,
     )
     preview = service.download_preview(
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[cached, missing],
     )
     assert preview["already_cached_bytes"] == len(b"cached")
@@ -329,7 +533,7 @@ def test_operation_transfer_progress_counts_only_missing_objects(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000017",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[cached, missing],
     )
     assert operation.progress["expected_bytes"] == len(b"new object")
@@ -345,9 +549,9 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
     service, _sessions = cache
     model = "1" * 64
     data = b"queued payload"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
     preview = service.download_preview(
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
     )
 
@@ -355,7 +559,7 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000014",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
     )
     assert operation.state == "queued"
@@ -384,17 +588,17 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
             f"queued-{index}".encode(),
             artifact_id=f"weights-{index}",
             path=f"weights-{index}.bin",
-            model_version_sha256=model,
+            model_content_sha256=model,
         )
         preview = service.download_preview(
-            model_version_sha256=model,
+            model_content_sha256=model,
             artifacts=[artifact],
         )
         operation = service.start_download(
             actor="test",
             request_key=f"00000000-0000-4000-8000-00000000001{index}",
             plan_digest=str(preview["plan_digest"]),
-            model_version_sha256=model,
+            model_content_sha256=model,
             artifacts=[artifact],
         )
         assert operation.state == "queued"
@@ -477,14 +681,14 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     service, sessions = cache
     model = "c" * 64
     data = bytes(range(256)) * 12_000
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
 
-    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     partial = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
         interrupt_after_bytes=1_100_000,
     )
@@ -504,7 +708,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
     )
     assert replay.id == partial.id
@@ -536,8 +740,8 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     service, _sessions = cache
     model = "e" * 64
     data = b"retryable payload"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
-    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     calls = 0
 
@@ -553,7 +757,7 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000019",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
     )
     service.run_pending()
@@ -578,8 +782,8 @@ def test_exhausted_transient_download_allows_bounded_operator_retry_after_restar
     service, sessions = cache
     model = "a" * 64
     data = b"operator retry payload"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
-    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     calls = 0
 
@@ -595,7 +799,7 @@ def test_exhausted_transient_download_allows_bounded_operator_retry_after_restar
         actor="test",
         request_key="00000000-0000-4000-8000-000000000020",
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=[artifact],
     )
     for _ in range(3):
@@ -678,12 +882,12 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     service, _sessions = cache
     model = "d" * 64
     good = b"good payload"
-    artifact = _artifact(tmp_path, good, artifact_id="weights", model_version_sha256=model)
+    artifact = _artifact(tmp_path, good, artifact_id="weights", model_content_sha256=model)
     source = tmp_path / "weights.source"
     set_digest = _download(
         service,
         [artifact],
-        model_version_sha256=model,
+        model_content_sha256=model,
         request_key="00000000-0000-4000-8000-000000000004",
     ).artifact_set_sha256 or ""
     target = service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"])
@@ -745,29 +949,15 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
     service, sessions = cache
     model = "e" * 64
     data = b"protected model"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
     set_digest = _download(
         service,
         [artifact],
-        model_version_sha256=model,
+        model_content_sha256=model,
         request_key="00000000-0000-4000-8000-000000000008",
     ).artifact_set_sha256 or ""
     recipe_revision_id = "00000000-0000-4000-8000-000000000022"
-    recipe_document = {
-        "kind": "recipe",
-        "models": [
-            {
-                "id": "primary",
-                "model": {
-                    "kind": "model",
-                    "publisher": "owner",
-                    "slug": "model",
-                    "content_sha256": model,
-                },
-                "files": [{"id": "weights", "file_id": "weights", "roles": ["model"]}],
-            }
-        ],
-    }
+    recipe_document = _canonical_recipe(model)
     recipe_digest = hashlib.sha256(
         json.dumps(recipe_document, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -902,7 +1092,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
             "schema_version": 2,
             "request_key": "00000000-0000-4000-8000-000000000012",
             "plan_digest": "f" * 64,
-            "model_version_sha256": "a" * 64,
+            "model_content_sha256": "a" * 64,
             "artifacts": [{"source": "file:///etc/passwd"}],
             "protected": True,
         },
@@ -928,11 +1118,11 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_pa
     service, _sessions = cache
     model = "f" * 64
     data = b"bounded bytes"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
     interrupted = _download(
         service,
         [artifact],
-        model_version_sha256=model,
+        model_content_sha256=model,
         request_key="00000000-0000-4000-8000-000000000013",
         interrupt_after_bytes=1,
     )
@@ -997,13 +1187,13 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
         "sha256": hashlib.sha256(b"").hexdigest(),
         "download_bytes": 0,
         "roles": ["auxiliary"],
-        "model_version_sha256": "e" * 64,
+        "model_content_sha256": "e" * 64,
     }
     try:
         operation = _download(
             service,
             [artifact],
-            model_version_sha256="e" * 64,
+            model_content_sha256="e" * 64,
             request_key="00000000-0000-4000-8000-000000000018",
         )
         assert operation.state == "succeeded"

@@ -6,7 +6,7 @@ developer-machine SSH script.
 
 ## Publication boundary
 
-Every recipe selects an exact model-version identity, execution harness,
+Every recipe selects an exact model-definition identity, execution harness,
 runtime distribution, optional patch bundle, and topology. A successful build
 produces content-addressed source/build evidence and an immutable image or
 artifact identity. Development and production channels are selected by the

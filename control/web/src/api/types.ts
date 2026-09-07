@@ -177,8 +177,8 @@ export interface LibraryApi {
   previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal): Promise<LibraryPlacementPreview>;
   applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
   libraryPlacement(placementId: string, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
-  previewLibraryModelDeletion(modelVersionSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
-  deleteLibraryModel(modelVersionSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
+  deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal): Promise<LibraryBuildPlan>;
   applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal): Promise<LibraryMappingPlan>;

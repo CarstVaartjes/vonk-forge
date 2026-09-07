@@ -338,7 +338,7 @@ class RunSwitchFleetProfileAdapter:
             ]
         )
         request = RunSwitchApplyRequest(
-            model_version_sha256=model_digest,
+            model_content_sha256=model_digest,
             recipe_revision_id=assignment.recipe_revision_id,
             spark_group=group,
             alias=assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),

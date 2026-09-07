@@ -142,7 +142,7 @@ class ArtifactInspection:
     # present on one target.
     artifact_set_sha256: str | None = None
     artifact_set_bytes: int | None = None
-    dependency_model_version_sha256: tuple[str, ...] = ()
+    dependency_model_content_sha256: tuple[str, ...] = ()
 
 
 class RunSwitchArtifactInspector(Protocol):
@@ -152,7 +152,7 @@ class RunSwitchArtifactInspector(Protocol):
         self,
         session: Session,
         *,
-        model_version_sha256: str,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -692,7 +692,7 @@ class DatabaseRunSwitchArtifactInspector:
         self,
         session: Session,
         *,
-        model_version_sha256: str,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -703,7 +703,7 @@ class DatabaseRunSwitchArtifactInspector:
         return self._inspect_model_cache(
             session,
             model_cache=self._model_cache,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             node_ids=node_ids,
             retention=retention,
@@ -715,7 +715,7 @@ class DatabaseRunSwitchArtifactInspector:
         session: Session,
         *,
         model_cache: object,
-        model_version_sha256: str,
+        model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
         retention: str,
@@ -734,11 +734,11 @@ class DatabaseRunSwitchArtifactInspector:
             raise TypeError("model-cache manifest provider is unavailable")
         try:
             manifest = resolve(
-                model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
             )
             preview_value = preview(
-                model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
                 recipe_revision_id=recipe_revision_id,
             )
         except Exception as error:
@@ -765,8 +765,8 @@ class DatabaseRunSwitchArtifactInspector:
                 seen.add(digest)
         if not model_digests or artifact_bytes < 1:
             raise RuntimeError("model-cache exact manifest has no artifacts")
-        manifest_model_digest = _manifest_value(manifest, "model_version_sha256")
-        if manifest_model_digest not in (None, model_version_sha256):
+        manifest_model_digest = _manifest_value(manifest, "model_content_sha256")
+        if manifest_model_digest not in (None, model_content_sha256):
             raise RuntimeError("model-cache manifest model identity does not match the request")
         manifest_bytes = _manifest_value(manifest, "expected_bytes")
         if manifest_bytes is not None and manifest_bytes != artifact_bytes:
@@ -828,7 +828,7 @@ class DatabaseRunSwitchArtifactInspector:
                     node_ids=node_ids,
                 )
             )
-        dependency_versions = _manifest_value(manifest, "model_versions")
+        dependency_versions = _manifest_value(manifest, "model_content_sha256s")
         raw_dependencies = (
             dependency_versions
             if isinstance(dependency_versions, Sequence)
@@ -840,7 +840,7 @@ class DatabaseRunSwitchArtifactInspector:
                 value
                 for value in raw_dependencies
                 if isinstance(value, str)
-                and value != model_version_sha256
+                and value != model_content_sha256
                 and _is_hex_digest(value)
             )
         )
@@ -860,7 +860,7 @@ class DatabaseRunSwitchArtifactInspector:
             warnings=tuple(warnings),
             artifact_set_sha256=artifact_set_sha256,
             artifact_set_bytes=artifact_bytes,
-            dependency_model_version_sha256=dependencies,
+            dependency_model_content_sha256=dependencies,
         )
 
 
@@ -1428,9 +1428,9 @@ class RunSwitchOperationService:
                 ]
             )
             model_digest = (
-                installation.model_version_sha256
+                installation.model_content_sha256
                 if installation is not None
-                else _string_or_none(run.plan.get("model_version_sha256"))
+                else _string_or_none(run.plan.get("model_content_sha256"))
             )
             recipe_digest = revision.content_digest if revision is not None else None
             _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
@@ -1541,7 +1541,7 @@ class RunSwitchOperationService:
                 "schema_version": 2,
                 "generated_at": now,
                 "action": "stop",
-                "model_version_sha256": model_digest,
+                "model_content_sha256": model_digest,
                 "recipe_revision_id": revision.id if revision is not None else None,
                 "recipe_content_sha256": recipe_digest,
                 "alias": run.alias,
@@ -1803,7 +1803,7 @@ class RunSwitchOperationService:
             recipe_model_digest = (
                 model_ref.get("content_sha256") if isinstance(model_ref, Mapping) else None
             )
-            if recipe_model_digest != request.model_version_sha256:
+            if recipe_model_digest != request.model_content_sha256:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_recipe_mismatch",
@@ -1814,7 +1814,7 @@ class RunSwitchOperationService:
             _model_document, model_documents, model_caps, recipe_caps, document_blockers = self._resolve_documents(
                 session,
                 revision,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 requested_recipe_digest=revision.content_digest,
             )
             blockers.extend(document_blockers)
@@ -1877,7 +1877,7 @@ class RunSwitchOperationService:
                 warnings.extend(current_fit_warnings)
             inspection = self._inspect_artifacts(
                 session,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 revision.id,
                 group,
                 retention=request.retention,
@@ -1897,7 +1897,7 @@ class RunSwitchOperationService:
             installation = self._matching_installation(
                 session,
                 revision.id,
-                request.model_version_sha256,
+                request.model_content_sha256,
                 mapping,
                 group,
             )
@@ -2120,7 +2120,7 @@ class RunSwitchOperationService:
                 "schema_version": 2,
                 "generated_at": now,
                 "action": request.action,
-                "model_version_sha256": request.model_version_sha256,
+                "model_content_sha256": request.model_content_sha256,
                 "recipe_revision_id": revision.id,
                 "recipe_content_sha256": revision.content_digest,
                 "alias": request.alias,
@@ -2230,7 +2230,7 @@ class RunSwitchOperationService:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_revision_unavailable",
-                        "The exact model version selected for this run is not resolved in local catalog authority.",
+                        "The exact model definition selected for this run is not resolved in local catalog authority.",
                         scope="model",
                     )
                 )
@@ -2345,7 +2345,7 @@ class RunSwitchOperationService:
                     RecipeInstallation.recipe_revision_id == revision_id,
                     RecipeInstallation.mapping_id == mapping.id,
                     RecipeInstallation.mapping_generation == mapping.generation,
-                    RecipeInstallation.model_version_sha256 == model_digest,
+                    RecipeInstallation.model_content_sha256 == model_digest,
                     RecipeInstallation.state.in_(("installed", "installing", "partial")),
                 )
                 .order_by(RecipeInstallation.state.desc(), RecipeInstallation.updated_at.desc())
@@ -3043,12 +3043,12 @@ class RunSwitchOperationService:
         )
         model = ModelArtifactPreparation(
             artifact_set_sha256=artifact_set_digest,
-            model_version_sha256=primary_model_digest,
+            model_content_sha256=primary_model_digest,
             recipe_revision_sha256=revision.content_digest,
             artifact_count=max(1, len(model_digests)),
             artifact_set_bytes=artifact_set_bytes,
-            dependency_model_version_sha256=sorted(
-                set(inspection.dependency_model_version_sha256)
+            dependency_model_content_sha256=sorted(
+                set(inspection.dependency_model_content_sha256)
             ),
             completeness=model_completeness,
             controller=model_controller,
@@ -3578,7 +3578,7 @@ class RunSwitchOperationService:
         try:
             inspection = self._artifacts.inspect(
                 session,
-                model_version_sha256=model_digest,
+                model_content_sha256=model_digest,
                 recipe_revision_id=revision_id,
                 node_ids=tuple(node.node_id for node in group.nodes),
                 retention=retention,
@@ -3618,7 +3618,7 @@ class RunSwitchOperationService:
                 reclaimable_digests=inspection.reclaimable_digests,
                 artifact_set_sha256=inspection.artifact_set_sha256,
                 artifact_set_bytes=inspection.artifact_set_bytes,
-                dependency_model_version_sha256=inspection.dependency_model_version_sha256,
+                dependency_model_content_sha256=inspection.dependency_model_content_sha256,
                 freshness=inspection.freshness,
                 blockers=(
                     *inspection.blockers,

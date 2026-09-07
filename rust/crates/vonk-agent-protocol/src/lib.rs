@@ -573,7 +573,7 @@ pub enum RecipeOperationRequest {
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
-    ModelUninstall(RecipeModelUninstallRequest),
+    ModelCleanup(RecipeModelCleanupRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -905,7 +905,7 @@ pub struct RecipeStopRequest {
 #[serde(deny_unknown_fields)]
 pub struct RecipeUninstallRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cleanup_model_version_sha256: Option<String>,
+    pub cleanup_model_content_sha256: Option<String>,
     pub installation_id: Uuid,
     pub plan_digest: String,
     pub recipe_content_sha256: String,
@@ -914,16 +914,16 @@ pub struct RecipeUninstallRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct RecipeModelUninstallInstallation {
+pub struct RecipeModelCleanupInstallation {
     pub installation_id: Uuid,
     pub recipe_content_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct RecipeModelUninstallRequest {
-    pub installations: Vec<RecipeModelUninstallInstallation>,
-    pub model_version_sha256: String,
+pub struct RecipeModelCleanupRequest {
+    pub installations: Vec<RecipeModelCleanupInstallation>,
+    pub model_content_sha256: String,
     pub plan_digest: String,
     pub schema_version: u8,
 }
@@ -948,7 +948,7 @@ impl RecipeOperationRequest {
             "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
             "recipe.uninstall" => Self::Uninstall(serde_json::from_value(claim.payload.clone())?),
             "recipe.model-uninstall.v1" => {
-                Self::ModelUninstall(serde_json::from_value(claim.payload.clone())?)
+                Self::ModelCleanup(serde_json::from_value(claim.payload.clone())?)
             }
             _ => return Err(ProtocolError::Identity("recipe operation")),
         };
@@ -1036,13 +1036,13 @@ impl RecipeOperationRequest {
                 valid_common(value.schema_version, &value.plan_digest)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && value
-                        .cleanup_model_version_sha256
+                        .cleanup_model_content_sha256
                         .as_ref()
                         .is_none_or(|digest| lower_hex(digest, 64))
             }
-            Self::ModelUninstall(value) => {
+            Self::ModelCleanup(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
-                    && lower_hex(&value.model_version_sha256, 64)
+                    && lower_hex(&value.model_content_sha256, 64)
                     && !value.installations.is_empty()
                     && value.installations.len() <= 512
                     && value
@@ -1063,6 +1063,49 @@ impl RecipeOperationRequest {
         } else {
             Err(ProtocolError::Identity("recipe payload"))
         }
+    }
+}
+
+#[cfg(test)]
+mod recipe_model_cleanup_tests {
+    use super::*;
+
+    fn claim(payload: Value) -> AgentClaim {
+        AgentClaim {
+            attempt: 1,
+            authority_revision: "a".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        }
+    }
+
+    #[test]
+    fn controller_model_cleanup_payload_uses_content_digest_and_rejects_retired_name() {
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "model_content_sha256": "f".repeat(64),
+            "plan_digest": "b".repeat(64),
+            "installations": [{
+                "installation_id": "00000000-0000-4000-8000-000000000004",
+                "recipe_content_sha256": "c".repeat(64)
+            }]
+        });
+        let parsed = RecipeOperationRequest::parse(&claim(payload.clone())).unwrap();
+        let RecipeOperationRequest::ModelCleanup(request) = parsed else {
+            panic!("model cleanup payload parsed as the wrong operation");
+        };
+        assert_eq!(request.model_content_sha256, "f".repeat(64));
+
+        let mut retired = payload;
+        retired["model_version_sha256"] = retired["model_content_sha256"].take();
+        assert!(RecipeOperationRequest::parse(&claim(retired)).is_err());
     }
 }
 
