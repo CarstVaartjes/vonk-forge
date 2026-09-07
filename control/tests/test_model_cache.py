@@ -48,6 +48,7 @@ from vonk_control.models import (
 )
 from vonk_control.worker import Worker
 from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -179,18 +180,33 @@ def _manifest_document(tmp_path: Path) -> dict[str, object]:
         recipe_revision_sha256=None,
         model_content_digests=("a" * 64,),
         artifacts=(artifact,),
+        model_definition_ref=ModelReference(
+            publisher="vonk-forge", slug="manifest-model", content_sha256="a" * 64
+        ),
     ).document()
 
 
 def test_cache_manifest_requires_exact_canonical_field_sets(tmp_path: Path) -> None:
     document = _manifest_document(tmp_path)
 
-    with pytest.raises(ModelCacheResolutionError, match="manifest fields are invalid"):
+    with pytest.raises(ModelCacheResolutionError, match="manifest shape is invalid"):
         ArtifactSetManifest.from_document({**document, "unexpected": True})
     missing = dict(document)
     missing.pop("model_content_digests")
-    with pytest.raises(ModelCacheResolutionError, match="manifest fields are invalid"):
+    with pytest.raises(ModelCacheResolutionError, match="manifest shape is invalid"):
         ArtifactSetManifest.from_document(missing)
+
+
+@pytest.mark.parametrize("schema_version", [True, 2.0])
+def test_cache_manifest_requires_native_schema_version_type(
+    tmp_path: Path, schema_version: object
+) -> None:
+    document = _manifest_document(tmp_path)
+    document["schema_version"] = schema_version
+
+    with pytest.raises(ModelCacheResolutionError) as error:
+        ArtifactSetManifest.from_document(document)
+    assert error.value.code == "model_cache.schema_unsupported"
 
 
 @pytest.mark.parametrize(
@@ -203,6 +219,22 @@ def test_cache_manifest_rejects_coercible_artifact_types(
     document = _manifest_document(tmp_path)
     artifact = dict(document["artifacts"][0])
     artifact[field] = value
+    document["artifacts"] = [artifact]
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest"):
+        ArtifactSetManifest.from_document(document)
+
+
+@pytest.mark.parametrize("mutation", ["extra", "missing"])
+def test_cache_manifest_artifact_dto_requires_exact_fields(
+    tmp_path: Path, mutation: str
+) -> None:
+    document = _manifest_document(tmp_path)
+    artifact = dict(document["artifacts"][0])
+    if mutation == "extra":
+        artifact["unexpected"] = True
+    else:
+        artifact.pop("roles")
     document["artifacts"] = [artifact]
 
     with pytest.raises(ModelCacheResolutionError, match="manifest"):
@@ -266,12 +298,12 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
 
     manifest = service.resolve_artifact_set(model_content_sha256=digest)
     assert manifest.model_content_sha256 == digest
-    assert manifest.model_definition_ref == {
+    assert manifest.model_definition_ref is not None
+    assert manifest.model_definition_ref.model_dump(mode="json") == {
         "kind": "model",
         "publisher": "vonk-forge",
         "slug": "canonical-model",
         "content_sha256": digest,
-        "artifact_key": None,
     }
     assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
         ("weights.bin", 3, ("weights",))

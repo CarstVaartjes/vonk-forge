@@ -755,8 +755,6 @@ def _resolved_model_content_digests(
         definition = ModelDefinition.model_validate(revision.document)
         resolved[digest] = revision
         pending.extend(dependency.content_sha256 for dependency in definition.dependencies)
-        if len(resolved) > 32:
-            raise InstallPlanConflict("install.model_dependency_count")
     return set(resolved)
 
 
