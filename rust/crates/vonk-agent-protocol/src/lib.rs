@@ -1027,7 +1027,7 @@ pub struct RecipeStopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeUninstallRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub cleanup_model_content_sha256: Option<String>,
     pub installation_id: Uuid,
     pub plan_digest: String,
@@ -1049,6 +1049,58 @@ pub struct RecipeModelCleanupRequest {
     pub model_content_sha256: String,
     pub plan_digest: String,
     pub schema_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeStopResult {
+    pub stopped: bool,
+}
+
+impl RecipeStopResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.stopped {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe stop result"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeUninstallResult {
+    pub uninstalled: bool,
+    pub removed_model_bytes: u64,
+}
+
+impl RecipeUninstallResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.uninstalled && self.removed_model_bytes <= 16 * 1024_u64.pow(4) {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe uninstall result"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeModelCleanupResult {
+    pub uninstalled_installations: u16,
+    pub removed_model_bytes: u64,
+}
+
+impl RecipeModelCleanupResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if (1..=512).contains(&self.uninstalled_installations)
+            && self.removed_model_bytes <= 16 * 1024_u64.pow(4)
+        {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe model cleanup result"))
+        }
+    }
 }
 
 impl RecipeOperationRequest {
@@ -1273,6 +1325,70 @@ mod recipe_model_cleanup_tests {
         let mut retired = payload;
         retired["model_version_sha256"] = retired["model_content_sha256"].take();
         assert!(RecipeOperationRequest::parse(&claim(retired)).is_err());
+    }
+
+    #[test]
+    fn uninstall_payload_requires_explicit_nullable_cleanup_field() {
+        let mut payload = serde_json::json!({
+            "schema_version": 1,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b".repeat(64),
+            "recipe_content_sha256": "c".repeat(64),
+            "cleanup_model_content_sha256": null,
+        });
+        let mut uninstall_claim = claim(serde_json::json!({
+            "schema_version": 1,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b".repeat(64),
+            "recipe_content_sha256": "c".repeat(64),
+            "cleanup_model_content_sha256": null,
+        }));
+        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_ok());
+        payload
+            .as_object_mut()
+            .unwrap()
+            .remove("cleanup_model_content_sha256");
+        uninstall_claim.payload = payload;
+        uninstall_claim.payload_digest =
+            hex_sha256(&canonical_json(&uninstall_claim.payload).unwrap());
+        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_err());
+    }
+
+    #[test]
+    fn lifecycle_success_bodies_are_strict_and_bounded() {
+        let stop: RecipeStopResult =
+            serde_json::from_value(serde_json::json!({"stopped": true})).unwrap();
+        assert!(stop.validate().is_ok());
+        assert!(
+            serde_json::from_value::<RecipeStopResult>(
+                serde_json::json!({"stopped": true, "extra": 1})
+            )
+            .is_err()
+        );
+        let uninstall: RecipeUninstallResult = serde_json::from_value(
+            serde_json::json!({"uninstalled": true, "removed_model_bytes": 0}),
+        )
+        .unwrap();
+        assert!(uninstall.validate().is_ok());
+        let oversized_uninstall: RecipeUninstallResult = serde_json::from_value(
+            serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64}),
+        )
+        .unwrap();
+        assert!(oversized_uninstall.validate().is_err());
+        let cleanup: RecipeModelCleanupResult = serde_json::from_value(
+            serde_json::json!({"uninstalled_installations": 1, "removed_model_bytes": 0}),
+        )
+        .unwrap();
+        assert!(cleanup.validate().is_ok());
+        assert!(
+            serde_json::from_value::<RecipeModelCleanupResult>(
+                serde_json::json!({"uninstalled_installations": 0, "removed_model_bytes": 0})
+            )
+            .unwrap()
+            .validate()
+            .is_err()
+        );
     }
 }
 
