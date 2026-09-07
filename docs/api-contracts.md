@@ -62,6 +62,14 @@ Bootstrap also has one response: the helper authority key is required, and the
 address and hostname list are explicit even when they are `null` and `[]`.
 There is no setup-schema selector or older bootstrap variant.
 
+The work-claim request and runtime identity are defined in
+`agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
+wait time, and the enrolled agent's observation key are required. The Rust
+HTTP transport and the connected test use the same request serializer and
+capability declaration. Enrollment keeps its bounded raw-body security
+handling, while OpenAPI exposes the exact `EnrollmentSubmitRequest` used to
+validate that body.
+
 `scripts/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing
 generated clients or weakening their schema. Rust wire compatibility requires

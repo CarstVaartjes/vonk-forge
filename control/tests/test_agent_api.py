@@ -109,6 +109,7 @@ PACKAGED_RUNTIME_IDENTITY = {
     "build_digest": "sha256:" + "b" * 64,
     "semantic_version": "1.2.3",
     "self_test_passed": True,
+    "observation_receipt_public_key": "d" * 64,
 }
 
 
@@ -1772,6 +1773,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
+        "observation_receipt_public_key": "d" * 64,
         removed_field: removed_value,
     }
 
@@ -1805,6 +1807,7 @@ def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1863,6 +1866,7 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
                 "build_digest": "sha256:" + "c" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1887,6 +1891,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -4351,3 +4356,54 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
     assert {"phase", "completed_bytes", "checkpoint", "members"} <= set(
         progress["properties"]
     )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "capabilities", "lease_seconds", "node_id", "protocol_version",
+        "runtime_identity", "wait_seconds", "observation_receipt_public_key",
+    ),
+)
+def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
+    client, _services, _sessions, _clock = agent_system
+    body = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": dict(PACKAGED_RUNTIME_IDENTITY),
+        "wait_seconds": 0,
+    }
+    if missing == "observation_receipt_public_key":
+        del body["runtime_identity"][missing]
+    else:
+        del body[missing]
+    # Use the raw request method: the convenience test client must not refill
+    # deliberately missing fields and hide a production boundary regression.
+    response = client.request(
+        "POST", "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"), json=body,
+    )
+    assert response.status_code == 422
+
+
+def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -> None:
+    from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/agent/v1/enroll"]["post"]
+    request = operation["requestBody"]
+    assert request["required"] is True
+    assert request["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/EnrollmentSubmitRequest"
+    }
+    expected = EnrollmentSubmitRequest.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    nested = expected.pop("$defs")
+    components = schema["components"]["schemas"]
+    assert components["EnrollmentSubmitRequest"] == expected
+    for name, document in nested.items():
+        assert components[name] == document

@@ -70,8 +70,34 @@ struct ClaimRequest<'a> {
     lease_seconds: u64,
     node_id: &'a str,
     protocol_version: u32,
-    runtime_identity: Option<&'a AgentRuntimeIdentity>,
+    runtime_identity: &'a AgentRuntimeIdentity,
     wait_seconds: u64,
+}
+
+/// Serialize the current claim contract used by the HTTP transport.
+pub fn claim_request_document(
+    node_id: &str,
+    capabilities: &[&str],
+    hostname: Option<&str>,
+    wait_seconds: u64,
+    runtime_identity: &AgentRuntimeIdentity,
+) -> Result<Vec<u8>, ClientError> {
+    if !runtime_identity.self_test_passed {
+        return Err(ClientError::Protocol);
+    }
+    runtime_identity
+        .observation_receipt_public_key()
+        .map_err(|_| ClientError::Protocol)?;
+    canonical_json(&ClaimRequest {
+        capabilities,
+        hostname,
+        lease_seconds: 60,
+        node_id,
+        protocol_version: 3,
+        runtime_identity,
+        wait_seconds: wait_seconds.min(60),
+    })
+    .map_err(|_| ClientError::Protocol)
 }
 
 #[derive(Serialize)]
@@ -260,18 +286,18 @@ impl AgentHttpClient {
         runtime_identity: Option<&AgentRuntimeIdentity>,
     ) -> Result<Option<AgentClaim>, ClientError> {
         let hostname = local_hostname();
+        let body = claim_request_document(
+            &self.node_id,
+            capabilities,
+            hostname.as_deref(),
+            wait_seconds,
+            runtime_identity.ok_or(ClientError::Protocol)?,
+        )?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/claim")?)
-            .json(&ClaimRequest {
-                capabilities,
-                hostname: hostname.as_deref(),
-                lease_seconds: 60,
-                node_id: &self.node_id,
-                protocol_version: 3,
-                runtime_identity,
-                wait_seconds: wait_seconds.min(60),
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         let status = response.status();

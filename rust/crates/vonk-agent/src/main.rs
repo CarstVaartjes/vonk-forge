@@ -32,23 +32,7 @@ use vonk_agent::{
     },
 };
 
-const CLAIM_CAPABILITIES: &[&str] = &[
-    "agent.runtime.rust.v1",
-    "runtime.vonk.v1",
-    "agent.upgrade.v1",
-    "artifact.distribution.v1",
-    "recipe.build.v1",
-    "recipe.image.import.v1",
-    "recipe.job.run.v1",
-    "recipe.install",
-    "recipe.start",
-    "recipe.start.two-phase.v1",
-    "recipe.run.inspect.exact.v1",
-    "recipe.run.inspect.receipt.v1",
-    "recipe.stop",
-    "recipe.uninstall",
-    "recipe.model-uninstall.v1",
-];
+use vonk_agent::CLAIM_CAPABILITIES;
 
 #[derive(Parser)]
 #[command(

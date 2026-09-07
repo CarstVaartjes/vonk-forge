@@ -47,6 +47,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
+from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentBootstrapResponse,
@@ -381,53 +382,6 @@ class EnrollmentListResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     enrollments: list[EnrollmentSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=128)
-
-
-class AgentRuntimeIdentityRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    architecture: Literal["linux-amd64", "linux-arm64"]
-    semantic_version: str = Field(
-        pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
-    )
-    build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    self_test_passed: Literal[True]
-    observation_receipt_public_key: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def reject_retired_identity_fields(cls, value: object) -> object:
-        if isinstance(value, Mapping) and {
-            "active_slot",
-            "agent_sha256",
-            "platform_version",
-            "supervisor_generation",
-            "supervisor_ready_generation",
-            "activation_deadline",
-        } & value.keys():
-            raise ValueError("retired runtime identity fields are not supported")
-        return value
-
-
-class ClaimRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    lease_seconds: int = Field(default=30, ge=1, le=300, strict=True)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-    hostname: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=255,
-        pattern=(
-            r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
-            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
-        ),
-    )
-    protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
-    capabilities: list[str] | None = Field(default=None, max_length=128)
-    runtime_identity: AgentRuntimeIdentityRequest
-    wait_seconds: int = Field(default=0, ge=0, le=60, strict=True)
 
 
 class AgentUpgradePackageRequest(StrictJSONModel):
@@ -2800,3 +2754,31 @@ def install_agent_routes(
 
     app.include_router(human)
     app.include_router(agent)
+
+    # Enrollment reads a bounded raw body before validation so an invalid
+    # submission still consumes its identifiable one-use grant. Document that
+    # input from the very same model used above; a Request parameter alone
+    # would otherwise hide the request contract from OpenAPI consumers.
+    standard_openapi = app.openapi
+
+    def openapi_with_enrollment_contract() -> dict[str, object]:
+        document = standard_openapi()
+        request_schema = EnrollmentSubmitRequest.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+        components = document.setdefault("components", {}).setdefault("schemas", {})
+        components.update(request_schema.pop("$defs", {}))
+        components[EnrollmentSubmitRequest.__name__] = request_schema
+        document["paths"]["/agent/v1/enroll"]["post"]["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "$ref": "#/components/schemas/EnrollmentSubmitRequest"
+                    }
+                }
+            },
+        }
+        return document
+
+    app.openapi = openapi_with_enrollment_contract

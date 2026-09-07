@@ -18,6 +18,7 @@ from vonk_agent_protocol.enrollment import (
 from .test_agent_api import (
     NODE_A,
     NODE_C,
+    PACKAGED_RUNTIME_IDENTITY,
     _csr_for,
     agent_headers,
     enrollment_grant,
@@ -26,6 +27,40 @@ from .test_agent_api import (
 from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
+
+
+def test_rust_claim_producer_uses_the_controller_request_contract(
+    agent_system, enrollment_wire_probe: Path,
+) -> None:
+    from vonk_agent_protocol.claims import ClaimRequest
+
+    client, _services, _sessions, _clock = agent_system
+    raw = _roundtrip(
+        enrollment_wire_probe,
+        json.dumps(PACKAGED_RUNTIME_IDENTITY).encode(),
+        "--claim", NODE_A,
+    )
+    parsed = ClaimRequest.model_validate_json(raw)
+    assert parsed.node_id == NODE_A
+    assert parsed.protocol_version == 3
+    assert parsed.runtime_identity.observation_receipt_public_key == (
+        PACKAGED_RUNTIME_IDENTITY["observation_receipt_public_key"]
+    )
+    # Submit the production serializer's bytes unchanged, bypassing the
+    # convenience client's automatic claim fixture completion.
+    response = client.request(
+        "POST", "/agent/v1/claim", content=raw,
+        headers={**agent_headers(NODE_A, "serial-a"), "content-type": "application/json"},
+    )
+    assert response.status_code == 204, response.text
+
+    invalid = dict(PACKAGED_RUNTIME_IDENTITY)
+    del invalid["observation_receipt_public_key"]
+    rejected = subprocess.run(
+        [str(enrollment_wire_probe), "--claim", NODE_A],
+        input=json.dumps(invalid).encode() + b"\n", capture_output=True, check=False,
+    )
+    assert rejected.returncode != 0
 
 
 @pytest.fixture(scope="session")
