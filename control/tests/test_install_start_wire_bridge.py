@@ -122,6 +122,8 @@ def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult,
         evidence = result.result.get("evidence", result.result)
         if row.kind == "recipe.install":
             assert set(result.result) == {"installed_bytes"}
+        elif row.kind == "recipe.stop":
+            assert result.result == {"stopped": True}
         elif row.kind == "recipe.uninstall":
             assert set(result.result) == {"uninstalled", "removed_model_bytes"}
             assert result.result == {
@@ -230,6 +232,27 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
             )
         )
         assert node is not None and node.state == "running"
+
+    stop_plan = service.preview_stop(start_operation.owner_id)
+    stop_operation = service.stop(
+        start_operation.owner_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="admin",
+        request_id="wire-bridge-single-stop",
+    )
+    stop_rows = _queued_children(sessions, stop_operation.id)
+    assert len(stop_rows) == 1
+    stop_results = _bridge(install_start_wire_probe, stop_rows)
+    _project(service, sessions, stop_rows, stop_results)
+    assert service.get(stop_operation.id).state == "succeeded"
+    with sessions() as session:
+        node = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start_operation.owner_id,
+                RunNode.node_id == stop_rows[0].node_id,
+            )
+        )
+        assert node is not None and node.state == "stopped"
 
 
 def test_controller_routine_uninstall_payload_crosses_rust_and_back(
