@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from vonk_agent_protocol import canonical_message
 
 from .fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationView,
     FleetProfileAssignmentInput,
+    FleetProfileLibraryPlacementContext,
     FleetProfileNode,
     FleetProfilePreview,
 )
@@ -64,8 +66,8 @@ class LibraryPlacementService:
         except FleetProfileConflict as error:
             raise LibraryPlacementConflict(str(error)) from error
         if replay is not None:
-            raw = replay.progress.get("library_placement")
-            if not isinstance(raw, Mapping) or not self._matches_request(raw, value):
+            raw = replay.progress.library_placement
+            if raw is None or not self._matches_request(raw, value):
                 raise LibraryPlacementConflict(
                     "direct placement request key was reused for another plan"
                 )
@@ -86,17 +88,18 @@ class LibraryPlacementService:
             or prepared.profile_plan_digest is None
         ):
             raise LibraryPlacementConflict("Library placement authority is unavailable")
-        metadata = {
-            "recipe_id": value.recipe_id,
-            "recipe_revision_id": prepared.preview.recipe_revision_id,
-            "selected_node_ids": list(value.node_ids),
-            "desired_state": value.desired_state,
-            "alias": value.alias,
-            "profile_plan_digest": prepared.profile_plan_digest,
-            "installation_ids": prepared.preview.locations.installation_ids,
-            "run_ids": prepared.preview.locations.run_ids,
-            "plan_digest": value.plan_digest,
-        }
+        metadata = FleetProfileLibraryPlacementContext(
+            recipe_id=value.recipe_id,
+            recipe_revision_id=prepared.preview.recipe_revision_id,
+            selected_node_ids=list(value.node_ids),
+            desired_state=value.desired_state,
+            alias=value.alias,
+            profile_plan_digest=prepared.profile_plan_digest,
+            installation_ids=prepared.preview.locations.installation_ids,
+            run_ids=prepared.preview.locations.run_ids,
+            plan_digest=value.plan_digest,
+        )
+        metadata_document = metadata.model_dump(mode="json")
         try:
             result = self._profiles.apply_internal_placement(
                 prepared.profile_id,
@@ -104,7 +107,7 @@ class LibraryPlacementService:
                 placement_plan_digest=value.plan_digest,
                 request_key=value.request_key,
                 actor=actor,
-                metadata=metadata,
+                metadata=metadata_document,
             )
         except FleetProfileConflict as error:
             raise LibraryPlacementConflict(str(error)) from error
@@ -112,11 +115,10 @@ class LibraryPlacementService:
 
     def application(self, application_id: str) -> LibraryPlacementApplication:
         result = self._profiles.application(application_id)
-        raw = result.progress.get("library_placement")
-        if not isinstance(raw, Mapping):
+        raw = result.progress.library_placement
+        if raw is None:
             raise KeyError(application_id)
-        metadata = dict(raw)
-        return self._application(result, metadata)
+        return self._application(result, raw)
 
     def _prepare(
         self, value: LibraryPlacementPreviewRequest, *, actor: str
@@ -339,22 +341,25 @@ class LibraryPlacementService:
         )
 
     def _application(
-        self, result: Any, metadata: Mapping[str, object]
+        self,
+        result: FleetProfileApplicationView,
+        metadata: FleetProfileLibraryPlacementContext,
     ) -> LibraryPlacementApplication:
-        recipe_id = str(metadata["recipe_id"])
-        node_ids = [str(item) for item in metadata["selected_node_ids"]]
+        recipe_id = metadata.recipe_id
+        node_ids = list(metadata.selected_node_ids)
         locations = self._current_locations(recipe_id, node_ids, metadata)
-        progress = dict(result.progress)
-        progress.pop("library_placement", None)
+        progress = FleetProfileApplicationProgress.model_validate(
+            result.progress
+        ).model_copy(update={"library_placement": None})
         return LibraryPlacementApplication(
             id=result.id,
             state=result.state,
             recipe_id=recipe_id,
-            recipe_revision_id=str(metadata["recipe_revision_id"]),
+            recipe_revision_id=metadata.recipe_revision_id,
             selected_node_ids=node_ids,
-            desired_state=str(metadata["desired_state"]),
-            alias=metadata.get("alias"),
-            plan_digest=str(metadata["plan_digest"]),
+            desired_state=metadata.desired_state,
+            alias=metadata.alias,
+            plan_digest=metadata.plan_digest,
             current_step=result.current_step,
             total_steps=result.total_steps,
             current_operation_id=result.current_operation_id,
@@ -369,7 +374,7 @@ class LibraryPlacementService:
         self,
         recipe_id: str,
         node_ids: list[str],
-        metadata: Mapping[str, object],
+        metadata: FleetProfileLibraryPlacementContext,
     ) -> LibraryPlacementLocations:
         try:
             detail = self._projection.detail(recipe_id)
@@ -386,27 +391,26 @@ class LibraryPlacementService:
                 return self._locations(group)
         except (KeyError, OSError, RuntimeError, TypeError, ValueError):
             pass
-        installation_ids = metadata.get("installation_ids", [])
-        run_ids = metadata.get("run_ids", [])
+        installation_ids = metadata.installation_ids
+        run_ids = metadata.run_ids
         return LibraryPlacementLocations(
-            installation_ids=list(installation_ids)
-            if isinstance(installation_ids, list)
-            else [],
-            run_ids=list(run_ids) if isinstance(run_ids, list) else [],
+            installation_ids=list(installation_ids),
+            run_ids=list(run_ids),
             installed=bool(installation_ids),
             running=bool(run_ids),
         )
 
     @staticmethod
     def _matches_request(
-        metadata: Mapping[str, object], value: LibraryPlacementApplyRequest
+        metadata: FleetProfileLibraryPlacementContext,
+        value: LibraryPlacementApplyRequest,
     ) -> bool:
         return (
-            metadata.get("recipe_id") == value.recipe_id
-            and metadata.get("selected_node_ids") == list(value.node_ids)
-            and metadata.get("desired_state") == value.desired_state
-            and metadata.get("alias") == value.alias
-            and metadata.get("plan_digest") == value.plan_digest
+            metadata.recipe_id == value.recipe_id
+            and metadata.selected_node_ids == list(value.node_ids)
+            and metadata.desired_state == value.desired_state
+            and metadata.alias == value.alias
+            and metadata.plan_digest == value.plan_digest
         )
 
     @staticmethod
