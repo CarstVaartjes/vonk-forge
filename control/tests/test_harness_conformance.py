@@ -1,25 +1,23 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
 
 import pytest
-from vonk_control.catalog_contract import catalog_content_sha256
+from vonk_control.compiled_execution_plan import CompiledExecutionPlan
 from vonk_control.harness_conformance import (
     HarnessConformanceError,
-    LifecycleRequest,
-    _conformance_recipe,
-    _documents,
+    _fixture_request,
     run_synthetic_conformance,
     validate_terminal_evidence,
 )
-from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
-from vonk_control.harnesses.common import SyntheticHarnessCompiler
-from vonk_control.harnesses.registry import TrustedBuiltinComposition
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+
+CANONICAL_SLUGS = tuple(item.slug for item in CANONICAL_HARNESSES)
 
 
-@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
+@pytest.mark.parametrize("slug", CANONICAL_SLUGS)
+def test_canonical_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
     evidence = run_synthetic_conformance(slug)
 
     assert evidence.phases == (
@@ -41,6 +39,7 @@ def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
     )
     assert evidence.offline_runtime is True
     assert evidence.security["docker_socket"] is False
+    assert evidence.security["plan_schema_version"] == 2
     assert evidence.interrupted_start_recovered is True
     assert evidence.interrupted_stop_recovered is True
     assert evidence.stop_bounded is True
@@ -52,82 +51,56 @@ def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
         "inspect-idempotent",
         "stop-recovered",
     )
-    assert evidence.document["schema_version"] == 1
+    assert evidence.document["schema_version"] == 2
+    assert CompiledExecutionPlan.model_validate(evidence.document["plan"])
 
 
-def test_conformance_rejects_an_unrelated_driver_injection() -> None:
-    with pytest.raises(TypeError):
-        run_synthetic_conformance("vllm", driver_factory=object())
+def test_conformance_fixture_uses_canonical_pydantic_definitions() -> None:
+    request = _fixture_request("vllm")
+    assert isinstance(request.recipe, RecipeDefinition)
+    assert request.models and all(isinstance(item, ModelDefinition) for item in request.models)
+    assert isinstance(request.plan, CompiledExecutionPlan)
+    assert request.plan.schema_version == 2
+    assert request.runtime_spec["identity"]["recipe_revision_sha256"]
 
 
-class BrokenConcreteProjectionCompiler:
-    contract_version = 1
+def test_artifact_job_uses_production_nullable_placement() -> None:
+    request = _fixture_request("diffusers")
 
-    def __init__(self, slug: str) -> None:
-        self.slug = slug
-
-    def compile(self, *args, **kwargs):
-        projection = SyntheticHarnessCompiler(self.slug).compile(*args, **kwargs)
-        return replace(projection, image="registry.example/vonk/mutable:latest")
+    assert request.launch_payload["endpoint"] is None
+    assert request.launch_payload["job"] is not None
+    assert request.placement["port"] is None
+    assert request.placement["reserved_memory_bytes"] > 0
 
 
-def test_conformance_fails_for_a_broken_concrete_builtin_projection() -> None:
-    compilers = tuple(
-        BrokenConcreteProjectionCompiler(slug)
-        if slug == "vllm"
-        else SyntheticHarnessCompiler(slug)
-        for slug in BUILTIN_HARNESS_SLUGS
-    )
-    registry = HarnessRegistry.from_trusted_builtins(
-        TrustedBuiltinComposition(compilers)
-    )
-
-    with pytest.raises(HarnessConformanceError, match="digest-pinned"):
-        run_synthetic_conformance("vllm", registry=registry)
+def test_conformance_rejects_unknown_harness() -> None:
+    with pytest.raises(HarnessConformanceError, match="unknown execution harness"):
+        run_synthetic_conformance("legacy-harness")
 
 
-def test_conformance_rejects_schema_valid_terminal_evidence_with_wrong_identity() -> (
-    None
-):
-    harness, distribution = _documents("vllm")
-    recipe = _conformance_recipe("vllm", harness, distribution)
-    projection = HarnessRegistry.with_builtins().compile(
-        harness,
-        recipe=recipe,
-        distribution=distribution,
-        patch=None,
-        parameters={},
-        topology=recipe["topology"],
-        role="entrypoint",
-        rank=0,
-    )
-    request = LifecycleRequest(
-        projection=projection,
-        recipe={
-            "publisher": "vonk-forge",
-            "slug": "synthetic-harness",
-            "content_sha256": "b" * 64,
-        },
-        execution_harness={
-            "kind": "execution-harness",
-            "publisher": "vonk-forge",
-            "slug": "vllm",
-            "content_sha256": catalog_content_sha256(harness),
-        },
-        runtime_distribution={
-            "kind": "runtime-distribution",
-            "publisher": "vonk-forge",
-            "slug": "synthetic-arm64",
-            "content_sha256": catalog_content_sha256(distribution),
-        },
-    )
+def test_conformance_rejects_tampered_plan_evidence() -> None:
+    request = _fixture_request("vllm")
     document = copy.deepcopy(run_synthetic_conformance("vllm").document)
-    document["projection"]["image"] = "registry.example/vonk/other@sha256:" + "0" * 64
+    document["plan"]["harness_sha256"] = "0" * 64
 
-    with pytest.raises(HarnessConformanceError, match="projection identity"):
+    with pytest.raises(HarnessConformanceError, match="plan identity"):
         validate_terminal_evidence(document, request)
 
 
-def test_conformance_fails_closed_for_unknown_harness() -> None:
-    with pytest.raises(HarnessConformanceError, match="unknown execution harness"):
-        run_synthetic_conformance("legacy-harness")
+def test_conformance_rejects_invalid_schema_or_retired_identity_evidence() -> None:
+    request = _fixture_request("vllm")
+    document = copy.deepcopy(run_synthetic_conformance("vllm").document)
+    document["schema_version"] = 0
+
+    with pytest.raises(HarnessConformanceError, match="evidence is invalid"):
+        validate_terminal_evidence(document, request)
+
+
+def test_conformance_fails_closed_for_mutated_canonical_recipe() -> None:
+    request = _fixture_request("vllm")
+    raw = request.recipe.model_dump(mode="json")
+    raw["runtime"]["entrypoint"] = ["/bin/sh", "-c", "unsafe"]
+    with pytest.raises(HarnessConformanceError):
+        from vonk_control.harness_conformance import run_recipe_conformance
+
+        run_recipe_conformance(raw, request.models)

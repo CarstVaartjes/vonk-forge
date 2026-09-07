@@ -17,7 +17,6 @@ on:
       - .github/workflows/installer-setups.yml
       - Cargo.lock
       - Cargo.toml
-      - config/execution-harnesses/**
       - control/**
       - deploy/compose/**
       - inventory/wheels/**

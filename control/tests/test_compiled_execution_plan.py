@@ -914,6 +914,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     )
     recipe_document = recipe.model_dump(mode="json")
     model_document = model.model_dump(mode="json")
+    recipe_document["runtime"]["entrypoint"][0] = "/opt/vonk/bin/vllm"
     model_digest = content_sha256(model)
     recipe_document["models"][0]["model"]["content_sha256"] = model_digest
     recipe = RecipeDefinition.model_validate(recipe_document)

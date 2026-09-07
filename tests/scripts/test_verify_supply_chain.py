@@ -164,7 +164,6 @@ def _copy(tmp_path: Path) -> Path:
         "config/model-groups",
         "config/models",
         "config/model-versions",
-        "config/execution-harnesses",
         "config/runtime-distributions",
         "config/patch-bundles",
     ):
