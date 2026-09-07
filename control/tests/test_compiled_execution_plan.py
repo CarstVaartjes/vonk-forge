@@ -971,6 +971,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         _document, image_digest: str, _runtime_spec: dict[str, object]
     ) -> RuntimeImageReceiptWire:
         return RuntimeImageReceiptWire(
+            schema_version=2,
             source="controller-build",
             distribution_publisher=recipe.identity.publisher,
             distribution_slug=recipe.identity.slug,

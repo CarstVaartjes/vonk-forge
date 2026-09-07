@@ -218,7 +218,7 @@ class RuntimeImageReceipt(WireModel):
     plan boundary.
     """
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2]
     source: Literal["published", "controller-build"]
     distribution_publisher: str = Field(min_length=1, max_length=128)
     distribution_slug: str = Field(min_length=1, max_length=128)
@@ -229,7 +229,7 @@ class RuntimeImageReceipt(WireModel):
     oci_archive_sha256: Digest
     image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
     local_image_config_id: ImageDigest | None
-    local_image_reference: str | None = Field(default=None, min_length=1, max_length=512)
+    local_image_reference: str | None = Field(min_length=1, max_length=512)
     architecture: Literal["linux-arm64"]
     runtime_interface: Literal["vonk.runtime.v1"]
     archive_path: str = Field(min_length=1, max_length=4096)
