@@ -1529,9 +1529,8 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert completed_transfer.progress.members[0].completed_bytes == 1024
     assert completed_transfer.progress.members[0].state == "succeeded"
     assert any(
-        isinstance(item, dict)
-        and item.get("node_id") == nodes[0]
-        and item.get("verified") is True
+        item.node_id == nodes[0]
+        and item.verified is True
         for item in completed_transfer.result.get("phase_results", [])
     )
     # The next durable tick consumes the persisted transfer receipts and runs

@@ -32,6 +32,7 @@ from .models import (
 from .run_switch_contract import (
     ArtifactVerificationResult,
     RunSwitchPhase,
+    RunSwitchPhaseResult,
     RunSwitchPlan,
 )
 from .run_switch_operations import PhaseExecution
@@ -48,6 +49,24 @@ class _ChildView:
     def progress(self) -> Mapping[str, object]:
         value = self.result.get("progress")
         return value if isinstance(value, Mapping) else {}
+
+
+def _phase_receipt(value: Mapping[str, object]) -> dict[str, object]:
+    """Validate the closed phase receipt before returning or persisting it."""
+
+    try:
+        normalized = dict(value)
+        assignments = normalized.get("assignments")
+        if isinstance(assignments, Mapping):
+            normalized["assignments"] = {
+                node_id: DistributionAssignment.parse(raw)
+                if isinstance(raw, Mapping) else raw
+                for node_id, raw in assignments.items()
+            }
+        receipt = RunSwitchPhaseResult.model_validate(normalized, strict=True)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("run-switch phase receipt is invalid") from error
+    return receipt.model_dump(mode="json", exclude_unset=True)
 
 
 class DurableDistributionPhaseExecutor:
@@ -77,7 +96,11 @@ class DurableDistributionPhaseExecutor:
         progress: Mapping[str, object],
     ) -> PhaseExecution:
         if phase.kind not in {"transfer", "verify"}:
-            return PhaseExecution(result={"scope": "spark-local", "reclaimed_bytes": 0, "nas_evicted": False})
+            return PhaseExecution(
+                result=_phase_receipt(
+                    {"scope": "spark-local", "reclaimed_bytes": 0, "nas_evicted": False}
+                )
+            )
         if item_index != 0:
             raise RuntimeError(f"unexpected {phase.kind} item index {item_index}")
         if phase.kind == "verify":
@@ -97,7 +120,9 @@ class DurableDistributionPhaseExecutor:
                         verified_registry_manifest_digest=plan.image_digest,
                     )
                 )
-            return PhaseExecution(result=self._verify_evidence(plan, progress, targets, cached))
+            return PhaseExecution(
+                result=_phase_receipt(self._verify_evidence(plan, progress, targets, cached))
+            )
         targets = tuple(phase.node_ids)
         cached = self._cached_targets(plan, targets)
         missing = tuple(node_id for node_id in targets if node_id not in cached)
@@ -159,7 +184,7 @@ class DurableDistributionPhaseExecutor:
         )
         return PhaseExecution(
             operation_id=child_id,
-            result={
+            result=_phase_receipt({
                 "cached_nodes": list(cached),
                 # Persist the exact assignment already verified against the
                 # succeeded build and cache manifest for the verify phase.
@@ -167,7 +192,7 @@ class DurableDistributionPhaseExecutor:
                     node_id: assignment.to_mapping()
                     for node_id, assignment in assignments.items()
                 },
-            },
+            }),
         )
 
     def get(self, operation_id: str) -> Any:
@@ -305,6 +330,7 @@ class DurableDistributionPhaseExecutor:
             if state != child.state:
                 child.state = state
                 child.status_reason = payload.get("reason")
+            payload = _phase_receipt(payload)
             child.result = payload
             child.updated_at = self._clock()
             session.commit()
@@ -435,7 +461,7 @@ class DurableDistributionPhaseExecutor:
                         for node_id, assignment in assignments.items()
                     },
                 },
-                result={"progress": progress, "members": progress["members"]},
+                result=_phase_receipt({"progress": progress, "members": progress["members"]}),
                 created_at=now,
                 updated_at=now,
             )
@@ -900,7 +926,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             runtime_result = self._prepare_runtime_image(plan)
             if runtime_result is None:
                 raise RuntimeError("runtime image preparation returned no evidence")
-            return PhaseExecution(result=runtime_result)
+            return PhaseExecution(result=_phase_receipt(runtime_result))
         if phase.subphase != "model-download":
             return super().execute(
                 plan,
@@ -976,7 +1002,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         if type(expected_bytes) is not int or expected_bytes < 1:
             raise RuntimeError("model-cache download total is unavailable")
         if preview.get("new_bytes") == 0:
-            return PhaseExecution(result={
+            return PhaseExecution(result=_phase_receipt({
                 "skipped": True,
                 "coverage": "complete",
                 "artifact_set_sha256": artifact_set_sha256,
@@ -985,7 +1011,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 # ``new_bytes`` is the operation's transfer envelope.
                 "downloaded_bytes": 0,
                 "total_bytes": 0,
-            })
+            }))
         cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{artifact_set_sha256}"))
         view = start_method(
             actor=actor,
@@ -993,7 +1019,10 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             plan_digest=preview["plan_digest"],
             **pins,
         )
-        return PhaseExecution(operation_id=view.id, result=self._cache_result(view))
+        return PhaseExecution(
+            operation_id=view.id,
+            result=_phase_receipt(self._cache_result(view)),
+        )
 
     def _prepare_runtime_image(
         self, plan: RunSwitchPlan
@@ -1098,7 +1127,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 view = getter(operation_id)
                 return _ChildView(
                     state=self._cache_state(view.state),
-                    result=self._cache_result(view),
+                    result=_phase_receipt(self._cache_result(view)),
                 )
             except ModelCacheNotFound:
                 pass
