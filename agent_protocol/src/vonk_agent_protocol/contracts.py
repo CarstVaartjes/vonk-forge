@@ -183,6 +183,20 @@ class AgentInstallResult(WireModel):
     installed_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
 
 
+class AgentUpgradeResult(WireModel):
+    """Evidence emitted after the Rust agent reports an exact upgrade."""
+
+    architecture: Literal["linux-arm64"]
+    binary_digest: DigestText
+    build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    package_sha256: DigestText
+    package_version: Annotated[
+        str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
+    ]
+    self_test_passed: Literal[True]
+    status: Literal["upgraded"]
+
+
 class _RecipeStartEvidenceCommon(WireModel):
     recipe_revision_id: CanonicalUUID
     recipe_content_sha256: DigestText
@@ -902,6 +916,7 @@ AgentResultPayload = (
     | RecipeJobRunResult
     | ArtifactDistributionResult
     | AgentFailureResult
+    | AgentUpgradeResult
     | AgentResultExtensions
 )
 PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
@@ -929,7 +944,7 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
 # payload registry so Controller ingress can resolve the stored operation and
 # validate the exact result graph before accepting it.
 RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
-    AgentOperation.AGENT_UPGRADE: AgentResultExtensions,
+    AgentOperation.AGENT_UPGRADE: AgentUpgradeResult,
     AgentOperation.NODE_PROBE: NodeProbeResult,
     AgentOperation.RELEASE_INSTALL: AgentResultExtensions,
     AgentOperation.WORKLOAD_PREPARE: AgentResultExtensions,

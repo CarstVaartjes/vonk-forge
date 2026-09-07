@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     canonical_message,
     validate_result_for_operation,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
@@ -54,6 +55,7 @@ _SAFE_AUTOMATIC_RECLAIM = frozenset(
         AgentOperation.NODE_PROBE.value,
         AgentOperation.WORKLOAD_HEALTH.value,
         AgentOperation.WORKLOAD_VERIFY.value,
+        AgentOperation.RECIPE_STOP.value,
     }
 )
 _RECIPE_CAPABILITIES = frozenset(
@@ -129,16 +131,16 @@ def _failure_result(
 ) -> dict[str, object]:
     """Build a typed failure result through the redaction boundary."""
 
-    return sanitize_failure_evidence(
-        {
-            "status": "waiting-for-operator" if uncertain else "failed",
-            "error_code": error_code,
-            "summary": reason,
-            "reason": reason,
-            "uncertain": uncertain,
-            "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
-        }
-    )
+    evidence: dict[str, object] = {
+        "error_code": error_code,
+        "summary": reason,
+        "reason": reason,
+        "uncertain": uncertain,
+        "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
+    }
+    if not uncertain:
+        evidence["status"] = "failed"
+    return sanitize_failure_evidence(evidence)
 
 
 def _aware(value: datetime) -> datetime:
@@ -391,7 +393,7 @@ class AgentJobService:
         lease_seconds: int,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: dict[str, object],
+        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
         hostname: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
@@ -584,7 +586,7 @@ class AgentJobService:
         certificate_serial: str,
         now: datetime,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
     ) -> None:
         if (
             capabilities is None
@@ -679,7 +681,7 @@ class AgentJobService:
     def _recipe_build_runtime_matches(
         session: Session,
         operation: StoredOperation,
-        runtime_identity: Mapping[str, object],
+        runtime_identity: AgentRuntimeIdentity | Mapping[str, object],
     ) -> bool:
         build_id = operation.payload.get("build_id")
         build = (
@@ -1301,7 +1303,7 @@ class AgentJobService:
         now: datetime,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
-        runtime_identity: dict[str, object] | None,
+        runtime_identity: AgentRuntimeIdentity | Mapping[str, object] | None,
         hostname: str | None,
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
@@ -1358,10 +1360,12 @@ class AgentJobService:
 
     @staticmethod
     def _runtime_identity(
-        value: Mapping[str, object] | None,
-    ) -> dict[str, object]:
+        value: AgentRuntimeIdentity | Mapping[str, object] | None,
+    ) -> AgentRuntimeIdentity | dict[str, object]:
         if value is None:
             raise ValueError("agent runtime identity is required")
+        if isinstance(value, AgentRuntimeIdentity):
+            return value
         if not isinstance(value, Mapping):
             raise TypeError("agent runtime identity is invalid")
         document = dict(value)
@@ -1374,6 +1378,11 @@ class AgentJobService:
             "activation_deadline",
         } & document.keys():
             raise ValueError("retired runtime identity fields are not supported")
+        if "observation_receipt_public_key" in document:
+            try:
+                return AgentRuntimeIdentity.model_validate(document)
+            except ValueError as error:
+                raise ValueError("agent runtime identity is invalid") from error
         required = {
             "architecture",
             "binary_digest",

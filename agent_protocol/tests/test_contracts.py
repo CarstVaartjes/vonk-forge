@@ -35,10 +35,22 @@ def valid_claim() -> dict[str, object]:
         "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
         "node_id": "spk_00000000000000000000000000000001",
-        "operation": "node.probe",
+        "operation": "recipe.stop",
         "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(b"{}").hexdigest(),
-        "payload": {},
+        "payload_digest": hashlib.sha256(
+            canonical_message(
+                {
+                    "schema_version": 1,
+                    "run_id": "00000000-0000-4000-8000-000000000001",
+                    "plan_digest": "a" * 64,
+                }
+            )
+        ).hexdigest(),
+        "payload": {
+            "schema_version": 1,
+            "run_id": "00000000-0000-4000-8000-000000000001",
+            "plan_digest": "a" * 64,
+        },
         "deadline": "2026-08-03T12:00:00+00:00",
     }
 
@@ -435,6 +447,33 @@ def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> Non
     assert validate_schema_message("agent-job.schema.json", raw)
 
 
+def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
+    result = {
+        "architecture": "linux-arm64",
+        "binary_digest": "d" * 64,
+        "build_digest": "sha256:" + "e" * 64,
+        "package_sha256": "b" * 64,
+        "package_version": "0.1.0~dev.330+g0123456789ab",
+        "self_test_passed": True,
+        "status": "upgraded",
+    }
+
+    parsed = validate_result_for_operation(
+        AgentOperation.AGENT_UPGRADE,
+        result,
+        state="succeeded",
+    )
+
+    assert parsed is not None
+    assert parsed.__class__.__name__ == "AgentUpgradeResult"
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.AGENT_UPGRADE,
+            result | {"status": "failed"},
+            state="succeeded",
+        )
+
+
 def protocol_message_with_document(
     name: str,
     document: dict[str, str],
@@ -744,7 +783,9 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
 
     with pytest.raises(AgentProtocolError, match="large"):
         AgentClaim.parse(
-            claim_for_operation("node.probe", {"value": "x" * MAX_DOCUMENT_BYTES})
+            claim_for_operation(
+                "recipe.stop", {"value": "x" * MAX_DOCUMENT_BYTES}
+            )
         )
 
 
