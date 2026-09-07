@@ -12,7 +12,6 @@ import type {
   ControlApi,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
-  FleetEvidenceResponse,
   FleetNodeIdentity,
   FleetProfile,
   FleetProfileApplication,
@@ -599,14 +598,6 @@ export class ApiClient implements ControlApi {
   artifactJobResultUrl(jobId: string, sha256: string): string {
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
     return `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
-  }
-
-  async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
-    return resultData(await this.generated.GET("/api/v1/nodes/status", {signal}));
-  }
-
-  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
-    return this.nodeStatuses(signal);
   }
 
   async nodeTelemetryHistory(
