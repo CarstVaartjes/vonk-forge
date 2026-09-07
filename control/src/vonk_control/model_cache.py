@@ -263,6 +263,11 @@ class ArtifactSpec:
 
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
+        if "model_version_sha256" in value:
+            raise ModelCacheResolutionError(
+                "model_cache.manifest_invalid",
+                "retired model-version artifact identity is not accepted",
+            )
         try:
             roles = value["roles"]
             if not isinstance(roles, list) or not all(
@@ -349,6 +354,22 @@ class ArtifactSetManifest:
         if value.get("schema_version") != SCHEMA_VERSION:
             raise ModelCacheResolutionError(
                 "model_cache.schema_unsupported", "cache manifest schema is unsupported"
+            )
+        if any(
+            key in value
+            for key in ("model_version_sha256", "model_versions", "model_version_ref")
+        ):
+            raise ModelCacheResolutionError(
+                "model_cache.manifest_invalid",
+                "retired model-version identity fields are not accepted",
+            )
+        if not all(
+            key in value
+            for key in ("model_content_sha256", "model_content_digests", "model_definition_ref")
+        ):
+            raise ModelCacheResolutionError(
+                "model_cache.manifest_invalid",
+                "canonical model identity fields are required",
             )
         raw_artifacts = value.get("artifacts")
         raw_model_content_digests = value.get("model_content_digests", [])
