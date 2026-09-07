@@ -449,6 +449,23 @@ pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
     json!({"installed_bytes": installed_bytes})
 }
 
+pub fn recipe_uninstall_success_body(removed_model_bytes: u64) -> Value {
+    json!({
+        "uninstalled": true,
+        "removed_model_bytes": removed_model_bytes,
+    })
+}
+
+pub fn recipe_model_cleanup_success_body(
+    uninstalled_installations: usize,
+    removed_model_bytes: u64,
+) -> Value {
+    json!({
+        "uninstalled_installations": uninstalled_installations,
+        "removed_model_bytes": removed_model_bytes,
+    })
+}
+
 pub fn recipe_start_success_body(
     request: &RecipeStartRequest,
     spec: &CompiledExecutionPlan,
@@ -1788,10 +1805,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 } else {
                     ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "uninstalled": true,
-                            "removed_model_bytes": removed_model_bytes.unwrap_or(0),
-                        }),
+                        body: recipe_uninstall_success_body(removed_model_bytes.unwrap_or(0)),
                     }
                 }
             }
@@ -1812,10 +1826,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     Ok(removed_model_bytes) => ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "uninstalled_installations": installations.len(),
-                            "removed_model_bytes": removed_model_bytes,
-                        }),
+                        body: recipe_model_cleanup_success_body(
+                            installations.len(),
+                            removed_model_bytes,
+                        ),
                     },
                     Err(_) => failed("model dependencies could not be safely removed"),
                 }

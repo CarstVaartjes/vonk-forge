@@ -94,9 +94,7 @@ def _queued_children(sessions, operation_id: str) -> tuple[AgentOperation, ...]:
         )
 
 
-def _bridge(
-    probe: Path, rows: tuple[AgentOperation, ...]
-) -> tuple[AgentResult, ...]:
+def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult, ...]:
     assert rows
     input_document = "".join(
         json.dumps(_claim(row), separators=(",", ":")) + "\n" for row in rows
@@ -117,6 +115,18 @@ def _bridge(
         evidence = result.result.get("evidence", result.result)
         if row.kind == "recipe.install":
             assert set(result.result) == {"installed_bytes"}
+        elif row.kind == "recipe.uninstall":
+            assert set(result.result) == {"uninstalled", "removed_model_bytes"}
+            assert result.result == {
+                "uninstalled": True,
+                "removed_model_bytes": 0,
+            }
+        elif row.kind == "recipe.model-uninstall.v1":
+            assert set(result.result) == {
+                "uninstalled_installations",
+                "removed_model_bytes",
+            }
+            assert result.result["removed_model_bytes"] == 0
         else:
             assert "evidence" in result.result
         if "image_digest" in evidence:
@@ -213,6 +223,81 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
             )
         )
         assert node is not None and node.state == "running"
+
+
+def test_controller_routine_uninstall_payload_crosses_rust_and_back(
+    tmp_path: Path, install_start_wire_probe: Path
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="70000000-0000-4000-8000-000000000001",
+    )
+
+    preview = service.preview_uninstall(installation.owner_id)
+    operation = service.uninstall(
+        installation.owner_id,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="70000000-0000-4000-8000-000000000002",
+    )
+    rows = _queued_children(sessions, operation.id)
+    assert len(rows) == 1
+    assert rows[0].kind == "recipe.uninstall"
+    assert rows[0].payload["cleanup_model_content_sha256"] == (
+        preview.model_impact.model_content_sha256
+    )
+
+    results = _bridge(install_start_wire_probe, rows)
+    _project(service, sessions, rows, results)
+    assert service.get(operation.id).state == "succeeded"
+
+
+def test_controller_explicit_multi_model_cleanup_payload_crosses_rust_and_back(
+    tmp_path: Path, install_start_wire_probe: Path
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    first = installed_recipe(
+        service,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="70000000-0000-4000-8000-000000000003",
+    )
+    second = installed_recipe(
+        service,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="70000000-0000-4000-8000-000000000004",
+    )
+
+    model_digest = service.preview_uninstall(
+        first.owner_id
+    ).model_impact.model_content_sha256
+    assert model_digest is not None
+    preview = service.preview_model_deletion(model_digest)
+    operation = service.delete_model(
+        model_digest,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id="70000000-0000-4000-8000-000000000005",
+    )
+    rows = _queued_children(sessions, operation.id)
+    assert len(rows) == 1
+    assert rows[0].kind == "recipe.model-uninstall.v1"
+    assert rows[0].payload["model_content_sha256"] == model_digest
+    assert {item["installation_id"] for item in rows[0].payload["installations"]} == {
+        first.owner_id,
+        second.owner_id,
+    }
+
+    results = _bridge(install_start_wire_probe, rows)
+    _project(service, sessions, rows, results)
+    assert service.get(operation.id).state == "succeeded"
 
 
 def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back(
