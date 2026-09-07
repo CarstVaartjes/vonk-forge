@@ -35,22 +35,10 @@ def valid_claim() -> dict[str, object]:
         "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
         "node_id": "spk_00000000000000000000000000000001",
-        "operation": "recipe.stop",
+        "operation": "node.probe",
         "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(
-            canonical_message(
-                {
-                    "schema_version": 1,
-                    "run_id": "00000000-0000-4000-8000-000000000001",
-                    "plan_digest": "a" * 64,
-                }
-            )
-        ).hexdigest(),
-        "payload": {
-            "schema_version": 1,
-            "run_id": "00000000-0000-4000-8000-000000000001",
-            "plan_digest": "a" * 64,
-        },
+        "payload_digest": hashlib.sha256(b"{}").hexdigest(),
+        "payload": {},
         "deadline": "2026-08-03T12:00:00+00:00",
     }
 

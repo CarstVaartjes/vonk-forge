@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -55,7 +56,6 @@ _SAFE_AUTOMATIC_RECLAIM = frozenset(
         AgentOperation.NODE_PROBE.value,
         AgentOperation.WORKLOAD_HEALTH.value,
         AgentOperation.WORKLOAD_VERIFY.value,
-        AgentOperation.RECIPE_STOP.value,
     }
 )
 _RECIPE_CAPABILITIES = frozenset(
@@ -1361,74 +1361,13 @@ class AgentJobService:
     @staticmethod
     def _runtime_identity(
         value: AgentRuntimeIdentity | Mapping[str, object] | None,
-    ) -> AgentRuntimeIdentity | dict[str, object]:
+    ) -> AgentRuntimeIdentity:
         if value is None:
             raise ValueError("agent runtime identity is required")
-        if isinstance(value, AgentRuntimeIdentity):
-            return value
-        if not isinstance(value, Mapping):
-            raise TypeError("agent runtime identity is invalid")
-        document = dict(value)
-        if {
-            "active_slot",
-            "agent_sha256",
-            "platform_version",
-            "supervisor_generation",
-            "supervisor_ready_generation",
-            "activation_deadline",
-        } & document.keys():
-            raise ValueError("retired runtime identity fields are not supported")
-        if "observation_receipt_public_key" in document:
-            try:
-                return AgentRuntimeIdentity.model_validate(document)
-            except ValueError as error:
-                raise ValueError("agent runtime identity is invalid") from error
-        required = {
-            "architecture",
-            "binary_digest",
-            "build_digest",
-            "semantic_version",
-            "self_test_passed",
-        }
-        # Keep the identity envelope forward-compatible.  Only the stable
-        # fields are persisted/validated; newer agents may attach additional
-        # evidence without making an otherwise compatible claim unusable.
-        if (
-            not required <= document.keys()
-            or document["architecture"] not in {"linux-amd64", "linux-arm64"}
-            or not isinstance(document["architecture"], str)
-            or not isinstance(document["binary_digest"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", document["binary_digest"]) is None
-            or not isinstance(document["build_digest"], str)
-            or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
-            or not isinstance(document["semantic_version"], str)
-            or re.fullmatch(
-                r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-                document["semantic_version"],
-            )
-            is None
-            or document["self_test_passed"] is not True
-            or (
-                document.get("observation_receipt_public_key") is not None
-                and (
-                    not isinstance(document["observation_receipt_public_key"], str)
-                    or re.fullmatch(
-                        r"[0-9a-f]{64}",
-                        document["observation_receipt_public_key"],
-                    )
-                    is None
-                )
-            )
-        ):
-            raise ValueError("agent runtime identity is invalid")
-        return {
-            key: document[key]
-            for key in (
-                *sorted(required),
-                "observation_receipt_public_key",
-            )
-            if key in document
-        }
+        try:
+            return AgentRuntimeIdentity.model_validate(value)
+        except (TypeError, ValidationError) as error:
+            raise ValueError("agent runtime identity is invalid") from error
 
     def _consume_contact(
         self,

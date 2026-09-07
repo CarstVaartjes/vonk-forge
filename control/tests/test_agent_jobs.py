@@ -179,6 +179,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "build_digest": "sha256:" + "f" * 64,
         "semantic_version": "0.1.0",
         "self_test_passed": True,
+        "observation_receipt_public_key": "d" * 64,
     }
     claim = claim_agent(
         jobs,
@@ -390,7 +391,9 @@ def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
                 "observation_receipt_public_key": "2" * 64,
             },
         )
-    with pytest.raises(ValueError, match="receipt identity is incomplete"):
+    incomplete_identity = dict(PACKAGED_RUNTIME_IDENTITY)
+    incomplete_identity.pop("observation_receipt_public_key")
+    with pytest.raises(ValueError, match="runtime identity is invalid"):
         jobs.claim(
             NODE_B,
             "serial-b",
@@ -399,7 +402,7 @@ def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
                 "agent.runtime.rust.v1",
                 "recipe.run.inspect.receipt.v1",
             ],
-            runtime_identity=PACKAGED_RUNTIME_IDENTITY,
+            runtime_identity=incomplete_identity,
         )
 
 
@@ -580,6 +583,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "binary_digest": "e" * 64,
             "semantic_version": "1.2.3",
             "self_test_passed": True,
+            "observation_receipt_public_key": "d" * 64,
         },
     )
 
@@ -745,17 +749,22 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
 
 def test_expired_attempt_cannot_publish_success(service) -> None:
     jobs, sessions, clock = service
-    jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
 
     clock.advance(seconds=31)
     second = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert second is not None
+    assert second is None
 
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(first, STOP_RESULT)
-    jobs.succeed(second, STOP_RESULT)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "waiting-for-operator"
 
 
 def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) -> None:
@@ -880,6 +889,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
+        "observation_receipt_public_key": "d" * 64,
     }
 
     assert (
@@ -903,6 +913,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "build_digest": node.build_digest,
             "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
+            "observation_receipt_public_key": node.observation_receipt_public_key,
         } == runtime_identity
 
 
@@ -918,6 +929,7 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
+        "observation_receipt_public_key": "d" * 64,
     }
 
     with pytest.raises(ValueError, match="runtime identity"):
@@ -1018,17 +1030,22 @@ def test_structured_fence_cannot_update_a_different_operation(service) -> None:
     assert first.operation_id != other_operation.id
 
 
-def test_attempt_expiring_exactly_at_claim_time_is_reclaimable(service) -> None:
+def test_attempt_expiring_exactly_at_claim_time_requires_operator_retry(service) -> None:
     jobs, sessions, clock = service
-    jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
 
     clock.advance(seconds=30)
     second = claim_agent(jobs, NODE_A, "serial-a", 30)
 
-    assert second is not None
-    assert second.fence != first.fence
+    assert second is None
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "waiting-for-operator"
 
 
 def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
