@@ -1110,18 +1110,16 @@ class AgentClaim(WireModel):
             operation=self.operation,
             maximum_bytes=maximum_bytes,
         )
-        if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}:
-            from .recipe_operations import RecipeInstallPayload, RecipeStartPayload
+        if self.operation in {
+            AgentOperation.RECIPE_INSTALL,
+            AgentOperation.RECIPE_START,
+            AgentOperation.RECIPE_STOP,
+            AgentOperation.RECIPE_UNINSTALL,
+            AgentOperation.RECIPE_MODEL_UNINSTALL,
+        }:
+            from .recipe_operations import RecipeOperationRequest
 
-            try:
-                typed_payload = json.loads(canonical_message(payload))
-                (
-                    RecipeInstallPayload
-                    if self.operation is AgentOperation.RECIPE_INSTALL
-                    else RecipeStartPayload
-                ).model_validate(typed_payload)
-            except Exception as error:
-                raise AgentProtocolError("recipe operation payload is invalid") from error
+            RecipeOperationRequest.parse(self.operation, payload)
         elif self.operation is AgentOperation.ARTIFACT_DISTRIBUTION:
             try:
                 ArtifactDistributionPayload.model_validate_json(canonical_message(payload))
