@@ -8,8 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
-    HostHelperOperation,
-    HostOperationKind,
+    ExecuteContainerRuntimeRequestOperation,
+    RestartVonkUnitOperation,
+    ScheduleRebootOperation,
     host_helper_grant_signing_bytes,
 )
 from vonk_control.host_helper_authority import (
@@ -42,9 +43,7 @@ def test_controller_issues_exact_short_lived_host_grant() -> None:
     authority = issuer()
     grant = authority.issue_grant(
         node_id="spk_" + "1" * 32,
-        operation=HostHelperOperation(
-            HostOperationKind.RESTART_VONK_UNIT, {"unit": "agent"}
-        ),
+        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
         expires_in_seconds=90,
     )
 
@@ -61,16 +60,14 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
     authority = issuer()
     grant = authority.issue_grant(
         node_id="spk_" + "1" * 32,
-        operation=HostHelperOperation(
-            HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
-            {
-                "action": ContainerRuntimeAction.START.value,
-                "job_id": "20000000-0000-4000-8000-000000000002",
-                "operation_id": "30000000-0000-4000-8000-000000000003",
-                "attempt": 2,
-                "fence": "40000000-0000-4000-8000-000000000004",
-                "request_sha256": "a" * 64,
-            },
+        operation=ExecuteContainerRuntimeRequestOperation(
+            type="execute-container-runtime-request",
+            action=ContainerRuntimeAction.START.value,
+            job_id="20000000-0000-4000-8000-000000000002",
+            operation_id="30000000-0000-4000-8000-000000000003",
+            attempt=2,
+            fence="40000000-0000-4000-8000-000000000004",
+            request_sha256="a" * 64,
         ),
         expires_in_seconds=30,
     )
@@ -91,9 +88,7 @@ def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError, match="expiry"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation=HostHelperOperation(
-                HostOperationKind.SCHEDULE_REBOOT, {"delay_seconds": 120}
-            ),
+            operation=ScheduleRebootOperation(type="schedule-reboot", delay_seconds=120),
             expires_in_seconds=seconds,
         )
 
@@ -229,8 +224,8 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         certificate_serial="certificate-1",
     )
 
-    assert grant.claims.operation.values["request_sha256"] == "e" * 64
-    assert grant.claims.operation.values["action"] == "start"
+    assert grant.claims.operation.request_sha256 == "e" * 64
+    assert grant.claims.operation.action == "start"
 
     inspect = service.issue_grant(
         node_id="spk_" + "1" * 32,
@@ -242,7 +237,7 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         request_sha256="f" * 64,
         certificate_serial="certificate-1",
     )
-    assert inspect.claims.operation.values["action"] == "run-inspect"
+    assert inspect.claims.operation.action == "run-inspect"
 
 
 def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
@@ -259,7 +254,7 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
     assert (
         service.issue_grant(
             **common, action=ContainerRuntimeAction.RUN_INSPECT
-        ).claims.operation.values["action"]
+        ).claims.operation.action
         == "run-inspect"
     )
     for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
@@ -286,7 +281,7 @@ def test_job_run_cancellation_keeps_exact_start_and_stop_authority_live(
         certificate_serial="certificate-1",
     )
 
-    assert grant.claims.operation.values["action"] == action.value
+    assert grant.claims.operation.action == action.value
 
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:

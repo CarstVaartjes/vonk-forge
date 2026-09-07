@@ -24,8 +24,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
-    HostHelperOperation,
-    HostOperationKind,
+    ExecuteContainerRuntimeRequestOperation,
+    InstallVonkDebOperation,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -787,16 +787,14 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_grant(self, **kwargs: object) -> object:
             self.grant_calls.append(kwargs)
-            operation = HostHelperOperation(
-                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
-                {
-                    "action": kwargs["action"].value,
-                    "job_id": kwargs["job_id"],
-                    "operation_id": kwargs["operation_id"],
-                    "attempt": kwargs["attempt"],
-                    "fence": kwargs["fence"],
-                    "request_sha256": kwargs["request_sha256"],
-                },
+            operation = ExecuteContainerRuntimeRequestOperation(
+                type="execute-container-runtime-request",
+                action=kwargs["action"].value,
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                request_sha256=kwargs["request_sha256"],
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -806,12 +804,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
             self.upgrade_calls.append(kwargs)
-            operation = HostHelperOperation(
-                HostOperationKind.INSTALL_VONK_DEB,
-                {
-                    "package_sha256": kwargs["package_sha256"],
-                    "package_signature": kwargs["package_signature"],
-                },
+            operation = InstallVonkDebOperation(
+                type="install-vonk-deb",
+                package_sha256=kwargs["package_sha256"],
+                package_signature=kwargs["package_signature"],
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
