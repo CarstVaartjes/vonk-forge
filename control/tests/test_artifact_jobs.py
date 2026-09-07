@@ -23,6 +23,7 @@ from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStor
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
     ArtifactJobService,
+    CompiledArtifactContract,
     _effective_parameters,
     _validate_parameter_definition,
 )
@@ -380,6 +381,25 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
 
     with pytest.raises(ArtifactJobError, match="request key"):
         service.create(**request)
+
+
+def test_artifact_job_persisted_contract_is_validated_before_projection(
+    tmp_path,
+) -> None:
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000118")
+    created = service.create(**request)
+    assert isinstance(created.compiled_contract, CompiledArtifactContract)
+
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        row.compiled_contract = {"schema_version": 1}
+
+    with pytest.raises(ArtifactJobError, match="compiled artifact contract"):
+        service.get(created.id)
 
 
 def test_artifact_job_create_exact_concurrent_replay_has_one_identity(

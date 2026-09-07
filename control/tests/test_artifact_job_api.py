@@ -22,7 +22,42 @@ class _ArtifactJobView:
     interface: str = "image-job"
     contract_sha256: str = "a" * 64
     compiled_contract: dict[str, object] = field(
-        default_factory=lambda: {"engine": {"future_argument": {"enabled": True}}}
+        default_factory=lambda: {
+            "schema_version": 1,
+            "interface": "image-job",
+            "input": {
+                "required": False,
+                "media_types": [],
+                "max_bytes": 0,
+                "slots": [],
+            },
+            "parameters": [],
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 1024,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Image",
+                        "description": "Generated image",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 0,
+                        "max_files": 1,
+                        "max_file_bytes": 1024,
+                        "max_total_bytes": 1024,
+                    }
+                ],
+            },
+            "output_limits": {
+                "max_files": 1,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 1024,
+                "allowed_media_types": ["image/png"],
+            },
+            "max_timeout_seconds": 3600,
+            "engine": {"future_argument": {"enabled": True}},
+        }
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
@@ -43,7 +78,6 @@ class _ArtifactJobView:
     timeout_seconds: int = 60
     created_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
     updated_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
-
 
 
 class _TransferService:
