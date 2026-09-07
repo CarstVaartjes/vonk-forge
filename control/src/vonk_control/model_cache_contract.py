@@ -20,7 +20,9 @@ Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True
+    )
 
 
 class ModelCacheDownloadRequest(StrictModel):
