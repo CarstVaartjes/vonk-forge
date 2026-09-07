@@ -325,7 +325,7 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
                 "label": "Document",
                 "description": "A JSON document to process",
                 "media_types": ["application/json"],
-                "extensions": [".json"],
+                "extensions": [".7z"],
                 "min_files": 1,
                 "max_files": 1,
                 "max_file_bytes": 1024,
@@ -352,6 +352,7 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
         lambda item: item.update(declared_content={"vendor": "free-form"}),
         lambda item: item.pop("required"),
         lambda item: item.update(max_bytes="1024"),
+        lambda item: item["slots"][0].update(max_files=0),
         lambda item: item["slots"][0].update(max_total_bytes=2048),
     ):
         invalid = copy.deepcopy(value)

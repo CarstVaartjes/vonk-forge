@@ -103,7 +103,7 @@ fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
                 "label": "Document",
                 "description": "A JSON document to process",
                 "media_types": ["application/json"],
-                "extensions": [".json"],
+                "extensions": [".7z"],
                 "min_files": 1,
                 "max_files": 1,
                 "max_file_bytes": 1024,
@@ -120,15 +120,18 @@ fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
     for mutation in [
         ("unknown", json!({"vendor": "free-form"})),
         ("missing", Value::Null),
+        ("zero_max_files", json!(0)),
     ] {
         let mut invalid = value.clone();
         if mutation.0 == "unknown" {
             invalid["job"]["input"]["declared_content"] = mutation.1;
-        } else {
+        } else if mutation.0 == "missing" {
             invalid["job"]["input"]
                 .as_object_mut()
                 .unwrap()
                 .remove("required");
+        } else {
+            invalid["job"]["input"]["slots"][0]["max_files"] = mutation.1;
         }
         assert!(serde_json::from_value::<CompiledExecutionPlan>(invalid).is_err());
     }

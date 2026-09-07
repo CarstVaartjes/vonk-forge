@@ -582,10 +582,8 @@ impl CompiledJobInputSlot {
             && valid_job_slot_id(&self.id)
             && !self.label.is_empty()
             && self.label.chars().count() <= 64
-            && !self.label.contains('\0')
             && !self.description.is_empty()
             && self.description.chars().count() <= 256
-            && !self.description.contains('\0')
             && (1..=16).contains(&self.media_types.len())
             && self.media_types.iter().all(|media_type| {
                 valid_job_media_type(media_type)
@@ -597,7 +595,7 @@ impl CompiledJobInputSlot {
                 valid_job_extension(extension) && extensions.insert(extension.as_str())
             })
             && self.min_files <= self.max_files
-            && self.max_files <= 32
+            && (1..=32).contains(&self.max_files)
             && self.max_file_bytes > 0
             && self.max_file_bytes <= 512 * 1024 * 1024
             && self.max_total_bytes >= self.max_file_bytes
@@ -858,7 +856,7 @@ fn valid_job_extension(value: &str) -> bool {
     bytes.len() >= 2
         && bytes.len() <= 17
         && bytes[0] == b'.'
-        && bytes[1].is_ascii_lowercase()
+        && (bytes[1].is_ascii_lowercase() || bytes[1].is_ascii_digit())
         && bytes[2..].iter().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
         })

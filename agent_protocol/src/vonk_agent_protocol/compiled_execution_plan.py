@@ -521,12 +521,6 @@ class CompiledJob(_Strict):
     output_path: Literal["/outputs"]
     timeout_seconds: int = Field(ge=1, le=3600)
 
-    @model_validator(mode="after")
-    def input_path_is_bound(self) -> CompiledJob:
-        if self.input is not None and self.input.path != "/inputs":
-            raise ValueError("job input path is invalid")
-        return self
-
 
 class CompiledExecutionPlan(_Strict):
     schema_version: Literal[2]
