@@ -1037,6 +1037,12 @@ impl RecipeOperationRequest {
                     // unphased.  The collective readiness variant carries
                     // the complete phase envelope below.
                     (None, None, None) => true,
+                    // A singleton has no rendezvous phase, but still carries
+                    // its run generation so its exact observation binding is
+                    // persisted from the initial start.
+                    (None, None, Some(generation)) => {
+                        generation > 0 && value.world_size == 1
+                    }
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
@@ -2314,6 +2320,54 @@ mod recipe_run_inspection_tests {
         );
         replay_shaped.claims.node_id = "wrong".to_owned();
         assert!(replay_shaped.validate().is_err());
+    }
+
+    #[test]
+    fn singleton_observation_uses_the_same_required_signed_shape() {
+        let mut binding = binding();
+        binding.rank = 0;
+        binding.role = "entrypoint".to_owned();
+        binding.world_size = 1;
+        binding.local_address = "192.168.100.10".parse().unwrap();
+        binding.master_address = binding.local_address;
+        binding.master_port = binding.port;
+        binding.validate().unwrap();
+
+        let observed_at = DateTime::from_timestamp(1_788_000_000, 0).unwrap();
+        let identity_sha256 = "a".repeat(64);
+        let receipt = RecipeRunObservationReceipt {
+            schema_version: 1,
+            claims: RecipeRunObservationReceiptClaims {
+                schema_version: 1,
+                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
+                node_id: "spk_11111111111111111111111111111111".to_owned(),
+                request_id: Uuid::new_v4(),
+                request_sha256: "b".repeat(64),
+                observation_identity_sha256: identity_sha256.clone(),
+                outcome: RecipeRunObservationOutcome::Running,
+                observed_at: observed_at.timestamp(),
+            },
+            signature: RecipeRunObservationReceiptSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: "c".repeat(64),
+                value: "d".repeat(128),
+            },
+        };
+        let observation = RecipeRunObservationWire {
+            schema_version: 1,
+            node_id: receipt.claims.node_id.clone(),
+            binding,
+            observed_at,
+            endpoint_ready: Some(true),
+            observation_identity_sha256: identity_sha256,
+            grant: serde_json::json!({"schema_version": 1}),
+            helper_receipt: receipt,
+            observation_receipt_public_key: "e".repeat(64),
+        };
+        observation.validate().unwrap();
+        let mut encoded = serde_json::to_value(&observation).unwrap();
+        encoded.as_object_mut().unwrap().remove("endpoint_ready");
+        assert!(serde_json::from_value::<RecipeRunObservationWire>(encoded).is_err());
     }
 }
 

@@ -60,9 +60,6 @@ from .recipe_operations import (
 )
 from .recipe_observations import (
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-    RecipeRunObservationReceiptWire,
-    RecipeRunObservationReceiptClaimsWire,
-    RecipeRunObservationReceiptSignatureWire,
     RecipeRunObservationWire,
     RecipeRunObservationsWire,
 )
@@ -120,9 +117,6 @@ __all__ = [
     "RecipeJobRunResult",
     "RecipeOperationRequest",
     "RecipeRunObservationReceiptClaims",
-    "RecipeRunObservationReceiptWire",
-    "RecipeRunObservationReceiptClaimsWire",
-    "RecipeRunObservationReceiptSignatureWire",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
     "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",

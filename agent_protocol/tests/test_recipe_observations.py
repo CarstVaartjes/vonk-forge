@@ -44,7 +44,32 @@ def _observation() -> dict[str, object]:
         "observed_at": datetime.fromtimestamp(observed_at, UTC).isoformat(),
         "endpoint_ready": None,
         "observation_identity_sha256": identity_sha256,
-        "grant": {"claims": {"request_id": "50000000-0000-4000-8000-000000000005"}},
+        "grant": {
+            "schema_version": 1,
+            "claims": {
+                "schema_version": 1,
+                "authority": "vonk.host-maintenance-helper",
+                "request_id": "50000000-0000-4000-8000-000000000005",
+                "node_id": identity["node_id"],
+                "issued_at": observed_at,
+                "expires_at": observed_at + 60,
+                "operation": {
+                    "type": "execute-container-runtime-request",
+                    "action": "run-inspect",
+                    "job_id": identity["run_id"],
+                    "operation_id": "60000000-0000-4000-8000-000000000006",
+                    "attempt": 3,
+                    "fence": "70000000-0000-4000-8000-000000000007",
+                    "request_sha256": "e" * 64,
+                    "observation_identity_sha256": identity_sha256,
+                },
+            },
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": hashlib.sha256(bytes.fromhex(public_key)).hexdigest(),
+                "value": "f" * 128,
+            },
+        },
         "helper_receipt": {
             "schema_version": 1,
             "claims": {
@@ -96,6 +121,47 @@ def test_legacy_and_receiptless_observations_are_rejected() -> None:
         )
     payload = _observation()
     payload.pop("helper_receipt")
+    with pytest.raises(Exception):
+        RecipeRunObservationWire.parse(payload)
+
+
+def test_singleton_observation_uses_the_same_signed_structure() -> None:
+    payload = _observation()
+    payload.update(
+        {
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": "192.168.100.2",
+            "master_address": "192.168.100.2",
+            "endpoint_ready": True,
+        }
+    )
+    identity = {
+        key: value
+        for key, value in payload.items()
+        if key
+        not in {
+            "observed_at",
+            "endpoint_ready",
+            "observation_identity_sha256",
+            "grant",
+            "helper_receipt",
+            "observation_receipt_public_key",
+        }
+    }
+    identity_sha256 = hashlib.sha256(canonical_message(identity)).hexdigest()
+    payload["observation_identity_sha256"] = identity_sha256
+    payload["grant"]["claims"]["operation"]["observation_identity_sha256"] = identity_sha256  # type: ignore[index]
+    payload["helper_receipt"]["claims"]["observation_identity_sha256"] = identity_sha256  # type: ignore[index]
+    parsed = RecipeRunObservationWire.parse(payload)
+    assert parsed.world_size == 1
+    assert parsed.endpoint_ready is True
+
+
+def test_observation_endpoint_readiness_field_is_required() -> None:
+    payload = _observation()
+    payload.pop("endpoint_ready")
     with pytest.raises(Exception):
         RecipeRunObservationWire.parse(payload)
 

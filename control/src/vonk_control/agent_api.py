@@ -2042,8 +2042,8 @@ def install_agent_routes(
                             identity=evidence.observation_identity(),
                             observed_at=evidence_observed_at,
                             received_at=now,
-                            signed_grant=evidence.grant,
-                            helper_receipt=evidence.helper_receipt.model_dump(mode="json"),
+                            signed_grant=evidence.grant.to_mapping(),
+                            helper_receipt=evidence.helper_receipt.to_mapping(),
                         )
                     except HostHelperAuthorityError:
                         # An authenticated same-generation identity mismatch is

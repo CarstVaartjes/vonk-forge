@@ -593,11 +593,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .collect::<Result<Vec<_>, _>>()?;
         let observation = identity
             .map(|identity| {
-                let local_address = placement.local_address.ok_or(OciError::Artifact)?;
-                let master_address = placement.master_address.ok_or(OciError::Artifact)?;
-                let master_port = placement.master_port.ok_or(OciError::Artifact)?;
-                if placement.world_size <= 1
-                    || identity.mapping_generation == 0
+                let (local_address, master_address, master_port) = if placement.world_size == 1 {
+                    let endpoint = placement.endpoint_address.ok_or(OciError::Artifact)?;
+                    (endpoint, endpoint, placement.port)
+                } else {
+                    (
+                        placement.local_address.ok_or(OciError::Artifact)?,
+                        placement.master_address.ok_or(OciError::Artifact)?,
+                        placement.master_port.ok_or(OciError::Artifact)?,
+                    )
+                };
+                if identity.mapping_generation == 0
                     || identity.run_generation == 0
                     || identity.recipe_content_sha256 != self.recipe_digest(installation_id)?
                 {
@@ -882,9 +888,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 || binding.rank != placement.rank
                 || binding.role != placement.role
                 || binding.world_size != placement.world_size
-                || Some(binding.local_address) != placement.local_address
-                || Some(binding.master_address) != placement.master_address
-                || Some(binding.master_port) != placement.master_port
+                || Some(binding.local_address)
+                    != (if placement.world_size == 1 {
+                        placement.endpoint_address
+                    } else {
+                        placement.local_address
+                    })
+                || Some(binding.master_address)
+                    != (if placement.world_size == 1 {
+                        placement.endpoint_address
+                    } else {
+                        placement.master_address
+                    })
+                || Some(binding.master_port)
+                    != (if placement.world_size == 1 {
+                        Some(placement.port)
+                    } else {
+                        placement.master_port
+                    })
                 || binding.port != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?

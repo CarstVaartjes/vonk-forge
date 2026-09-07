@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, field_serializer, field_validator, model_validator
 
 from .contracts import AgentProtocolError, canonical_message
+from .host_helper import SignedHostHelperGrant, SignedRecipeRunObservationReceipt
 from .wire_model import WireModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -32,29 +33,6 @@ def _strict_datetime(value: object, message: str) -> object:
         except ValueError as error:
             raise ValueError(message) from error
     raise ValueError(message)
-
-
-class RecipeRunObservationReceiptSignatureWire(WireModel):
-    algorithm: Literal["ed25519"]
-    key_id: Digest
-    value: str = Field(pattern=r"^[0-9a-f]{128}$")
-
-
-class RecipeRunObservationReceiptClaimsWire(WireModel):
-    schema_version: Literal[1]
-    authority: Literal["vonk.recipe-run-observation-helper"]
-    node_id: str = Field(pattern=_NODE)
-    request_id: str = Field(pattern=_UUID4)
-    request_sha256: Digest
-    observation_identity_sha256: Digest
-    outcome: Literal["running", "not-running"]
-    observed_at: int = Field(gt=0, strict=True)
-
-
-class RecipeRunObservationReceiptWire(WireModel):
-    schema_version: Literal[1]
-    claims: RecipeRunObservationReceiptClaimsWire
-    signature: RecipeRunObservationReceiptSignatureWire
 
 
 class RecipeRunObservationWire(WireModel):
@@ -83,8 +61,8 @@ class RecipeRunObservationWire(WireModel):
     observed_at: datetime
     endpoint_ready: bool | None = Field(strict=True)
     observation_identity_sha256: Digest
-    grant: dict[str, Any]
-    helper_receipt: RecipeRunObservationReceiptWire
+    grant: SignedHostHelperGrant
+    helper_receipt: SignedRecipeRunObservationReceipt
     observation_receipt_public_key: Digest
 
     @field_validator("observed_at", mode="before")
@@ -203,9 +181,6 @@ class RecipeRunObservationsWire(WireModel):
 
 __all__ = [
     "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
-    "RecipeRunObservationReceiptWire",
-    "RecipeRunObservationReceiptClaimsWire",
-    "RecipeRunObservationReceiptSignatureWire",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
 ]
