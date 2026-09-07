@@ -17,6 +17,10 @@ their current contracts; neither requires accepting an older document format.
 | Published Model and Recipe | `vonk_forge_contracts.ModelDefinition` and `RecipeDefinition`, in `vonk-forge-recipes/contracts/src` | Catalog importer, Controller, compiler, authoring tools |
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
+| Compiled artifact-job contract | `CompiledArtifactContract` in `compiled_artifact_contract.py` | Compiler, stored job, runtime handoff, artifact-job API |
+| Lifecycle operation results | `RecipeLifecycleResult` in `recipe_lifecycle_contract.py`, composed from shared protocol evidence | Lifecycle producers, stored results and recipe API |
+| Model-cache operation results | `ModelCacheDownloadResult` and `ModelCacheEvictionResult` | Cache workers, stored results, cache API and Run/Switch receipts |
+| Fleet and Run/Switch progress/results | `fleet_profile_contract.py` and `run_switch_contract.py` | Orchestration, restart/replay reads, Library projections and APIs |
 | Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
@@ -50,6 +54,12 @@ models. A JSON contract document loaded from a database must still be parsed
 with its canonical model before use. A database row is not proof that the
 document satisfies the contract.
 
+Persisted progress is a contract too. Validate the complete stored document
+before interpreting a missing child or adapter state. Only a declared nullable
+field may mean absent; malformed JSON must not silently become an empty or
+new operation. Completed phase receipts have phase-specific required fields,
+and reuse the canonical model-cache and runtime-image receipt types.
+
 ## Rust and generated clients
 
 Rust uses `serde` structs and enums, with explicit semantic validation where
@@ -78,6 +88,17 @@ Python/TypeScript clients from the actual API. Never fix drift by hand-editing
 generated clients or weakening their schema. Rust wire compatibility requires
 tests that serialize actual producer values and pass them to the other
 language's real parser and validator, in both directions.
+
+Test the actual FastAPI serialization schema as well as Pydantic validation.
+A custom serializer can accidentally erase a nested model from OpenAPI even
+when its Python validator remains strict. `test_api_contract_graph.py` permits
+open objects only at explicitly documented engine-value and authority-document
+extension points; it rejects opaque fixed nested documents.
+
+Future Rust type generation should consume schemas exported from this same
+Pydantic graph. It must preserve field presence, nullability and tagged unions,
+and retain explicit semantic validation and the connected wire tests. Rust
+type generation is not currently enabled.
 
 ## Required launch checks
 
@@ -168,25 +189,36 @@ lifecycle test proves the tested orchestration. Neither alone proves that every
 model works on physical Spark hardware.
 
 
-## Current coverage gaps
+## Nested contract coverage
 
-The 7 September 2026 route inventory verified that generation starts from the
-real FastAPI application; there is no separately handwritten full OpenAPI
-contract. This does not prove every nested document or error response is typed.
-The following active gaps remain after source consolidation:
+The 7 September 2026 application inventory contains 136 routes. Its 115
+response models cover JSON responses; the other 21 routes handle empty
+responses, raw uploads/downloads, signed files, metrics, or event streams.
+OpenAPI is generated from the actual application and its nested Pydantic graph.
 
-- `InstallPlanResponse.compiled_execution_plans` must expose the shared
-  `CompiledExecutionPlan` for each Spark.
-- `UninstallPlanResponse.recipe_content` must expose the public `RecipeDefinition`.
-- `ArtifactJobResponse.compiled_contract` needs one typed structure shared with
-  its compiler and validator; it currently uses a dictionary and manual checks.
-- `OperationResponse.result` needs the actual kind-specific lifecycle output
-  contracts, including progress and aggregated per-node results.
-- Alternate JSON errors in catalog, recipe, Run/Switch, image availability and
-  central exception handlers must serialize their documented Pydantic models.
-  Declaring a response model in OpenAPI does not validate a returned `JSONResponse`.
+The fixed documents previously exposed as dictionaries now use concrete models:
 
-Engine parameters and other intentionally extensible content remain flexible.
-Raw file responses, SSE, metrics and empty responses do not need JSON models.
-The exact route inventory was examined alongside the handlers; the nested audit
-identified concrete gaps rather than claiming exhaustive semantic coverage.
+- Install plans expose `CompiledExecutionPlan` for each Spark; uninstall plans
+  expose the public `RecipeDefinition`.
+- Artifact jobs share `CompiledArtifactContract` across compilation, persisted
+  reads, runtime handoff and HTTP responses.
+- Lifecycle results validate the operation kind and compose shared protocol
+  evidence, including tensor-parallel starts.
+- Fleet, Library and Run/Switch progress and receipts validate at persisted
+  reads/writes and API projections. Each phase receipt has its own required
+  structure and must match the phase being executed.
+- Model-cache results share canonical download/eviction contracts; update
+  identities use the public `ModelReference`.
+- Alternate JSON errors serialize their documented models. Validation problems
+  contain a bounded `detail` and typed `issues`; request inputs and exception
+  context are not copied into error responses.
+
+The graph regression checks actual serialization schemas, including browser
+and agent routes. It allows open objects only for engine-defined parameters,
+engine measurements and path-selected authority documents. A separate schema
+comparison proves authored job inputs and compiled wire inputs have the same
+nested structure and constraints. Rust wire tests check both serialization
+and semantic validation; schema equality alone does not prove runtime behavior.
+
+These checks establish source and interface consistency. Publication, Controller
+deployment and physical Spark execution remain separate verification steps.

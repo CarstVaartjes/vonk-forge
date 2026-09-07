@@ -34,8 +34,8 @@ from .models import (
 from .run_switch_contract import (
     ArtifactVerificationEvidence,
     ArtifactVerificationResult,
-    RunSwitchPhase,
     RunSwitchDistributionChildResult,
+    RunSwitchPhase,
     RunSwitchPhaseResult,
     RunSwitchPlan,
 )

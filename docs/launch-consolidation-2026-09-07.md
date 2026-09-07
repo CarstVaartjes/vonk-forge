@@ -1,12 +1,13 @@
 # Launch consolidation
 
-Updated 7 September 2026. Existing work is consolidated through
-[PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614) before new implementation
-starts. No new worker branches or worktrees were created during this consolidation.
+Updated 7 September 2026. The prior consolidation was merged through
+[PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614), producing main
+`1ed542a1`. The subsequent nested-contract closure uses four explicitly assigned
+worker branches, all merged whole into `codex/contract-gap-closure`.
 
 ## Ownership and branch disposition
 
-The sole platform integration branch is `codex/launch-run-operation-repair` in
+The current platform integration branch is `codex/contract-gap-closure` in
 `/private/tmp/vonk-forge-interface-integration`, targeting `main`. Root owns
 integration, generated artifacts, final checks and publication. Worker branches
 are merged whole. Unique uncommitted work is reviewed before a worktree is closed.
@@ -56,33 +57,28 @@ retaining the stronger typed structure. These older dirty checkouts remain
 preserved until publication is verified; ancestry alone is not used to discard
 uncommitted files.
 
-## Explicit remaining cleanup
+## Catalog cleanup and nested contract closure
 
-The proposed 53-path catalog/harness deletion is not applied. The current
-`validate-recipe-library` script still reads execution-harness metadata and
-checks adapters and topology support, and packaging still includes those inputs.
-Those consumers must first use canonical compiler metadata before the obsolete
-files can be removed together. This is a recorded unfinished cleanup, not a
-second supported authoring format or an unaccounted worker patch.
+The old catalog/harness modules, schemas, configuration files and their obsolete
+fixtures have been removed. The validator loads canonical compiler metadata
+from the exact requested platform checkout, including topology compatibility.
+Docker and wheel packaging no longer include the retired assets; supply-chain
+verification covers the replacement contract and orchestration sources.
 
-## API coverage audit
+All four contract workers are integrated. Fixed API documents now have nested
+Pydantic types, and persisted Fleet/Library/Run-Switch state follows those same
+types at reads and writes. The final generated graph permits open objects only
+at intentional engine-value and authority-document extension points. See
+[the contract ownership and verification guide](api-contracts.md).
 
-The real application registers 136 FastAPI routes: 115 have response models;
-the remaining 21 are raw transfers, uploads, event streams, metrics or empty
-responses. OpenAPI is derived from the real application and the generated web
-and CLI clients consume it. The bounded enrollment parser derives its schema
-from the same Pydantic request class.
-
-The pipeline is implemented, but complete nested-contract coverage is unfinished:
-compiled plans, uninstall recipe content, artifact job compiled contracts and
-kind-dependent lifecycle results still use open dictionaries in some responses.
-Several alternate JSON error responses are constructed directly instead of
-serializing their documented Pydantic model. These are concrete follow-up items;
-dynamic engine parameters remain deliberately extensible. See `api-contracts.md`.
+The full application still has 136 routes: 115 JSON response models and 21
+empty/raw/streaming routes. Python and TypeScript clients are regenerated from
+the actual API. Rust Serde remains handwritten and is checked against the
+shared protocol using actual producer/consumer wire tests.
 
 ## Publication and deployment boundary
 
-The integration targets remote platform `main`, last verified at `cb6edee0`.
+The integration targets remote platform `main`, last verified at `1ed542a1`.
 Local validation and commits do not imply a GitHub merge, Controller deployment
 or physical Spark acceptance. PR614 records publication and CI on its final head.
 

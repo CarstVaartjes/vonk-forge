@@ -2042,3 +2042,39 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     assert get_operation_from_providers([shared], operations[0].operation_id)["id"] == (
         operations[0].operation_id
     )
+
+
+@pytest.mark.parametrize(
+    "invalid_result", [[], "broken", {"phase_index": "0"}, {"phase": "old-phase"}]
+)
+def test_operation_read_rejects_malformed_persisted_result(
+    tmp_path: Path, invalid_result: object
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        job.result = invalid_result
+        previous_state = job.state
+    with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
+        service.get(operation.operation_id)
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        assert job.result == invalid_result
+        assert job.state == previous_state
