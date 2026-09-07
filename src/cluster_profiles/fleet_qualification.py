@@ -105,13 +105,12 @@ class _CurrentRecipe:
     def disk_requirements(self) -> dict[str, dict[str, int]]:
         return _disk_requirements_by_role(self.definition)
 
-    @property
-    def artifact_identities(self) -> list[dict[str, object]]:
-        rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
+    def _selected_model_files(self) -> list[tuple[str, Any, list[str]]]:
         documents_by_digest = {
             selected_model.selection.model.content_sha256: selected_model.model_document
             for selected_model in self.model_documents
         }
+        selected_files: list[tuple[str, Any, list[str]]] = []
         for selection in self.definition.models:
             model = documents_by_digest.get(selection.model.content_sha256)
             if model is None:
@@ -121,32 +120,35 @@ class _CurrentRecipe:
             model_key = f"{model.identity.publisher}/{model.identity.slug}"
             files_by_id = {file.id: file for file in model.files}
             for selected_file in selection.files:
-                file = files_by_id.get(selected_file.file_id) or files_by_id.get(
-                    selected_file.id
-                )
+                file = files_by_id.get(selected_file.file_id)
                 if file is None:
                     raise QualificationError(
                         f"recipe model selection references missing file: {model_key}:{selected_file.file_id}"
                     )
-                physical_key = (model_key, file.path, file.sha256)
-                row = rows_by_physical_file.get(physical_key)
-                if row is None:
-                    identity = {
-                        "model": model_key,
-                        "path": file.path,
-                        "sha256": file.sha256,
-                    }
-                    row = {
-                        "artifact_id": f"{model_key}:{file.id}",
-                        "identity_sha256": _digest(identity),
-                        "download_bytes": file.size_bytes,
-                        "installed_bytes": file.size_bytes,
-                        "roles": [],
-                    }
-                    rows_by_physical_file[physical_key] = row
-                row["roles"] = sorted(
-                    set(row["roles"]) | set(selected_file.roles)
-                )
+                selected_files.append((model_key, file, selected_file.roles))
+        return selected_files
+
+    @property
+    def artifact_identities(self) -> list[dict[str, object]]:
+        rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
+        for model_key, file, selected_roles in self._selected_model_files():
+            physical_key = (model_key, file.path, file.sha256)
+            row = rows_by_physical_file.get(physical_key)
+            if row is None:
+                identity = {
+                    "model": model_key,
+                    "path": file.path,
+                    "sha256": file.sha256,
+                }
+                row = {
+                    "artifact_id": f"{model_key}:{file.id}",
+                    "identity_sha256": _digest(identity),
+                    "download_bytes": file.size_bytes,
+                    "installed_bytes": file.size_bytes,
+                    "roles": [],
+                }
+                rows_by_physical_file[physical_key] = row
+            row["roles"] = sorted(set(row["roles"]) | set(selected_roles))
         return sorted(
             rows_by_physical_file.values(),
             key=lambda item: str(item["identity_sha256"]),
@@ -154,9 +156,16 @@ class _CurrentRecipe:
 
     @property
     def artifact_download_bytes(self) -> int:
-        return sum(
-            int(item["download_bytes"]) for item in self.artifact_identities
-        )
+        bytes_by_sha256: dict[str, int] = {}
+        for _model_key, file, _selected_roles in self._selected_model_files():
+            sha256 = file.sha256
+            size = file.size_bytes
+            previous = bytes_by_sha256.setdefault(sha256, size)
+            if previous != size:
+                raise QualificationError(
+                    f"artifacts sharing SHA-256 have inconsistent sizes: {sha256}"
+                )
+        return sum(bytes_by_sha256.values())
 
     @property
     def maximum_installed_bytes_per_node(self) -> int:

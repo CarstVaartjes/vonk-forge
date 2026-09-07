@@ -1768,6 +1768,14 @@ def test_artifact_projection_uses_selected_recipe_files_only() -> None:
     assert current.artifact_download_bytes == 1024
 
 
+def test_artifact_projection_requires_selected_file_id() -> None:
+    current = _current_recipe_fixture()
+    current.definition.models[0].files[0].file_id = "dangling-file-id"
+
+    with pytest.raises(QualificationError, match="dangling-file-id"):
+        current.artifact_identities
+
+
 def test_artifact_projection_deduplicates_repeated_physical_selection() -> None:
     current = _current_recipe_fixture()
     current.definition.models.append(current.definition.models[0])
@@ -1782,6 +1790,45 @@ def test_artifact_projection_deduplicates_repeated_physical_selection() -> None:
     )
 
     assert len(current.artifact_identities) == 1
+    assert current.artifact_download_bytes == 1024
+
+
+def test_artifact_download_bytes_deduplicates_shared_object_sha_across_models() -> None:
+    from cluster_profiles.generated_control.models.library_recipe_model import (
+        LibraryRecipeModel,
+    )
+    from cluster_profiles.generated_control.models.model_definition import ModelDefinition
+    from cluster_profiles.generated_control.models.recipe_model_selection import (
+        RecipeModelSelection,
+    )
+
+    current = _current_recipe_fixture()
+    model_document = current.model_documents[0].model_document.to_dict()
+    model_document["identity"]["publisher"] = "second-publisher"
+    model_document["identity"]["slug"] = "second-model"
+    model_document["identity"]["model"]["publisher"] = "second-publisher"
+    model_document["identity"]["model"]["slug"] = "second-model"
+    model = ModelDefinition.from_dict(model_document)
+
+    selection_document = current.definition.models[0].to_dict()
+    selection_document["id"] = "secondary"
+    selection_document["model"]["publisher"] = "second-publisher"
+    selection_document["model"]["slug"] = "second-model"
+    selection_document["model"]["content_sha256"] = "b" * 64
+    selection = RecipeModelSelection.from_dict(selection_document)
+    current.definition.models.append(selection)
+    current = _CurrentRecipe(
+        recipe_id=current.recipe_id,
+        recipe_revision_id=current.recipe_revision_id,
+        publisher=current.publisher,
+        slug=current.slug,
+        content_sha256=current.content_sha256,
+        definition=current.definition,
+        model_documents=current.model_documents
+        + (LibraryRecipeModel(model_document=model, selection=selection),),
+    )
+
+    assert len(current.artifact_identities) == 2
     assert current.artifact_download_bytes == 1024
 
 
