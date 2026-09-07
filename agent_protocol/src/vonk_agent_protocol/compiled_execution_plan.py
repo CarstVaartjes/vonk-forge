@@ -411,21 +411,13 @@ class CompiledExecutionPlan(_Strict):
             raise ValueError("compiled placement identity is inconsistent")
         if self.topology.world_size < self.topology.node_count:
             raise ValueError("compiled topology bounds are invalid")
-        if self.topology.world_size == 1:
-            if (
-                placement.rank != 0
-                or placement.local_address is not None
-                or placement.master_address is not None
-                or placement.master_port is not None
-            ):
-                raise ValueError("single-node rendezvous is invalid")
-        elif (
-            placement.local_address is None
-            or placement.master_address is None
-            or placement.master_port is None
-            or placement.master_port < 1024
+        if self.topology.world_size == 1 and (
+            placement.rank != 0
+            or placement.local_address is not None
+            or placement.master_address is not None
+            or placement.master_port is not None
         ):
-            raise ValueError("distributed rendezvous is invalid")
+            raise ValueError("single-node rendezvous is invalid")
         by_digest: dict[str, int] = {}
         selected: set[tuple[str, str]] = set()
         paths: set[tuple[str, str]] = set()

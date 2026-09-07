@@ -107,6 +107,37 @@ def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None
     assert start.mapping_id == MAPPING_ID
 
 
+def test_install_accepts_deferred_distributed_rendezvous() -> None:
+    plan = copy.deepcopy(PLAN)
+    plan["topology"].update(
+        world_size=2, node_count=2, mode="distributed", backend="nccl"
+    )
+    plan["runtime"]["placement"].update(
+        world_size=2,
+        local_address=None,
+        master_address=None,
+        master_port=29500,
+    )
+    plan["security"]["network_mode"] = "bridge"
+    payload = _install()
+    payload["compiled_execution_plan"] = plan
+    RecipeOperationRequest.parse(AgentOperation.RECIPE_INSTALL, payload)
+
+
+def test_compiled_single_node_plan_rejects_rendezvous_addresses() -> None:
+    plan = copy.deepcopy(PLAN)
+    plan["runtime"]["placement"]["local_address"] = "100.100.20.30"
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(plan)
+
+
+def test_start_allows_controller_route_alias_distinct_from_engine_alias() -> None:
+    payload = _start()
+    payload["alias"] = "controller-route"
+    request = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
+    assert request.alias == "controller-route"
+
+
 def test_agent_claim_dispatches_the_same_typed_install_and_start_models() -> None:
     for operation, payload in (
         (AgentOperation.RECIPE_INSTALL, _install()),

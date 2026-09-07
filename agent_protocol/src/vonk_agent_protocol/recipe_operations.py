@@ -112,9 +112,6 @@ class RecipeStartPayload(_StrictPayload):
             raise ValueError("start image does not match compiled plan")
         if self.recipe_content_sha256 != self.compiled_execution_plan.identity.recipe_revision_sha256:
             raise ValueError("start recipe digest does not match compiled plan")
-        endpoint = self.compiled_execution_plan.endpoint
-        if endpoint is None or self.alias not in endpoint.model_aliases:
-            raise ValueError("start alias does not match compiled endpoint")
         placement = self.compiled_execution_plan.runtime.placement
         endpoint_matches = self.endpoint_address == placement.endpoint_address
         if placement.endpoint_address is None and self.world_size > 1:
