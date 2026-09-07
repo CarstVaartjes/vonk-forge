@@ -79,9 +79,7 @@ _TERMINAL_PARENT_STATES = frozenset(
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
-_NEXT_CAPABILITIES = (
-    _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
-)
+_NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
@@ -199,6 +197,16 @@ class AgentJobService:
             ) from error
         if protocol_operation.value not in _CONTROL_OPERATIONS:
             raise ValueError("agent operation is not supported by the control plane")
+        targets = session.scalar(select(Job.targets).where(Job.id == parent_job_id))
+        if targets is None:
+            raise KeyError(parent_job_id)
+        scope = self._target_scope(targets)
+        if scope is None or node_id not in scope:
+            raise ValueError("agent operation node must be a parent target")
+        if not self._lock_target_scopes(
+            session, {"enqueue": (parent_job_id, scope)}, node_id
+        ):
+            raise ValueError("agent operation parent target scope changed")
         node = session.scalar(
             select(AgentNode)
             .where(AgentNode.node_id == node_id)
@@ -355,6 +363,57 @@ class AgentJobService:
                     return None
                 self._available.wait(min(remaining, _DATABASE_REPOLL_SECONDS))
 
+    @staticmethod
+    def _claimable_operations(node_id: str, now: datetime):
+        expired_attempt = (
+            select(AgentOperationAttempt.id)
+            .where(
+                AgentOperationAttempt.operation_id == StoredOperation.id,
+                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                AgentOperationAttempt.state == "running",
+                AgentOperationAttempt.lease_deadline <= now,
+            )
+            .exists()
+        )
+        retry_ready_attempt = (
+            select(AgentOperationAttempt.id)
+            .where(
+                AgentOperationAttempt.operation_id == StoredOperation.id,
+                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                AgentOperationAttempt.state.in_(
+                    {"expired", "failed", "waiting-for-operator"}
+                ),
+                AgentOperationAttempt.lease_deadline <= now,
+            )
+            .exists()
+        )
+        return (
+            select(StoredOperation)
+            .where(
+                StoredOperation.node_id == node_id,
+                or_(
+                    and_(
+                        StoredOperation.state == "queued",
+                        StoredOperation.current_attempt == 0,
+                    ),
+                    and_(
+                        StoredOperation.state == "running",
+                        expired_attempt,
+                    ),
+                    and_(
+                        StoredOperation.state == "waiting-for-operator",
+                        StoredOperation.retry_disposition == _RETRY_DISPOSITION,
+                        StoredOperation.retry_disposition_attempt
+                        == StoredOperation.current_attempt,
+                        retry_ready_attempt,
+                    ),
+                ),
+            )
+            .order_by(StoredOperation.created_at, StoredOperation.id)
+            .execution_options(populate_existing=True)
+            .limit(1)
+        )
+
     def _claim_once(
         self,
         node_id: str,
@@ -367,6 +426,42 @@ class AgentJobService:
         source: AgentSource | None,
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
+            now = self._clock()
+            candidate_id = session.scalar(
+                self._claimable_operations(node_id, now).with_only_columns(
+                    StoredOperation.id
+                )
+            )
+            upgrade_id = None
+            if (
+                capabilities is not None
+                and AgentOperation.AGENT_UPGRADE.value in capabilities
+            ):
+                upgrade_id = session.scalar(
+                    select(StoredOperation.id)
+                    .where(
+                        StoredOperation.node_id == node_id,
+                        StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                        StoredOperation.state.in_(
+                            {"queued", "running", "waiting-for-operator"}
+                        ),
+                    )
+                    .order_by(StoredOperation.created_at, StoredOperation.id)
+                    .limit(1)
+                )
+            scopes = self._lock_operation_scopes(
+                session,
+                tuple(
+                    dict.fromkeys(
+                        value
+                        for value in (candidate_id, upgrade_id)
+                        if value is not None
+                    )
+                ),
+                node_id,
+            )
+            if scopes is None:
+                return None
             identity = self._lock_identity(session, node_id, certificate_serial)
             now = self._clock()
             if identity is None or not self._identity_is_active(*identity, now):
@@ -393,69 +488,29 @@ class AgentJobService:
                 now,
                 capabilities,
                 runtime_identity,
+                operation_id=upgrade_id,
+                parent_job_id=None if upgrade_id is None else scopes[upgrade_id][0],
             )
-            expired_attempt = (
-                select(AgentOperationAttempt.id)
-                .where(
-                    AgentOperationAttempt.operation_id == StoredOperation.id,
-                    AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-                    AgentOperationAttempt.state == "running",
-                    AgentOperationAttempt.lease_deadline <= now,
-                )
-                .exists()
+            if candidate_id is None:
+                return None
+            statement = (
+                self._claimable_operations(node_id, now)
+                .where(StoredOperation.id == candidate_id)
+                .with_for_update(of=StoredOperation, skip_locked=True)
+                .execution_options(populate_existing=True)
             )
-            retry_ready_attempt = (
-                select(AgentOperationAttempt.id)
-                .where(
-                    AgentOperationAttempt.operation_id == StoredOperation.id,
-                    AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-                    AgentOperationAttempt.state.in_(
-                        {"expired", "failed", "waiting-for-operator"}
-                    ),
-                    AgentOperationAttempt.lease_deadline <= now,
-                )
-                .exists()
-            )
-            while True:
-                statement = (
-                    select(StoredOperation)
-                    .where(
-                        StoredOperation.node_id == node_id,
-                        or_(
-                            and_(
-                                StoredOperation.state == "queued",
-                                StoredOperation.current_attempt == 0,
-                            ),
-                            and_(
-                                StoredOperation.state == "running",
-                                expired_attempt,
-                            ),
-                            and_(
-                                StoredOperation.state == "waiting-for-operator",
-                                StoredOperation.retry_disposition == _RETRY_DISPOSITION,
-                                StoredOperation.retry_disposition_attempt
-                                == StoredOperation.current_attempt,
-                                retry_ready_attempt,
-                            ),
-                        ),
-                    )
-                    .order_by(StoredOperation.created_at, StoredOperation.id)
-                    .with_for_update(of=StoredOperation, skip_locked=True)
-                    .execution_options(populate_existing=True)
-                    .limit(1)
-                )
-                operation = session.scalars(statement).first()
-                if operation is None:
-                    return None
-                if self._claim_has_authority(
-                    session,
-                    operation,
-                    now,
-                    node=node,
-                    protocol_version=protocol_version,
-                    capabilities=capabilities,
-                ):
-                    break
+            operation = session.scalar(statement)
+            if operation is None or operation.parent_job_id != scopes[candidate_id][0]:
+                return None
+            if not self._claim_has_authority(
+                session,
+                operation,
+                now,
+                node=node,
+                protocol_version=protocol_version,
+                capabilities=capabilities,
+                locked_targets=scopes[candidate_id][1],
+            ):
                 return None
             if capabilities is not None and operation.kind not in capabilities:
                 return None
@@ -544,15 +599,21 @@ class AgentJobService:
         now: datetime,
         capabilities: tuple[str, ...] | None,
         runtime_identity: AgentRuntimeIdentity,
+        *,
+        operation_id: str | None,
+        parent_job_id: str | None,
     ) -> None:
         if (
-            capabilities is None
+            operation_id is None
+            or capabilities is None
             or AgentOperation.AGENT_UPGRADE.value not in capabilities
         ):
             return
         operation = session.scalar(
             select(StoredOperation)
             .where(
+                StoredOperation.id == operation_id,
+                StoredOperation.parent_job_id == parent_job_id,
                 StoredOperation.node_id == node_id,
                 StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
                 StoredOperation.state.in_(
@@ -561,6 +622,7 @@ class AgentJobService:
             )
             .order_by(StoredOperation.created_at, StoredOperation.id)
             .with_for_update(of=StoredOperation)
+            .execution_options(populate_existing=True)
             .limit(1)
         )
         if operation is None or (
@@ -568,8 +630,7 @@ class AgentJobService:
             != operation.payload.get("target_build_digest")
             or runtime_identity.binary_digest
             != operation.payload.get("target_binary_digest")
-            or runtime_identity.architecture
-            != operation.payload.get("architecture")
+            or runtime_identity.architecture != operation.payload.get("architecture")
             or runtime_identity.self_test_passed is not True
         ):
             return
@@ -649,8 +710,7 @@ class AgentJobService:
             build is not None
             and build.builder_node_id == operation.node_id
             and isinstance(report, dict)
-            and report.get("builder_binary_digest")
-            == runtime_identity.binary_digest
+            and report.get("builder_binary_digest") == runtime_identity.binary_digest
             and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
         )
 
@@ -707,13 +767,14 @@ class AgentJobService:
         node: AgentNode,
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
+        locked_targets: tuple[str, ...],
     ) -> bool:
         job = session.scalar(
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
         if job is None:
             raise ValueError("agent operation lacks its parent job")
-        if not self._lock_current_job_targets(session, job):
+        if self._target_scope(job.targets) != locked_targets:
             return False
         current_operation = session.scalar(
             select(StoredOperation)
@@ -750,24 +811,91 @@ class AgentJobService:
         return job.state not in _TERMINAL_PARENT_STATES
 
     @staticmethod
-    def _lock_current_job_targets(session: Session, job: Job) -> bool:
-        targets = job.targets
+    def _target_scope(targets: object) -> tuple[str, ...] | None:
         if (
             not isinstance(targets, list)
             or not targets
             or not all(isinstance(node_id, str) for node_id in targets)
             or len(targets) != len(set(targets))
         ):
-            return False
+            return None
+        return tuple(sorted(targets))
+
+    @classmethod
+    def _lock_operation_scopes(
+        cls,
+        session: Session,
+        operation_ids: tuple[str, ...],
+        node_id: str,
+    ) -> dict[str, tuple[str, tuple[str, ...]]] | None:
+        """Lock hinted target nodes, then parents; callers pin and refresh operations."""
+        rows = (
+            session.execute(
+                select(
+                    StoredOperation.id,
+                    StoredOperation.parent_job_id,
+                    StoredOperation.node_id,
+                    Job.targets,
+                )
+                .join(Job, Job.id == StoredOperation.parent_job_id)
+                .where(StoredOperation.id.in_(operation_ids))
+            ).all()
+            if operation_ids
+            else []
+        )
+        if len(rows) != len(operation_ids):
+            return None
+        scopes = {}
+        for operation_id, parent_id, operation_node, targets in rows:
+            scope = cls._target_scope(targets)
+            if scope is None or node_id not in scope or operation_node != node_id:
+                return None
+            scopes[operation_id] = (parent_id, scope)
+        if not cls._lock_target_scopes(session, scopes, node_id):
+            return None
+        return scopes
+
+    @classmethod
+    def _lock_target_scopes(
+        cls,
+        session: Session,
+        scopes: dict[str, tuple[str, tuple[str, ...]]],
+        node_id: str,
+    ) -> bool:
+        nodes = sorted(
+            {node_id} | {target for _, scope in scopes.values() for target in scope}
+        )
         locked = list(
             session.scalars(
                 select(AgentNode)
-                .where(AgentNode.node_id.in_(targets))
+                .where(AgentNode.node_id.in_(nodes))
                 .order_by(AgentNode.node_id)
                 .with_for_update(of=AgentNode)
+                .execution_options(populate_existing=True)
             )
         )
-        return [node.node_id for node in locked] == sorted(targets)
+        if [node.node_id for node in locked] != nodes:
+            return False
+        parent_ids = sorted({parent_id for parent_id, _ in scopes.values()})
+        parents = (
+            {
+                job.id: job
+                for job in session.scalars(
+                    select(Job)
+                    .where(Job.id.in_(parent_ids))
+                    .order_by(Job.id)
+                    .with_for_update(of=Job)
+                    .execution_options(populate_existing=True)
+                )
+            }
+            if parent_ids
+            else {}
+        )
+        return not any(
+            parent_id not in parents
+            or cls._target_scope(parents[parent_id].targets) != scope
+            for parent_id, scope in scopes.values()
+        )
 
     def heartbeat(
         self,
@@ -951,6 +1079,11 @@ class AgentJobService:
                 "agent operation lease, certificate, or fence is stale"
             )
         operation_id, node_id, certificate_serial, parent_job_id = identity_hint
+        scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
+        if scopes is None or scopes[operation_id][0] != parent_job_id:
+            raise StaleAgentAttempt(
+                "agent operation lease, certificate, or fence is stale"
+            )
         identity = self._lock_identity(session, node_id, certificate_serial)
         now = self._clock()
         if identity is None or not self._identity_is_active(*identity, now):
@@ -974,13 +1107,15 @@ class AgentJobService:
             select(StoredOperation)
             .where(StoredOperation.id == operation_id)
             .with_for_update(of=StoredOperation)
+            .execution_options(populate_existing=True)
         )
         if operation is None:
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
             )
         if (
-            not self._lock_current_job_targets(session, parent)
+            self._target_scope(parent.targets) != scopes[operation_id][1]
+            or operation.parent_job_id != parent_job_id
             or operation.node_id != node.node_id
             or operation.authority_revision != parent.authority_revision
             or node.state != "active"
@@ -998,6 +1133,7 @@ class AgentJobService:
                 AgentOperationAttempt.operation_id == operation.id,
             )
             .with_for_update(of=AgentOperationAttempt)
+            .execution_options(populate_existing=True)
         )
         if (
             attempt is None
