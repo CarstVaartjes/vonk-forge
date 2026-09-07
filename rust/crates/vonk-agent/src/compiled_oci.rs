@@ -717,7 +717,13 @@ mod tests {
         value["runtime"]["placement"]["port"] = Value::Null;
         value["job"] = json!({
             "interface": "image-job",
-            "input": {"path": "/inputs"},
+            "input": {
+                "path": "/inputs",
+                "required": true,
+                "media_types": ["application/octet-stream"],
+                "max_bytes": 1024,
+                "slots": null
+            },
             "output_path": "/outputs",
             "timeout_seconds": 90
         });
