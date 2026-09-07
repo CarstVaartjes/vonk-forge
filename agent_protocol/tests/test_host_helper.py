@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from vonk_agent_protocol import (
     AgentProtocolError,
     RecipeRunObservationReceiptClaims,
     SignedRecipeRunObservationReceipt,
+    canonical_message,
+    host_artifact_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
@@ -64,3 +69,30 @@ def test_exact_observation_receipt_rejects_invalid_claims(
 
     with pytest.raises(AgentProtocolError):
         RecipeRunObservationReceiptClaims.parse(document)
+
+
+def test_rust_signed_receipt_fixture_round_trips_with_identical_signing_bytes() -> None:
+    raw = (
+        (Path(__file__).parents[1] / "fixtures" / "recipe-run-observation-receipt.json")
+        .read_bytes()
+        .rstrip(b"\n")
+    )
+    document = json.loads(raw)
+    receipt = SignedRecipeRunObservationReceipt.parse(document)
+
+    assert canonical_message(receipt.to_mapping()) == raw
+    assert recipe_run_observation_receipt_signing_bytes(receipt.claims) == (
+        b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
+        + b'{"authority":"vonk.recipe-run-observation-helper",'
+        b'"node_id":"spk_0123456789abcdef0123456789abcdef",'
+        b'"observation_identity_sha256":"' + b"b" * 64 + b'",'
+        b'"observed_at":1788000000,"outcome":"not-running",'
+        b'"request_id":"10000000-0000-4000-8000-000000000001",'
+        b'"request_sha256":"' + b"a" * 64 + b'","schema_version":1}'
+    )
+
+
+def test_host_artifact_signing_bytes_keep_the_domain_and_raw_digest_contract() -> None:
+    assert host_artifact_signing_bytes("agent", "a" * 64) == (
+        b"VONK-HOST-ARTIFACT-V1\x00agent\x00" + bytes.fromhex("a" * 64)
+    )

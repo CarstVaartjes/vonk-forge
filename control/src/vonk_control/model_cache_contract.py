@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .operation_contract import AvailabilityOperationFailure, OperationMemberProgress
+from .strict_json import StrictJSONModel
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
@@ -19,8 +20,10 @@ UUID_PATTERN = (
 Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+class StrictModel(StrictJSONModel):
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True
+    )
 
 
 class ModelCacheDownloadRequest(StrictModel):
@@ -28,7 +31,7 @@ class ModelCacheDownloadRequest(StrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
     plan_digest: Digest
     artifact_set_sha256: Digest | None = None
-    model_version_sha256: Digest | None = None
+    model_content_sha256: Digest | None = None
     recipe_revision_sha256: Digest | None = None
     recipe_revision_id: str | None = Field(default=None, min_length=1, max_length=128)
     source_policy: Literal["nas-first"] = "nas-first"
@@ -43,7 +46,7 @@ class ModelCacheDownloadRequest(StrictModel):
 class ModelCacheDownloadPreviewRequest(StrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest | None = None
-    model_version_sha256: Digest | None = None
+    model_content_sha256: Digest | None = None
     recipe_revision_sha256: Digest | None = None
     recipe_revision_id: str | None = Field(default=None, min_length=1, max_length=128)
     source_policy: Literal["nas-first"] = "nas-first"
@@ -132,7 +135,7 @@ class CacheArtifactResponse(StrictModel):
 class CacheEntryResponse(StrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
-    model_version_sha256: Digest | None
+    model_content_sha256: Digest | None
     recipe_revision_sha256: Digest | None
     state: Literal[
         "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
@@ -256,8 +259,8 @@ class ModelCacheEvictionPreviewResponse(StrictModel):
 class ModelCacheUpdateResponse(StrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
-    model_version_sha256: Digest | None
-    latest_model_version_sha256: Digest | None
+    model_content_sha256: Digest | None
+    latest_model_content_sha256: Digest | None
     model_update_from: dict[str, object] | None = None
     model_update_to: dict[str, object] | None = None
     model_update_ambiguous: bool = False

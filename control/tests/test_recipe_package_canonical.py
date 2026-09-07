@@ -14,7 +14,7 @@ import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import _validate_recipe_build_payload
+from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.inventory_repository import (
@@ -186,7 +186,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     builder = RecipeBuildService(sessions, bundles=bundles)
     resolution = builder.resolve(revision_id)
     plan = builder.plan(revision_id, node_id, now=now, resolution=resolution)
-    _validate_recipe_build_payload(plan.agent_payload)
+    RecipeBuildRequest.model_validate(plan.agent_payload)
     assert plan.agent_payload["dockerfile"] == "Dockerfile"
     assert plan.agent_payload["limits"]["memory_bytes"] <= 4 * 1024**3
     assert plan.agent_payload["limits"]["gpu"] == 0

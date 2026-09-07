@@ -33,6 +33,7 @@ class TelemetryPoint:
             details (TelemetryDetails):
             gap_samples (int):
             id (str):
+            metrics (TelemetryMetrics):
             node_id (str):
             observed_at (datetime.datetime):
             received_at (datetime.datetime):
@@ -46,7 +47,6 @@ class TelemetryPoint:
             load_average_1m (Union[None, Unset, float]):
             memory_available_bytes (Union[None, Unset, int]):
             memory_total_bytes (Union[None, Unset, int]):
-            metrics (Union['TelemetryMetrics', None, Unset]):
             network_receive_bytes_per_second (Union[None, Unset, float]):
             network_transmit_bytes_per_second (Union[None, Unset, float]):
             power_watts (Union[None, Unset, float]):
@@ -57,6 +57,7 @@ class TelemetryPoint:
     details: 'TelemetryDetails'
     gap_samples: int
     id: str
+    metrics: 'TelemetryMetrics'
     node_id: str
     observed_at: datetime.datetime
     received_at: datetime.datetime
@@ -70,7 +71,6 @@ class TelemetryPoint:
     load_average_1m: Union[None, Unset, float] = UNSET
     memory_available_bytes: Union[None, Unset, int] = UNSET
     memory_total_bytes: Union[None, Unset, int] = UNSET
-    metrics: Union['TelemetryMetrics', None, Unset] = UNSET
     network_receive_bytes_per_second: Union[None, Unset, float] = UNSET
     network_transmit_bytes_per_second: Union[None, Unset, float] = UNSET
     power_watts: Union[None, Unset, float] = UNSET
@@ -90,6 +90,8 @@ class TelemetryPoint:
         gap_samples = self.gap_samples
 
         id = self.id
+
+        metrics = self.metrics.to_dict()
 
         node_id = self.node_id
 
@@ -153,14 +155,6 @@ class TelemetryPoint:
         else:
             memory_total_bytes = self.memory_total_bytes
 
-        metrics: Union[None, Unset, dict[str, Any]]
-        if isinstance(self.metrics, Unset):
-            metrics = UNSET
-        elif isinstance(self.metrics, TelemetryMetrics):
-            metrics = self.metrics.to_dict()
-        else:
-            metrics = self.metrics
-
         network_receive_bytes_per_second: Union[None, Unset, float]
         if isinstance(self.network_receive_bytes_per_second, Unset):
             network_receive_bytes_per_second = UNSET
@@ -193,6 +187,7 @@ class TelemetryPoint:
             "details": details,
             "gap_samples": gap_samples,
             "id": id,
+            "metrics": metrics,
             "node_id": node_id,
             "observed_at": observed_at,
             "received_at": received_at,
@@ -216,8 +211,6 @@ class TelemetryPoint:
             field_dict["memory_available_bytes"] = memory_available_bytes
         if memory_total_bytes is not UNSET:
             field_dict["memory_total_bytes"] = memory_total_bytes
-        if metrics is not UNSET:
-            field_dict["metrics"] = metrics
         if network_receive_bytes_per_second is not UNSET:
             field_dict["network_receive_bytes_per_second"] = network_receive_bytes_per_second
         if network_transmit_bytes_per_second is not UNSET:
@@ -246,6 +239,11 @@ class TelemetryPoint:
         gap_samples = d.pop("gap_samples")
 
         id = d.pop("id")
+
+        metrics = TelemetryMetrics.from_dict(d.pop("metrics"))
+
+
+
 
         node_id = d.pop("node_id")
 
@@ -351,26 +349,6 @@ class TelemetryPoint:
         memory_total_bytes = _parse_memory_total_bytes(d.pop("memory_total_bytes", UNSET))
 
 
-        def _parse_metrics(data: object) -> Union['TelemetryMetrics', None, Unset]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                metrics_type_0 = TelemetryMetrics.from_dict(data)
-
-
-
-                return metrics_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['TelemetryMetrics', None, Unset], data)
-
-        metrics = _parse_metrics(d.pop("metrics", UNSET))
-
-
         def _parse_network_receive_bytes_per_second(data: object) -> Union[None, Unset, float]:
             if data is None:
                 return data
@@ -416,6 +394,7 @@ class TelemetryPoint:
             details=details,
             gap_samples=gap_samples,
             id=id,
+            metrics=metrics,
             node_id=node_id,
             observed_at=observed_at,
             received_at=received_at,
@@ -429,7 +408,6 @@ class TelemetryPoint:
             load_average_1m=load_average_1m,
             memory_available_bytes=memory_available_bytes,
             memory_total_bytes=memory_total_bytes,
-            metrics=metrics,
             network_receive_bytes_per_second=network_receive_bytes_per_second,
             network_transmit_bytes_per_second=network_transmit_bytes_per_second,
             power_watts=power_watts,

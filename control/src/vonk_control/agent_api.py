@@ -13,7 +13,7 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,17 +21,42 @@ from threading import Lock
 from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    AgentClaim,
+    AgentDirective,
     AgentProgress,
-    AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
+    DistributionAssignment,
+    InventoryRequest,
+    RecipeRunObservationGrantRequest,
+    RecipeRunObservationGrantWire,
+    RecipeRunObservationsWire,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
     canonical_message,
 )
+from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
+from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.enrollment import (
+    ActivateRequest,
+    EnrollmentBootstrapResponse,
+    EnrollmentSubmitRequest,
+    IssuedCertificateResponse,
+    RenewRequest,
+)
+from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
@@ -48,6 +73,7 @@ from .auth import (
     agent_source_from_scope,
 )
 from .compiled_execution_plan import (
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
@@ -84,30 +110,31 @@ from .models import (
     RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
+from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_operations import (
-    RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
-    record_recipe_run_observations,
 )
 from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
+from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 from .workload_helper_authority import (
     WorkloadHelperAuthorityError,
     WorkloadHelperAuthorityService,
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_UUID4_TEXT = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
-_MAX_CSR_BYTES = 16 * 1024
-_MAX_EVIDENCE_FIELDS = 8
-_MAX_EVIDENCE_BYTES = 8 * 1024
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
@@ -120,6 +147,31 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
 )
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
+
+
+def _strict_json_datetime(value: object) -> object:
+    """Decode the JSON datetime representation before strict validation.
+
+    FastAPI hands Pydantic an already-decoded Python mapping, whereas
+    ``model_validate_json(..., strict=True)`` still accepts ISO datetime text.
+    Decode that one documented wire representation explicitly so strict route
+    models behave the same in both entry points.
+    """
+
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        # Pydantic turns ValueError into the stable request validation response.
+        raise ValueError(  # noqa: TRY004
+            "observed time must be an RFC 3339 string"
+        )
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("observed time must be an RFC 3339 string") from error
+    if "T" not in value and "t" not in value:
+        raise ValueError("observed time must be an RFC 3339 string")
+    return parsed
 
 
 def _runtime_image_receipt_matches(
@@ -273,8 +325,8 @@ class EnrollmentRateLimiter:
             return True
 
 
-class GrantRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class GrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
     purpose: Literal["new-node", "re-enroll"] = "new-node"
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
@@ -286,35 +338,6 @@ class GrantRequest(BaseModel):
         return self
 
 
-class EnrollmentSubmitRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    grant_token: str = Field(min_length=43, max_length=64)
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    evidence: dict[str, str] = Field(min_length=6, max_length=_MAX_EVIDENCE_FIELDS)
-
-    @field_validator("evidence")
-    @classmethod
-    def bounded_expected_evidence(cls, evidence: dict[str, str]) -> dict[str, str]:
-        legacy = {
-            "node_id",
-            "csr_public_key_fingerprint",
-            "host_key_fingerprint",
-            "hardware_fingerprint",
-            "agent_digest",
-            "boot_id",
-        }
-        receipt_key = "observation_receipt_public_key"
-        if set(evidence) not in (legacy, legacy | {receipt_key}) or any(
-            not value.strip() for value in evidence.values()
-        ):
-            raise ValueError("evidence fields are invalid")
-        if receipt_key in evidence and _DIGEST.fullmatch(evidence[receipt_key]) is None:
-            raise ValueError("observation receipt public key is invalid")
-        if len(canonical_message(evidence)) > _MAX_EVIDENCE_BYTES:
-            raise ValueError("evidence is too large")
-        return evidence
-
-
 _ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
@@ -322,8 +345,8 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
     return enrollment.state
 
 
-class EnrollmentGrantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     expires_at: str = Field(min_length=1, max_length=64)
     purpose: Literal["new-node", "re-enroll"]
@@ -339,21 +362,8 @@ class EnrollmentGrantResponse(BaseModel):
     ]
 
 
-class EnrollmentBootstrapResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    controller_endpoint: str = Field(min_length=1, max_length=2048)
-    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
-    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    ca_pem: str = Field(min_length=1, max_length=64 * 1024)
-    controller_address: str | None = None
-    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
-    host_helper_authority_public_key: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-
-
-class EnrollmentSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentSummary(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     state: str = Field(min_length=1, max_length=32)
@@ -367,68 +377,14 @@ class EnrollmentSummary(BaseModel):
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
 
-class EnrollmentListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EnrollmentListResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     enrollments: list[EnrollmentSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=128)
 
 
-class AgentRuntimeIdentityRequest(BaseModel):
-    # Runtime identity is an extensible envelope.  Newer agents may add
-    # attestations or diagnostics; the Controller only consumes the stable
-    # identity fields below and must not reject an otherwise compatible agent.
-    model_config = ConfigDict(extra="ignore")
-    architecture: Literal["linux-amd64", "linux-arm64"]
-    semantic_version: str = Field(
-        pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
-    )
-    build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    self_test_passed: Literal[True]
-    observation_receipt_public_key: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def reject_retired_identity_fields(cls, value: object) -> object:
-        if isinstance(value, Mapping) and {
-            "active_slot",
-            "agent_sha256",
-            "platform_version",
-            "supervisor_generation",
-            "supervisor_ready_generation",
-            "activation_deadline",
-        } & value.keys():
-            raise ValueError("retired runtime identity fields are not supported")
-        return value
-
-
-class ClaimRequest(BaseModel):
-    # Claims are a version-skew boundary.  Unknown top-level fields are
-    # intentionally ignored so a newer Spark can still claim work from this
-    # Controller; operation safety comes from the negotiated capability
-    # intersection below.
-    model_config = ConfigDict(extra="ignore")
-    lease_seconds: int = Field(default=30, ge=1, le=300)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-    hostname: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=255,
-        pattern=(
-            r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
-            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
-        ),
-    )
-    protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
-    capabilities: list[str] | None = Field(default=None, max_length=128)
-    runtime_identity: AgentRuntimeIdentityRequest
-    wait_seconds: int = Field(default=0, ge=0, le=60)
-
-
-class AgentUpgradePackageRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentUpgradePackageRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(ge=1, le=1024**3, strict=True)
     package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -440,8 +396,8 @@ class AgentUpgradePackageRequest(BaseModel):
     target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
-class AgentRepairManifestRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentRepairManifestRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[2]
     kind: Literal["agent-upgrade-repair"]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -449,8 +405,8 @@ class AgentRepairManifestRequest(BaseModel):
     package: AgentUpgradePackageRequest
 
 
-class AgentUpgradePreviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AgentUpgradePreviewRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
     package: AgentUpgradePackageRequest | None = None
     repair_manifest: AgentRepairManifestRequest | None = None
@@ -459,6 +415,109 @@ class AgentUpgradePreviewRequest(BaseModel):
 
 class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradePreviewResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_ids: list[str] = Field(max_length=64)
+    package: AgentUpgradePackageRequest
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    repair_manifest: AgentRepairManifestRequest | None = None
+    strategy: Literal["one-at-a-time", "all-at-once"]
+
+
+class AgentUpgradeApplyResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=32)
+
+
+class AgentGrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    expires_in_seconds: int = Field(ge=1, le=300)
+
+
+class HostRuntimeGrantRequest(AgentGrantRequest):
+    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradeGrantRequest(AgentGrantRequest):
+    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class PackageHelperReceiptObjectRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(strict=True, gt=0, le=2**63 - 1)
+
+
+class PackageHelperReceiptsRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    objects: list[PackageHelperReceiptObjectRequest] = Field(
+        min_length=1, max_length=256
+    )
+
+
+class PackageHelperGrantRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(pattern=_UUID4_TEXT)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID4_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation: str = Field(strict=True, pattern=_IDENTIFIER_TEXT)
+    operation: Literal[
+        "prepare", "verify", "start", "health", "infer", "stop", "verify-release"
+    ]
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_in_seconds: int = Field(ge=1, le=900)
+
+
+class PackageHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedPackageHelperGrant
+
+
+class HostHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedHostHelperGrant
+
+
+class PackageHelperReceiptsResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    receipts: list[SignedPackageObjectReceipt]
+
+
+def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:
+    return HostHelperGrantResponse(grant=grant)
+
+
+def _package_grant_response(
+    grant: SignedPackageHelperGrant,
+) -> PackageHelperGrantResponse:
+    return PackageHelperGrantResponse(grant=grant)
+
+
+def _package_receipts_response(
+    receipts: Sequence[SignedPackageObjectReceipt],
+) -> PackageHelperReceiptsResponse:
+    return PackageHelperReceiptsResponse(receipts=list(receipts))
 
 
 def _agent_upgrade_request_material(
@@ -494,288 +553,6 @@ def _agent_upgrade_request_material(
     return package, None
 
 
-class InventoryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1]
-    observed_at: datetime
-    disk_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    disk_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_count: int = Field(ge=0, le=64, strict=True)
-    artifact_store_read_only: bool
-    capabilities: list[str] = Field(max_length=64)
-    fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(
-        default=None, ge=1, le=1_000_000, strict=True
-    )
-    nvidia_driver_version: str = Field(min_length=1, max_length=256)
-    container_runtime_version: str = Field(min_length=1, max_length=256)
-
-    @model_validator(mode="after")
-    def internally_consistent(self) -> InventoryRequest:
-        if (
-            self.disk_free_bytes > self.disk_total_bytes
-            or self.host_memory_free_bytes > self.host_memory_total_bytes
-            or self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
-            or (self.fabric_address is None) != (self.fabric_bandwidth_mbps is None)
-            or len(self.capabilities) != len(set(self.capabilities))
-            or any(
-                re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", item) is None
-                for item in self.capabilities
-            )
-        ):
-            raise ValueError("inventory evidence is inconsistent")
-        return self
-
-
-class RecipeRunObservationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    run_id: str = Field(
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        )
-    )
-    ready: bool = Field(strict=True)
-
-
-class RecipeRunObservationIdentityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1]
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    run_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    installation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    recipe_revision_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    mapping_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
-    image_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    artifact_set_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_identity: str = Field(min_length=3, max_length=1024)
-    rank: int = Field(ge=0, le=1023, strict=True)
-    role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=2, le=1024, strict=True)
-    local_address: str = Field(min_length=2, max_length=45)
-    master_address: str = Field(min_length=2, max_length=45)
-    master_port: int = Field(ge=1024, le=65535, strict=True)
-    port: int = Field(ge=1024, le=65535, strict=True)
-    runtime_arguments_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class RecipeRunObservationGrantRequest(RecipeRunObservationIdentityRequest):
-    job_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    operation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
-    fence: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expires_in_seconds: Literal[10]
-
-    def observation_identity(self) -> dict[str, object]:
-        return self.model_dump(
-            exclude={
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "request_sha256",
-                "expires_in_seconds",
-            }
-        )
-
-
-class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
-    observed_at: datetime
-    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    endpoint_ready: bool | None = Field(default=None, strict=True)
-    grant: dict[str, object]
-    helper_receipt: dict[str, object]
-
-    @field_validator("observed_at")
-    @classmethod
-    def aware_observed_at(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("recipe run observation time must be timezone-aware")
-        return value
-
-    def observation_identity(self) -> dict[str, object]:
-        return self.model_dump(
-            exclude={
-                "observation_identity_sha256",
-                "observed_at",
-                "process_running",
-                "endpoint_ready",
-                "grant",
-                "helper_receipt",
-            }
-        )
-
-
-class RecipeRunObservationsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1, 2]
-    observed_at: datetime
-    runs: list[RecipeRunObservationRequest | RecipeRunExactObservationRequest] = Field(
-        max_length=64
-    )
-
-    @model_validator(mode="after")
-    def unique_runs(self) -> RecipeRunObservationsRequest:
-        if self.schema_version == 1 and any(
-            not isinstance(run, RecipeRunObservationRequest) for run in self.runs
-        ):
-            raise ValueError("recipe run observation version is invalid")
-        if self.schema_version == 2 and any(
-            not isinstance(run, RecipeRunExactObservationRequest) for run in self.runs
-        ):
-            raise ValueError("recipe run observation version is invalid")
-        identities = [run.run_id for run in self.runs]
-        if len(identities) != len(set(identities)):
-            raise ValueError("recipe run observation is duplicated")
-        return self
-
-
-class TelemetryDetailsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
-    accelerator_performance_state: str | None = Field(
-        default=None, min_length=1, max_length=32
-    )
-
-
-class TelemetrySampleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    boot_id: str = Field(
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
-            r"[0-9a-f]{4}-[0-9a-f]{12}$"
-        )
-    )
-    sequence: int = Field(ge=0, le=2**63 - 1, strict=True)
-    observed_at: datetime
-    cpu_utilization_percent: float | None = Field(
-        ge=0, le=100, allow_inf_nan=False, strict=True
-    )
-    load_average_1m: float | None = Field(
-        ge=0, le=1_000_000, allow_inf_nan=False, strict=True
-    )
-    memory_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    memory_available_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    disk_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    disk_free_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    gpu_utilization_percent: float | None = Field(
-        ge=0, le=100, allow_inf_nan=False, strict=True
-    )
-    gpu_memory_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    gpu_memory_free_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    temperature_c: float | None = Field(
-        ge=-100, le=300, allow_inf_nan=False, strict=True
-    )
-    power_watts: float | None = Field(
-        ge=0, le=100_000, allow_inf_nan=False, strict=True
-    )
-    network_receive_bytes_per_second: float | None = Field(
-        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
-    )
-    network_transmit_bytes_per_second: float | None = Field(
-        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
-    )
-    gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
-    details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
-    # ``metrics`` is additive to the active telemetry wire contract.  A
-    # scalar-only sample remains valid for an already enrolled agent while
-    # native agents progressively publish the richer contract.
-    metrics: TelemetryMetrics = Field(default_factory=empty_telemetry_metrics)
-
-    @field_validator("boot_id")
-    @classmethod
-    def nonzero_boot_id(cls, value: str) -> str:
-        if uuid.UUID(value).int == 0:
-            raise ValueError("telemetry boot ID cannot be nil")
-        return value
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def rfc3339_observed_at(cls, value: object) -> object:
-        if not isinstance(value, str):
-            # Pydantic turns ValueError into the stable request validation response.
-            raise ValueError(  # noqa: TRY004
-                "telemetry observed time must be an RFC 3339 string"
-            )
-        return value
-
-    @model_validator(mode="after")
-    def internally_consistent(self) -> TelemetrySampleRequest:
-        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
-            raise ValueError("telemetry observed time must be timezone-aware")
-        for total, available in (
-            (self.memory_total_bytes, self.memory_available_bytes),
-            (self.disk_total_bytes, self.disk_free_bytes),
-            (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
-        ):
-            if (total is None) is not (available is None) or (
-                total is not None and available is not None and available > total
-            ):
-                raise ValueError("telemetry capacity values are inconsistent")
-        return self
-
-
-class TelemetryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1]
-    samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def exact_schema_version(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise ValueError("telemetry schema version must be integer 1")
-        return value
-
-    @model_validator(mode="after")
-    def ordered_unique_samples(self) -> TelemetryRequest:
-        identities = [(sample.boot_id, sample.sequence) for sample in self.samples]
-        if len(identities) != len(set(identities)):
-            raise ValueError("telemetry sample is duplicated")
-        previous_by_boot: dict[str, int] = {}
-        for previous, current in zip(self.samples, self.samples[1:], strict=False):
-            if current.observed_at <= previous.observed_at:
-                raise ValueError("telemetry observation times must increase")
-        for sample in self.samples:
-            previous_sequence = previous_by_boot.get(sample.boot_id)
-            if previous_sequence is not None and sample.sequence <= previous_sequence:
-                raise ValueError("telemetry sequences must increase within one boot")
-            previous_by_boot[sample.boot_id] = sample.sequence
-        return self
-
-
-class RenewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
-class ActivateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    generation: int = Field(ge=1)
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-
 def _wire(value: object) -> object:
     return json.loads(canonical_message(value))
 
@@ -784,17 +561,17 @@ def _now(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _issued_response(issued: object) -> dict[str, object]:
-    return {
-        "node_id": issued.node_id,
-        "certificate_pem": issued.certificate_pem.decode("ascii"),
-        "chain_pem": issued.chain_pem.decode("ascii"),
-        "serial": issued.serial,
-        "fingerprint": issued.fingerprint,
-        "not_before": _now(issued.not_before).isoformat(),
-        "not_after": _now(issued.not_after).isoformat(),
-        "generation": issued.generation,
-    }
+def _issued_response(issued: IssuedCertificate) -> IssuedCertificateResponse:
+    return IssuedCertificateResponse(
+        node_id=issued.node_id,
+        certificate_pem=issued.certificate_pem.decode("ascii"),
+        chain_pem=issued.chain_pem.decode("ascii"),
+        serial=issued.serial,
+        fingerprint=issued.fingerprint,
+        not_before=_now(issued.not_before).isoformat(),
+        not_after=_now(issued.not_after).isoformat(),
+        generation=issued.generation,
+    )
 
 
 def _json_response(value: object, *, status_code: int = 200) -> Response:
@@ -877,8 +654,8 @@ def _authenticated_activation_identity(
     return identity
 
 
-def _body_node_matches(value: str | None, identity: AgentIdentity) -> None:
-    if value is not None and value != identity.node_id:
+def _body_node_matches(value: str, identity: AgentIdentity) -> None:
+    if value != identity.node_id:
         raise HTTPException(
             status_code=403, detail="authenticated node identity cannot be overridden"
         )
@@ -1396,11 +1173,16 @@ def install_agent_routes(
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
 
-    @human.post("/upgrades/preview")
+    @human.post(
+        "/upgrades/preview",
+        response_model=AgentUpgradePreviewResponse,
+        response_model_exclude_none=True,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def preview_agent_upgrade(
         body: AgentUpgradePreviewRequest,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePreviewResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
         if upgrades is None:
             raise HTTPException(
@@ -1416,39 +1198,44 @@ def install_agent_routes(
             )
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        return {
-            "authority_revision": plan.authority_revision,
-            "node_ids": list(plan.node_ids),
-            "package": plan.package,
-            "plan_digest": plan.plan_digest,
-            **(
-                {"repair_manifest": plan.repair_manifest}
-                if plan.repair_manifest is not None
-                else {}
-            ),
-            "strategy": plan.strategy,
-        }
+        return AgentUpgradePreviewResponse(
+            authority_revision=plan.authority_revision,
+            node_ids=list(plan.node_ids),
+            package=plan.package,
+            plan_digest=plan.plan_digest,
+            repair_manifest=plan.repair_manifest,
+            strategy=plan.strategy,
+        )
 
-    @human.get("/upgrades/candidate")
+    @human.get(
+        "/upgrades/candidate",
+        response_model=AgentUpgradePackageRequest,
+        responses=bounded_error_responses(401, 403, 503),
+    )
     def current_agent_upgrade(
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePackageRequest:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
             )
         try:
-            return upgrades.current_package()
+            return AgentUpgradePackageRequest.model_validate(upgrades.current_package())
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
 
-    @human.post("/upgrades", status_code=status.HTTP_202_ACCEPTED)
+    @human.post(
+        "/upgrades",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=AgentUpgradeApplyResponse,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def apply_agent_upgrade(
         body: AgentUpgradeApplyRequest,
         request: Request,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradeApplyResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades")
         if upgrades is None:
             raise HTTPException(
@@ -1476,7 +1263,7 @@ def install_agent_routes(
                 tuple(job.targets),
             )
         )
-        return {"id": job.id, "state": job.state}
+        return AgentUpgradeApplyResponse(id=job.id, state=job.state)
 
     @human.post(
         "/enrollments/grants",
@@ -1621,31 +1408,29 @@ def install_agent_routes(
         response_model=EnrollmentBootstrapResponse,
         responses=bounded_error_responses(503),
     )
-    def enrollment_bootstrap(setup_schema: Literal["1", "2"] = "1") -> Response:
+    def enrollment_bootstrap() -> Response:
         required = _require_services(services)
         if required.bootstrap is None:
             raise HTTPException(
                 status_code=503,
                 detail="agent enrollment bootstrap is unavailable",
             )
-        helper_public_key = None
-        if setup_schema == "2":
-            if required.host_runtime_authority is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
-            helper_public_key = required.host_runtime_authority.public_key_document.get(
-                "public_key"
+        if required.host_runtime_authority is None:
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
             )
-            if (
-                not isinstance(helper_public_key, str)
-                or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
-            ):
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
+        helper_public_key = required.host_runtime_authority.public_key_document.get(
+            "public_key"
+        )
+        if (
+            not isinstance(helper_public_key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
+            )
         return _json_response(
             EnrollmentBootstrapResponse(
                 controller_endpoint=required.bootstrap.controller_endpoint,
@@ -1655,10 +1440,10 @@ def install_agent_routes(
                 controller_address=required.bootstrap.controller_address,
                 service_hostnames=list(required.bootstrap.service_hostnames),
                 host_helper_authority_public_key=helper_public_key,
-            ).model_dump(exclude_none=True, exclude_defaults=True)
+            )
         )
 
-    @agent.post("/enroll")
+    @agent.post("/enroll", response_model=IssuedCertificateResponse)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1696,31 +1481,31 @@ def install_agent_routes(
         if scan.top_level_keys != 1:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
-        if not isinstance(body.get("grant_token"), str):
-            _consume_enrollment_denial(required, scan.tokens)
-            raise HTTPException(status_code=422, detail="enrollment grant is required")
-        csr = body.get("csr")
-        evidence = body.get("evidence")
         try:
-            csr_bytes = csr.encode("ascii") if isinstance(csr, str) else b""
+            submitted = EnrollmentSubmitRequest.model_validate(body)
+        except ValidationError:
+            _consume_enrollment_denial(required, scan.tokens)
+            if scan.tokens:
+                # Keep the enrollment oracle closed: a discoverable grant is
+                # consumed and reported as denied even when the request shape
+                # is malformed.  The canonical model handles valid requests;
+                # this branch preserves the bounded burn-on-invalid policy.
+                raise HTTPException(status_code=403, detail="enrollment denied") from None
+            raise HTTPException(status_code=422, detail="enrollment request is invalid") from None
+        try:
+            csr_bytes = submitted.csr.encode("ascii")
         except UnicodeEncodeError:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        service_evidence = (
-            evidence
-            if isinstance(evidence, Mapping)
-            and set(body) == {"grant_token", "csr", "evidence"}
-            else {}
-        )
         try:
             outcome = required.enrollment.submit(
-                body["grant_token"], csr_bytes, service_evidence
+                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except EnrollmentIssuanceUncertain as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1734,7 +1519,7 @@ def install_agent_routes(
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1748,7 +1533,7 @@ def install_agent_routes(
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
         token_identifier = hashlib.sha256(
-            body["grant_token"].encode("utf-8")
+            submitted.grant_token.encode("utf-8")
         ).hexdigest()
         audits.append(
             AuditRecord(
@@ -1765,7 +1550,10 @@ def install_agent_routes(
         )
         return _json_response(_issued_response(outcome))
 
-    @agent.post("/claim")
+    @agent.post(
+        "/claim", response_model=AgentClaim,
+        responses={204: {"description": "No work available"}},
+    )
     def claim(request: Request, body: ClaimRequest) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -1786,11 +1574,12 @@ def install_agent_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        return (
-            Response(status_code=status.HTTP_204_NO_CONTENT)
-            if result is None
-            else _json_response(_wire(result))
-        )
+        if result is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        encoded_claim = canonical_message(AgentClaim.model_validate(result))
+        if len(encoded_claim) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
+            raise HTTPException(status_code=500, detail="agent claim is too large")
+        return Response(content=encoded_claim, media_type="application/json")
 
     @agent.post("/inventory", status_code=status.HTTP_204_NO_CONTENT)
     def inventory(body: InventoryRequest, request: Request) -> Response:
@@ -1890,7 +1679,7 @@ def install_agent_routes(
 
     @agent.post("/recipe-runs/observations", status_code=status.HTTP_204_NO_CONTENT)
     def recipe_run_observations(
-        body: RecipeRunObservationsRequest, request: Request
+        body: RecipeRunObservationsWire, request: Request
     ) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -1910,110 +1699,92 @@ def install_agent_routes(
                 detail="recipe run observation time is outside the accepted window",
             )
         try:
-            if body.schema_version == 1:
-                legacy = tuple(
-                    RecipeRunObservation(run.run_id, run.ready)
-                    for run in body.runs
-                    if isinstance(run, RecipeRunObservationRequest)
+            authority = None
+            by_run = {run.run_id: run for run in body.runs}
+            with required.sessions.begin() as session:
+                assigned = prepare_exact_recipe_run_observation_nodes(
+                    session, identity.node_id, observed_at, set(by_run)
                 )
-                if len(legacy) != len(body.runs):
-                    raise ValueError("recipe run observation version is invalid")
-                record_recipe_run_observations(
-                    required.sessions, identity.node_id, observed_at, legacy
-                )
-            else:
-                authority = host_runtime_service()
-                exact = tuple(
-                    run
-                    for run in body.runs
-                    if isinstance(run, RecipeRunExactObservationRequest)
-                )
-                if len(exact) != len(body.runs):
-                    raise ValueError("recipe run observation version is invalid")
-                by_run = {run.run_id: run for run in exact}
-                with required.sessions.begin() as session:
-                    assigned = prepare_exact_recipe_run_observation_nodes(
-                        session, identity.node_id, observed_at, set(by_run)
-                    )
-                    for node in assigned:
-                        run = session.get(RecipeRun, node.run_id)
-                        assert run is not None
-                        evidence = by_run.get(node.run_id)
-                        if evidence is None:
-                            continue
-                        if (
-                            evidence.observed_at.tzinfo is None
-                            or evidence.observed_at.utcoffset() is None
-                        ):
-                            raise ValueError(
-                                "recipe run observation time must be timezone-aware"
-                            )
-                        evidence_observed_at = evidence.observed_at.astimezone(UTC)
-                        if evidence.run_generation != run.run_generation:
-                            raise ValueError(
-                                "recipe run observation generation is stale"
-                            )
-                        if (
-                            _now(node.updated_at).astimezone(UTC)
-                            >= evidence_observed_at
-                        ):
-                            raise ValueError("recipe run observation was replayed")
-                        try:
-                            (
-                                observed_identity,
-                                process_running,
-                                receipt_sha256,
-                            ) = authority.consume_recipe_run_observation_grant(
-                                session,
-                                node_id=identity.node_id,
-                                certificate_serial=identity.certificate_serial,
-                                identity=evidence.observation_identity(),
-                                observed_at=evidence_observed_at,
-                                received_at=now,
-                                signed_grant=evidence.grant,
-                                helper_receipt=evidence.helper_receipt,
-                            )
-                        except HostHelperAuthorityError:
-                            # An authenticated same-generation identity mismatch is
-                            # rank failure, not permission to keep serving.
-                            node.state = "failed"
-                            node.observed_run_generation = None
-                            node.observation_receipt_sha256 = None
-                            node.observation_endpoint_ready = None
-                            node.updated_at = evidence_observed_at
-                            continue
-                        mapping = session.get(ClusterMapping, run.mapping_id)
-                        owner = (
-                            mapping is not None
-                            and mapping.endpoint_owner_node_id == identity.node_id
+                agent_node = session.get(AgentNode, identity.node_id)
+                if agent_node is None:
+                    raise ValueError("recipe run observation node is unavailable")
+                for node in assigned:
+                    run = session.get(RecipeRun, node.run_id)
+                    assert run is not None
+                    evidence = by_run.get(node.run_id)
+                    if evidence is None:
+                        continue
+                    evidence_observed_at = evidence.observed_at.astimezone(UTC)
+                    if (
+                        agent_node.observation_receipt_public_key
+                        != evidence.observation_receipt_public_key
+                    ):
+                        raise ValueError("recipe run observation receipt key is stale")
+                    if evidence.run_generation != run.run_generation:
+                        raise ValueError("recipe run observation generation is stale")
+                    if authority is None:
+                        authority = host_runtime_service()
+                    if _now(node.updated_at).astimezone(UTC) >= evidence_observed_at:
+                        raise ValueError("recipe run observation was replayed")
+                    try:
+                        (
+                            observed_identity,
+                            process_running,
+                            receipt_sha256,
+                        ) = authority.consume_recipe_run_observation_grant(
+                            session,
+                            node_id=identity.node_id,
+                            certificate_serial=identity.certificate_serial,
+                            identity=evidence.observation_identity(),
+                            observed_at=evidence_observed_at,
+                            received_at=now,
+                            signed_grant=evidence.grant,
+                            helper_receipt=evidence.helper_receipt,
                         )
-                        if (
-                            observed_identity != evidence.observation_identity_sha256
-                            or (owner and type(evidence.endpoint_ready) is not bool)
-                            or (not owner and evidence.endpoint_ready is not None)
-                        ):
-                            node.state = "failed"
-                        elif node.state != "failed":
-                            node.state = (
-                                "running"
-                                if process_running
-                                and (not owner or evidence.endpoint_ready is True)
-                                else "failed"
-                            )
-                        node.observed_run_generation = run.run_generation
-                        node.observation_receipt_sha256 = receipt_sha256
-                        node.observation_endpoint_ready = (
-                            evidence.endpoint_ready if owner else None
-                        )
+                    except HostHelperAuthorityError:
+                        # An authenticated same-generation identity mismatch is
+                        # rank failure, not permission to keep serving.
+                        node.state = "failed"
+                        node.observed_run_generation = None
+                        node.observation_receipt_sha256 = None
+                        node.observation_endpoint_ready = None
                         node.updated_at = evidence_observed_at
+                        continue
+                    mapping = session.get(ClusterMapping, run.mapping_id)
+                    owner = (
+                        mapping is not None
+                        and mapping.endpoint_owner_node_id == identity.node_id
+                    )
+                    if (
+                        observed_identity != evidence.observation_identity_sha256
+                        or (owner and type(evidence.endpoint_ready) is not bool)
+                        or (not owner and evidence.endpoint_ready is not None)
+                    ):
+                        node.state = "failed"
+                    elif node.state != "failed":
+                        node.state = (
+                            "running"
+                            if process_running
+                            and (not owner or evidence.endpoint_ready is True)
+                            else "failed"
+                        )
+                    node.observed_run_generation = run.run_generation
+                    node.observation_receipt_sha256 = receipt_sha256
+                    node.observation_endpoint_ready = (
+                        evidence.endpoint_ready if owner else None
+                    )
+                    node.updated_at = evidence_observed_at
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/recipe-runs/observation-grants")
+    @agent.post(
+        "/recipe-runs/observation-grants",
+        response_model=RecipeRunObservationGrantWire,
+    )
     def recipe_run_observation_grant(
         body: RecipeRunObservationGrantRequest, request: Request
-    ) -> Response:
+    ) -> RecipeRunObservationGrantWire:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         if body.node_id != identity.node_id:
@@ -2055,12 +1826,10 @@ def install_agent_routes(
                 status_code=409,
                 detail="recipe run observation authority rejected request",
             ) from None
-        return _json_response(
-            {
-                "schema_version": 1,
-                "observation_identity_sha256": observation_identity,
-                "grant": grant.to_mapping(),
-            }
+        return RecipeRunObservationGrantWire(
+            schema_version=1,
+            observation_identity_sha256=observation_identity,
+            grant=SignedHostHelperGrant.parse(grant.to_mapping()),
         )
 
     @agent.get("/source-bundles/{source_sha256}")
@@ -2099,7 +1868,10 @@ def install_agent_routes(
             },
         )
 
-    @agent.get("/recipe-installations/{installation_id}/spec")
+    @agent.get(
+        "/recipe-installations/{installation_id}/spec",
+        response_model=AgentCompiledExecutionPlan,
+    )
     def recipe_spec(installation_id: str, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2255,6 +2027,7 @@ def install_agent_routes(
             installation_image_digest = installation.image_digest
         try:
             spec = validate_compiled_launch_payload(candidate)
+            typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
         except (CompiledExecutionPlanError, TypeError, ValueError) as error:
             raise HTTPException(
                 status_code=409,
@@ -2324,7 +2097,16 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification execution receipts are stale",
                 )
-        return _json_response(spec)
+        encoded_spec = canonical_message(typed_spec)
+        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification compiled execution plan is too large",
+            )
+        return Response(
+            content=encoded_spec,
+            media_type="application/json",
+        )
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:
         required = services.workload_helper_authority if services is not None else None
@@ -2347,108 +2129,116 @@ def install_agent_routes(
             )
         return required
 
-    @agent.post("/host-runtime/grant")
-    def host_runtime_grant(body: dict[str, object], request: Request) -> Response:
+    @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
+    def host_runtime_grant(
+        body: HostRuntimeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                action=ContainerRuntimeAction(body["action"]),
-                request_sha256=body["request_sha256"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                action=ContainerRuntimeAction(body.action),
+                request_sha256=body.request_sha256,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(_host_grant_response(grant))
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
 
-    @agent.post("/agent-upgrade/grant")
-    def agent_upgrade_grant(body: dict[str, object], request: Request) -> Response:
+    @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
+    def agent_upgrade_grant(
+        body: AgentUpgradeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                package_sha256=body["package_sha256"],
-                package_signature=body["package_signature"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                package_sha256=body.package_sha256,
+                package_signature=body.package_signature,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(_host_grant_response(grant))
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/receipts")
-    def package_helper_receipts(body: dict[str, object], request: Request) -> Response:
+    @agent.post(
+        "/package-helper/receipts", response_model=PackageHelperReceiptsResponse
+    )
+    def package_helper_receipts(
+        body: PackageHelperReceiptsRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
             receipts = required.issue_receipts(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                objects=body["objects"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                objects=[item.model_dump() for item in body.objects],
                 certificate_serial=identity.certificate_serial,
             )
             return _json_response(
-                {"receipts": [item.to_mapping() for item in receipts]}
+                _package_receipts_response(receipts)
             )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/grant")
-    def package_helper_grant(body: dict[str, object], request: Request) -> Response:
+    @agent.post("/package-helper/grant", response_model=PackageHelperGrantResponse)
+    def package_helper_grant(
+        body: PackageHelperGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
-            operation = PackageHelperOperation(body["operation"])
             grant = required.issue_grant(
-                request_id=body["request_id"],
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                generation=body["generation"],
-                operation=operation,
-                request_digest=body["request_digest"],
+                request_id=body.request_id,
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                generation=body.generation,
+                operation=PackageHelperOperation(body.operation),
+                request_digest=body.request_digest,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                _package_grant_response(grant)
+            )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
             ) from None
 
-    @agent.post("/heartbeat")
-    def heartbeat(body: dict[str, object], request: Request) -> Response:
+    @agent.post("/heartbeat", response_model=AgentDirective)
+    def heartbeat(body: AgentProgress, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentProgress.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
@@ -2460,17 +2250,14 @@ def install_agent_routes(
             )
         except (StaleAgentAttempt, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        return _json_response(_wire(response))
+        return _json_response(AgentDirective.model_validate(response))
 
     @agent.post("/result", status_code=status.HTTP_204_NO_CONTENT)
-    def result(body: dict[str, object], request: Request) -> Response:
+    def result(body: AgentResult, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentResult.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
@@ -2489,7 +2276,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/renew")
+    @agent.post("/renew", response_model=IssuedCertificateResponse)
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2688,8 +2475,11 @@ def install_agent_routes(
     @agent.get(
         "/distribution/manifests/{plan_digest}",
         operation_id="getAgentDistributionManifest",
+        response_model=DistributionAssignment,
     )
-    def distribution_manifest(plan_digest: str, request: Request) -> Response:
+    def distribution_manifest(
+        plan_digest: str, request: Request, response: Response
+    ) -> DistributionAssignment:
         """Return the exact model plus OCI object set authorized for this node."""
         _scope_identity(request)
         required = _require_services(services)
@@ -2697,17 +2487,15 @@ def install_agent_routes(
         if required.distribution is None:
             raise HTTPException(status_code=503, detail="agent distribution is unavailable")
         try:
-            body = required.distribution.manifest(
+            assignment = required.distribution.authorize(
                 node_id=identity.node_id,
                 plan_digest=plan_digest,
             )
         except DistributionError as error:
             raise _distribution_error(error) from None
-        return Response(
-            content=canonical_message(body),
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "ETag": f'"plan:{plan_digest}"'},
-        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["ETag"] = f'"plan:{plan_digest}"'
+        return assignment
 
     @agent.get(
         "/distribution/objects/{sha256}",
@@ -2821,3 +2609,31 @@ def install_agent_routes(
 
     app.include_router(human)
     app.include_router(agent)
+
+    # Enrollment reads a bounded raw body before validation so an invalid
+    # submission still consumes its identifiable one-use grant. Document that
+    # input from the very same model used above; a Request parameter alone
+    # would otherwise hide the request contract from OpenAPI consumers.
+    standard_openapi = app.openapi
+
+    def openapi_with_enrollment_contract() -> dict[str, object]:
+        document = standard_openapi()
+        request_schema = EnrollmentSubmitRequest.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+        components = document.setdefault("components", {}).setdefault("schemas", {})
+        components.update(request_schema.pop("$defs", {}))
+        components[EnrollmentSubmitRequest.__name__] = request_schema
+        document["paths"]["/agent/v1/enroll"]["post"]["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "$ref": "#/components/schemas/EnrollmentSubmitRequest"
+                    }
+                }
+            },
+        }
+        return document
+
+    app.openapi = openapi_with_enrollment_contract

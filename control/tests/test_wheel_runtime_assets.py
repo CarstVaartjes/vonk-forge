@@ -34,9 +34,9 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
     assert {
         "vonk_control/schemas/catalog-entity-v1.schema.json",
         "vonk_control/schemas/harness-evidence-v1.schema.json",
-        "vonk_control/schemas/recipe-v1.schema.json",
         "vonk_control/schemas/test-report-v1.schema.json",
     } <= members
+    assert "vonk_control/schemas/recipe-v1.schema.json" not in members
 
     fixture = tmp_path / "synthetic-canonical-recipe.json"
     fixture.write_bytes(
@@ -57,7 +57,7 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
                 "RecipeDefinition.model_validate(json.load(open(sys.argv[2], encoding='utf-8')));"
                 "[Draft202012Validator.check_schema(json.loads(read_runtime_schema(name))) "
                 "for name in ('catalog-entity-v1.schema.json','harness-evidence-v1.schema.json',"
-                "'recipe-v1.schema.json','test-report-v1.schema.json')]"
+                "'test-report-v1.schema.json')]"
             ),
             str(wheel),
             str(fixture),

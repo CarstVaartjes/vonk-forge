@@ -45,8 +45,6 @@ class _GeneratedModel(Protocol):
 
 
 class _RoutineControlClient(Protocol):
-    def nodes(self) -> _GeneratedModel: ...
-
     def endpoint(self, alias: str) -> _GeneratedModel: ...
 
 
@@ -72,12 +70,6 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(
         dest="command", required=True, parser_class=_CliParser
     )
-
-    nodes = commands.add_parser("nodes")
-    node_commands = nodes.add_subparsers(
-        dest="nodes_command", required=True, parser_class=_CliParser
-    )
-    _add_json(node_commands.add_parser("status"))
 
     endpoint = commands.add_parser("endpoint")
     endpoint.add_argument("name")
@@ -228,9 +220,6 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
     recipes = payload.get("recipes")
     if isinstance(recipes, list):
         recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
-        identity = (
-            "uri" if any("uri" in recipe for recipe in recipe_rows) else "recipe_id"
-        )
         if recipe_rows:
             _print_table(
                 recipe_rows,
@@ -239,7 +228,7 @@ def _emit_list_table(payload: Mapping[str, object]) -> bool:
                     ("qualification", "QUALIFICATION"),
                     ("execution_readiness", "READINESS"),
                     ("node_count", "SPARKS"),
-                    (identity, "URI" if identity == "uri" else "RECIPE ID"),
+                    ("recipe_id", "RECIPE ID"),
                 ),
             )
         else:
@@ -357,9 +346,9 @@ def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
                 print(
                     f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
                 )
-    if diagnostics.get("legacy_generic_ambiguous") is True:
+    if diagnostics.get("failure_details_unavailable") is True:
         print(
-            "diagnosis: legacy helper response is ambiguous; the exact target "
+            "diagnosis: helper did not report the failed stage; the exact target "
             "identity remains the success gate"
         )
     if diagnostics.get("next_action"):
@@ -409,12 +398,6 @@ def _model_payload(result: _GeneratedModel) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ControlClientError("control API response must be an object")
     return payload
-
-
-def _admin_payload(result: object) -> dict[str, object]:
-    if isinstance(result, Mapping):
-        return dict(result)
-    return _model_payload(result)  # type: ignore[arg-type]
 
 
 def _control_error(
@@ -490,8 +473,6 @@ def _routine(
     client: _RoutineControlClient,
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
-    if args.command == "nodes":
-        return _model_payload(client.nodes())
     if args.command == "endpoint":
         return _model_payload(client.endpoint(args.name))
     raise ControlClientError("unsupported routine command")

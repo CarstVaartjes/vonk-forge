@@ -36,7 +36,7 @@ class TelemetryMetricSummary:
             process_name (Union[None, Unset, str]):
             run_id (Union[None, Unset, str]):
             scope (Union[None, Unset, str]):
-            source (Union[Unset, str]):  Default: 'legacy'.
+            source (Union[Unset, str]):  Default: 'controller-derived'.
             unit (Union[Unset, str]):  Default: 'unknown'.
      """
 
@@ -53,7 +53,7 @@ class TelemetryMetricSummary:
     process_name: Union[None, Unset, str] = UNSET
     run_id: Union[None, Unset, str] = UNSET
     scope: Union[None, Unset, str] = UNSET
-    source: Union[Unset, str] = 'legacy'
+    source: Union[Unset, str] = 'controller-derived'
     unit: Union[Unset, str] = 'unknown'
 
 

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "node_id": "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "run_id": "10000000-0000-4000-8000-000000000001",
+  "installation_id": "20000000-0000-4000-8000-000000000002",
+  "recipe_revision_id": "30000000-0000-4000-8000-000000000003",
+  "recipe_content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mapping_id": "40000000-0000-4000-8000-000000000004",
+  "mapping_generation": 2,
+  "run_generation": 3,
+  "image_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifact_set_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "model_identity": "publisher/model@revision",
+  "rank": 1,
+  "role": "worker",
+  "world_size": 2,
+  "local_address": "192.168.100.3",
+  "master_address": "192.168.100.2",
+  "master_port": 29500,
+  "port": 8888,
+  "runtime_arguments_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "observed_at": "2026-09-07T00:00:00+00:00",
+  "endpoint_ready": null,
+  "observation_identity_sha256": "595f3b3887386b64ee2900d919fc19cd560806f8200f8dc96f99f66b0bdb5462",
+  "grant": {
+    "schema_version": 1,
+    "claims": {
+      "schema_version": 1,
+      "authority": "vonk.host-maintenance-helper",
+      "request_id": "50000000-0000-4000-8000-000000000005",
+      "node_id": "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "issued_at": 1788739200,
+      "expires_at": 1788739260,
+      "operation": {
+        "type": "execute-container-runtime-request",
+        "action": "run-inspect",
+        "job_id": "10000000-0000-4000-8000-000000000001",
+        "operation_id": "60000000-0000-4000-8000-000000000006",
+        "attempt": 3,
+        "fence": "70000000-0000-4000-8000-000000000007",
+        "request_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "observation_identity_sha256": "595f3b3887386b64ee2900d919fc19cd560806f8200f8dc96f99f66b0bdb5462"
+      }
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "key_id": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  "helper_receipt": {
+    "schema_version": 1,
+    "claims": {
+      "schema_version": 1,
+      "authority": "vonk.recipe-run-observation-helper",
+      "node_id": "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "request_id": "50000000-0000-4000-8000-000000000005",
+      "request_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "observation_identity_sha256": "595f3b3887386b64ee2900d919fc19cd560806f8200f8dc96f99f66b0bdb5462",
+      "outcome": "running",
+      "observed_at": 1788739200
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "key_id": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  "observation_receipt_public_key": "0000000000000000000000000000000000000000000000000000000000000000"
+}

@@ -62,14 +62,11 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_library_sync_runs",
     "recipe_run_observation_grants",
     "recipe_runs",
+    "recipe_route_authorities",
     "recipe_source_bundles",
     "source_bundle_archives",
     "runtime_image_receipts",
     "runtime_image_authorizations",
-    "reconciliation_cancellations",
-    "reconciliation_completion_generation",
-    "reconciliation_operations",
-    "reconciliations",
     "resource_reservations",
     "route_publication_owner",
     "route_publications",
@@ -146,6 +143,18 @@ def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
         assert connection.execute(
             text("SELECT singleton_id, last_id FROM fleet_event_cursor")
         ).all() == [(1, 0)]
+        source_default = next(
+            column["default"]
+            for column in inspect(engine).get_columns("node_telemetry_rollup_metrics")
+            if column["name"] == "source"
+        )
+        assert "controller-derived" in (source_default or "")
+        metrics_column = next(
+            column for column in inspect(engine).get_columns("node_telemetry_samples")
+            if column["name"] == "metrics"
+        )
+        assert metrics_column["default"] is None
+        assert metrics_column["nullable"] is False
 
 
 def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
@@ -157,6 +166,61 @@ def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
     assert "vonk_control.models" not in migration
     assert "Base.metadata" not in migration
     assert ".create_all(" not in migration
+
+
+def test_current_telemetry_defaults_preserve_rows_and_require_metrics(
+    postgres_engine,
+) -> None:
+    from sqlalchemy.orm import Session
+    from vonk_control.models import AgentNode
+
+    config = _config(postgres_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, "0021_runtime_authz")
+    node_id = "spk_" + "a" * 32
+    with Session(postgres_engine) as session, session.begin():
+        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+
+    insert_sample = text(
+        "INSERT INTO node_telemetry_samples "
+        "(id, node_id, boot_id, sequence, observed_at, received_at, gap_samples, details) "
+        "VALUES (:id, :node, :boot, :sequence, :now, :now, 0, '{}')"
+    )
+    values = {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "node": node_id,
+        "boot": "20000000-0000-4000-8000-000000000002",
+        "sequence": 1,
+        "now": "2026-09-07T12:00:00Z",
+    }
+    with postgres_engine.begin() as connection:
+        connection.execute(insert_sample, values)
+        before = connection.execute(
+            text("SELECT id, node_id, boot_id, sequence, metrics FROM node_telemetry_samples")
+        ).one()
+
+    command.upgrade(config, "head")
+
+    with postgres_engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT id, node_id, boot_id, sequence, metrics FROM node_telemetry_samples")
+        ).one() == before
+        columns = {
+            column["name"]: column
+            for column in inspect(connection).get_columns("node_telemetry_samples")
+        }
+        assert columns["metrics"]["default"] is None
+        assert columns["metrics"]["nullable"] is False
+        source = next(
+            column for column in inspect(connection).get_columns("node_telemetry_rollup_metrics")
+            if column["name"] == "source"
+        )
+        assert "controller-derived" in source["default"]
+
+    with pytest.raises(IntegrityError), postgres_engine.begin() as connection:
+        connection.execute(
+            insert_sample,
+            {**values, "id": "10000000-0000-4000-8000-000000000003", "sequence": 2},
+        )
 
 
 def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
@@ -185,6 +249,8 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0019_recipe_builds_canonical_revision.py",
         "0020_runtime_image_receipts.py",
         "0021_runtime_image_authorizations.py",
+        "0022_current_telemetry_defaults.py",
+        "0023_recipe_route_authority.py",
     ]
 
 
@@ -632,7 +698,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-                    == "0021_runtime_authz"
+                    == "0023_recipe_route_authority"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -670,7 +736,7 @@ def test_alembic_autogenerate_ignores_only_retained_legacy_storage(
     assert "op.drop_index" not in generated
 
 
-def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(
+def test_recipe_installation_model_identity_migration_adds_canonical_model_fields(
     tmp_path: Path,
 ) -> None:
     url = f"sqlite:///{tmp_path / 'model-identity-upgrade.sqlite'}"
@@ -685,8 +751,9 @@ def test_recipe_installation_model_identity_migration_adds_indexed_nullable_colu
         column["name"]: column
         for column in inspector.get_columns("recipe_installations")
     }
-    assert columns["model_version_sha256"]["nullable"] is True
-    assert "ix_recipe_installations_model_version_sha256" in {
+    assert columns["model_content_sha256"]["nullable"] is True
+    assert columns["model_content_digests"]["nullable"] is False
+    assert "ix_recipe_installations_model_content_sha256" in {
         index["name"] for index in inspector.get_indexes("recipe_installations")
     }
 
@@ -762,7 +829,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-                    == "0021_runtime_authz"
+                    == "0023_recipe_route_authority"
         )
 
 
@@ -844,7 +911,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-                    == "0021_runtime_authz"
+                    == "0023_recipe_route_authority"
         )
 
 

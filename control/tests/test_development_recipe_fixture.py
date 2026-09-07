@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import json
-from importlib.resources import files
 from pathlib import Path
 
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_policy import dockerfile_base_images
 
+from .canonical_recipe_fixtures import canonical_example
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def _example(name: str) -> dict[str, object]:
-    return json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", name)
-        .read_text(encoding="utf-8")
-    )
+    return canonical_example(name)
 
 
 def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:

@@ -40,7 +40,7 @@
       "target": "managed"
     },
     {
-      "context": "deploy/compose/litellm",
+      "context": ".",
       "dockerfile": "deploy/compose/litellm/Dockerfile",
       "environment": "LITELLM_IMAGE",
       "package": "vonk-forge-litellm",

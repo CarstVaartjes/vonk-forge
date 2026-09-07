@@ -32,8 +32,7 @@ T = TypeVar("T", bound="TelemetrySeries")
 
 @_attrs_define
 class TelemetrySeries:
-    """ One sampled or configured metric in canonical units.
-
+    """
         Attributes:
             aggregation (str):
             freshness_threshold_seconds (float):

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib
 import json
+from importlib.resources import files
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_CLIENT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_CLIENT = ROOT / "control/web/src/api/generated.d.ts"
+PACKAGED_CLI_OPENAPI = files("cluster_profiles.schemas").joinpath("control-openapi.json")
 
 
 def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -17,6 +19,13 @@ def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
         for method, operation in path.items()
         if method in {"delete", "get", "patch", "post", "put"}
     }
+
+
+def test_cli_packages_the_generated_admin_openapi_contract() -> None:
+    schema = json.loads(PACKAGED_CLI_OPENAPI.read_text())
+    assert "/api/v1/artifact-jobs/{job_id}" in schema["paths"]
+    assert "/api/v1/auth/login" not in schema["paths"]
+    assert schema["openapi"].startswith("3.1.")
 
 
 def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None:
@@ -56,7 +65,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
         "progress"
     ]
     assert any(
-        option.get("$ref") == "#/components/schemas/JobOperationProgress"
+        option.get("$ref") == "#/components/schemas/OperationProgress"
         for option in progress["anyOf"]
     )
 
@@ -233,6 +242,21 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
+    source_bundle = operations["downloadRecipeSourceBundle"]
+    assert source_bundle["x-vonk-streaming-transport"] is True
+    assert source_bundle["responses"]["200"]["content"] == {
+        "application/vnd.vonk-forge.source-bundle.v1+tar": {
+            "schema": {"format": "binary", "type": "string"}
+        }
+    }
+    assert "downloadRecipeSourceBundle" not in typescript
+    assert not (
+        PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py"
+    ).exists()
+    assert operations["getJobLog"]["x-vonk-streaming-transport"] is True
+    assert "getJobLog" not in typescript
+    assert not (PYTHON_CLIENT / "api/default/get_job_log.py").exists()
+
 
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
@@ -244,9 +268,9 @@ def test_admin_schema_is_secret_free() -> None:
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/logs",
         "/api/v1/jobs/{job_id}/resume",
-        "/api/v1/nodes/status",
         "/api/v1/nodes/{node_id}/telemetry",
     }
+    assert "/api/v1/nodes/status" not in schema["paths"]
     assert all(path.startswith("/api/v1/") for path in schema["paths"])
     operation_list = [
         operation
@@ -290,7 +314,6 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getNodeStatuses",
         "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
@@ -310,21 +333,6 @@ def test_admin_schema_is_secret_free() -> None:
     assert by_id["getFleetStatus"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert by_id["getNodeStatuses"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    assert "health_probe_stale" in node_status["required"]
-    assert (
-        "not aggregate node readiness"
-        in node_status["properties"]["health_probe_stale"]["description"]
-    )
-    assert node_status["properties"]["stale"]["deprecated"] is True
-    python_node_status = (PYTHON_CLIENT / "models/node_status.py").read_text()
-    assert "health_probe_stale: bool" in python_node_status
-    assert 'health_probe_stale = d.pop("health_probe_stale")' in python_node_status
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "health_probe_stale: boolean;" in typescript
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
@@ -566,7 +574,7 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
     for name in (
         "TelemetryCapability",
-        "TelemetryDetails",
+        "TelemetryDetails-Output",
         "TelemetryMetricSummary",
         "TelemetryMetrics",
         "TelemetryPoint",
@@ -586,21 +594,21 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
     point = schema["TelemetryPoint"]
     assert point["properties"]["details"] == {
-        "$ref": "#/components/schemas/TelemetryDetails"
+        "$ref": "#/components/schemas/TelemetryDetails-Output"
     }
-    assert point["properties"]["metrics"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryMetrics"},
-        {"type": "null"},
-    ]
+    assert point["properties"]["metrics"] == {
+        "$ref": "#/components/schemas/TelemetryMetrics"
+    }
+    assert "metrics" in point["required"]
     history = schema["TelemetryHistoryResponse"]
     assert history["properties"]["points"]["items"]["anyOf"] == [
         {"$ref": "#/components/schemas/TelemetryPoint"},
         {"$ref": "#/components/schemas/TelemetryRollupPoint"},
     ]
-    assert history["properties"]["metadata"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryHistoryMetadata"},
-        {"type": "null"},
-    ]
+    assert history["properties"]["metadata"] == {
+        "$ref": "#/components/schemas/TelemetryHistoryMetadata"
+    }
+    assert "metadata" in history["required"]
     assert schema["TelemetryCurrentResponse"]["properties"]["schema_version"][
         "const"
     ] == 2
@@ -618,75 +626,6 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
     assert 'TelemetryHistoryResponse: {[key: string]: unknown};' not in typescript
 
 
-def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
-    from cluster_profiles.generated_control.models.telemetry_history_response import (
-        TelemetryHistoryResponse,
-    )
-    from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
-
-    legacy_document = {
-        "id": "00000000-0000-4000-8000-000000000001",
-        "node_id": "spk_" + "1" * 32,
-        "boot_id": "00000000-0000-4000-8000-000000000002",
-        "sequence": 4,
-        "observed_at": "2026-09-05T00:00:00Z",
-        "received_at": "2026-09-05T00:00:01Z",
-        "gap_samples": 0,
-        "details": {},
-    }
-    legacy = TelemetryPoint.from_dict(legacy_document)
-    assert legacy.details.to_dict() == {}
-    assert "metrics" not in legacy.to_dict()
-
-    rich = TelemetryPoint.from_dict(
-        {
-            **legacy_document,
-            "metrics": {
-                "schema_version": 2,
-                "series": [
-                    {
-                        "aggregation": "instant",
-                        "freshness_threshold_seconds": 30,
-                        "key": "gpu.utilization_percent",
-                        "measurement_kind": "measured",
-                        "observed_at": "2026-09-05T00:00:00Z",
-                        "scope": "accelerator",
-                        "source": "fixture",
-                        "support_status": "available",
-                        "unit": "percent",
-                        "value": 75.0,
-                    }
-                ],
-                "capabilities": [],
-                "runtimes": [],
-                "workloads": [],
-                "provenance": {
-                    "collector": "fixture",
-                    "collector_version": "1",
-                },
-            },
-        }
-    )
-    assert rich.metrics is not None
-    assert rich.metrics.schema_version == 2
-    assert rich.metrics.series[0].key == "gpu.utilization_percent"
-
-    history = TelemetryHistoryResponse.from_dict(
-        {
-            "schema_version": 1,
-            "node_id": legacy.node_id,
-            "start": "2026-09-05T00:00:00Z",
-            "end": "2026-09-05T00:01:00Z",
-            "resolution": "raw",
-            "maximum_points": 2,
-            "points": [rich.to_dict()],
-        }
-    )
-    assert history.schema_version == 1
-    assert isinstance(history.points[0], TelemetryPoint)
-    assert history.points[0].metrics is not None
-
-
 def test_generated_python_client_parses_documented_operation_errors() -> None:
     import httpx
 
@@ -697,7 +636,7 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "get_job_log": (401, 403, 404, 503),
+        "list_job_logs": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }

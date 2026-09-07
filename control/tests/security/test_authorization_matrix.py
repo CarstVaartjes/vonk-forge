@@ -8,7 +8,7 @@ def test_every_mutating_route_has_explicit_role() -> None:
         def list(self): return []
         def get(self, _): raise KeyError
         def enqueue(self, *_args, **_kwargs): raise AssertionError
-    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore(), fleet=dict)
+    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore())
     routes = {
         (method, route.path)
         for route in app.routes

@@ -10,16 +10,21 @@ import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from pydantic import ValidationError
+
+sys.path.insert(0, "/opt/vonk-litellm")
+from route_activation import ActivationMarker
 
 ROOT = Path("/routes")
 ACTIVATION = ROOT / "activation.json"
@@ -39,22 +44,6 @@ MAXIMUM_LEASE = timedelta(seconds=300)
 _PRISMA_CACHE_ROOT = Path("/opt/vonk-litellm/prisma")
 _PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_DIRECTORY = re.compile(r"[0-9]{8}-[0-9a-f]{64}\Z")
-_MARKER_FIELDS = {
-    "schema_version",
-    "generation",
-    "state",
-    "reconciliation_id",
-    "plan_digest",
-    "evidence_set_digest",
-    "routes_sha256",
-    "litellm_sha256",
-    "issued_at",
-    "expires_at",
-    "directory",
-    "manifest_sha256",
-}
-_MANIFEST_FIELDS = _MARKER_FIELDS - {"directory", "manifest_sha256"}
 
 
 class ActiveRequest:
@@ -425,45 +414,17 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
         marker = json.loads(activation_content)
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(marker, dict) or set(marker) != _MARKER_FIELDS:
+    try:
+        activation = ActivationMarker.model_validate(marker)
+    except ValidationError:
         return None
+    marker = activation.model_dump()
     if activation_content != _encoded(marker):
         return None
-    generation = marker.get("generation")
-    directory_name = marker.get("directory")
-    manifest_digest = marker.get("manifest_sha256")
-    if (
-        marker.get("schema_version") != 1
-        or marker.get("state") not in {"maintenance", "published"}
-        or isinstance(generation, bool)
-        or not isinstance(generation, int)
-        or generation <= 0
-        or not isinstance(directory_name, str)
-        or _DIRECTORY.fullmatch(directory_name) is None
-        or not isinstance(manifest_digest, str)
-        or _DIGEST.fullmatch(manifest_digest) is None
-        or directory_name != f"{generation:08d}-{manifest_digest}"
-    ):
-        return None
-    try:
-        reconciliation_id = marker.get("reconciliation_id")
-        if (
-            not isinstance(reconciliation_id, str)
-            or str(uuid.UUID(reconciliation_id)) != reconciliation_id
-        ):
-            return None
-    except (ValueError, AttributeError):
-        return None
-    if any(
-        not isinstance(marker.get(field), str)
-        or _DIGEST.fullmatch(marker[field]) is None
-        for field in (
-            "plan_digest",
-            "evidence_set_digest",
-            "routes_sha256",
-            "litellm_sha256",
-        )
-    ):
+    generation = activation.generation
+    directory_name = activation.directory
+    manifest_digest = activation.manifest_sha256
+    if directory_name != f"{generation:08d}-{manifest_digest}":
         return None
     issued = _parse_timestamp(marker.get("issued_at"))
     expires = _parse_timestamp(marker.get("expires_at"))
@@ -488,7 +449,7 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
     ):
         return None
     try:
-        exact_manifest = {field: marker[field] for field in _MANIFEST_FIELDS}
+        exact_manifest = activation.manifest_document()
         config_document = json.loads(config.read_bytes())
     except (OSError, KeyError, json.JSONDecodeError):
         return None

@@ -11,17 +11,27 @@ content-addressed and available only to operator/administrator API roles.
 
 ## Routes stuck in maintenance
 
-Inspect the reconciliation job and affected-node health. Keep routes withdrawn
-until the pinned commit, releases, leases, and acceptance checks all pass. Do
-not manually point LiteLLM at an unaccepted GPU node endpoint.
+Inspect the current recipe operation and affected-node Fleet connection,
+inventory, and telemetry state. Keep routes withdrawn until the pinned commit,
+current API settings, recipe operation leases, and acceptance checks all pass. Do not manually point LiteLLM
+at an unaccepted GPU node endpoint.
 
-## Stale node probe
+## Stale fleet evidence
 
-Check worker health, cluster-egress connectivity, the node's stable ID, and its
-latest observation timestamp. A hostname or address change must be updated via
-the fleet repository proposal; it must not create a new node identity.
+Open `/api/v1/fleet` and inspect the node's connection state, certificate
+validity, admission inventory freshness, and telemetry freshness. Missing,
+delayed, and stale evidence remain distinct; an online connection alone does
+not establish readiness. A hostname or address change must be updated through
+the current Fleet API settings; it must not create a new node identity.
 
-## Reconciliation failures
+## Invalid node certificate
+
+Inspect the certificate state and expiry metric for the affected node. Renew or
+re-enroll through the authenticated enrollment flow, then verify that the Fleet
+connection state returns to online and that current inventory and telemetry are
+available.
+
+## Control job failures
 
 Filter operations and Audit by action, inspect sanitized evidence, and verify the
 protected commit is still eligible. Re-plan after correcting repository state;

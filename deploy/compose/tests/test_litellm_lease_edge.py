@@ -30,6 +30,7 @@ POST_RENEWAL_ASSERTION_WINDOW = timedelta(seconds=10)
 
 
 def _supervisor_module():
+    sys.path.insert(0, str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
     spec = importlib.util.spec_from_file_location(
         "litellm_config_supervisor_lease_edge", SUPERVISOR
     )

@@ -32,7 +32,6 @@ def _environment() -> dict[str, str]:
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
         "METRICS_TOKEN_FILE": "/dev/null",
-        "WORKER_API_TOKEN_FILE": "/dev/null",
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
         "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
@@ -336,7 +335,6 @@ def _settings_result(
         "VONK_AGENT_CA_ROOT_FILE": "test-root-certificate\n",
         "VONK_CONTROLLER_CA_FILE": "test-controller-ca\n",
         "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
-        "VONK_WORKER_API_TOKEN_FILE": "W" * 32 + "\n",
         "VONK_MANAGEMENT_CIDRS_FILE": "10.0.0.0/24\n",
         "VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "test-package-grant-key\n",
         "VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "test-package-receipt-key\n",
@@ -413,7 +411,6 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
         "application",
         "ca",
         "data",
-        "worker-authority",
     }
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
@@ -1093,7 +1090,6 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
         "application",
         "ca",
         "data",
-        "worker-authority",
     }
     assert rendered["networks"]["agent-proxy"]["internal"] is True
     assert "step-ca" in services

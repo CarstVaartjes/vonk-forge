@@ -249,7 +249,6 @@ def stage_compose_secrets(
         "agent-intermediate-certificate",
         "controller-ca",
         "agent-proxy-auth",
-        "worker-api-token",
     ):
         stage_private_key(
             source_root / name,

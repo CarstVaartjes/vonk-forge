@@ -273,7 +273,7 @@ function AgentUpgradeDiagnostics({detail, targetNames}: {detail: JobDetail; targ
       <dl><div><dt>Observed version</dt><dd>{target.observed_identity.version || "Not reported"}</dd></div><CopyableValue label="Observed binary digest" value={target.observed_identity.binary_digest}/><CopyableValue label="Observed build digest" value={target.observed_identity.build_digest}/>{target.retry_not_before && <div><dt>{target.retry_queued ? "Controller retry not before" : "Retry not before"}</dt><dd><time dateTime={target.retry_not_before}>{exactTime(target.retry_not_before) || target.retry_not_before}</time></dd></div>}</dl>
       {target.raw_reason && <details><summary>Raw helper evidence</summary><code>{target.raw_reason}</code></details>}
     </li>)}</ul>
-    {diagnostics.legacy_generic_ambiguous && <p className="activity-upgrade-ambiguity"><strong>Legacy helper response is ambiguous.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
+    {diagnostics.failure_details_unavailable && <p className="activity-upgrade-ambiguity"><strong>Helper did not report the failed stage.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
   </section>;
 }
 
@@ -390,7 +390,7 @@ function JobProgressDetails({
         {detail.state === "waiting-for-operator" && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
-        <details className="activity-job-technical"><summary>Operation identifiers</summary><dl><CopyableValue label="Operation ID" value={detail.id}/><CopyableValue label="Authority revision" value={detail.authority_revision}/>{detail.reconciliation_id && <CopyableValue label="Reconciliation ID" value={detail.reconciliation_id}/>} {detail.targets.map((target, index) => <CopyableValue key={`${target}:${index}`} label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`} value={target}/>)}</dl></details>
+        <details className="activity-job-technical"><summary>Operation identifiers</summary><dl><CopyableValue label="Operation ID" value={detail.id}/><CopyableValue label="Authority revision" value={detail.authority_revision}/> {detail.targets.map((target, index) => <CopyableValue key={`${target}:${index}`} label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`} value={target}/>)}</dl></details>
       </>}
     </div>
   </details>;

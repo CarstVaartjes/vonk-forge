@@ -32,7 +32,7 @@ from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
     Job,
-    Reconciliation,
+    RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
 )
@@ -64,7 +64,6 @@ class EnqueuedJob:
     targets: tuple[str, ...] = (NODE_ID,)
     current_attempt: int = 1
     status_reason: str | None = None
-    reconciliation_id: str | None = "22222222-2222-4222-8222-222222222222"
     created_at: datetime = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
 
 
@@ -125,6 +124,19 @@ class ProjectedFleet:
             resolution=resolution,
             maximum_points=maximum_points,
             points=[],
+            metadata={
+                "requested_start": start,
+                "requested_end": end,
+                "actual_start": None,
+                "actual_end": None,
+                "requested_resolution": resolution,
+                "actual_resolution": resolution,
+                "timezone": "UTC",
+                "point_count": 0,
+                "coverage_seconds": 0,
+                "gap_samples": 0,
+                "downsampled": resolution != "raw",
+            },
         )
 
     def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
@@ -139,14 +151,13 @@ class ProjectedFleet:
         )
 
 
-def _client(*, fleet=None, fleet_projection=None, operations=None, role="operator"):
+def _client(*, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=fleet or (lambda: {"authority_revision": COMMIT, "nodes": []}),
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
         admin=AdminServices(
@@ -264,6 +275,36 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert detail.json() == listed.json()["operations"][0]
 
 
+def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:
+    projected = operation_api._progress_projection(
+        {
+            "phase": "download",
+            "kind": "oci-layer",
+            "object_sha256": "a" * 64,
+            "completed_bytes": 128,
+            "total_bytes": 256,
+            "total_bytes_known": True,
+        }
+    )
+    assert projected is not None
+    assert projected.model_dump(mode="json") == {
+        "phase": "download",
+        "kind": "oci-layer",
+        "object_sha256": "a" * 64,
+        "completed_bytes": 128,
+        "total_bytes": 256,
+        "total_bytes_known": True,
+    }
+    assert operation_api._progress_projection({"phase": "verify"}).model_dump(
+        mode="json"
+    ) == {"phase": "verify"}
+    for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
+        assert (
+            operation_api._progress_projection({"phase": "download", retired: 1})
+            is None
+        )
+
+
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
@@ -286,7 +327,11 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
             "kind": "cache-download",
             "state": "running",
             "attempt": 1,
-            "progress": {"phase": "download", "total_unknown": True},
+            "progress": {
+                "phase": "download",
+                "total_bytes": None,
+                "total_bytes_known": False,
+            },
             "updated_at": "2026-08-15T12:01:00Z",
             "created_at": "2026-08-15T12:01:00Z",
             "supported_actions": [],
@@ -309,9 +354,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         def list_rows(query: OperationQuery) -> OperationListPage:
             selected = [rows[row_id] for row_id in ids]
             if query.node_id is not None:
-                selected = [
-                    row for row in selected if query.node_id in row["node_ids"]
-                ]
+                selected = [row for row in selected if query.node_id in row["node_ids"]]
             total = len(selected)
             if query.after is not None:
                 selected = [
@@ -428,7 +471,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                     profile_digest="9" * 64,
                     plan_digest=plan_digest,
                     state="running",
-                    plan={"scope": {"node_ids": node_ids}, "steps": [{"kind": "start"}]},
+                    plan={
+                        "scope": {"node_ids": node_ids},
+                        "steps": [{"kind": "start"}],
+                    },
                     current_step=0,
                     current_operation_id=None,
                     progress={"operation_kind": "fleet-profile.apply"},
@@ -450,9 +496,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get(
-        "/api/v1/operations", headers=operator, params={"limit": 1}
-    )
+    first = client.get("/api/v1/operations", headers=operator, params={"limit": 1})
     detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
     second = client.get(
         "/api/v1/operations",
@@ -481,11 +525,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert filtered.json()["operations"][0]["id"] == newest_id
 
 
-def test_fleet_exposes_visual_state_and_node_evidence() -> None:
+def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 
     visual = client.get("/api/v1/fleet", headers=operator)
-    evidence = client.get("/api/v1/nodes/status", headers=operator)
 
     assert visual.status_code == 200
     assert visual.json() == {
@@ -496,11 +539,6 @@ def test_fleet_exposes_visual_state_and_node_evidence() -> None:
         "nodes": [],
     }
     assert "evidence_digest" not in visual.json()
-    assert evidence.status_code == 200
-    assert evidence.json()["authority_revision"] == COMMIT
-    assert evidence.json()["nodes"] == []
-    assert len(evidence.json()["evidence_digest"]) == 64
-    assert "event_cursor" not in evidence.json()
 
 
 def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
@@ -528,6 +566,19 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         "resolution": "raw",
         "maximum_points": 1500,
         "points": [],
+        "metadata": {
+            "requested_start": "2026-08-15T11:00:00Z",
+            "requested_end": "2026-08-15T12:00:00Z",
+            "actual_start": None,
+            "actual_end": None,
+            "requested_resolution": "raw",
+            "actual_resolution": "raw",
+            "timezone": "UTC",
+            "point_count": 0,
+            "coverage_seconds": 0.0,
+            "gap_samples": 0,
+            "downsampled": False,
+        },
     }
     assert projection.history_calls == [
         (
@@ -639,41 +690,6 @@ def test_viewer_cannot_rename_node() -> None:
     assert projection.profile_calls == []
 
 
-def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
-    def fleet():
-        return {
-            "authority_revision": COMMIT,
-            "nodes": [
-                {
-                    "id": NODE_ID,
-                    "display_name": "Alpha",
-                    "hostname": "alpha",
-                    "lifecycle": "ready",
-                    "healthy": None,
-                    "labels": {},
-                    "profile": None,
-                    "memory_available_bytes": 0,
-                    "disk_available_bytes": 0,
-                    "probe_age_seconds": None,
-                    "health_probe_stale": True,
-                    "stale": True,
-                }
-            ],
-        }
-
-    client, operator, _reconciler, _audits = _client(fleet=fleet)
-
-    response = client.get("/api/v1/nodes/status", headers=operator)
-
-    assert response.status_code == 200
-    node = response.json()["nodes"][0]
-    assert node["healthy"] is None
-    assert node["health_probe_stale"] is True
-    assert node["stale"] is True
-    assert node["probe_age_seconds"] is None
-    assert "management" not in json.dumps(response.json(), sort_keys=True)
-
-
 def test_optional_operation_projections_fail_closed_when_unavailable() -> None:
     client, operator, _reconciler, _audits = _client()
 
@@ -705,7 +721,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
         "operation_next_cursor": None,
         "operation_total": 0,
         "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
-        "reconciliation_id": "22222222-2222-4222-8222-222222222222",
         "state": "queued",
         "status_reason": None,
         "targets": [NODE_ID],
@@ -723,7 +738,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     projection_factory = getattr(operation_api, "durable_operation_services", None)
     assert callable(projection_factory)
     now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    reconciliation_id = "22222222-2222-4222-8222-222222222222"
+    authority_id = "22222222-2222-4222-8222-222222222222"
     route_document = {
         "generation": 7,
         "routes": {
@@ -732,14 +747,14 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
                 "evidence_digest": "e" * 64,
                 "node_id": NODE_ID,
                 "observed_at": now.isoformat(),
-                "operation_id": f"model-a:{NODE_ID}:workload.verify",
+                "operation_id": "recipe-run:22222222-2222-4222-8222-222222222222",
                 "path": "/v1",
                 "port": 8000,
                 "scheme": "http",
                 "verify_evidence_digest": "v" * 64,
             }
         },
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "published",
     }
     route_bytes = _encoded(route_document)
@@ -747,10 +762,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     issued_at = now.isoformat()
     expires_at = (now + timedelta(minutes=5)).isoformat()
     manifest_document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": 7,
         "state": "published",
-        "reconciliation_id": reconciliation_id,
+        "authority_id": authority_id,
         "plan_digest": DIGEST,
         "evidence_set_digest": "e" * 64,
         "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
@@ -761,10 +776,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     manifest_bytes = _encoded(manifest_document)
     manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
     marker = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": 7,
         "state": "published",
-        "reconciliation_id": reconciliation_id,
+        "authority_id": authority_id,
         "plan_digest": DIGEST,
         "evidence_set_digest": "e" * 64,
         "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
@@ -787,27 +802,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(
-            Reconciliation(
-                id=reconciliation_id,
-                authority_revision=COMMIT,
-                status="succeeded",
-                summary={},
-                graph={
-                    "authority_revision": COMMIT,
-                    "nodes": [],
-                    "schema_version": 1,
-                    "targets": [NODE_ID],
-                },
-                graph_digest="3" * 64,
-                plan_digest=DIGEST,
-                current_phase="completed",
-                created_at=now,
-            )
-        )
+        session.add(RecipeRouteAuthority(authority_id=authority_id, created_at=now))
         session.add(
             RoutePublication(
-                reconciliation_id=reconciliation_id,
+                authority_id=authority_id,
                 state="completed",
                 generation=7,
                 plan_digest=DIGEST,
@@ -824,7 +822,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
         session.add(
             RoutePublicationOwner(
                 singleton_id=1,
-                reconciliation_id=reconciliation_id,
+                authority_id=authority_id,
                 owner_generation=7,
                 updated_at=now,
             )
@@ -915,12 +913,12 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     (generation / "litellm.json").write_bytes(litellm_bytes)
 
     with sessions.begin() as session:
-        session.get(RoutePublication, reconciliation_id).state = "publication-pending"
+        session.get(RoutePublication, authority_id).state = "publication-pending"
     with pytest.raises(RuntimeError, match="active publication"):
         services.endpoint("model-a")
 
     with sessions.begin() as session:
-        session.get(RoutePublication, reconciliation_id).state = "completed"
+        session.get(RoutePublication, authority_id).state = "completed"
     (route_root / "activation.json").write_text("{}")
     with pytest.raises(RuntimeError, match="activation marker"):
         services.endpoint("model-a")
@@ -1229,7 +1227,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                 "retry_queued": False,
             }
         ],
-        "legacy_generic_ambiguous": True,
+        "failure_details_unavailable": True,
         "next_action": (
             "Keep the rollout paused and inspect the Spark package-helper and dpkg "
             "recovery state before resuming. When ready, Resume queues the retry "
@@ -1322,7 +1320,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
-    assert specific["legacy_generic_ambiguous"] is False
+    assert specific["failure_details_unavailable"] is False
     assert specific["next_action"] is not None
     assert (
         "Resume queues the retry behind a new safety delay" in specific["next_action"]
@@ -1485,9 +1483,7 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         )
 
 
-def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct() -> (
-    None
-):
+def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> None:
     client, _operator, _reconciler, _audits = _client()
 
     schema = operation_api.admin_openapi_schema(client.app)
@@ -1497,19 +1493,9 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert paths["/api/v1/nodes/status"]["get"]["operationId"] == ("getNodeStatuses")
-    assert paths["/api/v1/nodes/status"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    health_probe_stale = node_status["properties"]["health_probe_stale"]
-    legacy_stale = node_status["properties"]["stale"]
-    assert "not aggregate node readiness" in health_probe_stale["description"]
-    assert legacy_stale["deprecated"] is True
-    assert "health_probe_stale" in legacy_stale["description"]
-    assert paths["/api/v1/nodes/status"]["get"]["summary"] == (
-        "Read explicit node health-probe evidence"
-    )
+    assert "/api/v1/nodes/status" not in paths
+    assert "NodeStatus" not in schema["components"]["schemas"]
+    assert "FleetStatusResponse" not in schema["components"]["schemas"]
     assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
         "getNodeTelemetryHistory"
     )
@@ -1535,7 +1521,6 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     ]
     assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
     assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
-    assert paths["/api/v1/nodes/status"]["get"]["security"] == [{"BearerAuth": []}]
 
 
 def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:

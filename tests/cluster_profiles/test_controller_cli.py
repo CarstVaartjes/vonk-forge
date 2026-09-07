@@ -13,6 +13,14 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import ControlForbidden
 
 
+class _Model:
+    def __init__(self, value: dict[str, object]) -> None:
+        self.value = value
+
+    def to_dict(self) -> dict[str, object]:
+        return self.value
+
+
 class _Client:
     def __init__(
         self,
@@ -29,6 +37,15 @@ class _Client:
         self.uploads: list[tuple[str, Path, str, str, int]] = []
         self.downloads: list[tuple[str, Path, str, str, int, bool]] = []
         self.extra_headers: list[dict[str, str] | None] = []
+
+    def fleet(self) -> _Model:
+        response = self.responses.get(("GET", "/api/v1/fleet"), {"nodes": []})
+        if isinstance(response, list):
+            assert response, "No fake responses remain for GET /api/v1/fleet"
+            response = response.pop(0)
+        self.calls.append(("GET", "/api/v1/fleet", None, None))
+        self.extra_headers.append(None)
+        return _Model(response)
 
     def request(
         self,
@@ -124,7 +141,15 @@ def test_availability_error_json_uses_shared_failure_fields() -> None:
 class _StrictTaskClient(_Client):
     """Fixture transport that rejects route, query, and body drift."""
 
-    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        extra_headers=None,
+        query=None,
+    ):
         allowed = {
             ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
             ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},
@@ -290,7 +315,7 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
                             "retry_queued": False,
                         }
                     ],
-                    "legacy_generic_ambiguous": True,
+                    "failure_details_unavailable": True,
                     "next_action": "Inspect package-helper and dpkg recovery state before resuming.",
                     "operator_summary": "The exact target identity was not proven.",
                 },
@@ -312,7 +337,7 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
     assert "raw_helper_reason: agent upgrade request is invalid" in output
     assert "retry_not_before: 2026-08-28T21:27:40+00:00" in output
     assert "retry_queued: false" in output
-    assert "legacy helper response is ambiguous" in output
+    assert "helper did not report the failed stage" in output
     assert "next_action: Inspect package-helper" in output
 
 
@@ -959,7 +984,7 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     with redirect_stdout(stdout):
         assert cli.main(("--json", "cache", "list"), control_client=client) == 0
         assert cli.main(
-                ("--json", "cache", "download", "apply", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                ("--json", "cache", "download", "apply", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}',
                  "--plan-digest", "d" * 64,
              "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
             control_client=client,
@@ -1204,10 +1229,20 @@ def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...
     assert result == 0
 
 
+@pytest.mark.parametrize("command", ["current", "state"])
+def test_fleet_summary_commands_use_canonical_fleet_snapshot(command: str) -> None:
+    client = _Client({("GET", "/api/v1/fleet"): {"nodes": []}})
+
+    result, _payload = _invoke(client, "--json", "fleet", command)
+
+    assert result == 0
+    assert [call[1] for call in client.calls] == ["/api/v1/fleet"]
+
+
 @pytest.mark.parametrize(
     ("argv", "method", "path"),
     [
-        (("models", "run", "preview", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
+        (("models", "run", "preview", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
         (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switches"),
         (("models", "run", "stop", "preview", "run-1"), "POST", "/api/v1/recipes/run-switch-stops/preview"),
         (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switch-stops"),
@@ -1259,7 +1294,7 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     )
     request_key = "11111111-1111-4111-8111-111111111111"
     run_input = {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
         "spark_group": {
             "nodes": [
@@ -1318,7 +1353,7 @@ def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
     )
     request_key = "11111111-1111-4111-8111-111111111111"
     artifact_input = {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
     }
 
@@ -1358,7 +1393,7 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
         "--json",
         "models",
         "download",
-        "--model-version-sha256",
+        "--model-content-sha256",
         "a" * 64,
         "--recipe-revision-id",
         "recipe-1",
@@ -1373,7 +1408,7 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
         "/api/v1/operations/op-1",
     ]
     assert client.calls[0][2] == {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
     }
 
@@ -1453,7 +1488,7 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
                 "models",
                 "run",
                 "--input",
-                '{"model_version_sha256":"' + "a" * 64 + '"}',
+                '{"model_content_sha256":"' + "a" * 64 + '"}',
                 "--request-key",
                 "11111111-1111-4111-8111-111111111111",
             ),
@@ -1501,7 +1536,7 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
             (
                 "models",
                 "download",
-                "--model-version-sha256",
+                "--model-content-sha256",
                 "a" * 64,
                 "--request-key",
                 "11111111-1111-4111-8111-111111111111",
@@ -1534,7 +1569,7 @@ def test_forced_model_download_uses_repair_without_changing_exact_identity() -> 
         "--json",
         "models",
         "download",
-        "--model-version-sha256",
+        "--model-content-sha256",
         "a" * 64,
         "--force",
         "--request-key",

@@ -1,5 +1,9 @@
 *
 !pyproject.toml
+!agent_protocol/
+!agent_protocol/src/
+!agent_protocol/src/vonk_agent_protocol/
+!agent_protocol/src/vonk_agent_protocol/route_activation.py
 !src/
 src/*
 !src/cluster_profiles/
@@ -24,7 +28,6 @@ schemas/*
 schemas/global/*
 !schemas/global/catalog-entity-v1.schema.json
 !schemas/global/harness-evidence-v1.schema.json
-!schemas/global/recipe-v1.schema.json
 !schemas/global/test-report-v1.schema.json
 !config/
 config/*

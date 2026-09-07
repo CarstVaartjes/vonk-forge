@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from cryptography import x509
@@ -23,7 +24,17 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
+from vonk_agent_protocol import (
+    ExecuteContainerRuntimeRequestOperation,
+    HostHelperGrantClaims,
+    HostHelperSignature,
+    InstallVonkDebOperation,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
+    canonical_message,
+)
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -37,6 +48,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.host_helper_authority import HostHelperGrantIssuer
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -59,9 +71,9 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRouteAuthority,
     RecipeRun,
     RecipeSourceBundle,
-    Reconciliation,
     RoutePublication,
     RunNode,
     RuntimeImageAuthorization,
@@ -71,28 +83,59 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_control.workload_helper_authority import (
+    WorkloadHelperGrantIssuer,
+    WorkloadObjectReceiptIssuer,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
-CAPABILITIES = [
-    "agent.runtime.rust.v1",
-    "node.probe",
-    "release.install",
-    "runtime.vonk.v1",
-    "workload.health",
-    "workload.prepare",
-    "workload.start",
-    "workload.stop",
-    "workload.verify",
-]
+CAPABILITIES = sorted(
+    [
+        "agent.runtime.rust.v1",
+        "runtime.vonk.v1",
+        "agent.upgrade.v1",
+        "artifact.distribution.v1",
+        "recipe.build.v1",
+        "recipe.image.import.v1",
+        "recipe.install",
+        "recipe.start",
+        "recipe.job.run.v1",
+        "recipe.stop",
+        "recipe.uninstall",
+        "recipe.model-uninstall.v1",
+    ]
+)
+STOP_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": "a" * 64,
+}
+
+
+def image_import_payload(digest: str) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "kind": "recipe.image.import.v1",
+        "build_id": "00000000-0000-4000-8000-000000000010",
+        "mapping_id": "00000000-0000-4000-8000-000000000011",
+        "mapping_generation": 1,
+        "source_node_id": NODE_A,
+        "image_digest": "sha256:" + "b" * 64,
+        "oci_layout_sha256": digest,
+        "image_bytes": 8,
+    }
+
+
 PACKAGED_RUNTIME_IDENTITY = {
     "architecture": "linux-amd64",
     "binary_digest": "c" * 64,
     "build_digest": "sha256:" + "b" * 64,
     "semantic_version": "1.2.3",
     "self_test_passed": True,
+    "observation_receipt_public_key": "d" * 64,
 }
 
 
@@ -150,23 +193,6 @@ def _controller_ca() -> tuple[str, str]:
     )
     pem = certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
     return pem, certificate.fingerprint(hashes.SHA256()).hex()
-
-
-PROBE_RESULT = {
-    "status": "ok",
-    "evidence": {
-        "vonk_forge": {
-            "schema_version": 1,
-            "memory": {"available_bytes": 1_000, "total_bytes": 4_000},
-            "storage": {"available_bytes": 2_000, "total_bytes": 8_000},
-            "accelerator": {
-                "available": True,
-                "active_nvidia_compute_processes": 0,
-            },
-        },
-        "nvidia": {"tools": {}},
-    },
-}
 
 
 class Jobs:
@@ -228,7 +254,7 @@ class Authority(CertificateAuthority):
             b"certificate",
             b"chain",
             "issued-serial",
-            "issued-fingerprint",
+            "e" * 64,
             now,
             now + timedelta(days=1),
         )
@@ -337,7 +363,6 @@ def agent_system(tmp_path):
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=dict,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
@@ -389,6 +414,17 @@ def telemetry_payload(
                     "accelerator_name": "NVIDIA GB10",
                     "accelerator_performance_state": "P0",
                 },
+                "metrics": {
+                    "schema_version": 2,
+                    "series": [],
+                    "capabilities": [],
+                    "runtimes": [],
+                    "workloads": [],
+                    "provenance": {
+                        "collector": "test",
+                        "collector_version": "1",
+                    },
+                },
             }
         ],
     }
@@ -399,10 +435,13 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"' + b"x" * (40 * 1024),
-            b"x" * (40 * 1024),
+            b'{"schema_version":1,"samples":[],"padding":"'
+            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
         reads = 0
@@ -454,6 +493,67 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
+
+
+@pytest.mark.parametrize("series_count", [143, 512])
+def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
+    agent_system,
+    series_count: int,
+) -> None:
+    from vonk_agent_protocol import TelemetryRequest
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
+    client, services, _, clock = agent_system
+    payload = telemetry_payload(clock)
+    sampled = payload["samples"][0]
+    series = [
+        {
+            "key": f"device.metric_{index}",
+            "scope": "node",
+            "process_name": "測" * 128,
+            "value": "測" * 256,
+            "unit": "state",
+            "source": "native-collector",
+            "measurement_kind": "measured",
+            "observed_at": sampled["observed_at"],
+            "freshness": "fresh",
+            "freshness_threshold_seconds": 6.0,
+            "support_status": "available",
+            "aggregation": "last",
+        }
+        for index in range(series_count)
+    ]
+    sampled["metrics"] = {
+        "schema_version": 2,
+        "series": series,
+        "capabilities": [],
+        "runtimes": [],
+        "workloads": [],
+        "provenance": {
+            "collector": "native-collector",
+            "collector_version": "2",
+            "host_uptime_seconds": 1,
+            "source_observed_at": sampled["observed_at"],
+        },
+    }
+    encoded = canonical_message(payload)
+    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
+    assert (
+        len(TelemetryRequest.parse(payload).samples[0].metrics.series) == series_count
+    )
+    response = client.post(
+        "/agent/v1/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        content=encoded,
+    )
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        row = session.scalar(select(NodeTelemetrySample))
+        assert row is not None
+        assert [item["key"] for item in row.metrics["series"]] == [
+            item["key"] for item in series
+        ]
+        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -680,12 +780,282 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    request_id = "00000000-0000-4000-8000-000000000005"
+    job_id = "00000000-0000-4000-8000-000000000002"
+    operation_id = "00000000-0000-4000-8000-000000000003"
+    fence = "00000000-0000-4000-8000-000000000004"
+
+    host_issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    package_issuer = WorkloadHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    receipt_issuer = WorkloadObjectReceiptIssuer(ed25519.Ed25519PrivateKey.generate())
+
+    class RecordingHostAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.upgrade_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            operation = ExecuteContainerRuntimeRequestOperation(
+                type="execute-container-runtime-request",
+                action=kwargs["action"].value,
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                request_sha256=kwargs["request_sha256"],
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
+            self.upgrade_calls.append(kwargs)
+            operation = InstallVonkDebOperation(
+                type="install-vonk-deb",
+                package_sha256=kwargs["package_sha256"],
+                package_signature=kwargs["package_signature"],
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+    class RecordingPackageAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.receipt_calls: list[dict[str, object]] = []
+            self.receipt_output: object | None = None
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            return package_issuer.issue_grant(
+                request_id=kwargs["request_id"],
+                node_id=kwargs["node_id"],
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                release_digest=kwargs["release_digest"],
+                generation=kwargs["generation"],
+                operation=kwargs["operation"],
+                request_digest=kwargs["request_digest"],
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
+            self.receipt_calls.append(kwargs)
+            if self.receipt_output is not None:
+                return self.receipt_output  # type: ignore[return-value]
+            return tuple(
+                receipt_issuer.issue_object_receipt(
+                    object_digest=item["object_digest"], size=item["size"]
+                )
+                for item in kwargs["objects"]
+            )
+
+    host = RecordingHostAuthority()
+    package = RecordingPackageAuthority()
+    object.__setattr__(services, "host_runtime_authority", host)
+    object.__setattr__(services, "workload_helper_authority", package)
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert (
+        schemas["PackageHelperSignature"]["properties"]["algorithm"]["const"]
+        == "ed25519"
+    )
+    uuid4_pattern = (
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    grant_claims = schemas["PackageHelperGrantClaims"]["properties"]
+    assert set(schemas["PackageHelperGrantClaims"]["required"]) >= {
+        "request_id",
+        "job_id",
+        "operation_id",
+        "fence",
+    }
+    for field_name in ("request_id", "job_id", "operation_id", "fence"):
+        assert grant_claims[field_name]["pattern"] == uuid4_pattern
+    assert "relative_name" in schemas["PackageObjectReceiptClaims"]["required"]
+    assert (
+        schemas["PackageObjectReceiptClaims"]["properties"]["relative_name"]["pattern"]
+        == r"^objects/sha256/[0-9a-f]{64}$"
+    )
+    assert (
+        schemas["PackageHelperReceiptsResponse"]["properties"]["receipts"]["items"][
+            "$ref"
+        ]
+        == "#/components/schemas/SignedPackageObjectReceipt"
+    )
+    assert (
+        schemas["PackageHelperGrantResponse"]["properties"]["grant"]["$ref"]
+        == "#/components/schemas/SignedPackageHelperGrant"
+    )
+    headers = agent_headers(NODE_A, "serial-a")
+    common = {
+        "node_id": NODE_A,
+        "job_id": job_id,
+        "operation_id": operation_id,
+        "attempt": 1,
+        "fence": fence,
+        "expires_in_seconds": 30,
+    }
+
+    host_response = client.post(
+        "/agent/v1/host-runtime/grant",
+        headers=headers,
+        json=common | {"action": "start", "request_sha256": "a" * 64},
+    )
+    assert host_response.status_code == 200
+    assert isinstance(
+        SignedHostHelperGrant.parse(host_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
+    assert host.grant_calls[0]["job_id"] == job_id
+
+    upgrade_response = client.post(
+        "/agent/v1/agent-upgrade/grant",
+        headers=headers,
+        json=common
+        | {
+            "package_sha256": "b" * 64,
+            "package_signature": "c" * 128,
+        },
+    )
+    assert upgrade_response.status_code == 200
+    assert isinstance(
+        SignedHostHelperGrant.parse(upgrade_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
+
+    receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={
+            key: value for key, value in common.items() if key != "expires_in_seconds"
+        }
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert receipt_response.status_code == 200
+    assert isinstance(
+        SignedPackageObjectReceipt.parse(receipt_response.json()["receipts"][0]),
+        SignedPackageObjectReceipt,
+    )
+    assert package.receipt_calls[0]["objects"] == [
+        {"object_digest": "e" * 64, "size": 17}
+    ]
+
+    package.receipt_output = ({"claims": {"unexpected": True}},)
+    malformed_receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={
+            key: value for key, value in common.items() if key != "expires_in_seconds"
+        }
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert malformed_receipt_response.status_code == 409
+    package.receipt_output = None
+
+    grant_body = common | {
+        "request_id": request_id,
+        "release_digest": "d" * 64,
+        "generation": "gen-future-stack-001",
+        "operation": "health",
+        "request_digest": "f" * 64,
+    }
+    grant_response = client.post(
+        "/agent/v1/package-helper/grant", headers=headers, json=grant_body
+    )
+    assert grant_response.status_code == 200
+    assert isinstance(
+        SignedPackageHelperGrant.parse(grant_response.json()["grant"]),
+        SignedPackageHelperGrant,
+    )
+    assert package.grant_calls[0]["generation"] == "gen-future-stack-001"
+
+    assert (
+        client.post(
+            "/agent/v1/package-helper/grant",
+            headers=headers,
+            json=grant_body | {"generation": 7},
+        ).status_code
+        == 422
+    )
+    assert len(package.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/package-helper/receipts",
+            headers=headers,
+            json={
+                key: value
+                for key, value in common.items()
+                if key != "expires_in_seconds"
+            }
+            | {
+                "release_digest": "d" * 64,
+                "objects": [{"object_digest": "e" * 64, "size": 17, "extra": True}],
+            },
+        ).status_code
+        == 422
+    )
+    assert len(package.receipt_calls) == 2
+    assert (
+        client.post(
+            "/agent/v1/host-runtime/grant",
+            headers=headers,
+            json=common
+            | {
+                "job_id": "00000000-0000-5000-8000-000000000002",
+                "action": "start",
+                "request_sha256": "a" * 64,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/agent-upgrade/grant",
+            headers=headers,
+            json=common
+            | {
+                "attempt": "1",
+                "package_sha256": "b" * 64,
+                "package_signature": "c" * 128,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.upgrade_calls) == 1
+
+
 def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     agent_system,
 ) -> None:
     client, _services, _, clock = agent_system
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "observed_at": clock.now.isoformat(),
         "runs": [],
     }
@@ -701,6 +1071,14 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     assert (
         client.post("/agent/v1/recipe-runs/observations", json=payload).status_code
         == 401
+    )
+    assert (
+        client.post(
+            "/agent/v1/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=payload | {"schema_version": 1},
+        ).status_code
+        == 422
     )
     assert (
         client.post(
@@ -874,6 +1252,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
     assert response.status_code == 204
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
     assert not (services.artifact_root / layout_digest).exists()
@@ -1062,6 +1441,7 @@ def valid_enrollment_body(token: str) -> bytes:
                 "hardware_fingerprint": "hardware",
                 "agent_digest": "a" * 64,
                 "boot_id": "boot",
+                "observation_receipt_public_key": "d" * 64,
             },
         }
     ).encode("utf-8")
@@ -1137,7 +1517,6 @@ def test_spoofed_agent_header_is_rejected() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
 
     response = TestClient(app).post(
@@ -1152,7 +1531,6 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
     sent: list[dict[str, object]] = []
     body_reads = 0
@@ -1198,7 +1576,6 @@ def test_agent_routes_do_not_require_human_bearer_tokens() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
 
     response = TestClient(app).post(
@@ -1225,7 +1602,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     )
 
     app = create_app(
-        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore(), fleet=dict
+        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
     )
     assert (
         TestClient(app)
@@ -1413,6 +1790,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
+        "observation_receipt_public_key": "d" * 64,
         removed_field: removed_value,
     }
 
@@ -1446,6 +1824,7 @@ def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1504,6 +1883,7 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
                 "build_digest": "sha256:" + "c" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1528,6 +1908,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1564,34 +1945,59 @@ def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
         assert node.protocol_version == 3
 
 
-def test_newer_claim_fields_and_runtime_attestations_are_forward_compatible(
+@pytest.mark.parametrize(
+    ("field", "nested"),
+    (("future_claim_field", False), ("future_attestation", True)),
+)
+def test_claim_rejects_unknown_structural_fields(
     agent_system,
+    field: str,
+    nested: bool,
 ) -> None:
-    client, services, _, _clock = agent_system
+    client, _services, _, _clock = agent_system
+    payload = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+    }
+    if nested:
+        payload["runtime_identity"] = {
+            **PACKAGED_RUNTIME_IDENTITY,
+            field: {"format": "v2"},
+        }
+    else:
+        payload[field] = {"version": 4}
 
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ("lease_seconds", "wait_seconds"))
+def test_claim_rejects_string_encoded_numeric_fields(
+    agent_system,
+    field: str,
+) -> None:
+    client, _services, _, _clock = agent_system
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
-            "future_claim_field": {"version": 4},
-            "runtime_identity": {
-                **PACKAGED_RUNTIME_IDENTITY,
-                "future_attestation": {"format": "v2"},
-            },
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+            field: "30",
         },
     )
 
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.semantic_version == PACKAGED_RUNTIME_IDENTITY["semantic_version"]
-        assert node.last_seen_at is not None
-        assert session.get(AgentPresence, NODE_A) is not None
+    assert response.status_code == 422
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -1600,7 +2006,11 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1657,7 +2067,11 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1680,7 +2094,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
             "node_id",
             "deadline",
         )
-    } | {"state": "succeeded", "result": PROBE_RESULT}
+    } | {"state": "succeeded", "result": {"stopped": True}}
 
     def reject_post_commit(_source) -> None:
         raise AssertionError("presence must be written inside the queue transaction")
@@ -1708,65 +2122,14 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         assert presence.observed_at.replace(tzinfo=UTC) == clock.now
 
 
-def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) -> None:
+def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
-    )
-    claim = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "wait_seconds": 0,
-        },
-    ).json()
-    clock.now += timedelta(seconds=2)
-    result = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"state": "succeeded", "result": PROBE_RESULT}
-
-    response = client.post(
-        "/agent/v1/result",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=result,
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        observations = list(
-            session.scalars(select(Observation).where(Observation.node_id == NODE_A))
-        )
-        assert len(observations) == 1
-        assert observations[0].kind == "health"
-        assert observations[0].observed_at.replace(tzinfo=UTC) == clock.now
-        assert observations[0].payload == {
-            "active_nvidia_compute_processes": 0,
-            "compute_occupancy": "clean",
-            "disk_available_bytes": 2_000,
-            "disk_total_bytes": 8_000,
-            "memory_available_bytes": 1_000,
-            "memory_total_bytes": 4_000,
-            "status": "healthy",
-        }
-
-
-def test_failed_probe_result_never_writes_health_observation(agent_system) -> None:
-    client, services, _, clock = agent_system
-    services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1784,7 +2147,7 @@ def test_failed_probe_result_never_writes_health_observation(agent_system) -> No
         )
     } | {
         "state": "failed",
-        "result": {"status": "failed", "error_code": "probe_failed"},
+        "result": {"status": "failed", "error_code": "stop_failed"},
     }
 
     assert (
@@ -1818,7 +2181,11 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node.protocol_version is None
 
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1845,7 +2212,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     } | {
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
 
     rejected = client.post(
@@ -1921,7 +2288,11 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
 def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1942,7 +2313,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         **result,
         "node_id": NODE_B,
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
     assert (
         client.post(
@@ -1954,7 +2325,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         **result,
         "fence": str(uuid.uuid4()),
         "state": "succeeded",
-        "result": {"healthy": True},
+        "result": {"stopped": True},
     }
     assert (
         client.post(
@@ -2035,6 +2406,11 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
 ) -> None:
     client, services, _, _ = agent_system
     assert services.bootstrap is not None
+    object.__setattr__(
+        services,
+        "host_runtime_authority",
+        SimpleNamespace(public_key_document={"public_key": "11" * 32}),
+    )
 
     response = client.get("/agent/v1/bootstrap")
 
@@ -2043,6 +2419,7 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert response.json() == {
         "ca_fingerprint": services.bootstrap.ca_fingerprint,
         "ca_pem": services.bootstrap.ca_pem,
+        "host_helper_authority_public_key": "11" * 32,
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
         "controller_address": "192.168.1.231",
@@ -2057,36 +2434,33 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert "PRIVATE KEY" not in response.text
 
 
-def test_setup_schema_two_adds_only_the_host_helper_public_authority(
+def test_bootstrap_has_one_current_response_even_with_an_obsolete_query(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
 
-    class PublicAuthority:
-        def __init__(self) -> None:
-            self.public_key_document = {"public_key": "11" * 32}
+    object.__setattr__(
+        services,
+        "host_runtime_authority",
+        SimpleNamespace(public_key_document={"public_key": "11" * 32}),
+    )
 
-    object.__setattr__(services, "host_runtime_authority", PublicAuthority())
+    current = client.get("/agent/v1/bootstrap")
+    setup = client.get("/agent/v1/bootstrap?setup_schema=1")
 
-    legacy = client.get("/agent/v1/bootstrap")
-    setup = client.get("/agent/v1/bootstrap?setup_schema=2")
-
-    assert legacy.status_code == setup.status_code == 200
-    assert "host_helper_authority_public_key" not in legacy.json()
-    assert setup.json() == {
-        **legacy.json(),
-        "host_helper_authority_public_key": "11" * 32,
-    }
+    assert current.status_code == setup.status_code == 200
+    assert current.json() == setup.json()
+    assert setup.json()["host_helper_authority_public_key"] == "11" * 32
     assert setup.content == canonical_message(setup.json())
     assert "PRIVATE KEY" not in setup.text
 
 
-def test_setup_schema_two_fails_closed_without_a_host_helper_authority(
+def test_bootstrap_requires_the_host_helper_authority(
     agent_system,
 ) -> None:
     client, _, _, _ = agent_system
 
-    response = client.get("/agent/v1/bootstrap?setup_schema=2")
+    response = client.get("/agent/v1/bootstrap")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "host runtime authority is unavailable"}
@@ -2097,11 +2471,6 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
 ) -> None:
     client, services, _, clock = agent_system
 
-    class Grant:
-        @staticmethod
-        def to_mapping() -> dict[str, object]:
-            return {"schema_version": 1, "test": "exact-rank-inspection"}
-
     class ExactObservationAuthority:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -2110,7 +2479,30 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
             self.calls.append(values)
             assert values["certificate_serial"] == "serial-a"
             assert values["expires_in_seconds"] == 10
-            return "f" * 64, Grant()
+            return "f" * 64, SignedHostHelperGrant(
+                schema_version=1,
+                claims=HostHelperGrantClaims(
+                    schema_version=1,
+                    authority="vonk.host-maintenance-helper",
+                    request_id="70000000-0000-4000-8000-000000000007",
+                    node_id=NODE_A,
+                    issued_at=1_800_000_000,
+                    expires_at=1_800_000_010,
+                    operation=ExecuteContainerRuntimeRequestOperation(
+                        type="execute-container-runtime-request",
+                        action="run-inspect",
+                        job_id=values["job_id"],
+                        operation_id=values["operation_id"],
+                        attempt=values["attempt"],
+                        fence=values["fence"],
+                        request_sha256=values["request_sha256"],
+                        observation_identity_sha256="f" * 64,
+                    ),
+                ),
+                signature=HostHelperSignature(
+                    algorithm="ed25519", key_id="0" * 64, value="0" * 128
+                ),
+            )
 
     authority = ExactObservationAuthority()
     object.__setattr__(services, "host_runtime_authority", authority)
@@ -2175,7 +2567,32 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert accepted.json() == {
         "schema_version": 1,
         "observation_identity_sha256": "f" * 64,
-        "grant": {"schema_version": 1, "test": "exact-rank-inspection"},
+        "grant": {
+            "schema_version": 1,
+            "claims": {
+                "schema_version": 1,
+                "authority": "vonk.host-maintenance-helper",
+                "request_id": "70000000-0000-4000-8000-000000000007",
+                "node_id": NODE_A,
+                "issued_at": 1_800_000_000,
+                "expires_at": 1_800_000_010,
+                "operation": {
+                    "type": "execute-container-runtime-request",
+                    "action": "run-inspect",
+                    "job_id": run_id,
+                    "operation_id": request["operation_id"],
+                    "attempt": request["attempt"],
+                    "fence": request["fence"],
+                    "request_sha256": request["request_sha256"],
+                    "observation_identity_sha256": "f" * 64,
+                },
+            },
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": "0" * 64,
+                "value": "0" * 128,
+            },
+        },
     }
     assert wrong_node.status_code == 409
     assert unknown_field.status_code == 422
@@ -2386,17 +2803,14 @@ def test_reenrollment_submission_reconciles_observation_receipt_key_through_api(
     with services.sessions.begin() as session:
         session.get(AgentNode, NODE_A).observation_receipt_public_key = "d" * 64
         session.add(
-            Reconciliation(
-                id=RECIPE_ROUTE_AUTHORITY_ID,
-                authority_revision="4" * 64,
-                status="completed",
-                summary={},
+            RecipeRouteAuthority(
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
                 created_at=services.clock(),
             )
         )
         session.add(
             RoutePublication(
-                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
+                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
                 state="completed",
                 generation=1,
                 plan_digest="5" * 64,
@@ -2700,6 +3114,15 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     assert resolved.status_code == 200
     assert resolved.json() == payload
     assert resolved.json()["schema_version"] == 2
+    assert resolved.content == canonical_message(
+        AgentCompiledExecutionPlan.model_validate(payload)
+    )
+    spec_route = client.get("/openapi.json").json()["paths"][
+        "/agent/v1/recipe-installations/{installation_id}/spec"
+    ]["get"]
+    assert spec_route["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/CompiledExecutionPlan")
 
     tampered = copy.deepcopy(payload)
     tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64
@@ -2787,6 +3210,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
+            "observation_receipt_public_key": "d" * 64,
         },
     }
     issued = client.post("/agent/v1/enroll", json=body)
@@ -2831,6 +3255,7 @@ def test_human_enrollment_mutations_audit_only_grant_and_revocation(
                 "hardware_fingerprint": "hardware-c",
                 "agent_digest": "c" * 64,
                 "boot_id": "boot-c",
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -3030,7 +3455,11 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3048,7 +3477,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         )
     } | {
         "state": "failed",
-        "result": {"status": "failed", "error_code": "probe_failed"},
+        "result": {"status": "failed", "error_code": "stop_failed"},
     }
 
     response = client.post(
@@ -3061,8 +3490,8 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
         )
         parent_job = session.get(Job, claim["job_id"])
-        assert attempt.result == {"status": "failed", "error_code": "probe_failed"}
-        assert parent_job is not None and parent_job.status_reason == "probe_failed"
+        assert attempt.result == {"status": "failed", "error_code": "stop_failed"}
+        assert parent_job is not None and parent_job.status_reason == "stop_failed"
 
 
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
@@ -3070,7 +3499,11 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -3086,7 +3519,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
             "node_id",
             "deadline",
         )
-    } | {"state": "failed", "result": {"reason": "unstructured failure"}}
+    } | {"state": "failed", "result": {"unexpected": "unstructured failure"}}
 
     response = client.post(
         "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3127,7 +3560,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         )
         time.sleep(0.05)
         operation = services.operations.enqueue(
-            parent_job.id, NODE_A, "node.probe", "a" * 64, {}
+            parent_job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD
         )
         response = waiting.result(timeout=1)
 
@@ -3145,7 +3578,6 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         jobs=Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=dict,
         agent=services,
         enrollment_rate_limiter=limiter,
     )
@@ -3387,18 +3819,33 @@ def test_enrollment_rejects_malformed_observation_receipt_public_key(
     assert_grant_consumed(services, token)
 
 
+def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
+    client, services, _, _ = agent_system
+    token = enrollment_grant(services)
+    body = json.loads(valid_enrollment_body(token))
+    body["evidence"].pop("observation_receipt_public_key")
+
+    response = client.post("/agent/v1/enroll", json=body)
+
+    assert response.status_code == 403
+    assert_grant_consumed(services, token)
+
+
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
-    (services.artifact_root / digest).write_bytes(b"artifact")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(b"artifact")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     response = client.get(
         f"/agent/v1/artifacts/{digest}",
@@ -3437,6 +3884,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
     payload = b"accepted recipe image archive"
     digest = hashlib.sha256(payload).hexdigest()
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     (storage.root / digest).write_bytes(payload)
     services.operations.enqueue(
@@ -3447,6 +3895,11 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         {
             "schema_version": 1,
             "kind": "recipe.image.import.v1",
+            "build_id": "00000000-0000-4000-8000-000000000010",
+            "mapping_id": "00000000-0000-4000-8000-000000000011",
+            "mapping_generation": 1,
+            "source_node_id": NODE_A,
+            "image_digest": "sha256:" + "b" * 64,
             "oci_layout_sha256": digest,
             "image_bytes": len(payload),
         },
@@ -3471,13 +3924,16 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
 def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64
-    (services.artifact_root / digest).symlink_to(tmp_path / "outside")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).symlink_to(tmp_path / "outside")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     assert (
         client.get(
@@ -3494,9 +3950,19 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "agent.upgrade.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        {
+            "schema_version": 1,
+            "architecture": "linux-arm64",
+            "package_bytes": 8,
+            "package_sha256": digest,
+            "package_signature": "a" * 128,
+            "package_url": "https://install.vonkforge.ai/releases/test/vonk-forge-agent.deb",
+            "package_version": "1.2.3",
+            "target_binary_digest": "b" * 64,
+            "target_build_digest": "sha256:" + "c" * 64,
+        },
     )
     assert (
         client.get(
@@ -3564,13 +4030,16 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
 def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
-    (services.artifact_root / digest).write_bytes(b"artifact")
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(b"artifact")
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.image.import.v1",
         "a" * 64,
-        {"artifact_digest": digest},
+        image_import_payload(digest),
     )
     fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
     before = len(os.listdir(fd_directory))
@@ -3855,3 +4324,98 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
         "/api/v1/agents/enrollments?state=issuing", headers=admin_headers(codec)
     ).json()
     assert [item["state"] for item in issuing["enrollments"]] == ["issuing"]
+
+
+def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
+    from vonk_agent_protocol import (
+        AgentClaim,
+        AgentDirective,
+        AgentProgress,
+        AgentResult,
+    )
+    from vonk_agent_protocol.wire_model import OperationProgress
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+    components = schema["components"]["schemas"]
+
+    for path, model in (("heartbeat", AgentProgress), ("result", AgentResult)):
+        reference = paths[f"/agent/v1/{path}"]["post"]["requestBody"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        document = components[reference.rsplit("/", 1)[-1]]
+        assert document["title"] == model.__name__
+        assert set(document["required"]) == set(model.model_json_schema()["required"])
+
+    for path, model in (("claim", AgentClaim), ("heartbeat", AgentDirective)):
+        reference = paths[f"/agent/v1/{path}"]["post"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        assert components[reference.rsplit("/", 1)[-1]]["title"] == model.__name__
+    assert "204" in paths["/agent/v1/claim"]["post"]["responses"]
+
+    # A compact serializer must not erase the outgoing progress structure.
+    progress = OperationProgress.model_json_schema(mode="serialization")
+    assert progress["additionalProperties"] is False
+    assert {"phase", "completed_bytes", "checkpoint", "members"} <= set(
+        progress["properties"]
+    )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "capabilities",
+        "lease_seconds",
+        "node_id",
+        "protocol_version",
+        "runtime_identity",
+        "wait_seconds",
+        "observation_receipt_public_key",
+    ),
+)
+def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
+    client, _services, _sessions, _clock = agent_system
+    body = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": dict(PACKAGED_RUNTIME_IDENTITY),
+        "wait_seconds": 0,
+    }
+    if missing == "observation_receipt_public_key":
+        del body["runtime_identity"][missing]
+    else:
+        del body[missing]
+    # Use the raw request method: the convenience test client must not refill
+    # deliberately missing fields and hide a production boundary regression.
+    response = client.request(
+        "POST",
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=body,
+    )
+    assert response.status_code == 422
+
+
+def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -> None:
+    from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/agent/v1/enroll"]["post"]
+    request = operation["requestBody"]
+    assert request["required"] is True
+    assert request["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/EnrollmentSubmitRequest"
+    }
+    expected = EnrollmentSubmitRequest.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    nested = expected.pop("$defs")
+    components = schema["components"]["schemas"]
+    assert components["EnrollmentSubmitRequest"] == expected
+    for name, document in nested.items():
+        assert components[name] == document

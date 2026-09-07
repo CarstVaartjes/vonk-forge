@@ -26,7 +26,6 @@ MUTATION_ROLES = {
     ("PATCH", "/api/v1/nodes/{node_id}/profile"): frozenset(
         {"operator", "administrator"}
     ),
-    ("POST", "/api/v1/jobs"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/proposals"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/changes"): frozenset({"administrator"}),
     ("POST", "/api/v1/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),
@@ -131,7 +130,7 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/library/model-deletion-plans/preview"): frozenset(
         {"administrator"}
     ),
-    ("POST", "/api/v1/library/models/{model_version_sha256}/delete"): frozenset(
+    ("POST", "/api/v1/library/models/{model_content_sha256}/delete"): frozenset(
         {"administrator"}
     ),
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(

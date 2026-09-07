@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -21,6 +23,7 @@ from vonk_control.recipe_action_plans import (
     UninstallNodeImpact,
     UninstallPlan,
 )
+from vonk_control.recipe_api import MappingPlanResponse, MappingPreviewRequest
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     ImageDistributionPreview,
@@ -30,6 +33,9 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunNodePlan, RunPlan
 from vonk_control.source_policy import SourcePolicyReport
+from vonk_forge_contracts import content_sha256
+
+from .canonical_recipe_fixtures import canonical_recipe
 
 NODE = "spk_" + "1" * 32
 REVISION = "00000000-0000-4000-8000-000000000001"
@@ -39,6 +45,48 @@ OPERATION = "00000000-0000-4000-8000-000000000004"
 MAPPING = "00000000-0000-4000-8000-000000000005"
 BUILD = "00000000-0000-4000-8000-000000000006"
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
+
+
+def test_recipe_api_preserves_1024_node_collection_bound() -> None:
+    node_ids = [f"spk_{index:032x}" for index in range(33)]
+    request = MappingPreviewRequest.model_validate(
+        {
+            "recipe_revision_id": REVISION,
+            "node_ids": node_ids,
+            "parameters": {},
+        }
+    )
+    response = MappingPlanResponse.model_validate(
+        {
+            "recipe_revision_id": REVISION,
+            "recipe_content_sha256": "a" * 64,
+            "topology_name": "large-topology",
+            "generation": 1,
+            "parameters": {},
+            "nodes": [
+                {
+                    "node_id": node_id,
+                    "rank": index,
+                    "role": "worker",
+                    "endpoint_owner": index == 0,
+                }
+                for index, node_id in enumerate(request.node_ids)
+            ],
+            "placement_digest": "b" * 64,
+        }
+    )
+
+    assert len(request.node_ids) == len(response.nodes) == 33
+    assert len(response.model_dump(mode="json")["nodes"]) == 33
+
+    with pytest.raises(ValidationError):
+        MappingPreviewRequest.model_validate(
+            {
+                "recipe_revision_id": REVISION,
+                "node_ids": [f"spk_{index:032x}" for index in range(1025)],
+                "parameters": {},
+            }
+        )
 
 
 class Jobs:
@@ -51,6 +99,7 @@ class Jobs:
 
 class Recipes:
     def __init__(self) -> None:
+        recipe = canonical_recipe()
         self.install_plan = InstallPlan(
             mapping_id=MAPPING,
             mapping_generation=1,
@@ -137,8 +186,8 @@ class Recipes:
             installation_id=INSTALLATION,
             recipe_id="00000000-0000-4000-8000-000000000007",
             recipe_revision_id=REVISION,
-            recipe_content_sha256="a" * 64,
-            recipe_content={"schema_version": 1},
+            recipe_content_sha256=content_sha256(recipe),
+            recipe_content=recipe.model_dump(mode="json"),
             installation_authority_digest="a" * 64,
             original_plan_digest="b" * 64,
             installation_state="installed",
@@ -152,7 +201,7 @@ class Recipes:
             warnings=(),
             consequences=UninstallConsequences(),
             model_impact=UninstallModelImpact(
-                model_version_sha256="f" * 64,
+                model_content_sha256="f" * 64,
                 model_title="publisher/model",
                 effect="recipe-and-unused-model",
                 dependent_recipe_ids=(),
@@ -162,7 +211,7 @@ class Recipes:
             plan_digest="5" * 64,
         )
         self.model_deletion_plan = ModelDeletionPlan(
-            model_version_sha256="f" * 64,
+            model_content_sha256="f" * 64,
             model_title="publisher/model",
             allowed=True,
             installations=(
@@ -190,10 +239,10 @@ class Recipes:
             warnings=(
                 ActionReason(
                     "model-delete.shared_cache_protected",
-                    "Unrelated immutable caches remain protected.",
+                    "Only affected installation copies are removed; reusable downloaded model cache remains retained.",
                 ),
             ),
-            shared_cache_policy="remove-unreferenced-model-artifacts-only",
+            shared_cache_policy="retain-shared-download-cache",
             plan_digest="6" * 64,
         )
         self.calls: list[tuple[str, object]] = []
@@ -372,16 +421,16 @@ class Recipes:
         self.calls.append(("preview_uninstall", installation_id))
         return self.uninstall_plan
 
-    def preview_model_deletion(self, model_version_sha256):
-        self.calls.append(("preview_model_deletion", model_version_sha256))
+    def preview_model_deletion(self, model_content_sha256):
+        self.calls.append(("preview_model_deletion", model_content_sha256))
         return self.model_deletion_plan
 
-    def delete_model(self, model_version_sha256, **kwargs):
-        self.calls.append(("delete_model", (model_version_sha256, kwargs)))
+    def delete_model(self, model_content_sha256, **kwargs):
+        self.calls.append(("delete_model", (model_content_sha256, kwargs)))
         return RecipeOperationView(
             OPERATION,
             "recipe.model-uninstall.v1",
-            model_version_sha256,
+            model_content_sha256,
             "running",
             "6" * 64,
             (NODE,),
@@ -421,7 +470,6 @@ def setup():
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         recipe_operations=recipes,
     )
@@ -705,12 +753,12 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     denied = client.post(
         "/api/v1/library/model-deletion-plans/preview",
         headers=headers("operator"),
-        json={"model_version_sha256": model_digest},
+        json={"model_content_sha256": model_digest},
     )
     preview = client.post(
         "/api/v1/library/model-deletion-plans/preview",
         headers=headers(),
-        json={"model_version_sha256": model_digest},
+        json={"model_content_sha256": model_digest},
     )
     request_id = "20000000-0000-4000-8000-000000000099"
     applied = client.post(
@@ -725,7 +773,7 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     assert denied.status_code == 403
     assert preview.status_code == 200
     assert preview.json()["shared_cache_policy"] == (
-        "remove-unreferenced-model-artifacts-only"
+        "retain-shared-download-cache"
     )
     assert preview.json()["nodes"][0]["installation_ids"] == [INSTALLATION]
     assert applied.status_code == 202
@@ -738,7 +786,7 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
         "operationId"
     ] == "previewLibraryModelDeletion"
     assert paths[
-        "/api/v1/library/models/{model_version_sha256}/delete"
+        "/api/v1/library/models/{model_content_sha256}/delete"
     ]["post"]["operationId"] == "deleteLibraryModel"
 
 
@@ -812,6 +860,17 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
     assert denied.status_code == 403
     assert extra.status_code == 422
     assert stop_unbound.status_code == uninstall_unbound.status_code == 422
+
+    malformed = client.post(
+        "/api/v1/recipes/mapping-plans/preview",
+        headers=headers(),
+        json={
+            "recipe_revision_id": 1,
+            "node_ids": [NODE],
+            "parameters": {},
+        },
+    )
+    assert malformed.status_code == 422
 
 
 def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:

@@ -7,9 +7,11 @@ import json
 import re
 import zipfile
 from dataclasses import replace
+from importlib import resources
 from pathlib import Path
 
 import pytest
+from library_route_fixtures import _library_detail
 
 from cluster_profiles.fleet_qualification import (
     ArtifactJobSmokeAdapter,
@@ -72,6 +74,15 @@ def _registry() -> FixtureRegistry:
         {},
         manifest_sha256="b" * 64,
     )
+
+
+def _current_image_job_detail() -> dict[str, object]:
+    recipe = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-job.json")
+        .read_text(encoding="utf-8")
+    )
+    return _library_detail(recipe)["detail"]
 
 
 def test_glb_fixture_validation_rejects_header_only_transport_stub() -> None:
@@ -436,7 +447,7 @@ def test_artifact_adapter_runs_and_ledgers_durable_controller_lifecycle(
     registry = _registry()
     adapter = ArtifactJobSmokeAdapter(registry)
     preview = adapter.preview(
-        {"visual_recipe": {"interfaces": [{"adapter": "image-job"}]}},
+        _current_image_job_detail(),
         recipe_key="vonk-forge/image",
         recipe_content_sha256="a" * 64,
     )
@@ -483,7 +494,7 @@ def test_artifact_adapter_runs_each_digest_bound_case_with_distinct_evidence(
     )
     adapter = ArtifactJobSmokeAdapter(registry)
     preview = adapter.preview(
-        {"visual_recipe": {"interfaces": [{"adapter": "image-job"}]}},
+        _current_image_job_detail(),
         recipe_key=recipe.key,
         recipe_content_sha256=recipe.content_sha256,
     )

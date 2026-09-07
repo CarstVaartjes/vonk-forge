@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.database_authority import (
     AuthorityChange,
+    AuthorityPolicyError,
     DatabaseAuthorityService,
     DatabaseProposalService,
     StaleAuthorityRevision,
@@ -22,6 +23,8 @@ from vonk_control.models import (
     ControlAuthorityProposal,
     ControlAuthorityRevision,
 )
+
+AUTHORITY_DOCUMENT_PATH = "docs/audits/authority-review.json"
 
 
 @pytest.fixture
@@ -50,16 +53,14 @@ def test_postgres_initialization_persists_revision_before_head(authority):
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
 
 
-def test_postgres_initial_authority_document_is_readable(authority):
+def test_postgres_initial_authority_has_no_legacy_topology_document(authority):
     service, _, _ = authority
 
     revision = service.ensure_initialized()
 
-    assert service.read_document(revision, "inventory/topology.json").parsed == {
-        "schema_version": 1,
-        "nodes": [],
-        "links": [],
-    }
+    assert service.inspect(revision).documents == {}
+    with pytest.raises(AuthorityPolicyError, match="managed document does not exist"):
+        service.read_document(revision, "inventory/topology.json")
 
 
 def test_postgres_apply_persists_revision_before_moving_head(authority):
@@ -70,8 +71,8 @@ def test_postgres_apply_persists_revision_before_moving_head(authority):
         base,
         [
             AuthorityChange(
-                "inventory/topology.json",
-                {"schema_version": 1, "nodes": ["first"], "links": []},
+                AUTHORITY_DOCUMENT_PATH,
+                {"kind": "authority-review", "status": "draft", "summary": "first"},
             )
         ],
     )
@@ -96,8 +97,8 @@ def test_postgres_preview_survives_service_restart_and_apply_is_idempotent(autho
         base,
         [
             AuthorityChange(
-                "inventory/topology.json",
-                {"schema_version": 1, "nodes": ["first"], "links": []},
+                AUTHORITY_DOCUMENT_PATH,
+                {"kind": "authority-review", "status": "draft", "summary": "first"},
             )
         ],
     )
@@ -123,8 +124,8 @@ def test_postgres_compare_and_swap_rejects_stale_proposal(authority):
         base,
         [
             AuthorityChange(
-                "inventory/topology.json",
-                {"schema_version": 1, "nodes": ["first"], "links": []},
+                AUTHORITY_DOCUMENT_PATH,
+                {"kind": "authority-review", "status": "draft", "summary": "first"},
             )
         ],
     )
@@ -133,8 +134,8 @@ def test_postgres_compare_and_swap_rejects_stale_proposal(authority):
         base,
         [
             AuthorityChange(
-                "inventory/topology.json",
-                {"schema_version": 1, "nodes": ["second"], "links": []},
+                AUTHORITY_DOCUMENT_PATH,
+                {"kind": "authority-review", "status": "draft", "summary": "second"},
             )
         ],
     )

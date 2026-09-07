@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
-import hashlib
+import base64
+import binascii
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import OperationProgress
 
 from .agent_upgrade_status import (
-    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
@@ -31,8 +32,7 @@ from .models import (
     AgentOperation,
     AgentOperationAttempt,
     Job,
-    Reconciliation,
-    ReconciliationOperation,
+    RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
 )
@@ -40,14 +40,13 @@ from .operation_contract import (
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
     OperationFailureEvidence,
-    OperationMemberProgress,
     OperationRecovery,
     OperationRecoveryAction,
-    normalize_operation_progress,
     recovery_for_operation,
     sanitize_failure_evidence,
 )
 from .route_runtime import verify_active_route_bundle
+from .strict_json import StrictJSONModel
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -99,7 +98,6 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/v1/library/recipes/{recipe_id}",
     ): "getLibraryRecipe",
-    ("get", "/api/v1/nodes/status"): "getNodeStatuses",
     ("patch", "/api/v1/nodes/{node_id}/profile"): "updateNodeProfile",
     (
         "get",
@@ -135,14 +133,15 @@ _ADMIN_OPERATION_IDS = {
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
 NodeIdentifier = Annotated[str, Field(pattern=NODE_PATTERN)]
+DigestIdentifier = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 class OperationProjectionError(RuntimeError):
     """Durable operation state cannot be safely projected."""
 
 
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class StrictModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class EmptyBody(StrictModel):
@@ -151,6 +150,78 @@ class EmptyBody(StrictModel):
 
 class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
+
+
+class HealthzResponse(StrictModel):
+    status: Literal["ok"]
+
+
+class ReadyzResponse(StrictModel):
+    status: Literal["ready"]
+
+
+class AuthorityResponse(StrictModel):
+    revision: str = Field(pattern=DIGEST_PATTERN)
+    documents: dict[str, str] = Field(max_length=256)
+    dependencies: dict[str, list[str]] = Field(max_length=256)
+
+
+class ProposalPreviewResponse(StrictModel):
+    base_revision: str = Field(pattern=DIGEST_PATTERN)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+    patch: str = Field(min_length=1, max_length=16 * 1024 * 1024)
+    affected_documents: list[str] = Field(min_length=1, max_length=32)
+    validation_results: list[str] = Field(max_length=32)
+
+    @field_validator("patch")
+    @classmethod
+    def patch_is_canonical_base64(cls, value: str) -> str:
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("patch must be base64") from None
+        if base64.b64encode(decoded).decode("ascii") != value:
+            raise ValueError("patch must be canonical base64")
+        return value
+
+
+class ChangeResponse(StrictModel):
+    proposal_digest: str = Field(pattern=DIGEST_PATTERN)
+    previous_revision: str = Field(pattern=DIGEST_PATTERN)
+    authority_revision: str = Field(pattern=DIGEST_PATTERN)
+    mode: Literal["database"]
+
+
+class JobResponse(StrictModel):
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=80)
+
+
+class AuditEventResponse(StrictModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=128)
+    authority_revision: str | None = Field(default=None, max_length=128)
+    targets: list[BoundedIdentifier] = Field(max_length=64)
+    occurred_at: str | None = Field(default=None, max_length=64)
+
+
+class AuditResponse(StrictModel):
+    events: list[AuditEventResponse] = Field(max_length=100)
+
+
+class IdentityHistoryItem(StrictModel):
+    node_id: str = Field(pattern=NODE_PATTERN)
+    agent_state: str = Field(min_length=1, max_length=80)
+    certificate_serial: str | None = Field(default=None, max_length=256)
+    certificate_fingerprint: str | None = Field(default=None, max_length=256)
+    certificate_generation: int | None = Field(default=None, ge=0)
+    enrolled_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class IdentityHistoryResponse(StrictModel):
+    identities: list[IdentityHistoryItem] = Field(max_length=100)
 
 
 def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
@@ -162,19 +233,19 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 
 class EndpointResponse(StrictModel):
-    alias: str = Field(pattern=IDENTIFIER_PATTERN)
-    api_base: str
-    expires_at: str
+    alias: str = Field(pattern=IDENTIFIER_PATTERN, max_length=63)
+    api_base: str = Field(min_length=1, max_length=512)
+    expires_at: str = Field(min_length=1, max_length=64)
     generation: int = Field(ge=1)
     node_id: str = Field(pattern=NODE_PATTERN)
-    observed_at: str
+    observed_at: str = Field(min_length=1, max_length=64)
     plan_digest: str = Field(pattern=DIGEST_PATTERN)
     state: str = Field(pattern=r"^published$")
 
 
 class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
-    state: str
+    state: str = Field(min_length=1, max_length=80)
     protocol_version: int | None = Field(default=None, ge=1)
     semantic_version: str | None = Field(
         default=None,
@@ -182,41 +253,22 @@ class AgentSummary(StrictModel):
     )
     build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    capabilities: list[str]
-    last_seen_at: str | None
+    capabilities: list[str] = Field(max_length=128)
+    last_seen_at: str | None = Field(default=None, max_length=64)
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
     stale: bool
-    certificate_expires_at: str | None
+    certificate_expires_at: str | None = Field(default=None, max_length=64)
 
 
 class AgentsResponse(StrictModel):
     agents: list[AgentSummary]
 
 
-class JobOperationProgress(StrictModel):
-    phase: str = Field(min_length=1, max_length=80)
-    completed_bytes: int | None = Field(default=None, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    total_bytes_known: bool | None = None
-    checkpoint: dict[str, object] | None = None
-    members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
-
-    @model_serializer(mode="wrap")
-    def _serialize_without_unset_contract_fields(self, handler):
-        document = handler(self)
-        # Keep old phase-only status responses byte-for-byte stable.
-        return {
-            key: value
-            for key, value in document.items()
-            if value is not None and value != []
-        }
+JobOperationProgress = OperationProgress
 
 
 class JobOperationResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
-    graph_operation_id: str | None = Field(default=None, max_length=128)
     node_id: str = Field(pattern=NODE_PATTERN)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
@@ -296,7 +348,7 @@ class AgentUpgradeTargetDiagnosticsResponse(StrictModel):
 class AgentUpgradeDiagnosticsResponse(StrictModel):
     expected_identity: AgentUpgradeIdentityResponse
     targets: list[AgentUpgradeTargetDiagnosticsResponse] = Field(max_length=64)
-    legacy_generic_ambiguous: bool
+    failure_details_unavailable: bool
     next_action: str | None = Field(default=None, max_length=512)
     operator_summary: str | None = Field(default=None, max_length=1024)
 
@@ -311,7 +363,6 @@ class JobDetailResponse(StrictModel):
     target_total: int = Field(ge=0)
     current_attempt: int = Field(ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
-    reconciliation_id: str | None = Field(default=None, max_length=128)
     operations: list[JobOperationResponse] = Field(max_length=100)
     operation_next_cursor: str | None = Field(default=None, max_length=512)
     operation_total: int = Field(ge=0)
@@ -320,7 +371,7 @@ class JobDetailResponse(StrictModel):
 
 
 class JobResumeResponse(StrictModel):
-    id: str
+    id: str = Field(min_length=1, max_length=128)
     state: str = Field(pattern=r"^queued$")
 
 
@@ -338,8 +389,8 @@ class JobsResponse(StrictModel):
 
 
 class JobLogsResponse(StrictModel):
-    job_id: str
-    digests: list[str]
+    job_id: str = Field(min_length=1, max_length=128)
+    digests: list[DigestIdentifier] = Field(max_length=100)
 
 
 @dataclass(frozen=True)
@@ -544,16 +595,11 @@ def job_response(
 ) -> JobDetailResponse:
     projected = [
         JobOperationResponse(
-            id=str(item["id"]),
-            graph_operation_id=(
-                None
-                if item.get("graph_operation_id") is None
-                else str(item["graph_operation_id"])
-            ),
-            node_id=str(item["node_id"]),
-            kind=str(item["kind"]),
-            state=str(item["state"]),
-            attempt=int(item["attempt"]),
+            id=item["id"],
+            node_id=item["node_id"],
+            kind=item["kind"],
+            state=item["state"],
+            attempt=item["attempt"],
             progress=_progress_projection(item.get("progress")),
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
@@ -562,7 +608,7 @@ def job_response(
             provenance=_provenance_projection(item.get("result")),
             evidence_download=_evidence_download_projection(item.get("result")),
             recovery=recovery_for_operation(
-                str(item["state"]),
+                item["state"],
                 supported_actions=item.get("supported_actions"),
                 available_actions=(OperationRecoveryAction.RESUME,),
                 uncertain=bool(
@@ -585,14 +631,14 @@ def job_response(
         else None
     )
     return JobDetailResponse(
-        id=str(job.id),
-        state=str(job.state),
-        kind=str(job.kind),
-        authority_revision=str(job.authority_revision),
+        id=job.id,
+        state=job.state,
+        kind=job.kind,
+        authority_revision=job.authority_revision,
         targets=visible_targets,
         target_next_cursor=target_next_cursor,
         target_total=len(targets),
-        current_attempt=int(job.current_attempt),
+        current_attempt=job.current_attempt,
         status_reason=(
             operation_page.agent_upgrade_diagnostics.get("operator_summary")
             if (
@@ -604,7 +650,6 @@ def job_response(
             )
             else job.status_reason
         ),
-        reconciliation_id=job.reconciliation_id,
         operations=projected,
         operation_next_cursor=operation_page.next_cursor,
         operation_total=operation_page.progress.total,
@@ -647,16 +692,17 @@ def decode_offset(
 def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
-    phase = value.get("phase")
-    if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
-        return None
     try:
-        normalized = normalize_operation_progress(value)
+        return JobOperationProgress.model_validate(value, strict=True)
     except (TypeError, ValueError):
-        # Unknown extension fields from older agents must not make the whole
-        # job status unavailable; retain the stable phase only.
-        normalized = {"phase": phase}
-    return JobOperationProgress(**normalized)
+        return None
+
+
+def _progress_document(value: object) -> dict[str, object] | None:
+    """Project one durable progress value with a single canonical parse."""
+
+    projected = _progress_projection(value)
+    return None if projected is None else projected.model_dump(mode="json")
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
@@ -680,8 +726,16 @@ def _failure_projection(value: object) -> OperationFailureEvidence | None:
             error_code=error_code,
             summary=summary,
             detail=detail if isinstance(detail, str) else None,
-            retryable=bool(safe.get("retryable", False)),
-            uncertain=bool(safe.get("uncertain", False)),
+            retryable=(
+                safe.get("retryable", False)
+                if isinstance(safe.get("retryable", False), bool)
+                else None
+            ),
+            uncertain=(
+                safe.get("uncertain", False)
+                if isinstance(safe.get("uncertain", False), bool)
+                else None
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -693,7 +747,9 @@ def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
     ):
         return None
     try:
-        return OperationEvidenceProvenance.model_validate(value["provenance"])
+        return OperationEvidenceProvenance.model_validate(
+            value["provenance"], strict=True
+        )
     except (TypeError, ValueError):
         return None
 
@@ -704,7 +760,9 @@ def _evidence_download_projection(value: object) -> OperationEvidenceDownload | 
     ):
         return None
     try:
-        return OperationEvidenceDownload.model_validate(value["evidence_download"])
+        return OperationEvidenceDownload.model_validate(
+            value["evidence_download"], strict=True
+        )
     except (TypeError, ValueError):
         return None
 
@@ -744,22 +802,20 @@ def operation_detail_response(
     """Build the bounded generic read representation from a durable projection."""
 
     return OperationDetailResponse(
-        id=str(item["id"]),
-        parent_id=(None if item.get("parent_id") is None else str(item["parent_id"])),
-        node_ids=list(item["node_ids"]),
-        kind=str(item["kind"]),
-        state=str(item["state"]),
-        attempt=int(item["attempt"]),
+        id=item["id"],
+        parent_id=item.get("parent_id"),
+        node_ids=item["node_ids"],
+        kind=item["kind"],
+        state=item["state"],
+        attempt=item["attempt"],
         progress=_progress_projection(item.get("progress")),
         created_at=str(item["created_at"]),
-        updated_at=(
-            None if item.get("updated_at") is None else str(item["updated_at"])
-        ),
+        updated_at=(None if item.get("updated_at") is None else item["updated_at"]),
         failure=_failure_projection(item.get("result")),
         provenance=_provenance_projection(item.get("result")),
         evidence_download=_evidence_download_projection(item.get("result")),
         recovery=recovery_for_operation(
-            str(item["state"]),
+            item["state"],
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
             uncertain=bool(
@@ -820,7 +876,7 @@ def _agent_upgrade_diagnostics(
     expected_binary = package.get("target_binary_digest")
     expected_build = package.get("target_build_digest")
     targets: list[dict[str, object]] = []
-    legacy_generic_ambiguous = False
+    failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
     for node_id in job.targets:
@@ -841,9 +897,9 @@ def _agent_upgrade_diagnostics(
         # the success gate and must never be projected as proof here.
         target_proven = bool(operation is not None and operation.state == "succeeded")
         unresolved_generic = bool(
-            not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
+            not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
-        legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
+        failure_details_unavailable = failure_details_unavailable or unresolved_generic
         retry_queued = bool(
             operation is not None
             and operation.retry_disposition == "retry"
@@ -891,7 +947,7 @@ def _agent_upgrade_diagnostics(
             "build_digest": expected_build,
         },
         "targets": targets,
-        "legacy_generic_ambiguous": legacy_generic_ambiguous,
+        "failure_details_unavailable": failure_details_unavailable,
         "next_action": (
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(
@@ -932,21 +988,19 @@ class _DurableOperationProjection:
             owner = session.get(RoutePublicationOwner, 1)
             publication = (
                 None
-                if owner is None or owner.reconciliation_id is None
-                else session.get(RoutePublication, owner.reconciliation_id)
+                if owner is None or owner.authority_id is None
+                else session.get(RoutePublication, owner.authority_id)
             )
-            reconciliation = (
+            authority = (
                 None
-                if owner is None or owner.reconciliation_id is None
-                else session.get(Reconciliation, owner.reconciliation_id)
+                if owner is None or owner.authority_id is None
+                else session.get(RecipeRouteAuthority, owner.authority_id)
             )
             if (
                 owner is None
                 or publication is None
-                or reconciliation is None
+                or authority is None
                 or publication.state not in _ACTIVE_PUBLICATION_STATES
-                or reconciliation.status != "succeeded"
-                or reconciliation.current_phase != "completed"
                 or publication.generation != owner.owner_generation
                 or publication.activation_marker is None
                 or publication.activation_marker_digest is None
@@ -963,7 +1017,7 @@ class _DurableOperationProjection:
             bundle_digest = publication.bundle_digest
             lease_issued_at = publication.lease_issued_at
             lease_expires_at = publication.lease_expires_at
-            owner_reconciliation_id = owner.reconciliation_id
+            owner_authority_id = owner.authority_id
             owner_generation = owner.owner_generation
             publication_generation = publication.generation
             publication_plan_digest = publication.plan_digest
@@ -974,10 +1028,10 @@ class _DurableOperationProjection:
         )
         active_marker = bundle.marker
         if (
-            asdict(active_marker) != marker
+            active_marker.model_dump() != marker
             or active_marker.digest != marker_digest
             or active_marker.state != "published"
-            or active_marker.reconciliation_id != owner_reconciliation_id
+            or active_marker.authority_id != owner_authority_id
             or active_marker.plan_digest != publication_plan_digest
             or active_marker.generation != publication_generation
             or active_marker.generation != owner_generation
@@ -1149,17 +1203,6 @@ class _DurableOperationProjection:
                     .group_by(AgentOperation.state)
                 )
             }
-            graph_ids = {
-                row.agent_operation_id: row.graph_operation_id
-                for row in session.scalars(
-                    select(ReconciliationOperation).where(
-                        ReconciliationOperation.agent_operation_id.in_(
-                            [operation.id for operation in operations]
-                        )
-                    )
-                )
-                if row.agent_operation_id is not None
-            }
             attempts = {
                 attempt.operation_id: attempt
                 for attempt in session.scalars(
@@ -1178,20 +1221,13 @@ class _DurableOperationProjection:
         items = [
             {
                 "attempt": operation.current_attempt,
-                "graph_operation_id": graph_ids.get(operation.id),
                 "id": operation.id,
                 "kind": operation.kind,
                 "node_id": operation.node_id,
                 "progress": (
                     None
                     if attempts.get(operation.id) is None
-                    else (
-                        None
-                        if _progress_projection(attempts[operation.id].progress) is None
-                        else _progress_projection(
-                            attempts[operation.id].progress
-                        ).model_dump(mode="json")
-                    )
+                    else _progress_document(attempts[operation.id].progress)
                 ),
                 "result": (
                     None
@@ -1574,78 +1610,3 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         name: schemas[name] for name in sorted(referenced) if name in schemas
     }
     return source
-
-
-class NodeStatus(StrictModel):
-    id: str = Field(pattern=NODE_PATTERN)
-    display_name: str
-    hostname: str
-    lifecycle: str
-    healthy: bool | None = Field(
-        description=(
-            "Health state from the latest explicit node.probe compute gate; null "
-            "when no completed probe is available."
-        )
-    )
-    health_probe_stale: bool = Field(
-        description=(
-            "True when explicit node.probe evidence is missing or older than the "
-            "Controller health-probe window. This is not aggregate node readiness; "
-            "use Fleet connection, inventory, and telemetry fields for live readiness."
-        )
-    )
-    stale: bool = Field(
-        deprecated=True,
-        description=(
-            "Deprecated compatibility alias for health_probe_stale; this does not "
-            "represent aggregate node readiness."
-        ),
-    )
-    labels: dict[str, str]
-    profile: str | None
-    memory_available_bytes: int = Field(ge=0)
-    disk_available_bytes: int = Field(ge=0)
-    probe_age_seconds: float | None = Field(
-        default=None,
-        ge=0,
-        description=(
-            "Age of the latest completed explicit node.probe compute gate, or null "
-            "when no probe evidence is available."
-        ),
-    )
-    inventory_observed_at: str | None = None
-    inventory_age_seconds: float | None = Field(default=None, ge=0)
-    inventory_stale: bool = True
-    inventory_capabilities: list[str] = Field(default_factory=list, max_length=64)
-    agent_state: str = "unregistered"
-    last_seen_at: str | None = None
-    last_seen_age_seconds: float | None = Field(default=None, ge=0)
-    agent_last_seen_at: str | None = None
-    agent_online: bool = False
-    # Version-skew projection remains nullable for pre-enrollment nodes.
-    agent_semantic_version: str | None = None
-    agent_build_digest: str | None = None
-    agent_binary_digest: str | None = None
-    certificate_expires_at: str | None = None
-    certificate_expiry_seconds: float | None = Field(default=None, ge=0)
-    compatibility: str = "unknown"
-
-
-class FleetStatusResponse(StrictModel):
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    nodes: list[NodeStatus]
-    evidence_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class _FleetEvidence(StrictModel):
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    nodes: list[NodeStatus]
-
-
-def fleet_response(fleet_state: Mapping[str, object]) -> FleetStatusResponse:
-    """Validate and digest the exact public live acceptance evidence."""
-
-    evidence = _FleetEvidence.model_validate(fleet_state)
-    public = evidence.model_dump(mode="json")
-    digest = hashlib.sha256(canonical_message(public)).hexdigest()
-    return FleetStatusResponse(**public, evidence_digest=digest)

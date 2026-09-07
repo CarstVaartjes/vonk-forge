@@ -202,12 +202,15 @@ pub fn project(
     validate_security(plan)?;
 
     let mut mounts = Vec::with_capacity(plan.artifacts.len() + 3);
-    let mut source_paths = BTreeSet::new();
     let mut target_paths = BTreeSet::new();
     for artifact in &plan.artifacts {
         let source = model_source(paths, artifact)?;
         let target = model_target(artifact)?;
-        if !source_paths.insert(source.clone()) || !target_paths.insert(target.clone()) {
+        // A physical file may be projected at more than one model target.
+        // Workload validation has already proved that repeated source paths
+        // carry the exact same receipt-bound object; retain every distinct
+        // target mount while reusing that source.
+        if !target_paths.insert(target.clone()) {
             return Err(CompiledOciError::Invalid("duplicate materialized path"));
         }
         mounts.push(OciMount {
@@ -448,10 +451,12 @@ fn ordered_environment(
 fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
     let placement = &plan.runtime.placement;
     let mut result = Vec::new();
-    if let (Some(endpoint), Some(endpoint_address)) = (&plan.endpoint, placement.endpoint_address) {
+    if let (Some(endpoint), Some(endpoint_address), Some(port)) =
+        (&plan.endpoint, placement.endpoint_address, placement.port)
+    {
         let first = match endpoint_address {
-            IpAddr::V4(address) => format!("{address}:{}:{}", placement.port, endpoint.port),
-            IpAddr::V6(address) => format!("[{address}]:{}:{}", placement.port, endpoint.port),
+            IpAddr::V4(address) => format!("{address}:{port}:{}", endpoint.port),
+            IpAddr::V6(address) => format!("[{address}]:{port}:{}", endpoint.port),
         };
         result.push(first);
     }
@@ -619,7 +624,35 @@ mod tests {
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(matches!(
             project(&plan, &paths()),
-            Err(CompiledOciError::Invalid("duplicate materialized path"))
+            Err(CompiledOciError::Workload(_))
+        ));
+    }
+
+    #[test]
+    fn one_physical_source_can_be_projected_to_two_targets() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert_eq!(invocation.mounts.len(), 7);
+        assert_eq!(invocation.mounts[0].source, invocation.mounts[3].source);
+        assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
+        assert_eq!(invocation.mounts[3].target, "/models/secondary/config.json");
+    }
+
+    #[test]
+    fn conflicting_duplicate_physical_source_is_rejected() {
+        let mut value = fixture();
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/secondary");
+        projection["file_id"] = json!("different-file");
+        value["artifacts"].as_array_mut().unwrap().push(projection);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            project(&plan, &paths()),
+            Err(CompiledOciError::Workload(_))
         ));
     }
 
@@ -681,6 +714,7 @@ mod tests {
     fn job_projection_keeps_input_output_and_lifecycle_boundaries() {
         let mut value = fixture();
         value["endpoint"] = Value::Null;
+        value["runtime"]["placement"]["port"] = Value::Null;
         value["job"] = json!({
             "interface": "image-job",
             "input": {"path": "/inputs"},

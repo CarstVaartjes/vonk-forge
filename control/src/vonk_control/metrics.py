@@ -6,8 +6,9 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,25 +18,47 @@ from .models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    Job,
 )
+
+if TYPE_CHECKING:
+    from .fleet_projection import FleetSnapshot
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-_JOB_KINDS = frozenset({"install", "probe", "reconcile", "deploy", "backup", "restore"})
+_JOB_KINDS = frozenset({
+    "agent-upgrade",
+    "artifact-distribution",
+    "fleet.revoke",
+    "recipe.run-switch.v2",
+    "recipe.stop.v2",
+})
 _JOB_STATES = frozenset({"queued", "running", "waiting-for-operator", "succeeded", "failed", "expired"})
 _ROUTE_STATES = frozenset({"published", "maintenance", "unavailable"})
 _AGENT_STATES = frozenset({"active", "retired"})
 _AGENT_OPERATIONS = frozenset({
-    "node.probe",
-    "release.install",
-    "workload.prepare",
-    "workload.start",
-    "workload.stop",
-    "workload.health",
-    "workload.verify",
+    "agent.upgrade.v1",
+    "artifact.distribution.v1",
+    "recipe.build.v1",
+    "recipe.image.import.v1",
+    "recipe.install",
+    "recipe.start",
+    "recipe.job.run.v1",
+    "recipe.stop",
+    "recipe.uninstall",
+    "recipe.model-uninstall.v1",
 })
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
+_CONNECTION_STATES = ("online", "offline", "unregistered")
+_CERTIFICATE_STATES = (
+    "valid",
+    "missing",
+    "not-yet-valid",
+    "expired",
+    "revoked",
+    "inactive",
+)
+_INVENTORY_FRESHNESS = ("fresh", "stale", "missing")
+_TELEMETRY_FRESHNESS = ("live", "delayed", "stale", "missing")
 _BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 
@@ -65,7 +88,19 @@ def protocol_version_bucket(
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._nodes: dict[str, tuple[bool, int, int, float | None]] = {}
+        self._nodes: dict[
+            str,
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                int | None,
+                int | None,
+                float | None,
+                float | None,
+            ],
+        ] = {}
         self._jobs: dict[tuple[str, str], int] = {}
         self._route_state = "unavailable"
         self._backup_age: float | None = None
@@ -74,7 +109,6 @@ class MetricsRegistry:
         self._agent_nodes: dict[str, tuple[str, str, float | None, float | None]] = {}
         self._agent_operations: dict[tuple[str, str], int] = {}
         self._agent_leases: dict[tuple[str, str], float] = {}
-        self._agent_rollouts: dict[str, int] = {}
 
     @staticmethod
     def _number(value: float, field: str) -> float:
@@ -82,20 +116,44 @@ class MetricsRegistry:
             raise ValueError(f"{field} must be a nonnegative finite number")
         return float(value)
 
-    def update_node(self, node_id: str, *, ready: bool, memory_available_bytes: int, disk_available_bytes: int, probe_age_seconds: float | None) -> None:
-        if _NODE.fullmatch(node_id) is None:
-            raise ValueError("metrics node ID must be a stable generated ID")
-        if not isinstance(ready, bool):
-            raise TypeError("node readiness must be boolean")
-        memory = int(self._number(memory_available_bytes, "memory"))
-        disk = int(self._number(disk_available_bytes, "disk"))
-        age = (
-            None
-            if probe_age_seconds is None
-            else self._number(probe_age_seconds, "probe age")
-        )
+    def update_fleet(self, snapshot: FleetSnapshot) -> None:
+        """Project the typed FleetSnapshot without inventing node health."""
+
+        from .fleet_projection import FleetSnapshot
+
+        if not isinstance(snapshot, FleetSnapshot):
+            raise TypeError("fleet metrics require a typed FleetSnapshot")
+        nodes: dict[
+            str,
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                int | None,
+                int | None,
+                float | None,
+                float | None,
+            ],
+        ] = {}
+        for node in snapshot.nodes:
+            connection = node.connection
+            inventory = node.inventory
+            telemetry = node.telemetry
+            nodes[node.id] = (
+                connection.online_state,
+                connection.certificate_state,
+                "missing" if inventory is None else inventory.freshness,
+                "missing" if telemetry is None else telemetry.freshness,
+                None if inventory is None else inventory.host_memory_free_bytes,
+                None if inventory is None else inventory.disk_free_bytes,
+                None if telemetry is None else telemetry.age_seconds,
+                None
+                if telemetry is None
+                else telemetry.sample.gpu_utilization_percent,
+            )
         with self._lock:
-            self._nodes[node_id] = (ready, memory, disk, age)
+            self._nodes = nodes
 
     def set_job_count(self, kind: str, state: str, count: int) -> None:
         safe_kind = kind if kind in _JOB_KINDS else "other"
@@ -103,6 +161,17 @@ class MetricsRegistry:
         bounded = int(self._number(count, "job count"))
         with self._lock:
             self._jobs[(safe_kind, safe_state)] = bounded
+
+    def replace_job_counts(self, rows: Iterable[tuple[str, str, int]]) -> None:
+        """Atomically replace job counts with bounded, aggregated labels."""
+
+        jobs: dict[tuple[str, str], int] = defaultdict(int)
+        for kind, state, count in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            safe_state = state if state in _JOB_STATES else "other"
+            jobs[(safe_kind, safe_state)] += int(self._number(count, "job count"))
+        with self._lock:
+            self._jobs = dict(jobs)
 
     def set_route_state(self, state: str) -> None:
         if state not in _ROUTE_STATES:
@@ -130,7 +199,6 @@ class MetricsRegistry:
         nodes: dict[str, tuple[str, str, float | None, float | None]],
         operations: dict[tuple[str, str], int],
         leases: dict[tuple[str, str], float],
-        rollouts: dict[str, int],
     ) -> None:
         safe_nodes = {}
         for node_id, (state, version_bucket, last_seen_age, certificate_expiry) in nodes.items():
@@ -162,16 +230,10 @@ class MetricsRegistry:
             )
             safe_age = self._number(age, "operation lease age")
             safe_leases[safe_key] = max(safe_leases.get(safe_key, 0.0), safe_age)
-        safe_rollouts: dict[str, int] = defaultdict(int)
-        for state, count in rollouts.items():
-            safe_rollouts[state if state in _JOB_STATES else "other"] += int(
-                self._number(count, "rollout count")
-            )
         with self._lock:
             self._agent_nodes = safe_nodes
             self._agent_operations = dict(safe_operations)
             self._agent_leases = safe_leases
-            self._agent_rollouts = dict(safe_rollouts)
 
     def render(self) -> str:
         with self._lock:
@@ -183,7 +245,6 @@ class MetricsRegistry:
             agent_nodes = dict(self._agent_nodes)
             agent_operations = dict(self._agent_operations)
             agent_leases = dict(self._agent_leases)
-            agent_rollouts = dict(self._agent_rollouts)
         lines = [
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
@@ -196,16 +257,60 @@ class MetricsRegistry:
                 "# TYPE vonk_control_backup_age_seconds gauge",
                 f"vonk_control_backup_age_seconds {backup_age:g}",
             ))
-        lines.extend(("# HELP vonk_node_ready Whether the stable fleet node is ready.", "# TYPE vonk_node_ready gauge"))
-        for node_id, (ready, memory, disk, age) in sorted(nodes.items()):
+        lines.extend((
+            "# HELP vonk_node_connection_state Current authenticated Fleet connection state.",
+            "# TYPE vonk_node_connection_state gauge",
+            "# HELP vonk_node_certificate_state Current Fleet certificate validity state.",
+            "# TYPE vonk_node_certificate_state gauge",
+            "# HELP vonk_node_inventory_freshness Current admission inventory freshness.",
+            "# TYPE vonk_node_inventory_freshness gauge",
+            "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
+            "# TYPE vonk_node_telemetry_freshness gauge",
+            "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
+            "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
+        ))
+        for node_id, (
+            connection_state,
+            certificate_state,
+            inventory_freshness,
+            telemetry_freshness,
+            memory,
+            disk,
+            telemetry_age,
+            gpu_utilization,
+        ) in sorted(nodes.items()):
             label = f'node_id="{node_id}"'
-            lines.extend((
-                f"vonk_node_ready{{{label}}} {1 if ready else 0}",
-                f"vonk_node_memory_available_bytes{{{label}}} {memory}",
-                f"vonk_node_disk_available_bytes{{{label}}} {disk}",
-            ))
-            if age is not None:
-                lines.append(f"vonk_node_probe_age_seconds{{{label}}} {age:g}")
+            for state in _CONNECTION_STATES:
+                lines.append(
+                    f'vonk_node_connection_state{{{label},state="{state}"}} '
+                    f"{1 if state == connection_state else 0}"
+                )
+            for state in _CERTIFICATE_STATES:
+                lines.append(
+                    f'vonk_node_certificate_state{{{label},state="{state}"}} '
+                    f"{1 if state == certificate_state else 0}"
+                )
+            for state in _INVENTORY_FRESHNESS:
+                lines.append(
+                    f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
+                    f"{1 if state == inventory_freshness else 0}"
+                )
+            for state in _TELEMETRY_FRESHNESS:
+                lines.append(
+                    f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
+                    f"{1 if state == telemetry_freshness else 0}"
+                )
+            if memory is not None:
+                lines.append(f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}")
+            if disk is not None:
+                lines.append(f"vonk_node_inventory_disk_free_bytes{{{label}}} {disk}")
+            if telemetry_age is not None:
+                lines.append(f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}")
+            if gpu_utilization is not None:
+                lines.append(
+                    f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
+                    f"{gpu_utilization:g}"
+                )
         lines.extend(("# HELP vonk_jobs Number of control jobs by bounded kind and state.", "# TYPE vonk_jobs gauge"))
         for (kind, state), count in sorted(jobs.items()):
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')
@@ -247,12 +352,6 @@ class MetricsRegistry:
             lines.append(
                 f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
             )
-        lines.extend((
-            "# HELP vonk_agent_rollouts Durable reconciliation jobs by bounded state.",
-            "# TYPE vonk_agent_rollouts gauge",
-        ))
-        for state, count in sorted(agent_rollouts.items()):
-            lines.append(f'vonk_agent_rollouts{{state="{state}"}} {count}')
         lines.extend(("# HELP vonk_api_requests_total API responses by method and status class.", "# TYPE vonk_api_requests_total counter"))
         for (method, status_class), count in sorted(api_counts.items()):
             labels = f'method="{method}",status_class="{status_class}"'
@@ -329,14 +428,6 @@ class OperationalMetricsCollector:
                     .order_by(AgentOperation.node_id, AgentOperation.kind, AgentOperation.id)
                 )
             )
-            rollout_rows = list(
-                session.execute(
-                    select(Job.state, func.count())
-                    .where(Job.kind == "reconcile")
-                    .group_by(Job.state)
-                    .order_by(Job.state)
-                )
-            )
         active_certificates: dict[str, AgentCertificate] = {}
         for certificate in certificates:
             active_certificates.setdefault(certificate.node_id, certificate)
@@ -363,10 +454,8 @@ class OperationalMetricsCollector:
             key = (node_id, operation)
             age = max(0.0, (now - _aware(updated_at)).total_seconds())
             leases[key] = max(leases.get(key, 0.0), age)
-        rollouts = {state: int(count) for state, count in rollout_rows}
         self._registry._replace_agent_snapshot(
             nodes=nodes,
             operations=operations,
             leases=leases,
-            rollouts=rollouts,
         )

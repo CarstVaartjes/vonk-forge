@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -22,13 +23,15 @@ from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
+    RecipeInstallPayload,
     RecipeRunObservationReceiptClaims,
+    RecipeStartPayload,
     SignedRecipeRunObservationReceipt,
     canonical_message,
+    format_model_identity,
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
-from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
@@ -69,9 +72,8 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
-    RecipeRunObservation,
+    _recipe_model_identities,
     prepare_exact_recipe_run_observation_nodes,
-    record_recipe_run_observations,
 )
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
@@ -93,6 +95,8 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from .canonical_recipe_fixtures import canonical_example
 
 
 class RecordingQueue:
@@ -177,6 +181,61 @@ def _synthetic_model_content_sha256() -> str:
     return content_sha256(ModelDefinition.model_validate(document))
 
 
+def test_recipe_model_identities_include_canonical_companion_dependencies() -> None:
+    primary_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    companion_document = json.loads(json.dumps(primary_document))
+    companion_document["identity"]["slug"] = "synthetic-companion"
+    companion_document["identity"]["model"]["slug"] = "synthetic-companion"
+    companion_document["identity"]["family"]["slug"] = "synthetic-companion"
+    companion = ModelDefinition.model_validate(companion_document)
+    companion_digest = content_sha256(companion)
+    primary_document["dependencies"] = [
+        {
+            "kind": "model",
+            "publisher": companion.identity.publisher,
+            "slug": companion.identity.slug,
+            "content_sha256": companion_digest,
+        }
+    ]
+    primary = ModelDefinition.model_validate(primary_document)
+    primary_digest = content_sha256(primary)
+    recipe_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    recipe_document["models"][0]["model"] = {
+        "kind": "model",
+        "publisher": primary.identity.publisher,
+        "slug": primary.identity.slug,
+        "content_sha256": primary_digest,
+    }
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    revisions = iter(
+        (
+            SimpleNamespace(document=primary.model_dump(mode="json")),
+            SimpleNamespace(document=companion.model_dump(mode="json")),
+        )
+    )
+
+    class RevisionSession:
+        def scalar(self, _statement: object) -> object:
+            return next(revisions)
+
+    identities = _recipe_model_identities(
+        RevisionSession(), recipe.model_dump(mode="json")
+    )
+
+    assert identities == (
+        (primary_digest, f"{primary.identity.publisher}/{primary.identity.slug}"),
+        (companion_digest, f"{companion.identity.publisher}/{companion.identity.slug}"),
+    )
+
+
 class _CanonicalModelCache:
     """Small exact cache authority used by the canonical operation fixture."""
 
@@ -214,13 +273,13 @@ def signed_observation_receipt(
     node_id: str,
     observed_at: datetime,
     outcome: str = "running",
-) -> dict[str, object]:
+) -> SignedRecipeRunObservationReceipt:
     claims = RecipeRunObservationReceiptClaims(
         schema_version=1,
         authority="vonk.recipe-run-observation-helper",
         node_id=node_id,
         request_id=grant.claims.request_id,
-        request_sha256=str(grant.claims.operation.values["request_sha256"]),
+        request_sha256=str(grant.claims.operation.request_sha256),
         observation_identity_sha256=observation_identity_sha256,
         outcome=outcome,
         observed_at=int(observed_at.timestamp()),
@@ -236,12 +295,12 @@ def signed_observation_receipt(
                 recipe_run_observation_receipt_signing_bytes(claims)
             ).hex(),
         ),
-    ).to_mapping()
+    )
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
-    model_identity = (
-        "vonk-forge/synthetic-tiny-fp16/" + _synthetic_model_content_sha256()
+    model_identity = format_model_identity(
+        "vonk-forge", "synthetic-tiny-fp16", _synthetic_model_content_sha256()
     )
     if payload.get("phase") == "rank-launch":
         identity = {
@@ -249,14 +308,14 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             "run_id": payload["run_id"],
             "recipe_revision_id": payload["recipe_revision_id"],
             "recipe_content_sha256": payload["recipe_content_sha256"],
-            "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
+            "image_digest": str(payload["image_digest"]),
             "artifact_set_digest": "b" * 64,
             "model_identity": model_identity,
             "rank": payload["rank"],
             "role": payload["role"],
             "world_size": payload["world_size"],
-            "local_address": str(payload["local_address"]),
-            "master_address": str(payload["master_address"]),
+            "local_address": payload["local_address"],
+            "master_address": payload["master_address"],
             "master_port": payload["master_port"],
             "memory_reservation_bytes": payload["reserved_memory_bytes"],
             "process_running": True,
@@ -277,7 +336,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
     identity = {
         "recipe_revision_id": payload["recipe_revision_id"],
         "recipe_content_sha256": payload["recipe_content_sha256"],
-        "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
+        "image_digest": str(payload["image_digest"]),
         "artifact_set_digest": "b" * 64,
         "model_identity": model_identity,
         "rank": payload["rank"],
@@ -299,8 +358,8 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             {
                 "run_generation": payload["run_generation"],
                 "runtime_arguments_sha256": "c" * 64,
-                "local_address": str(payload["local_address"]),
-                "master_address": str(payload["master_address"]),
+                "local_address": payload["local_address"],
+                "master_address": payload["master_address"],
                 "master_port": payload["master_port"],
             }
         )
@@ -405,11 +464,7 @@ def setup_services(
                 fabric_bandwidth_mbps=(1000 if nodes > 1 else None),
             )
         )
-    document = json.loads(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-source-build.json")
-        .read_text()
-    )
+    document = canonical_example("recipe-source-build.json")
     model_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -602,15 +657,6 @@ def setup_services(
             )
             for node_id in node_ids
         )
-    sizes = StaticArtifactSizeResolver(
-        (
-            ArtifactSize(
-                "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
-                "2" * 64,
-                70,
-            ),
-        )
-    )
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):
@@ -638,7 +684,6 @@ def setup_services(
     )
     install = InstallAdmissionService(
         sessions,
-        sizes=sizes,
         inventory_max_age=300,
         disk_floor_bytes=10,
         compiled_plan_provider=execution_plans.compile_installation,
@@ -736,6 +781,17 @@ def test_canonical_recipe_revision_drives_install_and_schema2_payload(
         payload = compiled[nodes[0]]
         assert payload["schema_version"] == 2
         assert payload["identity"]["recipe_revision_sha256"] == revision.content_digest
+        RecipeInstallPayload.model_validate(
+            {
+                "schema_version": 2,
+                "installation_id": operation.owner_id,
+                "plan_digest": plan.plan_digest,
+                "rank": 0,
+                "role": "entrypoint",
+                "expected_bytes": 120,
+                "compiled_execution_plan": payload,
+            }
+        )
 
 
 def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
@@ -1129,6 +1185,8 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
         )
         assert {item.payload["role"] for item in first} == {"worker"}
         assert len(first) == 2
+        for item in first:
+            RecipeStartPayload.model_validate(item.payload)
         stored = session.get(Job, start.id)
         assert stored is not None and len(stored.payload["phases"]) == 2
     for operation in first:
@@ -1155,6 +1213,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
             item for item in all_children if item.payload["role"] == "entrypoint"
         )
         assert len(second) == 1
+        RecipeStartPayload.model_validate(second[0].payload)
     recovered.record_node_result(
         start.id,
         second[0].node_id,
@@ -1968,7 +2027,6 @@ def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> N
         session.add(
             RoutePublicationOwner(
                 singleton_id=1,
-                reconciliation_id=None,
                 owner_generation=0,
                 updated_at=NOW,
             )
@@ -2343,7 +2401,7 @@ def test_partial_multinode_stop_retains_every_active_capacity_reservation(
 
 
 def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
-    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
     plan = service.preview_install(mapping_id, build_id)
@@ -2362,6 +2420,21 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
     retry = service.retry(first.id, actor="admin", request_id="3" * 36)
     assert retry.id != first.id
     assert retry.owner_id == first.owner_id
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, retry.owner_id)
+        assert installation is not None
+        persisted_plans = installation.plan["compiled_execution_plans"]
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == retry.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        assert {child.node_id for child in children} == set(nodes)
+        for child in children:
+            parsed = RecipeInstallPayload.model_validate(child.payload)
+            assert parsed.compiled_execution_plan.to_mapping() == persisted_plans[child.node_id]
     with pytest.raises(RecipeOperationConflict, match="not retryable"):
         service.retry(first.id, actor="admin", request_id="3" * 35 + "4")
 
@@ -2614,6 +2687,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert child.payload["endpoint_address"] == "192.168.1.211"
         assert child.payload["world_size"] == 1
         assert child.payload["master_address"] is None
+        RecipeStartPayload.model_validate(child.payload)
         evidence = start_evidence(child.payload)
     blocked_uninstall = service.preview_uninstall(install.owner_id)
     assert blocked_uninstall.allowed is False
@@ -2759,7 +2833,7 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
             select(AgentOperation).where(AgentOperation.parent_job_id == operation.id)
         )
         assert child is not None
-        assert child.payload["cleanup_model_version_sha256"] is None
+        assert child.payload["cleanup_model_content_sha256"] is None
 
     service.record_node_result(
         operation.id,
@@ -2816,9 +2890,9 @@ def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
                 .order_by(AgentOperation.node_id)
             )
         )
-    assert [child.payload["cleanup_model_version_sha256"] for child in children] == [
+    assert [child.payload["cleanup_model_content_sha256"] for child in children] == [
         None,
-        preview.model_impact.model_version_sha256,
+        preview.model_impact.model_content_sha256,
     ]
 
 
@@ -2835,14 +2909,18 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
         service, mapping_id, build_id, nodes, request_id="d" * 35 + "1"
     )
     uninstall = service.preview_uninstall(installation.owner_id)
-    model_digest = uninstall.model_impact.model_version_sha256
+    model_digest = uninstall.model_impact.model_content_sha256
 
     preview = service.preview_model_deletion(model_digest)
 
     assert preview.allowed is True
-    assert preview.model_version_sha256 == model_digest
-    assert preview.shared_cache_policy == "remove-unreferenced-model-artifacts-only"
+    assert preview.model_content_sha256 == model_digest
+    assert preview.shared_cache_policy == "retain-shared-download-cache"
     assert preview.bytes_removed == 480
+    assert preview.warnings[0].detail == (
+        "Only affected installation copies are removed; reusable downloaded model "
+        "cache remains retained."
+    )
     assert [item.installation_id for item in preview.installations] == sorted(
         [installation.owner_id, second_installation.owner_id]
     )
@@ -2886,7 +2964,7 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
         }
         expected_payload = {
             "schema_version": 1,
-            "model_version_sha256": model_digest,
+            "model_content_sha256": model_digest,
             "plan_digest": preview.plan_digest,
             "installations": [
                 {
@@ -2950,7 +3028,7 @@ def test_model_deletion_requires_explicit_stop_for_every_active_run(
     )
     model_digest = service.preview_uninstall(
         installation.owner_id
-    ).model_impact.model_version_sha256
+    ).model_impact.model_content_sha256
 
     preview = service.preview_model_deletion(model_digest)
 
@@ -3285,142 +3363,6 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         )
 
 
-def test_legacy_snapshot_updates_single_run_and_ignores_exact_distributed_run(
-    tmp_path: Path,
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    install_plan = service.preview_install(mapping_id, build_id)
-    install = service.install(
-        install_plan,
-        plan_digest=install_plan.plan_digest,
-        actor="admin",
-        request_id="b" * 36,
-    )
-    for node_id in nodes:
-        service.record_node_result(
-            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
-        )
-    run_plan = service.preview_run(install.owner_id, "observed-gang")
-    start = service.start(
-        run_plan,
-        plan_digest=run_plan.plan_digest,
-        actor="admin",
-        request_id="c" * 36,
-    )
-    while service.get(start.id).state == "running":
-        with sessions() as session:
-            operations = tuple(
-                session.scalars(
-                    select(AgentOperation).where(
-                        AgentOperation.parent_job_id == start.id,
-                        AgentOperation.state == "queued",
-                    )
-                )
-            )
-        for operation in operations:
-            service.record_node_result(
-                start.id,
-                operation.node_id,
-                succeeded=True,
-                evidence=start_evidence(operation.payload),
-            )
-
-    legacy_run_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        exact_run = session.get(RecipeRun, start.owner_id)
-        assert exact_run.plan["observation_schema_version"] == 2
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == exact_run.id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        assert exact_rank is not None
-        exact_rank.state = "failed"
-        session.add(
-            RecipeRun(
-                id=legacy_run_id,
-                installation_id=exact_run.installation_id,
-                mapping_id=exact_run.mapping_id,
-                mapping_generation=exact_run.mapping_generation,
-                run_generation=1,
-                alias="legacy-single",
-                plan_digest="d" * 64,
-                plan={"schema_version": 1, "observation_schema_version": 1},
-                state="running",
-                route_state="withdrawn",
-                actor="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        session.add(
-            RunNode(
-                run_id=legacy_run_id,
-                node_id=nodes[0],
-                rank=0,
-                role="single",
-                state="running",
-                port=9000,
-                reserved_memory_bytes=1,
-                updated_at=NOW,
-            )
-        )
-
-    record_recipe_run_observations(
-        sessions,
-        nodes[0],
-        NOW + timedelta(seconds=1),
-        (
-            RecipeRunObservation(start.owner_id, True),
-            RecipeRunObservation(legacy_run_id, True),
-        ),
-    )
-    with sessions() as session:
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        legacy_rank = session.scalar(
-            select(RunNode).where(RunNode.run_id == legacy_run_id)
-        )
-        assert exact_rank.state == "failed"
-        assert exact_rank.updated_at.replace(tzinfo=UTC) == NOW
-        assert legacy_rank.state == "running"
-        assert legacy_rank.updated_at.replace(tzinfo=UTC) == NOW + timedelta(seconds=1)
-
-    record_recipe_run_observations(sessions, nodes[0], NOW + timedelta(seconds=2), ())
-    with sessions() as session:
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        legacy_rank = session.scalar(
-            select(RunNode).where(RunNode.run_id == legacy_run_id)
-        )
-        assert exact_rank.state == "failed"
-        assert legacy_rank.state == "failed"
-
-    with sessions.begin() as session:
-        assigned = prepare_exact_recipe_run_observation_nodes(
-            session, nodes[1], NOW + timedelta(seconds=3), set()
-        )
-        assert [node.run_id for node in assigned] == [start.owner_id]
-    with sessions() as session:
-        exact_worker = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[1],
-            )
-        )
-        assert exact_worker.state == "failed"
-
     with sessions.begin() as session:
         exact_run = session.get(RecipeRun, start.owner_id)
         exact_worker = session.scalar(
@@ -3488,7 +3430,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             "mapping_id": run.mapping_id,
             "mapping_generation": run.mapping_generation,
             "run_generation": run.run_generation,
-            "image_digest": launch["image_digest"],
+            "image_digest": installed.image_digest.removeprefix("sha256:"),
             "artifact_set_digest": launch["artifact_set_digest"],
             "model_identity": launch["model_identity"],
             "rank": run_node.rank,
@@ -3517,7 +3459,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         expires_in_seconds=10,
     )
     assert (
-        grant.claims.operation.values["observation_identity_sha256"] == identity_sha256
+        grant.claims.operation.observation_identity_sha256 == identity_sha256
     )
     with pytest.raises(HostHelperAuthorityError, match="pending"):
         authority.issue_recipe_run_observation_grant(
@@ -3537,7 +3479,15 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         node_id=observation_node,
         observed_at=NOW,
     )
-    forged_receipt["signature"]["value"] = "0" * 128
+    forged_receipt = forged_receipt.model_copy(
+        update={
+            "signature": HostHelperSignature(
+                algorithm="ed25519",
+                key_id=forged_receipt.signature.key_id,
+                value="0" * 128,
+            )
+        }
+    )
     with (
         sessions.begin() as session,
         pytest.raises(HostHelperAuthorityError, match="signature"),
@@ -3549,7 +3499,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=forged_receipt,
         )
     with sessions.begin() as session:
@@ -3560,7 +3510,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=signed_observation_receipt(
                 grant,
                 identity_sha256,
@@ -3592,7 +3542,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW + timedelta(seconds=1),
             received_at=NOW + timedelta(seconds=1),
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=signed_observation_receipt(
                 grant,
                 identity_sha256,
@@ -3622,7 +3572,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=second_grant.to_mapping(),
+            signed_grant=second_grant,
             helper_receipt=signed_observation_receipt(
                 second_grant,
                 second_identity_sha256,
@@ -3654,7 +3604,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW - timedelta(seconds=1),
             received_at=NOW,
-            signed_grant=stale_grant.to_mapping(),
+            signed_grant=stale_grant,
             helper_receipt=signed_observation_receipt(
                 stale_grant,
                 identity_sha256,
@@ -4095,7 +4045,6 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     live_root = tmp_path / "live-routes"
     runtime = AtomicRouteBundlePublisher(
         live_root,
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
         clock=lambda: current["now"],
     )
     atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
@@ -4222,7 +4171,6 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
 
     runtime = AtomicRouteBundlePublisher(
         live_root,
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
         clock=lambda: current["now"],
         await_supervisor_ack=expire_while_waiting_for_ack,
     )
@@ -4322,20 +4270,6 @@ def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missin
             )
         )
     assert publisher.aliases[-1] == ()
-
-
-def test_run_observation_snapshot_rejects_duplicate_and_naive_evidence(
-    tmp_path: Path,
-) -> None:
-    sessions, _service, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
-    observation = RecipeRunObservation(str(uuid.uuid4()), True)
-
-    with pytest.raises(ValueError, match="duplicated"):
-        record_recipe_run_observations(
-            sessions, nodes[0], NOW, (observation, observation)
-        )
-    with pytest.raises(ValueError, match="timezone-aware"):
-        record_recipe_run_observations(sessions, nodes[0], NOW.replace(tzinfo=None), ())
 
 
 def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(

@@ -26,6 +26,8 @@ from vonk_control.telemetry import (
     TelemetrySampleInput,
 )
 
+from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
+
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 BOOT_A = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -88,6 +90,7 @@ def sample(
             accelerator_name="NVIDIA GB10",
             accelerator_performance_state="P0",
         ),
+        metrics=telemetry_metrics(),
     )
 
 
@@ -299,6 +302,7 @@ def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
                 memory_available_bytes=None,
                 gap_samples=0,
                 details={},
+                metrics=telemetry_metrics_document(),
             )
         )
 
@@ -336,6 +340,7 @@ def test_database_rejects_metrics_above_wire_maximums(
                 received_at=NOW,
                 gap_samples=0,
                 details={},
+                metrics=telemetry_metrics_document(),
                 **values,
             )
         )
@@ -365,6 +370,7 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
             received_at=NOW,
             gap_samples=0,
             details={},
+            metrics=telemetry_metrics_document(),
         )
         session.add(row)
         session.flush()

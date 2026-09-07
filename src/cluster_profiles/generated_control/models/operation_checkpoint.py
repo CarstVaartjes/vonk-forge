@@ -21,7 +21,7 @@ T = TypeVar("T", bound="OperationCheckpoint")
 
 @_attrs_define
 class OperationCheckpoint:
-    """ A restart-safe cursor identifying the last completed durable unit.
+    """ Restart-safe cursor identifying a durable operation unit.
 
         Attributes:
             key (str):

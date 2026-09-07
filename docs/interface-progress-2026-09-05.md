@@ -1,16 +1,201 @@
 # Launch implementation and evidence
 
-Updated 2026-09-06. This replaces the earlier status snapshot. Platform
-integration is `codex/interface-integration`
-(latest checked remote main `0ab88b4f` is included). Local checks, publication,
-Controller deployment and physical Spark execution remain separate results.
-No local result below claims a deployed Controller or NVIDIA workload.
+Updated 2026-09-07. The current integration branch is
+`codex/launch-run-operation-repair`, based on remote main `cb6edee0`.
+[PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614) carries the combined
+Controller/Spark contract and trusted-cache corrections. Local checks,
+publication, Controller deployment and physical Spark execution remain
+separate results.
+
+## Consolidation checkpoint
+
+[The consolidation ledger](launch-consolidation-2026-09-07.md) accounts for the
+existing worker branches and original checkout changes. Completed branches are
+merged whole into PR614; no new worktrees were created. Current route authority,
+queue locking, canonical compiler metadata and browser telemetry are integrated.
+The browser production build and 216 tests pass; CLI/generated contracts pass
+245 tests and 45 subtests. The final full Controller check is in progress.
+The remaining catalog validator/packaging cleanup is explicitly recorded in the
+ledger. This is source integration; deployment and physical acceptance remain
+separate.
+
+## Earlier checkpoint evidence
+
+- Platform work is on the integration branch, not yet published or deployed.
+  Earlier CI runs do not cover its subsequent commits.
+- Public contracts v1.0.5 are published at recipes commit
+  `d55389b5cc144d0483cf89b95770198c6125cb15` (PR76). Model, Recipe, and nested
+  capabilities require exact integer schema tags. All 92 Models, 85 Recipes,
+  and 109 compiled role projections pass, including the 751-file Model.
+- Canonical Model content references now connect cache persistence, all selected
+  and companion Model ownership, Run/Switch, deletion, the API, CLI, and web.
+  Generated clients use those same fields. Families, versions, and capabilities
+  remain data in ModelDefinition. Private cache manifests use strict Pydantic
+  structure and the public ModelReference type.
+- Spark downloads use one shared object path across artifact sets. Installation
+  materializes selected files from that cache, retries clean up their own partial
+  files, and repeated selections retain their distinct mounts. Removing an
+  installation keeps reusable downloads; API and UI previews describe that
+  retention and report installation-copy bytes.
+- The old recipe parser and package assets, flat recovery conversion, duplicate
+  enrollment DTO, unused artifact-size resolver, and obsolete model mount layout
+  are removed. Current Library acceptance uses ordinary published catalog inputs
+  and fresh PostgreSQL.
+- CLI qualification uses the current Library API. Selected file IDs are exact;
+  download totals deduplicate shared object bytes across Models.
+- Run/Switch consumes the typed cache manifest and the current preview response
+  contract. Connected tests prove companion Model references survive, empty
+  support files remain selectable, and shared object bytes count once.
+- Concurrent Model and image workers claim only the row they will process;
+  PostgreSQL no longer over-locks queued work and starves another worker.
+- Verification at `e9a2b5b2`, before the ongoing wire consolidation: 1,943 Controller tests pass (three documented platform
+  or opt-in skips); all four Controller-to-Rust install/start/uninstall/cleanup
+  bridge tests pass. The 432 Rust tests across 40 executables passed in
+  unprivileged ARM64 OrbStack before the final response-builder extraction;
+  its focused protocol and connected bridge tests also pass. Web: 216 unit
+  tests, production build, and 25 browser journeys pass (one capture-only skip).
+  CLI/generated/supply-chain checks previously passed 328 tests plus 45 subtests;
+  the final generated/supply-chain rerun passed all 107 tests.
+- Distribution now uses the same shared Pydantic model in the Controller's
+  actual response and compiled plan. At `40419e9d`, 562 connected Python tests
+  and 32 Linux Rust protocol tests pass, including the actual HTTP manifest
+  through Rust with safe Unicode, space, and underscore filenames.
+- Removed progress-field aliases and the Rust heartbeat response fallback.
+  Enrollment/renewal use shared Pydantic requests and issued-certificate output;
+  the retired Rust pending-approval response and polling path are removed.
+  Focused validation: 98 Controller enrollment/rotation tests and 12 Linux
+  pairing tests pass. The combined protocol/wire run passed 539 tests, including
+  enrollment and renewal through Rust, and exposed one heartbeat 409 failure
+  following progress canonicalization. The host-helper integration fixes that
+  mapping handoff; the current full Controller run passes the heartbeat checks.
+- Bootstrap no longer selects an older response by setup-schema query. Both
+  Controller and Spark setup require the complete current document. Seven
+  connected bootstrap/enrollment/renewal checks and 47 unprivileged Linux setup
+  tests pass; three focused Controller bootstrap checks pass.
+- The current build/import and inventory boundary passes 16 connected checks,
+  including artifact jobs and lifecycle execution. Job placement has an explicit
+  nullable host port; serving placement may publish a different host port from
+  the container endpoint. The full catalog gate uses production placement and
+  passes all 109 roles across 85 Recipes and 92 Models, including 44 job Recipes.
+- Package-helper authorization and release documents now use a complete
+  Pydantic graph, with schemas derived from it rather than separately maintained
+  field lists. All 74 focused package/helper and API checks pass.
+- Telemetry uses one shared graph in the actual Controller endpoint and Rust
+  sender. There is no empty legacy metric default. Its generated schema exposes
+  scalar bounds and is checked for drift. All 237 focused Python checks and 19
+  actual Rust/API/PostgreSQL bridge checks pass. Historical database migrations
+  remain inert history; they are not runtime fallbacks.
+- Model identity and safe Unicode/space filenames retain the same structure
+  across Python, Rust, and helper materialization, including a nested path at
+  the declared 512-character limit. The 122 affected checks and two focused
+  Linux helper path tests pass at integration commit `006fd39a`.
+- Host-helper grants and receipts use shared typed documents in Python and
+  Rust. The actual grant API, Rust verifier/signer, Python signature consumer,
+  authority service, and recipe operation checks pass all 101 focused tests.
+  The unused generic grant response is removed.
+- The composed Rust workspace compiles and its 38 test executables pass after
+  the affected fixture/environment reruns (439 tests). Updated fixtures include
+  required telemetry metrics and the explicit null port for artifact jobs.
+  The Linux process boundary tests use executable temporary directories; the
+  builder test accommodates the existing reserve scaling on small filesystems.
+- The broader Controller run at `9d295cd8` passed 1,944 tests with three
+  expected platform/opt-in skips and exposed three stale fixture/schema
+  assumptions. Their 132 affected checks now pass. Current schema head
+  `0022_current_telemetry_defaults` leaves historical 0016 unchanged and preserves
+  existing row values. It removes the empty new-sample metrics default and uses
+  current Controller provenance for new rollups. A populated PostgreSQL test
+  verifies row preservation and rejection of omitted metrics.
+- Core job envelopes now use shared Pydantic models on the actual claim,
+  heartbeat and result routes. Result validation also resolves the stored
+  operation kind before accepting successful evidence. The current claim
+  request requires protocol and identity fields instead of filling them from
+  defaults; 78 focused API checks and eight connected Rust enrollment/claim
+  checks pass. Enrollment OpenAPI now exposes its canonical request model.
+- The final operation audit found seven retired Python-agent commands that
+  the current Rust agent rejects. Their old Controller orchestration is
+  superseded by Run/Switch and is being removed together with its definitions
+  and consumers. Current queue/fencing, compiled route authority, inventory,
+  and signed readiness behavior remain owned by their current implementations.
+- Signed run observations now use one current envelope and shared Python/Rust
+  structures. Singleton observations carry explicit null rendezvous fields;
+  omissions are rejected by both parsers. The complete composed wire suite
+  passes 647 checks using newly built Rust probes in unprivileged ARM64
+  OrbStack. The focused Python/API/lifecycle composition passes 583 tests
+  with seven opt-in skips. Connected readiness checks pass actual start results
+  through Controller persistence, grant issuance, helper signing, Rust
+  serialization and Controller consumption. They do not execute a model.
+- The old orchestration, agent reconciliation, and worker-authority modules
+  and their dedicated tests are removed at `14d88a1b`. Current recipe and
+  upgrade result consumers are wired directly. The unused worker token,
+  internal API settings, Compose secret, and authority network are removed at
+  `a4d96e2e`; 60 settings/authorization tests and 45 real Compose/bundle checks
+  pass (two separate Linux-only runtime-initialization checks remain skipped).
+  Browser clients use current Activity and Fleet fields; 69 tests and the
+  production build pass. The old probe-derived Dashboard and NodeStatus API
+  are removed at `187b5bf9`; 71 current Fleet/API/metrics checks pass.
+  Command/queue graph retirement, current route authority, monitoring consumers,
+  and the final catalog dependency cleanup remain in progress.
+  The bundled protocol wheel and generated API clients must be refreshed after
+  those merges, followed by the combined suite. These focused checks do not
+  constitute a release-wide pass.
+- The mandatory client-generator check invokes the repository-pinned generator
+  and fails on generator warnings or unavailable tooling. Arbitrary JSON values
+  survive generated Python round trips. All 24 generator/catalog/selector
+  checks pass at `4d979a0b`. The wider Controller sweep collected 1,865 tests:
+  1,812 passed, 19 failed, three skipped, and 31 required Rust-probe checks
+  lacked their Linux runner. Two failures were fixed at root (the removed
+  POST-job permission entry and a distribution fixture missing its required
+  authority); the 17 old protocol/queue fixture failures are assigned to the
+  current-operation worker. The complete suite must run again after composition,
+  with the dedicated Rust probes supplied.
+- Image preparation, cache persistence, availability, and launch compilation
+  now use one Pydantic receipt. The duplicate class, field-alias property and
+  dictionary fallbacks are removed. All declared receipt fields are required,
+  with explicit nulls where applicable. The five affected Controller suites
+  pass 125 tests; the one Docker-permission skip was then run with access to
+  OrbStack and passed against real PostgreSQL. Current Activity integration
+  and canonical-contract imports are mandatory tests, with the old
+  import-error skip fallbacks removed. A current full
+  Rust workspace run passes all 435 tests across 38 executables in offline,
+  non-root, read-only ARM64 OrbStack. It also caught and fixed a duplicate
+  standard test annotation on an async Tokio test introduced during composition.
+- The unavailable upstream Skopeo pin is replaced with a verified current
+  official image. All six packaging checks pass; the worker image builds and
+  downloads an OCI archive as UID10001 with a read-only root.
+- The development lifecycle canary is blocked before lifecycle execution:
+  nested Docker on the fresh OrbStack VM cannot unpack the baseline LiteLLM
+  layer containing `/dev/console`. Source-built Controller images and ARM64
+  binaries exist, but this is neither signed release nor physical acceptance.
+- The user approved deleting obsolete PostgreSQL tables and records and
+  assuming a fresh state. Existing model/image cache contents are also
+  disposable if the current contract changes their layout or metadata. No
+  compatibility code is required to preserve that state. Database changes
+  will be applied with the matching Controller/worker update, not ahead of it.
+- Catalog ModelGroup/ModelVersion schema branches, validators, and seed/test
+  documents are obsolete. Automatic review rejected deleting them while
+  consumers or integrity checks still depended on them. The worker is first
+  replacing those consumers and their verification coverage, retaining the
+  files until current-path independence is proven. This does not make the old
+  formats a supported execution path. Separate exact approvals remain pending for
+  removing repeated full-file hashes at trusted internal handoffs and the
+  qualification CLI's duplicate territorial metadata check. Those changes have
+  not been performed.
+- The coordinated archive checksum field/header rename from OCI layout to OCI
+  archive terminology is paused for exact approval. Checksum behavior is
+  unchanged in the proposal; mixed Controller/Spark versions would reject the
+  renamed message. No partial rename or old-name fallback has been introduced.
+- The NAS Controller is unchanged. Backups and a fresh database are prepared;
+  device identities have not been copied and no selected Model download has
+  started. Deployment follows successful publication and acceptance.
+
+The detailed evidence below records earlier implementation checkpoints; this
+current checkpoint takes precedence for release and deployment status.
 
 ## Published results
 
 | Component | Verified result |
 |---|---|
-| Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
+| Recipes | [PR76](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/76) merged at `d55389b5cc144d0483cf89b95770198c6125cb15`; [v1.0.5 publication](https://github.com/CarstVaartjes/vonk-forge-recipes/actions/runs/34109170382) succeeded with strict schema tags and unchanged 92 Models and 85 Recipes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
 | Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |

@@ -63,6 +63,8 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from .canonical_recipe_fixtures import canonical_example
+
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 REGISTRY_DIGEST = "sha256:" + "d" * 64
 PLATFORM_DIGEST = "sha256:" + "e" * 64
@@ -145,7 +147,7 @@ class _Inspector:
             warnings=(),
             artifact_set_sha256=MODEL_SET_DIGEST,
             artifact_set_bytes=1024,
-            dependency_model_version_sha256=(),
+            dependency_model_content_sha256=(),
         )
 
 
@@ -271,11 +273,7 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    recipe_document = json.loads(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
-        .read_text()
-    )
+    recipe_document = canonical_example("recipe-image.json")
     model_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -433,26 +431,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
             )
             if row is None:
                 raise RuntimeError("missing durable direct receipt")
-            return {
-                "image_digest": row.platform_manifest_digest,
-                "oci_layout_sha256": row.oci_archive_sha256,
-                "image_bytes": row.image_bytes,
-                "source": row.source,
-                "build_id": row.build_id,
-                "registry_manifest_digest": row.registry_manifest_digest,
-                "platform_manifest_digest": row.platform_manifest_digest,
-                "local_image_config_id": row.local_image_config_id,
-                "architecture": row.architecture,
-                "runtime_interface": row.runtime_interface,
-                "runtime_interface_label": row.runtime_interface_label,
-                "local_image_reference": None,
-                "distribution_object": {
-                    "name": "image.oci.tar",
-                    "sha256": row.oci_archive_sha256,
-                    "bytes": row.image_bytes,
-                    "kind": "oci-archive",
-                },
-            }
+            return storage.read_receipt(row.oci_archive_sha256)
 
     compiler = ControllerExecutionPlanService(
         model_cache,
@@ -461,7 +440,6 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
 
     admission = InstallAdmissionService(
         sessions,
-        sizes=SimpleNamespace(),
         disk_floor_bytes=10,
         compiled_plan_provider=compiler.compile_installation,
     )
@@ -476,7 +454,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
     )
     source = SimpleNamespace(
         objects_for_set=lambda digest: (
-            DistributionObject("model.safetensors", MODEL_DIGEST, 1024, "model"),
+            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
         )
     )
     executor = _TargetExecutor(
@@ -507,7 +485,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     service, sessions, revision_id, recipe_digest, mapping_id, executor, events = _make_service(tmp_path)
     del mapping_id
     request = RunSwitchPreviewRequest(
-        model_version_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]
@@ -598,7 +576,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
 
 def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
     return RunSwitchPreviewRequest(
-        model_version_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]
@@ -641,7 +619,6 @@ def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, install
         jobs=_NoopJobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
         now=lambda: int(NOW.timestamp()),
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

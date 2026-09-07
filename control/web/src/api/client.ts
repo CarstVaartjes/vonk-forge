@@ -12,7 +12,6 @@ import type {
   ControlApi,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
-  FleetEvidenceResponse,
   FleetNodeIdentity,
   FleetProfile,
   FleetProfileApplication,
@@ -449,16 +448,16 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async previewLibraryModelDeletion(modelVersionSha256: string, signal?: AbortSignal) {
+  async previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/v1/library/model-deletion-plans/preview", {
-      body: {model_version_sha256: modelVersionSha256},
+      body: {model_content_sha256: modelContentSha256},
       signal,
     }));
   }
 
-  async deleteLibraryModel(modelVersionSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/models/{model_version_sha256}/delete", {
-      params: {path: {model_version_sha256: modelVersionSha256}},
+  async deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/models/{model_content_sha256}/delete", {
+      params: {path: {model_content_sha256: modelContentSha256}},
       body: input,
       signal,
     }));
@@ -646,14 +645,6 @@ export class ApiClient implements ControlApi {
   artifactJobResultUrl(jobId: string, sha256: string): string {
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
     return `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
-  }
-
-  async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
-    return resultData(await this.generated.GET("/api/v1/nodes/status", {signal}));
-  }
-
-  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
-    return this.nodeStatuses(signal);
   }
 
   async nodeTelemetryHistory(

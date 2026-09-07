@@ -26,8 +26,7 @@ T = TypeVar("T", bound="TelemetryWorkload")
 
 @_attrs_define
 class TelemetryWorkload:
-    """ Sanitized request/job correlation to the actual serving placement.
-
+    """
         Attributes:
             engine_id (str):
             executor_node_ids (list[str]):

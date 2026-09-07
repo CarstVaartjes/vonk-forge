@@ -212,7 +212,6 @@ def test_development_defaults_agent_runtime_to_disabled(monkeypatch) -> None:
 
     assert settings.agent_runtime == "disabled"
     assert settings.agent_proxy_auth == b""
-    assert settings.worker_api_token == b""
 
 
 def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_path(
@@ -312,7 +311,6 @@ def _configure_agent_authority(
         "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
         "VONK_CONTROLLER_CA_FILE": "public-controller-ca",
         "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32,
-        "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
     }
     paths: dict[str, Path] = {}
     for name, value in secret_values.items():
@@ -348,7 +346,6 @@ def _configure_agent_authority(
         "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE",
         "VONK_AGENT_CA_ROOT_FILE",
         "VONK_AGENT_PROXY_AUTH_FILE",
-        "VONK_WORKER_API_TOKEN_FILE",
     ):
         monkeypatch.setenv(name, str(paths[name]))
     monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
@@ -383,12 +380,10 @@ def test_agent_authority_mode_runtime_matrix(
     assert settings.agent_runtime == runtime
     if runtime == "disabled":
         assert settings.agent_proxy_auth == b""
-        assert settings.worker_api_token == b""
         return
     assert settings.agent_client_ca == b"client-ca"
     assert settings.agent_intermediate_certificate == b"intermediate-certificate"
     assert settings.agent_proxy_auth == b"p" * 32
-    assert settings.worker_api_token == b"w" * 32
 
 
 def test_agent_certificate_lifetime_defaults_and_is_bounded(
@@ -514,7 +509,6 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(
         "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
         "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
         "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32 + "\r\n",
-        "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
     }
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
@@ -581,12 +575,11 @@ def test_agent_proxy_auth_defaults_empty(monkeypatch) -> None:
     assert settings.agent_proxy_auth == b""
 
 
-def test_production_worker_settings_can_explicitly_disable_agent_runtime(
+def test_production_worker_settings_requires_management_cidrs(
     tmp_path: Path, monkeypatch
 ) -> None:
     values = {
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
-        "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
     }
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     for name, value in values.items():
@@ -600,7 +593,6 @@ def test_production_worker_settings_can_explicitly_disable_agent_runtime(
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     settings = WorkerSettings.from_env_and_secrets()
 
-    assert settings.internal_api_token == b"w" * 32
     assert settings.management_cidrs == "10.0.0.0/24"
 
 
@@ -608,12 +600,9 @@ def test_worker_recipe_build_parallel_preparations_defaults_and_bounds(
     tmp_path: Path, monkeypatch
 ) -> None:
     database = tmp_path / "database-url"
-    token = tmp_path / "worker-api-token"
     database.write_text("postgresql://control:test@postgres/control")
-    token.write_text("w" * 32)
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
     assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 2

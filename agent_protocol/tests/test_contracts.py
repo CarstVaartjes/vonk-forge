@@ -10,7 +10,10 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
     AgentClaim,
     AgentOperation,
     AgentProgress,
@@ -18,11 +21,18 @@ from vonk_agent_protocol import (
     AgentResult,
     canonical_message,
     schema_validator,
+    validate_result_for_operation,
     validate_schema_message,
 )
+from vonk_agent_protocol.contracts import RESULT_MODELS
 
 
 def valid_claim() -> dict[str, object]:
+    payload = {
+        "schema_version": 1,
+        "run_id": "00000000-0000-4000-8000-000000000004",
+        "plan_digest": "a" * 64,
+    }
     return {
         "schema_version": 1,
         "job_id": "00000000-0000-4000-8000-000000000001",
@@ -30,10 +40,10 @@ def valid_claim() -> dict[str, object]:
         "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
         "node_id": "spk_00000000000000000000000000000001",
-        "operation": "node.probe",
+        "operation": "recipe.stop",
         "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(b"{}").hexdigest(),
-        "payload": {},
+        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
+        "payload": payload,
         "deadline": "2026-08-03T12:00:00+00:00",
     }
 
@@ -54,10 +64,16 @@ def valid_attempt() -> dict[str, object]:
 
 
 def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
-    return valid_claim() | {
-        "payload": payload,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
-    }
+    current = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    current_payload = current["payload"]
+    assert isinstance(current_payload, dict)
+    current_payload["parameters"] = payload
+    return claim_for_operation("recipe.job.run.v1", current_payload)
 
 
 def claim_for_operation(
@@ -78,6 +94,30 @@ def recipe_build_vectors() -> dict[str, object]:
             / "recipe-build-claim-v1.json"
         ).read_text(encoding="utf-8")
     )
+
+
+def recipe_start_result(
+    *, endpoint: str = "http://[fd00::211]:8000", model_identity: str | None = None
+) -> dict[str, object]:
+    evidence = {
+        "recipe_revision_id": "00000000-0000-4000-8000-000000000006",
+        "recipe_content_sha256": "a" * 64,
+        "image_digest": "sha256:" + "b" * 64,
+        "artifact_set_digest": "c" * 64,
+        "model_identity": model_identity,
+        "rank": 0,
+        "world_size": 1,
+        "memory_reservation_bytes": 1024,
+        "evidence_digest": "d" * 64,
+        "endpoint": endpoint,
+        "ready": True,
+        "run_generation": 1,
+        "runtime_arguments_sha256": "e" * 64,
+        "local_address": None,
+        "master_address": None,
+        "master_port": None,
+    }
+    return {"endpoint": endpoint, "evidence": evidence, "evidence_digest": "f" * 64}
 
 
 def apply_vector_changes(
@@ -151,7 +191,7 @@ SAFE_PATH_KEY_COLLISIONS = (
 def test_claim_is_node_scoped_and_canonical() -> None:
     claim = AgentClaim.parse(valid_claim())
 
-    assert json.loads(canonical_message(claim))["operation"] == "node.probe"
+    assert json.loads(canonical_message(claim))["operation"] == "recipe.stop"
 
 
 @pytest.mark.parametrize("field", ["command", "shell", "environment", "password"])
@@ -170,7 +210,7 @@ def test_protocol_allows_only_exact_versioned_platform_target_identifier() -> No
 
     claim = AgentClaim.parse(claim_with_payload({"platform_target_name": target}))
 
-    assert claim.payload["platform_target_name"] == target
+    assert claim.payload.parameters["platform_target_name"] == target
 
 
 @pytest.mark.parametrize(
@@ -182,11 +222,11 @@ def test_protocol_allows_only_exact_versioned_platform_target_identifier() -> No
         "platform/releases/1.2.3/" + "A" * 64 + ".json",
     ),
 )
-def test_protocol_rejects_noncanonical_platform_target_identifier(
+def test_protocol_rejects_client_selected_parameter_path(
     target: str,
 ) -> None:
-    with pytest.raises(AgentProtocolError, match="platform target"):
-        AgentClaim.parse(claim_with_payload({"platform_target_name": target}))
+    with pytest.raises(AgentProtocolError, match="unsafe|path"):
+        AgentClaim.parse(claim_with_payload({"artifact_path": target}))
 
 
 def test_claim_rejects_changed_payload_digest() -> None:
@@ -204,22 +244,30 @@ def test_claim_requires_an_aware_utc_deadline(deadline: str) -> None:
 
 
 def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
-    source = valid_claim() | {"payload": {"nested": ["before"]}}
+    payload = valid_claim()["payload"]
+    assert isinstance(payload, dict)
+    source = valid_claim() | {
+        "payload": payload
+        | {"run_id": "00000000-0000-4000-8000-000000000005"}
+    }
     source["payload_digest"] = hashlib.sha256(
         canonical_message(source["payload"])
     ).hexdigest()
     claim = AgentClaim.parse(source)
-    source["payload"]["nested"].append("after")  # type: ignore[index]
+    source["payload"]["run_id"] = "00000000-0000-4000-8000-000000000006"  # type: ignore[index]
 
-    assert json.loads(canonical_message(claim))["payload"] == {"nested": ["before"]}
-    with pytest.raises(AttributeError):
+    assert (
+        json.loads(canonical_message(claim))["payload"]["run_id"]
+        == "00000000-0000-4000-8000-000000000005"
+    )
+    with pytest.raises(ValidationError):
         claim.attempt = 2  # type: ignore[misc]
 
 
 def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -> None:
     raw = valid_claim()
 
-    with pytest.raises(AgentProtocolError, match="unsafe"):
+    with pytest.raises(ValidationError, match="unsafe"):
         AgentClaim(
             schema_version=1,
             job_id=raw["job_id"],
@@ -227,10 +275,12 @@ def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -
             attempt=1,
             fence=raw["fence"],
             node_id=raw["node_id"],
-            operation=AgentOperation.NODE_PROBE,
+            operation=AgentOperation.RECIPE_STOP,
             authority_revision="a" * 64,
-            payload_digest=hashlib.sha256(b'{"command":"unsafe"}').hexdigest(),
-            payload={"command": "unsafe"},
+            payload_digest=hashlib.sha256(
+                canonical_message({"schema_version": 1, "command": "unsafe"})
+            ).hexdigest(),
+            payload={"schema_version": 1, "command": "unsafe"},
             deadline=datetime(2026, 8, 3, 12, tzinfo=UTC),
         )
 
@@ -238,7 +288,7 @@ def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -
 def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
     raw = valid_attempt()
 
-    with pytest.raises(AgentProtocolError, match="path"):
+    with pytest.raises(ValidationError):
         AgentResult(
             **raw,
             state="succeeded",
@@ -251,16 +301,12 @@ def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris
 ):
     raw = valid_attempt()
     revision = "sha256:" + "a" * 64
-    result = {
-        "endpoint": "http://[fd00::211]:8000",
-        "evidence": {
-            "endpoint": "http://[fd00::211]:8000",
-            "model_identity": (
-                "https://models.example.invalid/organization/model.bin?download=true@"
-                + revision
-            ),
-        },
-    }
+    result = recipe_start_result(
+        model_identity=(
+            "https://models.example.invalid/organization/model.bin?download=true@"
+            + revision
+        )
+    )
 
     parsed = AgentResult.parse(raw | {"state": "succeeded", "result": result})
 
@@ -278,7 +324,7 @@ def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris
 def test_recipe_result_accepts_each_authorized_model_identity_form(
     model_identity: str,
 ) -> None:
-    result = {"evidence": {"model_identity": model_identity}}
+    result = recipe_start_result(model_identity=model_identity)
 
     AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": result})
 
@@ -305,27 +351,29 @@ def test_recipe_result_accepts_each_authorized_model_identity_form(
 def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
     field: str, value: str
 ) -> None:
-    result = {field: value}
+    result = recipe_start_result()
     if field == "model_identity":
-        result = {"evidence": result}
+        result["evidence"][field] = value  # type: ignore[index]
+    else:
+        result[field] = value
 
-    with pytest.raises(AgentProtocolError, match="path"):
+    with pytest.raises(AgentProtocolError, match="path|credential|endpoint"):
         AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": result})
 
 
 def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> None:
     endpoint = "http://192.168.1.211:8000"
 
-    with pytest.raises(AgentProtocolError, match="path"):
-        AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
-    with pytest.raises(AgentProtocolError, match="path"):
+    claim = AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
+    assert claim.payload.parameters["endpoint"] == endpoint
+    with pytest.raises(ValidationError):
         AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
 
 
 def test_direct_progress_construction_enforces_protocol_boundary() -> None:
     raw = valid_attempt()
 
-    with pytest.raises(AgentProtocolError, match="unsafe"):
+    with pytest.raises(ValidationError, match="unsafe"):
         AgentProgress(**raw, progress={"authorization": "unsafe"})
 
 
@@ -430,6 +478,33 @@ def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> Non
     assert validate_schema_message("agent-job.schema.json", raw)
 
 
+def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
+    result = {
+        "architecture": "linux-arm64",
+        "binary_digest": "d" * 64,
+        "build_digest": "sha256:" + "e" * 64,
+        "package_sha256": "b" * 64,
+        "package_version": "0.1.0~dev.330+g0123456789ab",
+        "self_test_passed": True,
+        "status": "upgraded",
+    }
+
+    parsed = validate_result_for_operation(
+        AgentOperation.AGENT_UPGRADE,
+        result,
+        state="succeeded",
+    )
+
+    assert parsed is not None
+    assert parsed.__class__.__name__ == "AgentUpgradeResult"
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.AGENT_UPGRADE,
+            result | {"status": "failed"},
+            state="succeeded",
+        )
+
+
 def protocol_message_with_document(
     name: str,
     document: dict[str, str],
@@ -468,14 +543,15 @@ def test_complete_path_key_segments_are_rejected_by_runtime_and_schemas(
     field = form.format(token=token, title=token.title(), upper=token.upper())
     raw, parser = protocol_message_with_document(name, {field: "release"})
 
-    with pytest.raises(AgentProtocolError, match="path"):
+    with pytest.raises(AgentProtocolError, match="path|unsafe"):
         parser(raw)
-    assert not schema(name).is_valid(raw)
-    with pytest.raises(AgentProtocolError):
-        validate_schema_message(name, raw)
+    if name == "agent-result.schema.json":
+        assert not schema(name).is_valid(raw)
+        with pytest.raises(AgentProtocolError):
+            validate_schema_message(name, raw)
 
 
-@pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])
+@pytest.mark.parametrize("name", ["agent-job.schema.json"])
 @pytest.mark.parametrize("field", SAFE_PATH_KEY_COLLISIONS)
 def test_path_token_collisions_are_accepted_by_runtime_and_schemas(
     name: str,
@@ -491,7 +567,7 @@ def test_path_token_collisions_are_accepted_by_runtime_and_schemas(
 def test_progress_and_result_are_fenced_node_messages() -> None:
     progress = AgentProgress.parse(valid_attempt() | {"progress": {"phase": "probe"}})
     result = AgentResult.parse(
-        valid_attempt() | {"state": "succeeded", "result": {"healthy": True}}
+        valid_attempt() | {"state": "succeeded", "result": {"stopped": True}}
     )
 
     assert progress.node_id == "spk_00000000000000000000000000000001"
@@ -527,13 +603,6 @@ def test_operation_enum_contains_only_supported_operations() -> None:
     assert {member.value for member in AgentOperation} == {
         "agent.upgrade.v1",
         "artifact.distribution.v1",
-        "node.probe",
-        "release.install",
-        "workload.prepare",
-        "workload.start",
-        "workload.stop",
-        "workload.health",
-        "workload.verify",
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",
@@ -670,13 +739,130 @@ def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents
         validate_schema_message(name, raw)
 
 
-@pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])
-def test_packaged_schemas_match_repository_bytes(name: str) -> None:
-    repository_schema = (
-        Path(__file__).parents[1] / "src" / "vonk_agent_protocol" / "schemas" / name
-    ).read_bytes()
-    packaged_schema = (
-        importlib.resources.files("vonk_agent_protocol") / "schemas" / name
-    ).read_bytes()
+@pytest.mark.parametrize("operation", ["recipe.install", "recipe.start"])
+def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
+    operation: str,
+) -> None:
+    compiled_plan = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "control"
+            / "tests"
+            / "fixtures"
+            / "compiled_plan_751.json"
+        ).read_text(encoding="utf-8")
+    )
+    placement = compiled_plan["runtime"]["placement"]
+    if operation == "recipe.install":
+        corpus_payload = {
+            "schema_version": 2,
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "plan_digest": "b" * 64,
+            "rank": placement["rank"],
+            "role": placement["role"],
+            "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
+            "compiled_execution_plan": compiled_plan,
+        }
+    else:
+        compiled_plan = deepcopy(compiled_plan)
+        compiled_plan["runtime"]["placement"]["endpoint_address"] = "10.0.0.2"
+        compiled_plan["security"]["network_mode"] = "bridge"
+        placement = compiled_plan["runtime"]["placement"]
+        corpus_payload = {
+            "schema_version": 2,
+            "run_id": "00000000-0000-4000-8000-000000000005",
+            "installation_id": "00000000-0000-4000-8000-000000000004",
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000006",
+            "recipe_content_sha256": compiled_plan["identity"][
+                "recipe_revision_sha256"
+            ],
+            "mapping_id": "00000000-0000-4000-8000-000000000007",
+            "mapping_generation": 1,
+            "run_generation": 1,
+            "image_digest": compiled_plan["runtime"]["image_digest"],
+            "plan_digest": "b" * 64,
+            "alias": "synthetic-tiny",
+            "rank": placement["rank"],
+            "role": placement["role"],
+            "port": placement["port"],
+            "reserved_memory_bytes": placement["reserved_memory_bytes"],
+            "endpoint_address": placement["endpoint_address"],
+            "world_size": placement["world_size"],
+            "compiled_execution_plan": compiled_plan,
+            "local_address": placement["local_address"],
+            "master_address": placement["master_address"],
+            "master_port": placement["master_port"],
+        }
 
-    assert packaged_schema == repository_schema
+    claim = AgentClaim.parse(claim_for_operation(operation, corpus_payload))
+    assert claim.operation.value == operation
+
+    oversized_plan = deepcopy(compiled_plan)
+    oversized_plan["runtime"]["executable"] = (
+        "/" + "x" * MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+    )
+    oversized = deepcopy(corpus_payload)
+    oversized["compiled_execution_plan"] = oversized_plan
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(claim_for_operation(operation, oversized))
+
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(
+            claim_for_operation(
+                "recipe.stop", {"value": "x" * MAX_DOCUMENT_BYTES}
+            )
+        )
+
+
+@pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])
+def test_core_schemas_are_derived_from_the_registry(name: str) -> None:
+    validator = schema_validator(name)
+    assert validator.schema["additionalProperties"] is False
+    assert "schema_version" in validator.schema["required"]
+    assert validator.schema["properties"]["attempt"]["minimum"] == 1
+
+
+def test_known_operation_result_uses_its_typed_result_model() -> None:
+    parsed = validate_result_for_operation(
+        AgentOperation.RECIPE_STOP,
+        {"stopped": True},
+        state="succeeded",
+    )
+    assert parsed is not None
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.RECIPE_STOP,
+            {"stopped": "true"},
+            state="succeeded",
+        )
+
+
+def test_every_current_operation_has_a_result_model() -> None:
+    assert set(RESULT_MODELS) == set(AgentOperation)
+
+
+def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
+    complete = {
+        "assignment_id": "00000000-0000-4000-8000-000000000004",
+        "model_artifact_set_sha256": "a" * 64,
+        "verified": True,
+        "verified_digests": ["b" * 64],
+        "verified_image_digest": "sha256:" + "c" * 64,
+        "imported_image_digest": "sha256:" + "c" * 64,
+        "verified_oci_layout_sha256": "d" * 64,
+        "oci_image_digest": "sha256:" + "c" * 64,
+        "downloaded_bytes": 1024,
+        "evidence_digest": "e" * 64,
+    }
+    parsed = validate_result_for_operation(
+        AgentOperation.ARTIFACT_DISTRIBUTION,
+        complete,
+        state="succeeded",
+    )
+    assert parsed is not None
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.ARTIFACT_DISTRIBUTION,
+            complete | {"downloaded_bytes": "1024"},
+            state="succeeded",
+        )
