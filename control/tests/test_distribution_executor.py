@@ -26,6 +26,7 @@ from vonk_control.distribution import (
 from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
+    _phase_receipt,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
@@ -39,6 +40,11 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
+from vonk_control.run_switch_contract import (
+    RunSwitchPreviewRequest,
+    SparkGroup,
+    SparkGroupNode,
+)
 from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
@@ -47,6 +53,21 @@ from vonk_control.run_switch_operations import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .test_recipe_operations import NOW, setup_services
+
+
+def test_phase_receipt_rejects_explicit_cross_phase_receipt() -> None:
+    receipt = {
+        "phase": "prepare",
+        "subphase": "runtime-plan",
+        "installation_id": str(uuid.uuid4()),
+        "mapping_id": str(uuid.uuid4()),
+        "install_plan_digest": "a" * 64,
+        "compiled_plan_persisted": True,
+    }
+    phase = SimpleNamespace(kind="transfer", subphase="target-copy")
+    with pytest.raises(RuntimeError, match="phase receipt is invalid"):
+        _phase_receipt(receipt, phase=phase)
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
@@ -979,6 +1000,43 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
 
     copy_view = executor.get(copy_child.operation_id)
     member_progress = copy_view.result["progress"]["members"]
+    (tmp_path / "run-switch-plan").mkdir()
+    plan_sessions, _plan_lifecycle, _plan_queue, _plan_mapping_id, _plan_build_id, plan_nodes = (
+        setup_services(tmp_path / "run-switch-plan", nodes=2)
+    )
+    with plan_sessions() as session:
+        plan_revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+        assert plan_revision is not None
+        plan_model_digest = plan_revision.document["models"][0]["model"]["content_sha256"]
+    operation_plan = RunSwitchOperationService(plan_sessions, clock=lambda: NOW).preview(
+        RunSwitchPreviewRequest(
+            model_content_sha256=plan_model_digest,
+            recipe_revision_id=plan_revision.id,
+            spark_group=SparkGroup(
+                nodes=[
+                    SparkGroupNode(
+                        node_id=plan_nodes[0],
+                        rank=0,
+                        role="entrypoint",
+                        endpoint_owner=True,
+                    ),
+                    SparkGroupNode(node_id=plan_nodes[1], rank=1, role="worker"),
+                ]
+            ),
+            alias="qwen",
+        ),
+        actor="operator",
+    )
+    operation_plan_payload = operation_plan.model_dump(mode="json")
+    member_progress = [
+        {**member, "node_id": plan_nodes[index]}
+        for index, member in enumerate(member_progress)
+    ]
     run_id = str(uuid.uuid4())
     with services.sessions.begin() as session:
         session.add(
@@ -988,10 +1046,14 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 kind="recipe.run-switch.v2",
                 state="running",
                 actor="operator",
-                authority_revision=plan.plan_digest,
-                targets=list(nodes),
-                payload_digest=plan.plan_digest,
-                payload={"action": "run"},
+                authority_revision=operation_plan.plan_digest,
+                targets=list(plan_nodes),
+                payload_digest=operation_plan.plan_digest,
+                payload={
+                    "action": operation_plan.action,
+                    "plan_digest": operation_plan.plan_digest,
+                    "plan": operation_plan_payload,
+                },
                 result={
                     "phase": "transfer",
                     "phase_index": 0,
@@ -1014,7 +1076,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert {
         (item["member_id"], item["completed_bytes"], item["total_bytes"])
         for item in family_item["progress"]["members"]
-    } == {(NODE_A, expected_target_bytes, expected_target_bytes), (NODE_B, expected_target_bytes, expected_target_bytes)}
+    } == {(plan_nodes[0], expected_target_bytes, expected_target_bytes), (plan_nodes[1], expected_target_bytes, expected_target_bytes)}
     restarted_provider = RunSwitchOperationService(
         services.sessions,
         clock=clock,
@@ -1035,7 +1097,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert {
         (item["member_id"], item["completed_bytes"], item["total_bytes"])
         for item in merged_run["progress"]["members"]
-    } == {(NODE_A, expected_target_bytes, expected_target_bytes), (NODE_B, expected_target_bytes, expected_target_bytes)}
+    } == {(plan_nodes[0], expected_target_bytes, expected_target_bytes), (plan_nodes[1], expected_target_bytes, expected_target_bytes)}
 
     unknown_id = str(uuid.uuid4())
     with services.sessions.begin() as session:
@@ -1046,10 +1108,14 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 kind="recipe.run-switch.v2",
                 state="running",
                 actor="operator",
-                authority_revision=plan.plan_digest,
-                targets=[NODE_A],
-                payload_digest=plan.plan_digest,
-                payload={"action": "run"},
+                authority_revision=operation_plan.plan_digest,
+                targets=[plan_nodes[0]],
+                payload_digest=operation_plan.plan_digest,
+                payload={
+                    "action": operation_plan.action,
+                    "plan_digest": operation_plan.plan_digest,
+                    "plan": operation_plan_payload,
+                },
                 result={
                     "phase": "transfer",
                     "phase_index": 0,
@@ -1057,7 +1123,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     "total_bytes": None,
                     "total_bytes_known": False,
                     "members": [{
-                        "node_id": NODE_A,
+                        "node_id": plan_nodes[0],
                         "phase": "transfer",
                         "state": "running",
                         "completed_bytes": 0,
