@@ -195,6 +195,43 @@ fn canonical_multi_model_mount_projection_is_admitted() {
 }
 
 #[test]
+fn mount_source_and_target_policy_matches_python_matrix() {
+    for (source, target, read_only) in [
+        ("model", "/models", true),
+        ("model", "/models/secondary", true),
+        ("inputs", "/inputs", true),
+        ("outputs", "/outputs", false),
+    ] {
+        let mut value = fixture();
+        value["security"]["mounts"] = json!([{
+            "source": source,
+            "target": target,
+            "read_only": read_only
+        }]);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        plan.validate().unwrap();
+    }
+
+    for (source, target, read_only) in [
+        ("model", "/inputs", true),
+        ("inputs", "/models", true),
+        ("outputs", "/models", false),
+    ] {
+        let mut value = fixture();
+        value["security"]["mounts"] = json!([{
+            "source": source,
+            "target": target,
+            "read_only": read_only
+        }]);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            plan.validate(),
+            Err(WorkloadError::Invalid("compiled security"))
+        ));
+    }
+}
+
+#[test]
 fn mount_projection_rejects_over_duplicate_or_unsafe_targets() {
     let mut over = fixture();
     let mounts = over["security"]["mounts"].as_array_mut().unwrap();
