@@ -35,7 +35,9 @@ from vonk_control.compiled_execution_plan import (
 )
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
+    ExecutionPlanCompilationError,
     _bind_runtime_artifacts,
+    _placement,
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
@@ -889,6 +891,102 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
     editorial = _compile(_spec(recipe_digest="9" * 64))
     assert editorial.recipe_revision_sha256 != prebuilt.recipe_revision_sha256
     assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
+
+
+@pytest.mark.parametrize("mutation", ["missing", "malformed"])
+def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary(
+    mutation: str,
+) -> None:
+    from importlib.resources import files
+
+    raw = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples/recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe = RecipeDefinition.model_validate(raw)
+    document = recipe.model_dump(mode="json")
+    if mutation == "missing":
+        document.pop("topology")
+    else:
+        document["topology"]["parallelism"]["world_size"] = 0
+
+    class Cache:
+        def resolve_artifact_set(self, **_kwargs: object) -> object:
+            raise AssertionError("invalid recipes must fail before cache resolution")
+
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest="a" * 64,
+        document=document,
+    )
+    service = ControllerExecutionPlanService(Cache())
+    with pytest.raises(
+        ExecutionPlanCompilationError,
+        match="recipe does not satisfy the canonical contract",
+    ):
+        service.compile_installation(
+            None,
+            revision=revision,
+            build=None,
+            mapping_nodes=(),
+            parameters={},
+        )
+
+
+def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+
+    class Cache:
+        def resolve_artifact_set(self, **_kwargs: object) -> object:
+            raise AssertionError("digest mismatches must fail before cache resolution")
+
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest="a" * 64,
+        document=recipe.model_dump(mode="json"),
+    )
+    service = ControllerExecutionPlanService(Cache())
+    with pytest.raises(
+        ExecutionPlanCompilationError,
+        match="recipe revision digest does not match the canonical document",
+    ):
+        service.compile_installation(
+            None,
+            revision=revision,
+            build=None,
+            mapping_nodes=(),
+            parameters={},
+        )
+
+
+def test_placement_rejects_unresolved_role_and_endpoint() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    node = SimpleNamespace(rank=0, role="missing", node_id="spk_missing")
+    with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
+        _placement(recipe, {"endpoint": {"port": 8000}}, node, 1)
+
+    node.role = "entrypoint"
+    with pytest.raises(ExecutionPlanCompilationError, match="endpoint"):
+        _placement(recipe, {}, node, 1)
 
 
 def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (
