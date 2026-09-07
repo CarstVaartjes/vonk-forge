@@ -28,6 +28,7 @@ _ARCHIVE_PAYLOAD_PREFIXES = (
     "weights/",
     "runtime-distributions/",
     "patch-bundles/",
+    "execution-harnesses/",
 )
 _ARCHIVE_PAYLOAD_SUFFIXES = (
     ".safetensors",
@@ -464,36 +465,29 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         validate_model_references(models.values())
     except ContractResolutionError as error:
         raise LibraryValidationError(f"model reference graph is invalid: {error}") from error
-    try:
-        control_src = str(platform_root / "control" / "src")
-        if control_src not in sys.path:
-            sys.path.insert(0, control_src)
-        from vonk_control.harnesses.canonical_metadata import (
-            CANONICAL_HARNESSES,
-            CanonicalHarnessMetadata,
-        )
-
-        metadata_type = CanonicalHarnessMetadata
-        metadata_rows = CANONICAL_HARNESSES
-        if not isinstance(metadata_rows, tuple) or not metadata_rows:
-            raise TypeError("canonical metadata rows must be a non-empty tuple")
-        harnesses = {}
-        for metadata in metadata_rows:
+    harness_root = platform_root / "config" / "execution-harnesses"
+    harnesses: dict[str, Mapping[str, object]] = {}
+    if harness_root.is_dir():
+        for harness_path in sorted(harness_root.glob("*.json")):
+            try:
+                harness = json.loads(harness_path.read_bytes())
+            except (OSError, UnicodeError, json.JSONDecodeError) as error:
+                raise LibraryValidationError(f"{harness_path}: execution harness is invalid") from error
             if (
-                type(metadata) is not metadata_type
-                or not metadata.slug
-                or metadata.slug in harnesses
-                or not metadata.adapters
-                or not metadata.topology_modes
+                not isinstance(harness, Mapping)
+                or harness.get("kind") != "execution-harness"
+                or harness.get("schema_version") != 1
+                or not isinstance(harness.get("identity"), Mapping)
+                or harness["identity"].get("slug") != harness_path.stem
+                or not isinstance(harness.get("runtime_interface"), str)
+                or not harness.get("runtime_interface")
+                or not isinstance(harness.get("topology_modes"), list)
+                or not harness.get("topology_modes")
             ):
-                raise ValueError("canonical metadata row is invalid")
-            harnesses[metadata.slug] = metadata
-    except (AttributeError, ImportError, OSError, TypeError, ValueError) as error:
-        raise LibraryValidationError(
-            "platform canonical harness metadata is missing or invalid"
-        ) from error
+                raise LibraryValidationError(f"{harness_path}: execution harness compatibility declaration is invalid")
+            harnesses[harness_path.stem] = harness
     if not harnesses:
-        raise LibraryValidationError("platform canonical harness metadata is empty")
+        raise LibraryValidationError("platform execution-harnesses directory is missing or empty")
     recipe_keys: set[tuple[str, str]] = set()
     digests: list[str] = []
     try:
@@ -578,7 +572,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             raise LibraryValidationError(
                 f"{path}: platform harness implementation is not structurally valid"
             ) from error
-        if recipe.validation.serving.interface not in harness.adapters:
+        if recipe.validation.serving.interface not in harness["adapters"]:
             raise LibraryValidationError(
                 f"{path}: serving interface is not implemented by platform harness: "
                 f"{recipe.validation.serving.interface}"

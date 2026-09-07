@@ -1,0 +1,84 @@
+name: Privileged helper OCI process proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/privileged-helper-oci-process.yml
+      - control/tests/fixtures/compiled_workload_v2.json
+      - rust/crates/vonk-agent/**
+      - rust/crates/vonk-agent-helper/**
+      - rust/crates/vonk-agent-protocol/**
+      - tests/acceptance/privileged_helper_oci_process.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-privileged-helper-oci-process-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-arm64-helper-process:
+    name: Exercise signed helper import and start on ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(dpkg --print-architecture)" = arm64
+          rustup set profile minimal
+          rustup toolchain install 1.97.1 --component rustfmt
+          rustup default 1.97.1
+      - name: Restore read-only ARM64 Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Install bounded helper proof dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            acl adduser ca-certificates curl systemd-container
+          docker info
+      - name: Build production helper and compiled-plan probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --package vonk-agent-helper --bin vonk-agent-helper
+          cargo build --locked --release --package vonk-agent \
+            --example privileged_oci_process_probe
+      - name: Run signed import and start through the real helper process
+        shell: bash
+        env:
+          VONK_HELPER_BINARY: ${{ github.workspace }}/target/release/vonk-agent-helper
+          VONK_HELPER_PROBE_BINARY: ${{ github.workspace }}/target/release/examples/privileged_oci_process_probe
+          VONK_HELPER_FIXTURE: ${{ github.workspace }}/control/tests/fixtures/compiled_workload_v2.json
+          VONK_HELPER_REPORT_ROOT: ${{ runner.temp }}/vonk-helper-process-proof
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=VONK_HELPER_BINARY,VONK_HELPER_PROBE_BINARY,VONK_HELPER_FIXTURE,VONK_HELPER_REPORT_ROOT \
+            tests/acceptance/privileged_helper_oci_process.sh
+      - name: Normalize helper proof evidence permissions
+        if: always()
+        shell: bash
+        run: |
+          sudo chmod -R a+rX "$RUNNER_TEMP/vonk-helper-process-proof" 2>/dev/null || true
+      - name: Upload helper process evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: privileged-helper-oci-process-proof-${{ github.run_id }}
+          path: ${{ runner.temp }}/vonk-helper-process-proof
+          if-no-files-found: warn

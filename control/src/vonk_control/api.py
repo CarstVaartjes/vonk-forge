@@ -96,13 +96,11 @@ from .operation_api import (
     AuthorityResponse,
     ChangeResponse,
     EndpointResponse,
-    FleetStatusResponse,
     HealthzResponse,
     IdentityHistoryResponse,
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
-    JobResponse,
     JobResumeResponse,
     JobsResponse,
     OperationApiServices,
@@ -115,7 +113,6 @@ from .operation_api import (
     _global_list_operations,
     bounded_error_responses,
     decode_offset,
-    fleet_response,
     job_response,
     operation_detail_response,
 )
@@ -418,34 +415,11 @@ class AuditSink(Protocol):
 
 def refresh_fleet_metrics(
     metrics: MetricsRegistry,
-    fleet_state: Mapping[str, object],
+    fleet_snapshot: FleetSnapshot,
 ) -> None:
-    """Refresh bounded fleet series while omitting unknown probe ages."""
+    """Refresh metrics from the single typed FleetProjection evidence path."""
 
-    nodes = fleet_state.get("nodes")
-    if not isinstance(nodes, Sequence):
-        raise TypeError("fleet metrics nodes are invalid")
-    for node in nodes:
-        if not isinstance(node, Mapping):
-            raise TypeError("fleet metrics node is invalid")
-        probe_age = node.get("probe_age_seconds")
-        metrics.update_node(
-            str(node["id"]),
-            ready=node.get("healthy") is True,
-            memory_available_bytes=int(node["memory_available_bytes"]),
-            disk_available_bytes=int(node["disk_available_bytes"]),
-            probe_age_seconds=(None if probe_age is None else float(probe_age)),
-        )
-
-
-class JobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    kind: str = Field(min_length=1, max_length=80)
-    authority_revision: str = Field(min_length=1, max_length=128)
-    targets: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
-        max_length=64
-    )
-    payload: dict[str, object] = Field(max_length=128)
+    metrics.update_fleet(fleet_snapshot)
 
 
 class ProposalChangeRequest(BaseModel):
@@ -494,9 +468,6 @@ def create_app(
     agent: AgentApiServices | None = None,
     trusted_agent_proxy_auth: bytes = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
-    worker_authority: Any | None = None,
-    worker_api_token: bytes = b"",
-    generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
     recipe_library: Any | None = None,
@@ -726,14 +697,6 @@ def create_app(
         upgrades=agent_upgrades,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
-    if worker_authority is not None:
-        from .worker_authority import install_worker_authority_routes
-
-        install_worker_authority_routes(
-            app,
-            worker_authority,
-            token=worker_api_token,
-        )
     authenticated_actor = Depends(actor)
     authenticated_browser_actor = Depends(browser_session_actor)
 
@@ -879,22 +842,6 @@ def create_app(
                 "X-Accel-Buffering": "no",
             },
         )
-
-    @app.get(
-        "/api/v1/nodes/status",
-        response_model=FleetStatusResponse,
-        responses=bounded_error_responses(401),
-        operation_id="getNodeStatuses",
-        summary="Read explicit node health-probe evidence",
-        description=(
-            "Returns the node health-probe projection. The health_probe_stale field "
-            "refers only to explicit node.probe compute-gate evidence, not aggregate "
-            "Fleet readiness. Use /api/v1/fleet for live connection, inventory, and "
-            "telemetry readiness."
-        ),
-    )
-    def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
-        return fleet_response(fleet())
 
     @app.patch(
         "/api/v1/nodes/{node_id}/profile",
@@ -1191,45 +1138,6 @@ def create_app(
         )
         return ChangeResponse.model_validate(result)
 
-    @app.post(
-        "/api/v1/jobs",
-        response_model=JobResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        include_in_schema=False,
-    )
-    def enqueue(
-        body: JobRequest, request: Request, authenticated: Actor = authenticated_actor
-    ) -> JobResponse:
-        require_mutation_role(authenticated, "/api/v1/jobs")
-        if not generic_jobs_enabled:
-            raise HTTPException(
-                status_code=422,
-                detail="generic jobs are disabled; use an immutable reconciliation plan",
-            )
-        if body.kind == "reconcile":
-            raise HTTPException(
-                status_code=422,
-                detail="reconciliations require an accepted immutable plan",
-            )
-        job = jobs.enqueue(
-            body.kind,
-            authenticated.subject,
-            body.authority_revision,
-            body.targets,
-            body.payload,
-            request_id=request.state.request_id,
-        )
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                f"job.enqueue:{body.kind}",
-                body.authority_revision,
-                tuple(body.targets),
-            )
-        )
-        return JobResponse(id=job.id, state=job.state)
-
     @app.get(
         "/api/v1/jobs",
         response_model=JobsResponse,
@@ -1486,6 +1394,7 @@ def create_app(
     @app.get(
         "/api/v1/jobs/{job_id}/logs/{digest}",
         responses=bounded_error_responses(401, 403, 404, 503),
+        openapi_extra={"x-vonk-streaming-transport": True},
     )
     def job_log_content(
         job_id: str, digest: str, authenticated: Actor = authenticated_actor
@@ -1509,14 +1418,9 @@ def production_app() -> FastAPI:
     from sqlalchemy import func, select
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-    from .agent_reconciliation import (
-        bind_reconciliation_result_consumer,
-        load_reconciliation_authority_input,
-    )
     from .agent_upgrades import AgentUpgradeService
     from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
-    from .dashboard import DashboardService
     from .database_authority import (
         DatabaseAuthorityService,
         DatabaseChangeService,
@@ -1549,7 +1453,6 @@ def production_app() -> FastAPI:
     )
     from .settings import Settings
     from .telemetry import TelemetryRepository
-    from .worker_authority import WorkerAuthorityService
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
@@ -1563,7 +1466,6 @@ def production_app() -> FastAPI:
     proposals = DatabaseProposalService(authority)
     changes = DatabaseChangeService(authority, proposals)
     database_bundles = DatabaseSourceBundleStore(sessions)
-    dashboard = DashboardService(authority, sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
@@ -1733,38 +1635,6 @@ def production_app() -> FastAPI:
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
 
-    def reconciliation_authority_input(
-        reconciliation_id: str,
-    ) -> tuple[str, str, tuple[Any, ...], str]:
-        def endpoint(session: Any, node_id: str) -> tuple[str, Any]:
-            observation = agent_services.presence.latest_in_session(
-                session,
-                node_id,
-                maximum_age_seconds=300,
-            )
-            return observation.address, observation.observed_at
-
-        with sessions() as session:
-            snapshot = load_reconciliation_authority_input(
-                session,
-                reconciliation_id,
-                endpoint,
-            )
-        return (
-            snapshot.authority_revision,
-            snapshot.plan_digest,
-            snapshot.routes,
-            snapshot.fleet_evidence_digest,
-        )
-
-    worker_authority = WorkerAuthorityService(
-        current_revision=current_revision,
-        revision_eligible=revision_eligible,
-        reconciliation_input=reconciliation_authority_input,
-        current_fleet_evidence=lambda: (
-            fleet_response(dashboard.fleet()).evidence_digest
-        ),
-    )
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
         management_policy=ManagementAddressPolicy.parse(
@@ -1869,20 +1739,11 @@ def production_app() -> FastAPI:
         recipe_operations.consume_agent_result(session, operation, attempt, message)
         agent_upgrades.consume_agent_result(session, operation, attempt, message)
 
-    bind_reconciliation_result_consumer(
-        sessions,
-        operations=agent_services.operations,
-        presence=agent_services.presence,
-        clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
-        additional_result_consumer=consume_agent_result,
-    )
+    agent_services.operations.set_result_consumer(consume_agent_result)
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()
-        fleet_state = dashboard.fleet()
-        refresh_fleet_metrics(metrics, fleet_state)
+        refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
             for kind, state, count in session.execute(
                 select(Job.kind, Job.state, func.count()).group_by(Job.kind, Job.state)
@@ -1929,7 +1790,7 @@ def production_app() -> FastAPI:
         jobs=job_service,
         tokens=token_codec,
         audits=audits_store,
-        fleet=dashboard.fleet,
+        fleet=visual_fleet.read,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
@@ -1944,12 +1805,6 @@ def production_app() -> FastAPI:
         job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime == "enabled" else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
-        worker_authority=(
-            worker_authority if settings.agent_runtime == "enabled" else None
-        ),
-        worker_api_token=(
-            settings.worker_api_token if settings.agent_runtime == "enabled" else b""
-        ),
         operations=register_model_cache_operation_provider(
             durable_operation_services(
                 sessions,

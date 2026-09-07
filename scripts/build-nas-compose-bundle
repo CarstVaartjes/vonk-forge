@@ -57,7 +57,6 @@ SECRET_FILES = {
     "controller-server-certificate": "controller-server-certificate",
     "controller-server-key": "controller-server-key",
     "agent-proxy-auth": "agent-proxy-auth",
-    "worker-api-token": "worker-api-token",
     "package-helper-grant-private-key": "package-helper-grant-private-key.pem",
     "package-helper-receipt-private-key": "package-helper-receipt-private-key.pem",
     "host-runtime-grant-private-key": "host-runtime-grant-private-key.pem",
@@ -331,7 +330,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                     ("litellm-master-key", "LiteLLM administrator key"),
                     ("grafana-admin-password", "Grafana administrator password"),
                     ("agent-proxy-auth", "Internal agent proxy token"),
-                    ("worker-api-token", "Internal worker API token"),
                     ("hermes-api-key", "Hermes API key"),
                 )
             ],

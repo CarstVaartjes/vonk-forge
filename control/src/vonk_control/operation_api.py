@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -17,7 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress, canonical_message
+from vonk_agent_protocol import OperationProgress
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -100,7 +99,6 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/v1/library/recipes/{recipe_id}",
     ): "getLibraryRecipe",
-    ("get", "/api/v1/nodes/status"): "getNodeStatuses",
     ("patch", "/api/v1/nodes/{node_id}/profile"): "updateNodeProfile",
     (
         "get",
@@ -1633,70 +1631,3 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         name: schemas[name] for name in sorted(referenced) if name in schemas
     }
     return source
-
-
-class NodeStatus(StrictModel):
-    id: str = Field(pattern=NODE_PATTERN)
-    display_name: str
-    hostname: str
-    lifecycle: str
-    healthy: bool | None = Field(
-        description=(
-            "Health state from the latest explicit node.probe compute gate; null "
-            "when no completed probe is available."
-        )
-    )
-    health_probe_stale: bool = Field(
-        description=(
-            "True when explicit node.probe evidence is missing or older than the "
-            "Controller health-probe window. This is not aggregate node readiness; "
-            "use Fleet connection, inventory, and telemetry fields for live readiness."
-        )
-    )
-    labels: dict[str, str]
-    memory_available_bytes: int = Field(ge=0)
-    disk_available_bytes: int = Field(ge=0)
-    probe_age_seconds: float | None = Field(
-        default=None,
-        ge=0,
-        description=(
-            "Age of the latest completed explicit node.probe compute gate, or null "
-            "when no probe evidence is available."
-        ),
-    )
-    inventory_observed_at: str | None = None
-    inventory_age_seconds: float | None = Field(default=None, ge=0)
-    inventory_stale: bool = True
-    inventory_capabilities: list[str] = Field(default_factory=list, max_length=64)
-    agent_state: str = "unregistered"
-    last_seen_at: str | None = None
-    last_seen_age_seconds: float | None = Field(default=None, ge=0)
-    agent_last_seen_at: str | None = None
-    agent_online: bool = False
-    # Version-skew projection remains nullable for pre-enrollment nodes.
-    agent_semantic_version: str | None = None
-    agent_build_digest: str | None = None
-    agent_binary_digest: str | None = None
-    certificate_expires_at: str | None = None
-    certificate_expiry_seconds: float | None = Field(default=None, ge=0)
-    compatibility: str = "unknown"
-
-
-class FleetStatusResponse(StrictModel):
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    nodes: list[NodeStatus]
-    evidence_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class _FleetEvidence(StrictModel):
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    nodes: list[NodeStatus]
-
-
-def fleet_response(fleet_state: Mapping[str, object]) -> FleetStatusResponse:
-    """Validate and digest the exact public live acceptance evidence."""
-
-    evidence = _FleetEvidence.model_validate(fleet_state)
-    public = evidence.model_dump(mode="json")
-    digest = hashlib.sha256(canonical_message(public)).hexdigest()
-    return FleetStatusResponse(**public, evidence_digest=digest)

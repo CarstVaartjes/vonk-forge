@@ -1,6 +1,5 @@
 import type {components} from "./generated";
 
-export type NodeSummary = components["schemas"]["NodeStatus"];
 export type AuthSession = components["schemas"]["AuthSession"];
 export type FleetTelemetryDetails = components["schemas"]["TelemetryDetails"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
@@ -9,7 +8,6 @@ export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type FleetNodeIdentity = components["schemas"]["FleetNodeIdentity"];
 export type NodeProfileUpdate = components["schemas"]["NodeProfileUpdateRequest"];
-export type FleetEvidenceResponse = components["schemas"]["FleetStatusResponse"];
 export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
 export type TelemetryResolution = TelemetryHistory["resolution"];
 export type TelemetryHistoryPoint = components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"];
@@ -242,8 +240,6 @@ export interface ControlApi extends LibraryApi {
   recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
-  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
-  nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
   nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse>;
   nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse>;

@@ -27,9 +27,7 @@ def model() -> ModelDefinition:
 
 
 def _recipe(name: str = "recipe-image.json") -> RecipeDefinition:
-    raw = _example(name)
-    raw["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
-    return RecipeDefinition.model_validate(raw)
+    return RecipeDefinition.model_validate(_example(name))
 
 
 def _compile(recipe: RecipeDefinition, model: ModelDefinition) -> dict[str, object]:
@@ -114,7 +112,7 @@ def test_canonical_job_recipe_declares_a_read_only_input_contract(
 ) -> None:
     raw = _example("recipe-job.json")
     raw["runtime"]["engine"] = "diffusers"
-    raw["runtime"]["entrypoint"] = ["/opt/vonk/bin/diffusers-job"]
+    raw["runtime"]["entrypoint"] = ["diffusers-job"]
     raw["interfaces"][0]["input"] = {
         "path": "/inputs",
         "required": True,

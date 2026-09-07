@@ -156,7 +156,6 @@ class Settings:
     workload_tuf_metadata_root: Path
     workload_tuf_target_root: Path
     agent_proxy_auth: bytes
-    worker_api_token: bytes
     management_cidrs: str
     direct_fabric_cidrs: str
     package_helper_grant_private_key_path: Path | None = None
@@ -442,11 +441,6 @@ class Settings:
             if agent_enabled
             else b""
         )
-        worker_api_token = (
-            _agent_proxy_auth_secret("VONK_WORKER_API_TOKEN_FILE", production=True)
-            if agent_enabled
-            else b""
-        )
         agent_artifact_root = _absolute_root(
             "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
         )
@@ -556,7 +550,6 @@ class Settings:
             workload_tuf_metadata_root=workload_tuf_metadata_root,
             workload_tuf_target_root=workload_tuf_target_root,
             agent_proxy_auth=agent_proxy_auth,
-            worker_api_token=worker_api_token,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
@@ -588,9 +581,6 @@ class WorkerSettings:
 
     database_url: str
     deployment_mode: str
-    internal_api_url: str
-    internal_api_token: bytes
-    internal_api_timeout_seconds: float
     management_cidrs: str
     direct_fabric_cidrs: str
     state_path: Path
@@ -620,34 +610,6 @@ class WorkerSettings:
             "postgresql+psycopg",
         }:
             raise SettingsError("database URL must use PostgreSQL")
-        token = _agent_proxy_auth_secret(
-            "VONK_WORKER_API_TOKEN_FILE",
-            production=mode == "production",
-        )
-        origin = os.environ.get(
-            "VONK_INTERNAL_API_URL",
-            "http://control-api:8000",
-        )
-        parsed = urlsplit(origin)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-            or parsed.username is not None
-            or parsed.password is not None
-        ):
-            raise SettingsError("VONK_INTERNAL_API_URL must be a fixed HTTP origin")
-        origin = origin.rstrip("/")
-        try:
-            timeout = float(os.environ.get("VONK_INTERNAL_API_TIMEOUT_SECONDS", "3"))
-        except ValueError as error:
-            raise SettingsError("internal API timeout must be numeric") from error
-        if not 0 < timeout <= 30:
-            raise SettingsError(
-                "internal API timeout must be between zero and 30 seconds"
-            )
         management_cidrs = _secret_or_file(
             "VONK_MANAGEMENT_CIDRS",
             "VONK_MANAGEMENT_CIDRS_FILE",
@@ -736,9 +698,6 @@ class WorkerSettings:
         return cls(
             database_url=database_url,
             deployment_mode=mode,
-            internal_api_url=origin,
-            internal_api_token=token,
-            internal_api_timeout_seconds=timeout,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
             state_path=_absolute_root("VONK_STATE_PATH", "/srv/vonk-forge/state"),

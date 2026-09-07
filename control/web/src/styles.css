@@ -56,7 +56,7 @@ code{color:#9bd7ff}
 .danger{background:#d96a78;color:#180508}
 .grant-secret{display:grid;gap:.75rem;border-color:#71e6b1}
 .grant-secret code{font-size:1.1rem;overflow-wrap:anywhere}
-.reconciliation-workflow,.plan-review,.job-detail,.operation-card{margin:1.25rem 0;padding:1rem;background:#0e1924;border:1px solid #263747;border-radius:.6rem}
+.plan-review,.job-detail,.operation-card{margin:1.25rem 0;padding:1rem;background:#0e1924;border:1px solid #263747;border-radius:.6rem}
 .inventory-shell{margin:1.25rem 0;padding:1.1rem;background:#0b1621;border:1px solid #263747;border-radius:.7rem}
 .inventory-heading{align-items:center}
 .inventory-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.65rem;margin:1rem 0}

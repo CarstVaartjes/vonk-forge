@@ -527,11 +527,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert filtered.json()["operations"][0]["id"] == newest_id
 
 
-def test_fleet_exposes_visual_state_and_node_evidence() -> None:
+def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 
     visual = client.get("/api/v1/fleet", headers=operator)
-    evidence = client.get("/api/v1/nodes/status", headers=operator)
 
     assert visual.status_code == 200
     assert visual.json() == {
@@ -542,11 +541,6 @@ def test_fleet_exposes_visual_state_and_node_evidence() -> None:
         "nodes": [],
     }
     assert "evidence_digest" not in visual.json()
-    assert evidence.status_code == 200
-    assert evidence.json()["authority_revision"] == COMMIT
-    assert evidence.json()["nodes"] == []
-    assert len(evidence.json()["evidence_digest"]) == 64
-    assert "event_cursor" not in evidence.json()
 
 
 def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
@@ -696,40 +690,6 @@ def test_viewer_cannot_rename_node() -> None:
 
     assert response.status_code == 403
     assert projection.profile_calls == []
-
-
-def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
-    def fleet():
-        return {
-            "authority_revision": COMMIT,
-            "nodes": [
-                {
-                    "id": NODE_ID,
-                    "display_name": "Alpha",
-                    "hostname": "alpha",
-                    "lifecycle": "ready",
-                    "healthy": None,
-                    "labels": {},
-                    "memory_available_bytes": 0,
-                    "disk_available_bytes": 0,
-                    "probe_age_seconds": None,
-                    "health_probe_stale": True,
-                }
-            ],
-        }
-
-    client, operator, _reconciler, _audits = _client(fleet=fleet)
-
-    response = client.get("/api/v1/nodes/status", headers=operator)
-
-    assert response.status_code == 200
-    node = response.json()["nodes"][0]
-    assert node["healthy"] is None
-    assert node["health_probe_stale"] is True
-    assert "stale" not in node
-    assert "profile" not in node
-    assert node["probe_age_seconds"] is None
-    assert "management" not in json.dumps(response.json(), sort_keys=True)
 
 
 def test_optional_operation_projections_fail_closed_when_unavailable() -> None:
@@ -1543,7 +1503,7 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         )
 
 
-def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct() -> (
+def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> (
     None
 ):
     client, _operator, _reconciler, _audits = _client()
@@ -1555,19 +1515,9 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert paths["/api/v1/nodes/status"]["get"]["operationId"] == ("getNodeStatuses")
-    assert paths["/api/v1/nodes/status"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    health_probe_stale = node_status["properties"]["health_probe_stale"]
-    assert "health_probe_stale" in node_status["required"]
-    assert "not aggregate node readiness" in health_probe_stale["description"]
-    assert "stale" not in node_status["properties"]
-    assert "profile" not in node_status["properties"]
-    assert paths["/api/v1/nodes/status"]["get"]["summary"] == (
-        "Read explicit node health-probe evidence"
-    )
+    assert "/api/v1/nodes/status" not in paths
+    assert "NodeStatus" not in schema["components"]["schemas"]
+    assert "FleetStatusResponse" not in schema["components"]["schemas"]
     assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
         "getNodeTelemetryHistory"
     )
@@ -1593,7 +1543,6 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     ]
     assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
     assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
-    assert paths["/api/v1/nodes/status"]["get"]["security"] == [{"BearerAuth": []}]
 
 
 def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:

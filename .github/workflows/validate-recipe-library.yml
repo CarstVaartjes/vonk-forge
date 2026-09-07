@@ -32,6 +32,10 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Require candidate contract source
+        run: |
+          test -f "$GITHUB_WORKSPACE/contracts/src/vonk_forge_contracts/__init__.py"
+
       - name: Validate recipe library
         run: |
           uv run --project .vonk-forge/control --frozen \
