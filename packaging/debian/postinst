@@ -490,6 +490,7 @@ ensure_observation_receipt_key || {
 }
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
+deb-systemd-helper enable vonk-forge-package-rollback.service >/dev/null
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
@@ -539,7 +540,6 @@ if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ] \
 fi
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
-    systemctl --system enable vonk-forge-package-rollback.service >/dev/null
     if [ "$needs_finisher" -eq 1 ]; then
         if ! activate_permanent_helper_unit; then
             echo 'vonk-forge-agent: cannot activate the permanent package-helper sandbox' >&2

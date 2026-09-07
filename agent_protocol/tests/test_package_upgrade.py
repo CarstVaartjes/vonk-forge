@@ -91,3 +91,34 @@ def test_source_authority_rejects_arbitrary_path_and_root_receipt_is_current() -
         PackageActivationReceipt.model_validate(
             receipt.model_dump() | {"schema_version": 1}
         )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("source_version", "../old.deb"),
+        ("outcome", "shell output secret"),
+        ("updated_at", 99),
+    ],
+)
+def test_activation_receipt_rejects_unbounded_or_unordered_evidence(
+    field: str, value: object
+) -> None:
+    receipt = {
+        "schema_version": 2,
+        "node_id": "spk_" + "1" * 32,
+        "source_package_sha256": "a" * 64,
+        "source_version": "0.1.1~acceptance.1",
+        "source_binary_sha256": "c" * 64,
+        "candidate_package_sha256": "f" * 64,
+        "candidate_version": "0.1.1~acceptance.2",
+        "candidate_binary_sha256": "2" * 64,
+        "attempt_nonce": "e" * 64,
+        "phase": "rolled_back",
+        "created_at": 100,
+        "updated_at": 130,
+        "outcome": "source_restored_and_restarted",
+    }
+    receipt[field] = value
+    with pytest.raises(ValidationError):
+        PackageActivationReceipt.model_validate_json(json.dumps(receipt))

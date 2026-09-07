@@ -76,3 +76,49 @@ pub struct PackageActivationReceipt {
     pub updated_at: i64,
     pub outcome: String,
 }
+
+impl PackageActivationReceipt {
+    pub fn validate(&self) -> Result<(), String> {
+        let hex = |value: &str| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        };
+        let version = |value: &str| {
+            value
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+                && value.len() <= 128
+                && value
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b".+~:-".contains(&c))
+        };
+        if self.schema_version != 2
+            || self.node_id.len() != 36
+            || !self.node_id.starts_with("spk_")
+            || !self.node_id[4..]
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            || !hex(&self.source_package_sha256)
+            || !hex(&self.source_binary_sha256)
+            || !hex(&self.candidate_package_sha256)
+            || !hex(&self.candidate_binary_sha256)
+            || !hex(&self.attempt_nonce)
+            || !version(&self.source_version)
+            || !version(&self.candidate_version)
+            || self.created_at < 1
+            || self.updated_at < self.created_at
+            || self.outcome.is_empty()
+            || self.outcome.len() > 128
+            || !self
+                .outcome
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c == b'_')
+        {
+            return Err("invalid package activation receipt".into());
+        }
+        Ok(())
+    }
+}

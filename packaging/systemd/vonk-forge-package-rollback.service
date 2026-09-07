@@ -18,7 +18,8 @@ ProtectHome=true
 ProtectSystem=full
 ReadWritePaths=/var/lib/vonk-forge /var/lib/vonk-forge-agent /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
 ReadWritePaths=/etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/subuid /etc/subgid
-ReadWritePaths=/etc/systemd/system /etc/sudoers.d /usr/share/keyrings
+ReadWritePaths=/etc/systemd/system /etc/sudoers.d /usr/share/keyrings /usr/share/doc/vonk-forge-agent
+ReadWritePaths=-/var/lib/systemd/linger
 ReadWritePaths=/run
 
 [Install]

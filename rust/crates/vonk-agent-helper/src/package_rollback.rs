@@ -148,6 +148,18 @@ pub fn prerequisites() -> Result<(), String> {
         "/usr/bin/chmod",
         "/usr/bin/chown",
         "/usr/bin/cp",
+        "/usr/bin/cmp",
+        "/usr/bin/deb-systemd-helper",
+        "/usr/bin/deb-systemd-invoke",
+        "/usr/bin/dirname",
+        "/usr/bin/getent",
+        "/usr/bin/ln",
+        "/usr/bin/loginctl",
+        "/usr/bin/openssl",
+        "/usr/bin/sleep",
+        "/usr/bin/tail",
+        "/usr/sbin/addgroup",
+        "/usr/sbin/nologin",
         "/usr/bin/cut",
         "/usr/bin/date",
         "/usr/bin/dpkg",
@@ -268,6 +280,7 @@ impl Store {
             updated_at: tx.updated_at,
             outcome: tx.outcome.clone(),
         };
+        receipt.validate()?;
         let parent = self.root.parent().ok_or("receipt parent")?;
         let temporary = parent.join(format!(".activation-{}.json", uuid::Uuid::new_v4()));
         let mut output = OpenOptions::new()
@@ -315,6 +328,16 @@ impl Store {
         authority: &PackageRollbackAuthority,
     ) -> Result<(), String> {
         prerequisites()?;
+        command(
+            "/usr/bin/systemctl",
+            &[
+                "--system",
+                "is-enabled",
+                "--quiet",
+                "vonk-forge-package-rollback.service",
+            ],
+            false,
+        )?;
         let _lock = self.lock()?;
         let timestamp = now()?;
         if !authority.valid()
@@ -326,6 +349,14 @@ impl Store {
         }
         if self.root.join("transaction.json").exists() {
             let previous = self.read()?;
+            if previous.rollback.attempt_nonce == authority.attempt_nonce
+                || self
+                    .root
+                    .join(format!("receipt-{}.json", authority.attempt_nonce))
+                    .exists()
+            {
+                return Err("activation attempt nonce was already used".into());
+            }
             if !matches!(previous.phase, Phase::Acknowledged | Phase::RolledBack) {
                 return Err("another package activation is unresolved".into());
             }
@@ -368,6 +399,26 @@ impl Store {
                 return Err("package identity mismatch".into());
             }
         }
+        let candidate_version = command(
+            "/usr/bin/dpkg-deb",
+            &[
+                "--field",
+                candidate.to_str().ok_or("candidate path")?,
+                "Version",
+            ],
+            false,
+        )?;
+        command(
+            "/usr/bin/dpkg",
+            &[
+                "--compare-versions",
+                &candidate_version,
+                "ge",
+                &authority.source.package_version,
+            ],
+            false,
+        )
+        .map_err(|_| "candidate would downgrade the healthy source")?;
         let source_extraction = self.root.join("source-check");
         if source_extraction.exists() {
             fs::remove_dir_all(&source_extraction).map_err(|e| e.to_string())?;
@@ -412,15 +463,7 @@ impl Store {
             schema_version: 2,
             node_id: node.into(),
             candidate_sha256: candidate_sha256.into(),
-            candidate_version: command(
-                "/usr/bin/dpkg-deb",
-                &[
-                    "--field",
-                    candidate.to_str().ok_or("candidate path")?,
-                    "Version",
-                ],
-                false,
-            )?,
+            candidate_version,
             candidate_binary_sha256: digest(&extraction.join("usr/lib/vonk-forge/vonk-agent"))?,
             candidate_helper_sha256: digest(
                 &extraction.join("usr/lib/vonk-forge/vonk-agent-helper"),
@@ -460,6 +503,20 @@ impl Store {
         safe(&self.root, true, 0, 0o700)?;
         let tx = self.read()?;
         let cgroup = fs::read_to_string("/proc/self/cgroup").map_err(|e| e.to_string())?;
+        let unit_cgroup = command(
+            "/usr/bin/systemctl",
+            &[
+                "--system",
+                "show",
+                "--property=ControlGroup",
+                "--value",
+                "vonk-forge-package-rollback.service",
+            ],
+            false,
+        )?;
+        if !unit_cgroup.starts_with('/') || unit_cgroup == "/" {
+            return Err("rollback unit cgroup unavailable".into());
+        }
         let nonce = std::env::var("VONK_FORGE_PACKAGE_ROLLBACK_NONCE")
             .map_err(|_| "rollback nonce missing")?;
         if tx.phase != Phase::RollingBack
@@ -469,7 +526,7 @@ impl Store {
             || helper != tx.rollback.source.helper_sha256
             || !cgroup
                 .lines()
-                .any(|line| line == "0::/system.slice/vonk-forge-package-rollback.service")
+                .any(|line| line == format!("0::{unit_cgroup}"))
         {
             return Err("maintainer rollback is outside captured source authority".into());
         }
