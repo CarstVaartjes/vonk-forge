@@ -623,7 +623,7 @@ class RecipeImageAvailabilityService:
                 retryable=True,
                 recovery_actions=("retry",),
             ) from error
-        model_versions = manifest_document.get("model_versions")
+        model_content_digests = manifest_document["model_content_digests"]
         artifacts = manifest_document.get("artifacts")
         return {
             "id": operation.id,
@@ -631,9 +631,7 @@ class RecipeImageAvailabilityService:
             "state": operation.state,
             "artifact_set_sha256": artifact_set_sha256,
             "plan_digest": plan_digest,
-            "model_versions": [item for item in model_versions if isinstance(item, str)]
-            if isinstance(model_versions, list)
-            else [],
+            "model_content_digests": model_content_digests,
             "artifacts": [dict(item) for item in artifacts if isinstance(item, Mapping)]
             if isinstance(artifacts, list)
             else [],

@@ -5920,8 +5920,8 @@ export interface components {
              * @enum {string}
              */
             kind: "model-cache" | "runtime-image";
-            /** Model Content Sha256S */
-            model_content_sha256s?: string[];
+            /** Model Content Digests */
+            model_content_digests: string[];
             /** Plan Digest */
             plan_digest?: string | null;
             progress: components["schemas"]["OperationProgress"];
@@ -6014,8 +6014,8 @@ export interface components {
             local_image_config_id?: string | null;
             /** Model Child Id */
             model_child_id?: string | null;
-            /** Model Content Sha256S */
-            model_content_sha256s?: string[];
+            /** Model Content Digests */
+            model_content_digests: string[];
             /** Model Digest */
             model_digest?: string | null;
             /** Oci Archive Sha256 */

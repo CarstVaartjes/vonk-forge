@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 from vonk_control.operation_api import admin_openapi_schema
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityView
 from vonk_control.recipe_image_availability_api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
+    _child,
     _progress,
     _view_document,
     install_recipe_image_availability_routes,
 )
+
+
+@pytest.mark.parametrize("mutation", [{}, {"model_content_digests": [12]}, {"model_content_digests": None}])
+def test_model_child_requires_typed_model_references(mutation: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _child(
+            {"id": "model-child", "state": "queued", "progress": {"phase": "download"}} | mutation,
+            kind="model-cache",
+        )
 
 
 def test_model_cache_progress_maps_to_shared_typed_progress() -> None:
@@ -51,7 +63,7 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
             "model_child": {
                 "id": "model-child",
                 "artifact_set_sha256": "c" * 64,
-                "model_content_sha256s": ["model"],
+                "model_content_digests": ["d" * 64],
             },
         },
         failure=None,
@@ -61,12 +73,15 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
         model_child={
             "id": "model-child",
             "state": "succeeded",
+            "model_content_digests": ["d" * 64],
             "progress": {"phase": "download", "completed_bytes": 0, "total_bytes_known": False},
         },
     )
     response = _view_document(view)
     assert response.result is not None
     assert response.result.model_child_id == "model-child"
+    assert response.result.model_content_digests == ["d" * 64]
+    assert response.children[0].model_content_digests == ["d" * 64]
     assert {child.kind for child in response.children} == {"model-cache", "runtime-image"}
 
 

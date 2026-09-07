@@ -12899,11 +12899,12 @@
             "title": "Kind",
             "type": "string"
           },
-          "model_content_sha256s": {
+          "model_content_digests": {
             "items": {
+              "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
-            "title": "Model Content Sha256S",
+            "title": "Model Content Digests",
             "type": "array"
           },
           "plan_digest": {
@@ -12948,6 +12949,7 @@
           "kind",
           "id",
           "state",
+          "model_content_digests",
           "progress"
         ],
         "title": "RecipeImageAvailabilityChild",
@@ -13194,11 +13196,12 @@
             ],
             "title": "Model Child Id"
           },
-          "model_content_sha256s": {
+          "model_content_digests": {
             "items": {
+              "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
-            "title": "Model Content Sha256S",
+            "title": "Model Content Digests",
             "type": "array"
           },
           "model_digest": {
@@ -13254,6 +13257,7 @@
         },
         "required": [
           "recipe_content_sha256",
+          "model_content_digests",
           "source",
           "platform_manifest_digest",
           "image_digest",
