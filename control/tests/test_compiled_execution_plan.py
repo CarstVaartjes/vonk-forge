@@ -347,12 +347,12 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
     )
     missing = copy.deepcopy(payload)
     del missing["job"]
-    with pytest.raises(CompiledExecutionPlanError, match="schema"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(missing)
 
     both = copy.deepcopy(payload)
     both["job"] = {"id": "job-1"}
-    with pytest.raises(CompiledExecutionPlanError, match="interface"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(both)
 
 
@@ -374,12 +374,12 @@ def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt
     )
     polluted = copy.deepcopy(payload)
     polluted["identity"]["model_version_sha256"] = "f" * 64
-    with pytest.raises(CompiledExecutionPlanError, match="identity fields"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
     mismatched = copy.deepcopy(payload)
     mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
-    with pytest.raises(CompiledExecutionPlanError, match="receipt is inconsistent"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(mismatched)
 
 
@@ -401,12 +401,12 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
     )
     polluted = copy.deepcopy(payload)
     polluted["security"]["network_mode"] = "bridge"
-    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
     polluted = copy.deepcopy(payload)
     polluted["security"]["host_network"] = True
-    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+    with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
 

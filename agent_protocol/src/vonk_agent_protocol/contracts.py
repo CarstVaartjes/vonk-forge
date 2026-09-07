@@ -209,9 +209,14 @@ def _validate_safe_keys(
                 and isinstance(path[2], int)
                 and key == "name"
             )
+            typed_compiled_plan_key = (
+                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                and path[:1] == ("compiled_execution_plan",)
+            )
             if _is_path_key(key) and not (
                 typed_recipe_build_key
                 or typed_distribution_object_name
+                or typed_compiled_plan_key
                 or (
                     operation is AgentOperation.RECIPE_JOB_RUN
                     and path == ("output_limits",)
@@ -281,6 +286,11 @@ def _validate_safe_keys(
                 and ("/" in value or "\\" in value)
                 and _typed_result_string(path, value)
             )
+        ):
+            return
+        elif (
+            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            and path[:1] == ("compiled_execution_plan",)
         ):
             return
         elif "/" in value or "\\" in value:
@@ -446,6 +456,25 @@ def _model_identity(value: str) -> bool:
         and _safe_model_query(parsed.query)
         and not parsed.fragment
     )
+
+
+def parse_model_identity(value: str) -> tuple[str, str]:
+    """Parse the canonical result identity ``repository@revision``."""
+
+    if not isinstance(value, str) or not _model_identity(value):
+        raise AgentProtocolError("model identity is invalid")
+    repository, _marker, revision = value.rpartition("@")
+    return repository, revision
+
+
+def format_model_identity(
+    publisher: str, slug: str, content_sha256: str
+) -> str:
+    """Format the catalog model identity used by result evidence."""
+
+    value = f"{publisher}/{slug}@{content_sha256}"
+    parse_model_identity(value)
+    return value
 
 
 def _safe_model_query(query: str) -> bool:
@@ -1022,6 +1051,16 @@ class AgentClaim:
             operation=self.operation,
             maximum_bytes=maximum_bytes,
         )
+        if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}:
+            from .recipe_operations import RecipeInstallPayload, RecipeStartPayload
+
+            try:
+                typed_payload = json.loads(canonical_message(payload))
+                (
+                    RecipeInstallPayload if self.operation is AgentOperation.RECIPE_INSTALL else RecipeStartPayload
+                ).model_validate(typed_payload)
+            except Exception as error:
+                raise AgentProtocolError("recipe operation payload is invalid") from error
         if (
             hashlib.sha256(canonical_message(payload)).hexdigest()
             != self.payload_digest
