@@ -24,6 +24,28 @@ fn fixtures() -> PathBuf {
 }
 
 #[test]
+fn python_issuer_fixture_is_verified_by_the_rust_helper() {
+    let raw = fs::read(fixtures().join("host-helper-grant-python-issued.json")).unwrap();
+    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+    let request = parse_request(raw).unwrap();
+    assert_eq!(vonk_agent_protocol::canonical_json(&request).unwrap(), raw);
+    let public_key =
+        hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633").unwrap();
+    GrantVerifier::new(&public_key, 971)
+        .unwrap()
+        .authorize(
+            &request,
+            &PeerIdentity {
+                uid: 1001,
+                primary_gid: 971,
+                supplementary_gids: Vec::new(),
+            },
+            2_100_000_000,
+        )
+        .unwrap();
+}
+
+#[test]
 fn python_fixture_is_the_same_strict_canonical_grant() {
     let raw = fs::read(fixtures().join("host-helper-grant.json")).unwrap();
     let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);

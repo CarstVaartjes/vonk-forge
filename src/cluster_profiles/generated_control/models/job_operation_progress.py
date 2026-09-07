@@ -32,7 +32,9 @@ class JobOperationProgress:
             checkpoint (Union['OperationCheckpoint', None, Unset]):
             completed_bytes (Union[None, Unset, int]):
             eta_seconds (Union[None, Unset, float]):
+            kind (Union[None, Unset, str]):
             members (Union[None, Unset, list['OperationMemberProgress']]):
+            object_sha256 (Union[None, Unset, str]):
             total_bytes (Union[None, Unset, int]):
             total_bytes_known (Union[None, Unset, bool]):
      """
@@ -42,7 +44,9 @@ class JobOperationProgress:
     checkpoint: Union['OperationCheckpoint', None, Unset] = UNSET
     completed_bytes: Union[None, Unset, int] = UNSET
     eta_seconds: Union[None, Unset, float] = UNSET
+    kind: Union[None, Unset, str] = UNSET
     members: Union[None, Unset, list['OperationMemberProgress']] = UNSET
+    object_sha256: Union[None, Unset, str] = UNSET
     total_bytes: Union[None, Unset, int] = UNSET
     total_bytes_known: Union[None, Unset, bool] = UNSET
 
@@ -81,6 +85,12 @@ class JobOperationProgress:
         else:
             eta_seconds = self.eta_seconds
 
+        kind: Union[None, Unset, str]
+        if isinstance(self.kind, Unset):
+            kind = UNSET
+        else:
+            kind = self.kind
+
         members: Union[None, Unset, list[dict[str, Any]]]
         if isinstance(self.members, Unset):
             members = UNSET
@@ -93,6 +103,12 @@ class JobOperationProgress:
 
         else:
             members = self.members
+
+        object_sha256: Union[None, Unset, str]
+        if isinstance(self.object_sha256, Unset):
+            object_sha256 = UNSET
+        else:
+            object_sha256 = self.object_sha256
 
         total_bytes: Union[None, Unset, int]
         if isinstance(self.total_bytes, Unset):
@@ -120,8 +136,12 @@ class JobOperationProgress:
             field_dict["completed_bytes"] = completed_bytes
         if eta_seconds is not UNSET:
             field_dict["eta_seconds"] = eta_seconds
+        if kind is not UNSET:
+            field_dict["kind"] = kind
         if members is not UNSET:
             field_dict["members"] = members
+        if object_sha256 is not UNSET:
+            field_dict["object_sha256"] = object_sha256
         if total_bytes is not UNSET:
             field_dict["total_bytes"] = total_bytes
         if total_bytes_known is not UNSET:
@@ -188,6 +208,16 @@ class JobOperationProgress:
         eta_seconds = _parse_eta_seconds(d.pop("eta_seconds", UNSET))
 
 
+        def _parse_kind(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        kind = _parse_kind(d.pop("kind", UNSET))
+
+
         def _parse_members(data: object) -> Union[None, Unset, list['OperationMemberProgress']]:
             if data is None:
                 return data
@@ -211,6 +241,16 @@ class JobOperationProgress:
             return cast(Union[None, Unset, list['OperationMemberProgress']], data)
 
         members = _parse_members(d.pop("members", UNSET))
+
+
+        def _parse_object_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        object_sha256 = _parse_object_sha256(d.pop("object_sha256", UNSET))
 
 
         def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
@@ -239,7 +279,9 @@ class JobOperationProgress:
             checkpoint=checkpoint,
             completed_bytes=completed_bytes,
             eta_seconds=eta_seconds,
+            kind=kind,
             members=members,
+            object_sha256=object_sha256,
             total_bytes=total_bytes,
             total_bytes_known=total_bytes_known,
         )

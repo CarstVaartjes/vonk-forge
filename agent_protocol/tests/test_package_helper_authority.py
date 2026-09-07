@@ -5,9 +5,9 @@ from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_GRANT_DOMAIN,
     HostHelperGrantClaims,
-    HostHelperOperation,
-    HostOperationKind,
+    RestartVonkUnitOperation,
     host_helper_grant_signing_bytes,
+    parse_host_operation,
 )
 from vonk_agent_protocol.wire_model import WireModel
 from vonk_agent_protocol.workload_packages import (
@@ -144,9 +144,7 @@ def test_host_helper_grant_has_a_distinct_narrow_authority_domain() -> None:
         node_id="spk_" + "1" * 32,
         issued_at=2_000_000_000,
         expires_at=2_000_000_060,
-        operation=HostHelperOperation(
-            HostOperationKind.RESTART_VONK_UNIT, {"unit": "agent"}
-        ),
+        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
     )
 
     encoded = host_helper_grant_signing_bytes(claims)
@@ -182,7 +180,7 @@ def test_host_helper_protocol_rejects_paths_and_untyped_process_control(
     document: dict[str, object],
 ) -> None:
     with pytest.raises(AgentProtocolError):
-        HostHelperOperation.parse(document)
+        parse_host_operation(document)
 
 
 @pytest.mark.parametrize(
@@ -201,4 +199,4 @@ def test_host_helper_protocol_rejects_removed_agent_lifecycle_operations(
     document: dict[str, object],
 ) -> None:
     with pytest.raises(AgentProtocolError, match="operation|unit"):
-        HostHelperOperation.parse(document)
+        parse_host_operation(document)

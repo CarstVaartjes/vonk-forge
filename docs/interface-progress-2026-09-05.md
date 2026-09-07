@@ -59,6 +59,27 @@ separate results.
   Controller and Spark setup require the complete current document. Seven
   connected bootstrap/enrollment/renewal checks and 47 unprivileged Linux setup
   tests pass; three focused Controller bootstrap checks pass.
+- The current build/import and inventory boundary passes 16 connected checks,
+  including artifact jobs and lifecycle execution. Job placement has an explicit
+  nullable host port; serving placement may publish a different host port from
+  the container endpoint. The full catalog gate uses production placement and
+  passes all 109 roles across 85 Recipes and 92 Models, including 44 job Recipes.
+- Package-helper authorization and release documents now use a complete
+  Pydantic graph, with schemas derived from it rather than separately maintained
+  field lists. All 74 focused package/helper and API checks pass.
+- Telemetry uses one shared graph in the actual Controller endpoint and Rust
+  sender. There is no empty legacy metric default. Its generated schema exposes
+  scalar bounds and is checked for drift. All 237 focused Python checks and 19
+  actual Rust/API/PostgreSQL bridge checks pass. Historical database migrations
+  remain inert history; they are not runtime fallbacks.
+- Model identity and safe Unicode/space filenames retain the same structure
+  across Python, Rust, and helper materialization, including a nested path at
+  the declared 512-character limit. The 122 affected checks and two focused
+  Linux helper path tests pass at integration commit `006fd39a`.
+- Core job-envelope and signed run-observation integration remains in progress.
+  The bundled protocol wheel and generated API clients must be refreshed after
+  those merges, followed by the combined suite. These focused checks do not
+  constitute a release-wide pass.
 - The unavailable upstream Skopeo pin is replaced with a verified current
   official image. All six packaging checks pass; the worker image builds and
   downloads an OCI archive as UID10001 with a read-only root.
@@ -76,6 +97,10 @@ separate results.
   removing repeated full-file hashes at trusted internal handoffs and the
   qualification CLI's duplicate territorial metadata check. Those changes have
   not been performed.
+- The coordinated archive checksum field/header rename from OCI layout to OCI
+  archive terminology is paused for exact approval. Checksum behavior is
+  unchanged in the proposal; mixed Controller/Spark versions would reject the
+  renamed message. No partial rename or old-name fallback has been introduced.
 - The NAS Controller is unchanged. Backups and a fresh database are prepared;
   device identities have not been copied and no selected Model download has
   started. Deployment follows successful publication and acceptance.

@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import OperationProgress, canonical_message
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -42,10 +42,8 @@ from .operation_contract import (
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
     OperationFailureEvidence,
-    OperationProgress,
     OperationRecovery,
     OperationRecoveryAction,
-    normalize_operation_progress,
     recovery_for_operation,
     sanitize_failure_evidence,
 )
@@ -269,6 +267,9 @@ class AgentsResponse(StrictModel):
     agents: list[AgentSummary]
 
 
+JobOperationProgress = OperationProgress
+
+
 class JobOperationResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     graph_operation_id: str | None = Field(default=None, max_length=128)
@@ -276,7 +277,7 @@ class JobOperationResponse(StrictModel):
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(ge=0)
-    progress: OperationProgress | None = None
+    progress: JobOperationProgress | None = None
     updated_at: str | None = None
     failure: OperationFailureEvidence | None = None
     provenance: OperationEvidenceProvenance | None = None
@@ -300,7 +301,7 @@ class OperationDetailResponse(StrictModel):
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(ge=0)
-    progress: OperationProgress | None = None
+    progress: JobOperationProgress | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
     failure: OperationFailureEvidence | None = None
@@ -695,18 +696,20 @@ def decode_offset(
     return offset
 
 
-def _progress_projection(value: object) -> OperationProgress | None:
+def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
-    phase = value.get("phase")
-    if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
-        return None
     try:
-        OperationProgress.model_validate(value, strict=True)
-        normalized = normalize_operation_progress(value)
+        return JobOperationProgress.model_validate(value, strict=True)
     except (TypeError, ValueError):
         return None
-    return OperationProgress.model_validate(normalized)
+
+
+def _progress_document(value: object) -> dict[str, object] | None:
+    """Project one durable progress value with a single canonical parse."""
+
+    projected = _progress_projection(value)
+    return None if projected is None else projected.model_dump(mode="json")
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
@@ -1247,13 +1250,7 @@ class _DurableOperationProjection:
                 "progress": (
                     None
                     if attempts.get(operation.id) is None
-                    else (
-                        None
-                        if _progress_projection(attempts[operation.id].progress) is None
-                        else _progress_projection(
-                            attempts[operation.id].progress
-                        ).model_dump(mode="json")
-                    )
+                    else _progress_document(attempts[operation.id].progress)
                 ),
                 "result": (
                     None

@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from vonk_agent_protocol.wire_model import (
+from vonk_agent_protocol import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
@@ -82,7 +82,9 @@ class AvailabilityOperationFailure(BaseModel):
 
     code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
     detail: str = Field(min_length=1, max_length=512)
-    recovery_actions: list[AvailabilityRecoveryAction] = Field(default_factory=list, max_length=8)
+    recovery_actions: list[AvailabilityRecoveryAction] = Field(
+        default_factory=list, max_length=8
+    )
     retryable: bool = False
     retry_time: str | None = Field(default=None, max_length=64)
     retry_after_seconds: int | None = Field(default=None, ge=0)
@@ -118,10 +120,13 @@ class AvailabilityOperationFailure(BaseModel):
         if self.retry_after_seconds is not None and self.retry_time is None:
             raise ValueError("retry_after_seconds requires retry_time")
         if self.retry_time is not None:
-            if re.fullmatch(
-                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
-                self.retry_time,
-            ) is None:
+            if (
+                re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                    self.retry_time,
+                )
+                is None
+            ):
                 raise ValueError("retry_time must be RFC3339")
             try:
                 parsed = datetime.fromisoformat(self.retry_time)
@@ -137,7 +142,9 @@ class AvailabilityOperationFailure(BaseModel):
             assert self.free_bytes is not None
             assert self.shortfall_bytes is not None
             if self.shortfall_bytes != max(0, self.required_bytes - self.free_bytes):
-                raise ValueError("shortfall_bytes does not match required and free bytes")
+                raise ValueError(
+                    "shortfall_bytes does not match required and free bytes"
+                )
         return self
 
 
@@ -176,9 +183,11 @@ def validate_progress_update(
     if not previous:
         return normalized
     old = normalize_operation_progress(previous)
-    # A legacy heartbeat may report only a new phase. Keep the last durable
+    # A phase-only heartbeat may report only a new phase. Keep the last durable
     # counters/checkpoint instead of treating omitted fields as zero/reset.
     for key in (
+        "kind",
+        "object_sha256",
         "completed_bytes",
         "total_bytes",
         "total_bytes_known",

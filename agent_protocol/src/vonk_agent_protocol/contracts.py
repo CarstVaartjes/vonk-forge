@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.resources
 import ipaddress
 import json
 import re
@@ -918,6 +917,55 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupPayload,
 }
 
+# Result validation is contextual because the result envelope deliberately
+# carries no operation discriminator.  Keep this registry alongside the
+# payload registry so Controller ingress can resolve the stored operation and
+# validate the exact result graph before accepting it.
+RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.NODE_PROBE: NodeProbeResult,
+    AgentOperation.WORKLOAD_HEALTH: NodeProbeHealthResult,
+    AgentOperation.WORKLOAD_VERIFY: NodeProbeHealthResult,
+    AgentOperation.RECIPE_INSTALL: AgentInstallResult,
+    AgentOperation.RECIPE_START: RecipeStartResult,
+    AgentOperation.RECIPE_STOP: RecipeStopResult,
+    AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
+    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupResult,
+    AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
+    AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
+    AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
+}
+
+
+def validate_result_for_operation(
+    operation: AgentOperation | str,
+    result: Any,
+    *,
+    state: str,
+) -> BaseModel | None:
+    """Validate a result against the operation stored by the Controller.
+
+    The generic evidence branch remains available for operation kinds whose
+    producer has no shared result model.  A current operation with a typed
+    result model must pass that model, preventing the generic branch from
+    silently accepting malformed known-operation evidence.
+    """
+
+    try:
+        operation_kind = AgentOperation(operation)
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError("agent result operation is invalid") from error
+    model = RESULT_MODELS.get(operation_kind)
+    if model is None:
+        return None
+    if state != "succeeded":
+        return None
+    try:
+        return model.model_validate_json(canonical_message(result))
+    except (TypeError, ValueError, ValidationError) as error:
+        raise AgentProtocolError(
+            f"{operation_kind.value} result does not match its typed model"
+        ) from error
+
 
 class _ProtocolEnvelopeModel(WireModel):
     """Wire envelope base with the derived extension-map security schema."""
@@ -1189,19 +1237,7 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         from .telemetry import TelemetryRequest
 
         registry[schema_name] = TelemetryRequest
-    if schema_name in registry:
-        document = registry[schema_name].model_json_schema()
-    else:
-        try:
-            document = json.loads(
-                (
-                    importlib.resources.files("vonk_agent_protocol")
-                    / "schemas"
-                    / schema_name
-                ).read_text(encoding="utf-8")
-            )
-        except (OSError, json.JSONDecodeError) as error:
-            raise AgentProtocolError("packaged protocol schema is invalid") from error
+    document = registry[schema_name].model_json_schema()
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
 
 

@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     AgentResult,
     canonical_message,
     schema_validator,
+    validate_result_for_operation,
     validate_schema_message,
 )
 
@@ -751,3 +752,18 @@ def test_core_schemas_are_derived_from_the_registry(name: str) -> None:
     assert validator.schema["additionalProperties"] is False
     assert "schema_version" in validator.schema["required"]
     assert validator.schema["properties"]["attempt"]["minimum"] == 1
+
+
+def test_known_operation_result_uses_its_typed_result_model() -> None:
+    parsed = validate_result_for_operation(
+        AgentOperation.RECIPE_STOP,
+        {"stopped": True},
+        state="succeeded",
+    )
+    assert parsed is not None
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.RECIPE_STOP,
+            {"stopped": "true"},
+            state="succeeded",
+        )
