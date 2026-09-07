@@ -1,7 +1,9 @@
 # Seven retired agent operations: removal review
 
-Snapshot reviewed: platform commit `6651e420b`. This document is a review
-packet only. It does not apply the blocked deletion.
+Initial snapshot reviewed: platform commit `6651e420b`; the route-persistence
+and caller graph was rechecked against clean integration checkpoints
+`d1912c22` and `f9b65c47`. This document is an execution packet. It does not
+itself change production source.
 
 ## Authorized removal
 
@@ -29,6 +31,123 @@ were disclosed. The removal is breaking for any persisted old reconciliation
 graph. This is a greenfield deployment, so the proposed implementation rejects
 or removes that old state instead of adding a reader, alias, migration shim, or
 second enum.
+
+The decision is settled. The user subsequently approved the exact coordinated
+removal twice, including deletion of the three old modules, callbacks, seven
+commands and graph-only tests; replacement of fake `Reconciliation` route
+persistence; matching database changes that drop the graph tables; and discard
+of old reconciliation records. The outstanding obstacle was automatic review
+of incomplete variants, not missing user direction.
+
+## Approved atomic implementation
+
+The patch must be composed from four disjoint lanes and tested only after all
+four are present. No intermediate lane is a deployable migration.
+
+### Database and current route authority
+
+`models.py` gains exactly one small `RecipeRouteAuthority` row keyed by the
+existing fixed `RECIPE_ROUTE_AUTHORITY_ID`. `RoutePublication.authority_id` and
+`RoutePublicationOwner.authority_id` reference it. Neither class exposes a
+`reconciliation_id` synonym or property. `Job.reconciliation_id` is removed.
+
+Migration `0023`, based on `0022_current_telemetry_defaults`, creates the
+authority table and matching current foreign keys, then removes the four graph
+tables and the Job graph column/index. It does not copy arbitrary
+`Reconciliation` rows into the new table. It inserts the fixed current route
+authority and resets the singleton route owner to unowned. Old filesystem
+markers therefore fail closed against durable state until
+`RecipeRouteService.maintain` republishes or withdraws from current
+`RecipeRun`/`RunNode` state. This avoids both a dual reader and pretending an
+old graph marker is current. Historical migration files remain inert.
+
+The migration test starts from `0022` on PostgreSQL with current Recipe runs,
+an old graph, route publication/owner, activation marker, lease, generations
+and all digest fields. After upgrade it proves Recipe/Run/Job data survives,
+the fixed current authority exists, the owner is unowned, every graph table and
+`jobs.reconciliation_id` is absent, and the database schema matches the ORM.
+It then runs current route maintenance and proves a fresh marker and owner are
+created from current Recipe state.
+
+### Route runtime and API projection
+
+`recipe_routes.py::projection_in_session` stops constructing the schema-1
+empty graph shown in the current source. It locks or creates the fixed
+`RecipeRouteAuthority`, writes the publication under `authority_id`, and
+updates the already locked singleton owner. The route candidate, exact
+per-rank readiness, recovery deadline, withdrawal and renewal logic remain.
+
+`route_runtime.py` changes the internal marker field, `RouteBundleRequest`,
+`ActivationMarker`, publication, withdrawal, verification and compare-and-swap
+paths from `reconciliation_id` to `authority_id` in one change. There is no old
+key reader. The UUID check, filesystem lock, immutable generation directory,
+atomic writes, route/LiteLLM/manifest hashes, lease checks and supervisor
+activation acknowledgement remain unchanged.
+
+`operation_api.py::_DurableOperationProjection.endpoint` resolves the locked
+owner and publication through `authority_id`; it no longer loads or gates on a
+`Reconciliation`. It still compares the complete persisted marker with the
+verified filesystem bundle, including owner/publication generation, state,
+plan/evidence/route/LiteLLM/bundle/marker digests and exact lease timestamps.
+Reconciliation-only graph IDs are removed from operation DTOs and lookups.
+
+### Controller, worker and queue callers
+
+`api.py` removes `JobRequest`, the hidden disabled generic job POST,
+`generic_jobs_enabled`, the old reconciliation result binding and authority
+loader, and worker-authority construction/routes. Authenticated Agent mTLS,
+current typed Agent endpoints, Job reads/progress/logs/resume/cancel, Fleet,
+Recipe, Run/Switch and current operation APIs remain.
+
+`worker.py` removes `AgentReconciliationService` and `HttpWorkerAuthority`
+construction/ticks. `RecipeOperationWorker`, distribution, build, cache,
+recovery, route maintenance and telemetry services remain. The standalone
+`worker_authority.py` module and tests are deleted.
+
+`agent_jobs.py` removes only graph-specific imports, capability sets,
+continuous-authority callbacks, target locks, projection updates and uncertain
+expiry handling. Its generic row lock, certificate/mTLS identity checks,
+capability admission, claim lease, attempt fence, stale result rejection,
+parent aggregation, notification and current typed result consumers remain.
+Current mutating Recipe operations continue to use `NodeMutationLease`,
+installation/run row locks, plan and mapping-generation checks and resource
+reservations.
+
+### Old graph and protocol deletion
+
+Delete `orchestration.py`, `agent_reconciliation.py` and their graph-only test
+suites. Delete exactly the seven operation members and their payload/result
+models, registries, exports and schema mutations. `agent.upgrade.v1` uses its
+actual typed success result; runtime identity uses the shared Claims model.
+Every retained `AgentOperation` has an explicit Pydantic request/result
+contract. Queue tests that used `node.probe` as arbitrary data are rewritten
+with real current typed operations while preserving their lease, fence,
+ordering, aggregation and concurrency assertions.
+
+`dashboard.py`, `metrics.py`, `operation_api.py` and direct UI consumers remove
+only old probe/graph labels and fields. Inventory, strict telemetry, exact
+signed readiness, progress and recovery remain. Generated OpenAPI, clients,
+wheels and SBOM are rebuilt only after this source composition.
+
+### Required single-composition proof
+
+The composed patch must collect the entire Controller suite without imports of
+the deleted modules. It must pass the real PostgreSQL migration and schema
+checks; publish/renew/withdraw/recovery and concurrent route-owner tests;
+Run/Switch lock, stale plan and mapping-generation tests; queue lease/attempt/
+stale-result/parent/notification tests; stale-inventory and memory-admission
+tests; Rust capability equality; and all current connected wire bridges. A
+source/schema/database scan may retain old names only in inert historical
+migrations and explicit rejection/audit text.
+
+## Automatic review record
+
+Two partial route-authority variants were rejected and are not being retried.
+The first changed ORM fields without a migration and retained synonyms. The
+second added a migration but copied legacy graph identities and deliberately
+kept legacy workers. Automatic review rejected those exact defects. The
+approved implementation above includes the matching migration and removes the
+old readers, records and workers as one current-only change.
 
 ## Complete old path and current owner
 
