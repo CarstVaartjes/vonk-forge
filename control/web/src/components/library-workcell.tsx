@@ -2,7 +2,7 @@ import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import type {ControlApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
 import type {LibraryRoute} from "../lib/library-route";
-import {modelVersionKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
+import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
 import {formatBytes} from "../lib/fleet";
 
 export type LibraryWorkcellFilters = {model: string; capability: string};
@@ -46,7 +46,7 @@ export function recipeAttribution(document: LibraryRecipeSummary["recipe_documen
 
 export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot): LibraryRecipeRecord[] {
   return snapshot.models.flatMap(model => {
-    const key = modelVersionKey(model.model);
+    const key = modelKey(model.model);
     const title = modelTitle(model);
     const files = model.model_document.files;
     const bytes = files.reduce((total, file) => total + file.size_bytes, 0);

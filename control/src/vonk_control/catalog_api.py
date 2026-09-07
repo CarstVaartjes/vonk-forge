@@ -101,7 +101,6 @@ class ManagedCatalogWithdrawnRecipe(StrictModel):
     recipe_id: UuidId
     recipe_uri: str | None = Field(default=None, max_length=256)
     release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
-    model_version_key: str | None = Field(default=None, max_length=256)
 
 
 class ManagedCatalogStaleRecipe(StrictModel):

@@ -967,7 +967,7 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     with redirect_stdout(stdout):
         assert cli.main(("--json", "cache", "list"), control_client=client) == 0
         assert cli.main(
-                ("--json", "cache", "download", "apply", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                ("--json", "cache", "download", "apply", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}',
                  "--plan-digest", "d" * 64,
              "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
             control_client=client,
@@ -1225,7 +1225,7 @@ def test_fleet_summary_commands_use_canonical_fleet_snapshot(command: str) -> No
 @pytest.mark.parametrize(
     ("argv", "method", "path"),
     [
-        (("models", "run", "preview", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
+        (("models", "run", "preview", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
         (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switches"),
         (("models", "run", "stop", "preview", "run-1"), "POST", "/api/v1/recipes/run-switch-stops/preview"),
         (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switch-stops"),
@@ -1277,7 +1277,7 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     )
     request_key = "11111111-1111-4111-8111-111111111111"
     run_input = {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
         "spark_group": {
             "nodes": [
@@ -1336,7 +1336,7 @@ def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
     )
     request_key = "11111111-1111-4111-8111-111111111111"
     artifact_input = {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
     }
 
@@ -1376,7 +1376,7 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
         "--json",
         "models",
         "download",
-        "--model-version-sha256",
+        "--model-content-sha256",
         "a" * 64,
         "--recipe-revision-id",
         "recipe-1",
@@ -1391,7 +1391,7 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
         "/api/v1/operations/op-1",
     ]
     assert client.calls[0][2] == {
-        "model_version_sha256": "a" * 64,
+        "model_content_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
     }
 
@@ -1471,7 +1471,7 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
                 "models",
                 "run",
                 "--input",
-                '{"model_version_sha256":"' + "a" * 64 + '"}',
+                '{"model_content_sha256":"' + "a" * 64 + '"}',
                 "--request-key",
                 "11111111-1111-4111-8111-111111111111",
             ),
@@ -1519,7 +1519,7 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
             (
                 "models",
                 "download",
-                "--model-version-sha256",
+                "--model-content-sha256",
                 "a" * 64,
                 "--request-key",
                 "11111111-1111-4111-8111-111111111111",
@@ -1552,7 +1552,7 @@ def test_forced_model_download_uses_repair_without_changing_exact_identity() -> 
         "--json",
         "models",
         "download",
-        "--model-version-sha256",
+        "--model-content-sha256",
         "a" * 64,
         "--force",
         "--request-key",

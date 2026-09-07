@@ -66,18 +66,18 @@ def _artifact(index: str, data: bytes, *, host: str = "example.test") -> dict[st
         "sha256": hashlib.sha256(data).hexdigest(),
         "download_bytes": len(data),
         "roles": ["model"],
-        "model_version_sha256": hashlib.sha256(index.encode()).hexdigest(),
+        "model_content_sha256": hashlib.sha256(index.encode()).hexdigest(),
     }
 
 
 def _start(service: ModelCacheService, artifacts: list[dict[str, object]], key: str):
-    model = str(artifacts[0]["model_version_sha256"])
-    preview = service.download_preview(model_version_sha256=model, artifacts=artifacts)
+    model = str(artifacts[0]["model_content_sha256"])
+    preview = service.download_preview(model_content_sha256=model, artifacts=artifacts)
     return service.start_download(
         actor="test",
         request_key=key,
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model,
+        model_content_sha256=model,
         artifacts=artifacts,
     )
 
@@ -390,7 +390,7 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "download_bytes": len(data),
                 "roles": ["model"],
-                "model_version_sha256": "c" * 64,
+                "model_content_sha256": "c" * 64,
             }
         )
     operation = _start(
@@ -474,7 +474,7 @@ def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(tmp_path: 
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "1")
     current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
-    manifest = service.resolve_artifact_set(model_version_sha256=current_digest)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
     newer = _model_document("source-revision-2", "2", supersedes=current_digest)
@@ -492,7 +492,7 @@ def test_update_discovery_reports_incomparable_lineage_candidates(tmp_path: Path
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "3")
     current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
-    manifest = service.resolve_artifact_set(model_version_sha256=current_digest)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
     _insert_model_revision(sessions, _model_document("candidate-a", "4"), created_at=NOW + timedelta(hours=1))
@@ -724,7 +724,7 @@ def test_access_recheck_groups_hf_files_by_repository_without_failed_key(
         )
         artifacts.append(artifact)
     manifest = service.resolve_artifact_set(
-        model_version_sha256="e" * 64,
+        model_content_sha256="e" * 64,
         artifacts=artifacts,
     )
     service._check_huggingface_access(manifest, failed_artifact_key=None)

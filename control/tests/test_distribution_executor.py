@@ -414,7 +414,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
     plan = SimpleNamespace(
         preparation=SimpleNamespace(model=SimpleNamespace(
             artifact_set_sha256="d" * 64,
-            model_version_sha256="a" * 64,
+            model_content_sha256="a" * 64,
             recipe_revision_sha256="b" * 64,
             artifact_count=2,
             artifact_set_bytes=15,
@@ -423,7 +423,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
     )
     if not image_prepared:
         model = plan.preparation.model
-        plan.model_version_sha256 = model.model_version_sha256
+        plan.model_content_sha256 = model.model_content_sha256
         plan.recipe_content_sha256 = model.recipe_revision_sha256
         plan.storage = SimpleNamespace(
             artifact_set_sha256=model.artifact_set_sha256,
@@ -498,7 +498,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         reserve_bytes=0,
         fixture_sources=True,
     )
-    model_version = "a" * 64
+    model_content_sha256 = "a" * 64
     recipe_digest = "b" * 64
     payload = (b"model-payload-" * 100_000) + b"!"
     source = tmp_path / "weights.source"
@@ -511,10 +511,10 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         "sha256": hashlib.sha256(payload).hexdigest(),
         "download_bytes": len(payload),
         "roles": ["model"],
-        "model_version_sha256": model_version,
+        "model_content_sha256": model_content_sha256,
     }
     seed_preview = service.download_preview(
-        model_version_sha256=model_version,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=[artifact],
     )
@@ -522,7 +522,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000011",
         plan_digest=str(seed_preview["plan_digest"]),
-        model_version_sha256=model_version,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=[artifact],
         interrupt_after_bytes=1024,
@@ -535,7 +535,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         preparation=SimpleNamespace(
             model=SimpleNamespace(
                 artifact_set_sha256=artifact_set,
-                model_version_sha256=model_version,
+                model_content_sha256=model_content_sha256,
                 recipe_revision_sha256=recipe_digest,
                 artifact_count=1,
                 artifact_set_bytes=len(payload),
@@ -598,14 +598,14 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             .read_text(encoding="utf-8")
         )
     )
-    model_version = content_sha256(model)
+    model_content_sha256 = content_sha256(model)
     recipe_document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = "production-composite"
-    recipe_document["models"][0]["model"]["content_sha256"] = model_version
+    recipe_document["models"][0]["model"]["content_sha256"] = model_content_sha256
     recipe = RecipeDefinition.model_validate(recipe_document)
     recipe_document = recipe.model_dump(mode="json")
     recipe_digest = content_sha256(recipe)
@@ -624,7 +624,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             "sha256": hashlib.sha256(model_payload).hexdigest(),
             "download_bytes": len(model_payload),
             "roles": ["model"],
-            "model_version_sha256": model_version,
+            "model_content_sha256": model_content_sha256,
         },
         {
             "id": "tokenizer",
@@ -634,11 +634,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             "sha256": hashlib.sha256(auxiliary_payload).hexdigest(),
             "download_bytes": len(auxiliary_payload),
             "roles": ["auxiliary"],
-            "model_version_sha256": model_version,
+            "model_content_sha256": model_content_sha256,
         },
     ]
     preview = cache.download_preview(
-        model_version_sha256=model_version,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=artifacts,
     )
@@ -656,7 +656,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         actor="operator",
         request_key=cache_request,
         plan_digest=str(preview["plan_digest"]),
-        model_version_sha256=model_version,
+        model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=artifacts,
     )
@@ -724,7 +724,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     schema_version=2,
                     state="active",
                     document=model.model_dump(mode="json"),
-                    content_digest=model_version,
+                    content_digest=model_content_sha256,
                     projected={},
                     created_by="test",
                     created_at=now,
@@ -763,7 +763,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     preparation = SimpleNamespace(
         model=SimpleNamespace(
             artifact_set_sha256=artifact_set,
-            model_version_sha256=model_version,
+            model_content_sha256=model_content_sha256,
             recipe_revision_sha256=recipe_digest,
             artifact_count=2,
             artifact_set_bytes=len(model_payload) + len(auxiliary_payload),

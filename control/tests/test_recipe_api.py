@@ -201,7 +201,7 @@ class Recipes:
             warnings=(),
             consequences=UninstallConsequences(),
             model_impact=UninstallModelImpact(
-                model_version_sha256="f" * 64,
+                model_content_sha256="f" * 64,
                 model_title="publisher/model",
                 effect="recipe-and-unused-model",
                 dependent_recipe_ids=(),
@@ -211,7 +211,7 @@ class Recipes:
             plan_digest="5" * 64,
         )
         self.model_deletion_plan = ModelDeletionPlan(
-            model_version_sha256="f" * 64,
+            model_content_sha256="f" * 64,
             model_title="publisher/model",
             allowed=True,
             installations=(
@@ -239,10 +239,10 @@ class Recipes:
             warnings=(
                 ActionReason(
                     "model-delete.shared_cache_protected",
-                    "Unrelated immutable caches remain protected.",
+                    "Only affected installation copies are removed; reusable downloaded model cache remains retained.",
                 ),
             ),
-            shared_cache_policy="remove-unreferenced-model-artifacts-only",
+            shared_cache_policy="retain-shared-download-cache",
             plan_digest="6" * 64,
         )
         self.calls: list[tuple[str, object]] = []
@@ -421,16 +421,16 @@ class Recipes:
         self.calls.append(("preview_uninstall", installation_id))
         return self.uninstall_plan
 
-    def preview_model_deletion(self, model_version_sha256):
-        self.calls.append(("preview_model_deletion", model_version_sha256))
+    def preview_model_deletion(self, model_content_sha256):
+        self.calls.append(("preview_model_deletion", model_content_sha256))
         return self.model_deletion_plan
 
-    def delete_model(self, model_version_sha256, **kwargs):
-        self.calls.append(("delete_model", (model_version_sha256, kwargs)))
+    def delete_model(self, model_content_sha256, **kwargs):
+        self.calls.append(("delete_model", (model_content_sha256, kwargs)))
         return RecipeOperationView(
             OPERATION,
             "recipe.model-uninstall.v1",
-            model_version_sha256,
+            model_content_sha256,
             "running",
             "6" * 64,
             (NODE,),
@@ -754,12 +754,12 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     denied = client.post(
         "/api/v1/library/model-deletion-plans/preview",
         headers=headers("operator"),
-        json={"model_version_sha256": model_digest},
+        json={"model_content_sha256": model_digest},
     )
     preview = client.post(
         "/api/v1/library/model-deletion-plans/preview",
         headers=headers(),
-        json={"model_version_sha256": model_digest},
+        json={"model_content_sha256": model_digest},
     )
     request_id = "20000000-0000-4000-8000-000000000099"
     applied = client.post(
@@ -774,7 +774,7 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     assert denied.status_code == 403
     assert preview.status_code == 200
     assert preview.json()["shared_cache_policy"] == (
-        "remove-unreferenced-model-artifacts-only"
+        "retain-shared-download-cache"
     )
     assert preview.json()["nodes"][0]["installation_ids"] == [INSTALLATION]
     assert applied.status_code == 202
@@ -787,7 +787,7 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
         "operationId"
     ] == "previewLibraryModelDeletion"
     assert paths[
-        "/api/v1/library/models/{model_version_sha256}/delete"
+        "/api/v1/library/models/{model_content_sha256}/delete"
     ]["post"]["operationId"] == "deleteLibraryModel"
 
 

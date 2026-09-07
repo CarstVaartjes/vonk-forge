@@ -50,7 +50,7 @@ class RecipeImageAvailabilityArtifact(StrictJSONModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     download_bytes: int = Field(ge=0)
     roles: list[str]
-    model_version_sha256: str | None = None
+    model_content_sha256: str | None = None
 
 
 class RecipeImageAvailabilityChild(StrictJSONModel):
@@ -62,7 +62,7 @@ class RecipeImageAvailabilityChild(StrictJSONModel):
     state: Literal["queued", "running", "partial", "succeeded", "failed"]
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_versions: list[str] = Field(default_factory=list)
+    model_content_sha256s: list[str] = Field(default_factory=list)
     artifacts: list[RecipeImageAvailabilityArtifact] = Field(default_factory=list)
     progress: OperationProgress
     failure: AvailabilityOperationFailure | None = None
@@ -92,7 +92,7 @@ class RecipeImageAvailabilityResult(StrictJSONModel):
     model_digest: str | None = None
     model_child_id: str | None = None
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_versions: list[str] = Field(default_factory=list)
+    model_content_sha256s: list[str] = Field(default_factory=list)
     build_input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source: str = Field(min_length=1, max_length=64)
     registry_manifest_digest: str | None = None
@@ -206,7 +206,9 @@ def _child(value: object, *, kind: Literal["model-cache", "runtime-image"]) -> R
         state=str(raw.get("state", "queued")),
         artifact_set_sha256=raw.get("artifact_set_sha256") if isinstance(raw.get("artifact_set_sha256"), str) else None,
         plan_digest=raw.get("plan_digest") if isinstance(raw.get("plan_digest"), str) else None,
-        model_versions=[item for item in raw.get("model_versions", []) if isinstance(item, str)],
+        model_content_sha256s=[
+            item for item in raw.get("model_content_sha256s", []) if isinstance(item, str)
+        ],
         artifacts=[RecipeImageAvailabilityArtifact.model_validate(item) for item in raw.get("artifacts", []) if isinstance(item, dict)],
         progress=_progress(raw.get("progress")),
         failure=AvailabilityOperationFailure.model_validate(failure) if isinstance(failure, dict) else None,
@@ -226,7 +228,11 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             | {
                 "model_child_id": child.get("id") if isinstance(child, dict) else None,
                 "artifact_set_sha256": child.get("artifact_set_sha256") if isinstance(child, dict) else None,
-                "model_versions": child.get("model_versions", []) if isinstance(child, dict) else [],
+                "model_content_sha256s": (
+                    child.get("model_content_sha256s", [])
+                    if isinstance(child, dict)
+                    else []
+                ),
             }
         )
     failure = document.get("failure")

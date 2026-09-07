@@ -620,7 +620,7 @@ def add_controller_commands(
 
     # Stable, task-oriented aliases for the browser's primary workflows.  The
     # lower-level ``library`` tree remains available for expert lifecycle work.
-    models = commands.add_parser("models", help="Discover and compare model versions")
+    models = commands.add_parser("models", help="Discover and compare model definitions")
     model_commands = _subcommands(models, "models_command")
     model_list = model_commands.add_parser("list", aliases=["discover"])
     _paging(model_list, default=100, maximum=512)
@@ -642,7 +642,7 @@ def add_controller_commands(
     model_download = model_commands.add_parser(
         "download", help="Download an exact model to the Library"
     )
-    model_download.add_argument("--model-version-sha256", required=True)
+    model_download.add_argument("--model-content-sha256", required=True)
     model_download.add_argument("--recipe-revision-id")
     model_download.add_argument("--recipe-revision-sha256")
     model_download.add_argument("--request-key")
@@ -731,7 +731,7 @@ def add_controller_commands(
     cache_download = cache_commands.add_parser("download")
     cache_download.add_argument("download_mode", nargs="?", choices=("preview", "apply"))
     _structured_input(cache_download, required=False)
-    cache_download.add_argument("--model-version-sha256")
+    cache_download.add_argument("--model-content-sha256")
     cache_download.add_argument("--recipe-revision-sha256")
     cache_download.add_argument("--recipe-revision-id")
     cache_download.add_argument("--dry-run", action="store_true", help="Preview without downloading")
@@ -2456,11 +2456,11 @@ def _run_models(
                 ]
         return result
     if command == "download":
-        if _LOWER_SHA256.fullmatch(args.model_version_sha256) is None:
-            raise ValueError("model version identity must be a lowercase SHA-256 digest")
-        model_version_sha256 = args.model_version_sha256
+        if _LOWER_SHA256.fullmatch(args.model_content_sha256) is None:
+            raise ValueError("model content identity must be a lowercase SHA-256 digest")
+        model_content_sha256 = args.model_content_sha256
         payload: dict[str, object] = {
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
         }
         if args.recipe_revision_id is not None:
             payload["recipe_revision_id"] = args.recipe_revision_id
@@ -2730,7 +2730,7 @@ def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
         value = getattr(args, key, None)
         if value is not None:
             payload.setdefault(key, value)
-    for key in ("model_version_sha256", "recipe_revision_sha256", "recipe_revision_id"):
+    for key in ("model_content_sha256", "recipe_revision_sha256", "recipe_revision_id"):
         value = getattr(args, key, None)
         if value is not None:
             payload.setdefault(key, value)
