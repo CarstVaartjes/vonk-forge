@@ -144,6 +144,28 @@ pub struct RuntimeStopPlan {
     pub post_stop: Vec<Vec<String>>,
 }
 
+/// Project one validated workload into the exact Podman argument vector used
+/// by `start_arguments`.  This remains pure so protocol probes can exercise
+/// the same argument construction without touching the host runtime.
+pub fn start_arguments_for_paths(
+    spec: &CompiledExecutionPlan,
+    paths: &CompiledOciPaths,
+    run_id: &str,
+) -> Result<Vec<String>, OciError> {
+    let invocation = project(spec, paths).map_err(|_| OciError::Runtime)?;
+    let mut arguments = invocation.podman_arguments();
+    arguments.splice(
+        1..1,
+        [
+            "--name".to_owned(),
+            format!("vonk-{run_id}"),
+            "--restart".to_owned(),
+            "no".to_owned(),
+        ],
+    );
+    Ok(arguments)
+}
+
 fn runtime_policy() -> Result<RuntimePolicy, OciError> {
     serde_json::from_str(include_str!(
         "../../../../schemas/global/container-runtime-policy-v1.json"
@@ -408,7 +430,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let metadata = self.run_metadata_path(run_id)?;
         let runtime_cache =
             managed_path(self.data_root, "installations", installation_id)?.join("runtime-cache");
-        let invocation = project(
+        start_arguments_for_paths(
             spec,
             &CompiledOciPaths {
                 image_archive: self
@@ -425,19 +447,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 cache_root: runtime_cache,
                 runtime_spec: metadata.join("runtime.json"),
             },
+            run_id,
         )
-        .map_err(|_| OciError::Runtime)?;
-        let mut arguments = invocation.podman_arguments();
-        arguments.splice(
-            1..1,
-            [
-                "--name".to_owned(),
-                format!("vonk-{run_id}"),
-                "--restart".to_owned(),
-                "no".to_owned(),
-            ],
-        );
-        Ok(arguments)
     }
 
     fn ensure_runtime_cache(&self, installation_id: &str) -> Result<PathBuf, OciError> {

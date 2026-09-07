@@ -18,10 +18,10 @@ use crate::{
         AgentHttpClient, ClientError, DistributionDownloadEvidence, DistributionProgress,
         ExactRecipeRunObservation,
     },
-    health::{HealthEvidence, wait_ready, wait_ready_until},
+    health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
-    oci::{OciRuntime, RecipeRunStartIdentity},
+    oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
@@ -29,9 +29,9 @@ use crate::{
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
-    HostRuntimeAction, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    HostRuntimeAction, ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
-    RecipeStartPhase, canonical_json, hex_sha256,
+    RecipeStartPhase, RecipeStartRequest, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -39,9 +39,9 @@ const JOB_CANCEL_EXIT_CODE: i32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, ()> {
-    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).map_err(|_| ())?;
-    plan.validate().map_err(|_| ())?;
+pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
+    plan.validate()?;
     Ok(plan)
 }
 
@@ -73,7 +73,7 @@ fn same_installed_workload(
         && installed.topology.node_count == requested.topology.node_count
 }
 
-fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
+pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
     let image_digest = spec
         .runtime
         .image_digest
@@ -422,6 +422,124 @@ fn evidence_with_digest(mut evidence: Value) -> (Value, String) {
         );
     }
     (evidence, evidence_digest)
+}
+
+/// Build the exact runtime argument vector used for start, inspection, and a
+/// pre-start hook. The caller supplies the complete command slice because
+/// `RuntimeStartPlan::pre_start` already contains a complete hook invocation.
+pub fn runtime_arguments_for_plan(
+    plan: &crate::oci::RuntimeStartPlan,
+    command: &[String],
+) -> Vec<String> {
+    let mut arguments = vec![
+        plan.archive_sha256.clone(),
+        plan.registry_index_digest.clone(),
+        plan.platform_manifest_digest.clone(),
+        plan.image_reference.clone(),
+    ];
+    arguments.extend(command.iter().cloned());
+    arguments
+}
+
+pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, ProtocolError> {
+    canonical_json(&arguments.to_vec()).map(|value| hex_sha256(&value))
+}
+
+pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
+    json!({"installed_bytes": installed_bytes})
+}
+
+pub fn recipe_start_success_body(
+    request: &RecipeStartRequest,
+    spec: &CompiledExecutionPlan,
+    artifact_set_digest: &str,
+    runtime_guard_arguments: &[String],
+) -> Result<Value, ProtocolError> {
+    let runtime_arguments_sha256 = runtime_arguments_digest(runtime_guard_arguments)?;
+    let (image_digest, model_identity) = readiness_identity(spec);
+    let endpoint = format!(
+        "http://{}:{}",
+        match request.endpoint_address {
+            std::net::IpAddr::V4(address) => address.to_string(),
+            std::net::IpAddr::V6(address) => format!("[{address}]"),
+        },
+        request.port
+    );
+    let evidence = match request.phase {
+        Some(RecipeStartPhase::RankLaunch) => json!({
+            "phase": "rank-launch",
+            "run_id": request.run_id.to_string(),
+            "run_generation": request.run_generation,
+            "recipe_revision_id": request.recipe_revision_id.to_string(),
+            "recipe_content_sha256": request.recipe_content_sha256,
+            "image_digest": image_digest,
+            "artifact_set_digest": artifact_set_digest,
+            "runtime_arguments_sha256": runtime_arguments_sha256,
+            "model_identity": model_identity,
+            "rank": request.rank,
+            "role": request.role,
+            "world_size": request.world_size,
+            "local_address": request.local_address,
+            "master_address": request.master_address,
+            "master_port": request.master_port,
+            "memory_reservation_bytes": request.reserved_memory_bytes,
+            "process_running": true,
+            "fabric_projection_bound": true,
+            "launched": true,
+        }),
+        Some(RecipeStartPhase::CollectiveReadiness) => json!({
+            "phase": "collective-readiness",
+            "run_id": request.run_id.to_string(),
+            "run_generation": request.run_generation,
+            "recipe_revision_id": request.recipe_revision_id.to_string(),
+            "recipe_content_sha256": request.recipe_content_sha256,
+            "image_digest": image_digest,
+            "artifact_set_digest": artifact_set_digest,
+            "runtime_arguments_sha256": runtime_arguments_sha256,
+            "model_identity": model_identity,
+            "rank": request.rank,
+            "role": request.role,
+            "world_size": request.world_size,
+            "local_address": request.local_address,
+            "master_address": request.master_address,
+            "master_port": request.master_port,
+            "endpoint": endpoint,
+            "memory_reservation_bytes": request.reserved_memory_bytes,
+            "ready": true,
+        }),
+        None => {
+            let evidence = json!({
+                "recipe_revision_id": request.recipe_revision_id.to_string(),
+                "recipe_content_sha256": request.recipe_content_sha256,
+                "image_digest": image_digest,
+                "artifact_set_digest": artifact_set_digest,
+                "model_identity": model_identity,
+                "rank": request.rank,
+                "world_size": request.world_size,
+                "endpoint": endpoint,
+                "memory_reservation_bytes": request.reserved_memory_bytes,
+                "ready": true,
+            });
+            let (evidence, evidence_digest) = evidence_with_digest(evidence);
+            return Ok(json!({
+                "endpoint": endpoint,
+                "evidence": evidence,
+                "evidence_digest": evidence_digest,
+            }));
+        }
+    };
+    let (evidence, evidence_digest) = evidence_with_digest(evidence);
+    Ok(match request.phase {
+        Some(RecipeStartPhase::CollectiveReadiness) => json!({
+            "endpoint": endpoint,
+            "evidence": evidence,
+            "evidence_digest": evidence_digest,
+        }),
+        Some(RecipeStartPhase::RankLaunch) => {
+            json!({"evidence": evidence, "evidence_digest": evidence_digest})
+        }
+        None => unreachable!("single-node result returned above"),
+    })
 }
 
 fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
@@ -966,14 +1084,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
-                for hook in plan.pre_start {
-                    let mut arguments = vec![
-                        plan.archive_sha256.clone(),
-                        plan.registry_index_digest.clone(),
-                        plan.platform_manifest_digest.clone(),
-                        plan.image_reference.clone(),
-                    ];
-                    arguments.extend(hook);
+                for hook in &plan.pre_start {
+                    let arguments = runtime_arguments_for_plan(&plan, hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                         .await
@@ -1246,7 +1358,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .unwrap_or(request.expected_bytes);
                 ExecutionResult {
                     state: "succeeded",
-                    body: json!({"installed_bytes": installed_bytes}),
+                    body: recipe_install_success_body(installed_bytes),
                 }
             }
             RecipeOperationRequest::Start(request) => {
@@ -1386,14 +1498,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if collective_readiness && !plan.pre_start.is_empty() {
                     return failed("retained workload unexpectedly contains start hooks");
                 }
-                for hook in plan.pre_start {
-                    let mut arguments = vec![
-                        plan.archive_sha256.clone(),
-                        plan.registry_index_digest.clone(),
-                        plan.platform_manifest_digest.clone(),
-                        plan.image_reference.clone(),
-                    ];
-                    arguments.extend(hook);
+                for hook in &plan.pre_start {
+                    let arguments = runtime_arguments_for_plan(&plan, hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                         .await
@@ -1403,13 +1509,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         return failed("container runtime pre-start hook failed");
                     }
                 }
-                let mut arguments = vec![
-                    plan.archive_sha256.clone(),
-                    plan.registry_index_digest.clone(),
-                    plan.platform_manifest_digest.clone(),
-                    plan.image_reference.clone(),
-                ];
-                arguments.extend(plan.main);
+                let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
                 if collective_readiness {
                     if self
@@ -1497,40 +1597,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("rank launch evidence is unavailable");
                             }
                         };
-                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
-                        Ok(arguments) => hex_sha256(&arguments),
+                    let body = match recipe_start_success_body(
+                        &request,
+                        &spec,
+                        &artifact_set_digest,
+                        &runtime_guard_arguments,
+                    ) {
+                        Ok(body) => body,
                         Err(_) => return failed("rank launch evidence is unavailable"),
                     };
-                    let (evidence_image_digest, evidence_model_identity) =
-                        readiness_identity(&spec);
-                    let evidence = json!({
-                        "phase": "rank-launch",
-                        "run_id": run_id,
-                        "run_generation": request.run_generation,
-                        "recipe_revision_id": request.recipe_revision_id.to_string(),
-                        "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": evidence_image_digest,
-                        "artifact_set_digest": artifact_set_digest,
-                        "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": evidence_model_identity,
-                        "rank": request.rank,
-                        "role": request.role,
-                        "world_size": request.world_size,
-                        "local_address": request.local_address,
-                        "master_address": request.master_address,
-                        "master_port": request.master_port,
-                        "memory_reservation_bytes": request.reserved_memory_bytes,
-                        "process_running": true,
-                        "fabric_projection_bound": true,
-                        "launched": true,
-                    });
-                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
                     return ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "evidence": evidence,
-                            "evidence_digest": evidence_digest,
-                        }),
+                        body,
                     };
                 }
                 let runtime_guard = async {
@@ -1598,90 +1676,36 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("collective readiness evidence is unavailable");
                             }
                         };
-                    let endpoint_url = format!(
-                        "http://{}:{}",
-                        match request.endpoint_address {
-                            std::net::IpAddr::V4(address) => address.to_string(),
-                            std::net::IpAddr::V6(address) => format!("[{address}]"),
-                        },
-                        request.port
-                    );
-                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
-                        Ok(arguments) => hex_sha256(&arguments),
+                    let body = match recipe_start_success_body(
+                        &request,
+                        &spec,
+                        &artifact_set_digest,
+                        &runtime_guard_arguments,
+                    ) {
+                        Ok(body) => body,
                         Err(_) => return failed("collective readiness evidence is unavailable"),
                     };
-                    let (evidence_image_digest, evidence_model_identity) =
-                        readiness_identity(&spec);
-                    let evidence = json!({
-                        "phase": "collective-readiness",
-                        "run_id": run_id,
-                        "run_generation": request.run_generation,
-                        "recipe_revision_id": request.recipe_revision_id.to_string(),
-                        "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": evidence_image_digest,
-                        "artifact_set_digest": artifact_set_digest,
-                        "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": evidence_model_identity,
-                        "rank": request.rank,
-                        "role": request.role,
-                        "world_size": request.world_size,
-                        "local_address": request.local_address,
-                        "master_address": request.master_address,
-                        "master_port": request.master_port,
-                        "endpoint": endpoint_url,
-                        "memory_reservation_bytes": request.reserved_memory_bytes,
-                        "ready": true,
-                    });
-                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
                     return ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "endpoint": endpoint_url,
-                            "evidence": evidence,
-                            "evidence_digest": evidence_digest,
-                        }),
+                        body,
                     };
                 }
-                let (evidence_image_digest, evidence_model_identity) = readiness_identity(&spec);
-                let evidence = HealthEvidence {
-                    recipe_revision_id: request.recipe_revision_id.to_string(),
-                    recipe_content_sha256: request.recipe_content_sha256,
-                    image_digest: evidence_image_digest,
-                    artifact_set_digest: self
-                        .runtime
-                        .artifact_set_digest(&installation_id)
-                        .unwrap_or_default(),
-                    model_identity: evidence_model_identity,
-                    rank: request.rank,
-                    world_size: request.world_size,
-                    endpoint: format!(
-                        "http://{}:{}",
-                        match request.endpoint_address {
-                            std::net::IpAddr::V4(address) => address.to_string(),
-                            std::net::IpAddr::V6(address) => format!("[{address}]"),
-                        },
-                        request.port
-                    ),
-                    memory_reservation_bytes: request.reserved_memory_bytes,
-                    ready: true,
+                let artifact_set_digest = match self.runtime.artifact_set_digest(&installation_id) {
+                    Ok(digest) => digest,
+                    Err(_) => return failed("readiness evidence is unavailable"),
                 };
-                let evidence_digest = canonical_json(&evidence)
-                    .map(|value| hex_sha256(&value))
-                    .unwrap_or_default();
-                let mut evidence_value = serde_json::to_value(&evidence).unwrap_or_default();
-                if let Some(document) = evidence_value.as_object_mut() {
-                    document.insert(
-                        "evidence_digest".to_owned(),
-                        Value::String(evidence_digest.clone()),
-                    );
-                }
+                let body = match recipe_start_success_body(
+                    &request,
+                    &spec,
+                    &artifact_set_digest,
+                    &runtime_guard_arguments,
+                ) {
+                    Ok(body) => body,
+                    Err(_) => return failed("readiness evidence is unavailable"),
+                };
                 ExecutionResult {
                     state: "succeeded",
-                    body: json!({
-                        "endpoint": evidence.endpoint,
-                        "evidence": evidence_value,
-                        "evidence_digest": evidence_digest,
-                    }),
+                    body,
                 }
             }
             RecipeOperationRequest::Stop(request) => {
