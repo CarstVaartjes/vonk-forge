@@ -1264,6 +1264,11 @@ for (const width of [1280, 360]) {
     let retryBody: Record<string, unknown> | undefined;
     let readId: string | undefined;
     let applyCount = 0;
+    await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+      schema_version: 2, profile_id: base.profile_id, profile_digest: base.profile_digest,
+      state: readId ? "matched" : "drifted", matched: Boolean(readId), drifted: !readId,
+      scope: {node_ids: [nodeId, borealisId], idle_node_ids: []}, reasons: [], generated_at: base.updated_at,
+    }}));
     await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
     await page.route("**/api/v1/fleet-profiles/*/apply", route => { applyCount += 1; return route.fulfill({status: 202, json: base}); });
     await page.route(`**/api/v1/fleet-profile-applications/${failedId}/retry`, route => { retryBody = route.request().postDataJSON(); return route.fulfill({status: 202, json: linked}); });
@@ -1280,6 +1285,9 @@ for (const width of [1280, 360]) {
     await expect.poll(() => readId).toBe(nextId);
     await expect(progress).toContainText("succeeded");
     expect(applyCount).toBe(1);
+    await expect(page.getByText("Profile switch completed.", {exact: true})).toBeVisible();
+    await expect(page.getByText("Profile status: Up to date", {exact: true})).toBeVisible();
+    await expect(page.getByText("Remaining profile work is being rechecked against the current fleet.", {exact: true})).toHaveCount(0);
     await expect(progress.getByRole("button", {name: "Retry remaining work"})).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({path: testInfo.outputPath(`profile-retried-${width}.png`)});

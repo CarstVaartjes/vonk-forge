@@ -63,6 +63,7 @@ const preview = {
 } as unknown as FleetProfilePreview;
 
 const application = {
+  attempt: 1,
   schema_version: 2,
   id: "55555555-5555-4555-8555-555555555555",
   profile_id: profileId,
@@ -74,6 +75,7 @@ const application = {
   current_operation_id: null,
   status_reason: null,
   progress: {
+    attempt: 1,
     completed_steps: 0,
     total_steps: 3,
     child_progress: {
@@ -215,11 +217,16 @@ test("does not offer to save a new profile before a Spark is enrolled", async ()
 test("retries remaining work once and follows the returned application", async () => {
   const user = userEvent.setup();
   const failed = {...application, state: "failed", status_reason: "Spark B disconnected"};
-  const retried = {...application, id: "66666666-6666-4666-8666-666666666666"};
+  const retried = {...application, id: "66666666-6666-4666-8666-666666666666", attempt: 2, retry_of_application_id: application.id, progress: {...application.progress, attempt: 2, retry_of_application_id: application.id}};
   let resolveRetry!: (value: FleetProfileApplication) => void;
   const retryFleetProfileApplication = vi.fn(() => new Promise<FleetProfileApplication>(resolve => { resolveRetry = resolve; }));
-  const fleetProfileApplication = vi.fn(async () => ({...retried, state: "succeeded"}));
-  const api = {...editingApi(), applyFleetProfile: vi.fn(async () => failed), retryFleetProfileApplication, fleetProfileApplication};
+  let complete = false;
+  const fleetProfileApplication = vi.fn(async () => {
+    complete = true;
+    return {...retried, state: "succeeded", current_step: 3, progress: {...retried.progress, completed_steps: 3}, result: {changed: true, completed_steps: 3}};
+  });
+  const fleetProfileStatus = vi.fn(async () => ({state: complete ? "matched" : "drifted", matched: complete, drifted: !complete, scope: {node_ids: [nodeA, nodeB]}, reasons: []}));
+  const api = {...editingApi(), fleetProfileStatus, applyFleetProfile: vi.fn(async () => failed), retryFleetProfileApplication, fleetProfileApplication};
   render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
   await user.click(await screen.findByRole("button", {name: "Switch profile"}));
   await user.click(await screen.findByRole("button", {name: "Retry remaining work"}));
@@ -229,6 +236,9 @@ test("retries remaining work once and follows the returned application", async (
   expect(await screen.findByText("Remaining profile work is being rechecked against the current fleet.")).toBeVisible();
   await screen.findByText("succeeded", {}, {timeout: 2500});
   expect(fleetProfileApplication).toHaveBeenCalledWith(retried.id, expect.any(AbortSignal));
+  expect(await screen.findByText("Profile switch completed.")).toBeVisible();
+  expect(await screen.findByText("Profile status: Up to date")).toBeVisible();
+  expect(screen.queryByText("Remaining profile work is being rechecked against the current fleet.")).not.toBeInTheDocument();
 });
 
 test("keeps failed application evidence and reuses the request key after an uncertain retry", async () => {
@@ -252,4 +262,16 @@ test.each(["waiting-for-operator", "cancelled"] as const)("offers only supported
   await user.click(await screen.findByRole("button", {name: "Switch profile"}));
   if (state === "cancelled") expect(screen.queryByRole("button", {name: "Retry remaining work"})).not.toBeInTheDocument();
   else expect(screen.getByRole("button", {name: "Retry remaining work"})).toBeEnabled();
+});
+
+test("refreshes status after completion without overriding server-reported drift", async () => {
+  const user = userEvent.setup();
+  const fleetProfileStatus = vi.fn(async () => ({state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeA, nodeB]}, reasons: []}));
+  const api = {...editingApi(), fleetProfileStatus, applyFleetProfile: vi.fn(async () => ({...application, state: "succeeded", current_step: 3, progress: {...application.progress, completed_steps: 3}, result: {changed: true, completed_steps: 3}}))};
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Switch profile"}));
+  expect(await screen.findByText("Profile switch completed.")).toBeVisible();
+  expect(fleetProfileStatus).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("Profile status: Needs update")).toBeVisible();
+  expect(screen.queryByText("Profile status: Up to date")).not.toBeInTheDocument();
 });
