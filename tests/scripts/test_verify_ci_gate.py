@@ -4,6 +4,8 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -33,6 +35,7 @@ def _valid(**overrides: str):
         "rust-quality-gate": "success",
         "rust-tests": "success",
         "rust-platform": "success",
+        "controller-spark-wire": "success",
         "repository": "skipped",
         "control": "success",
         "web": "success",
@@ -57,6 +60,7 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
     for job in (
         "rust-tests",
         "rust-platform",
+        "controller-spark-wire",
         "repository",
         "control",
         "web",
@@ -82,3 +86,16 @@ def test_rejects_failure_cancelled_and_unexpected_success() -> None:
     errors = _module().verify("success", selected, results)
     assert any("generated result" in error for error in errors)
     assert any("compose result" in error for error in errors)
+
+
+@pytest.mark.parametrize("area", ["rust", "control"])
+@pytest.mark.parametrize("result", ["skipped", "failure", "cancelled", None])
+def test_wire_contract_is_required_for_either_language_change(area, result) -> None:
+    selected, results = _valid()
+    selected.update(rust="false", control="false")
+    selected[area] = "true"
+    results["controller-spark-wire"] = result
+    assert any(
+        "controller-spark-wire" in error
+        for error in _module().verify("success", selected, results)
+    )

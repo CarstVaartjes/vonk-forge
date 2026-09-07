@@ -27,7 +27,7 @@ class ModelCacheDownloadRequest:
             plan_digest (str):
             request_key (str):
             artifact_set_sha256 (Union[None, Unset, str]):
-            model_version_sha256 (Union[None, Unset, str]):
+            model_content_sha256 (Union[None, Unset, str]):
             recipe_revision_id (Union[None, Unset, str]):
             recipe_revision_sha256 (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
@@ -37,7 +37,7 @@ class ModelCacheDownloadRequest:
     plan_digest: str
     request_key: str
     artifact_set_sha256: Union[None, Unset, str] = UNSET
-    model_version_sha256: Union[None, Unset, str] = UNSET
+    model_content_sha256: Union[None, Unset, str] = UNSET
     recipe_revision_id: Union[None, Unset, str] = UNSET
     recipe_revision_sha256: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
@@ -58,11 +58,11 @@ class ModelCacheDownloadRequest:
         else:
             artifact_set_sha256 = self.artifact_set_sha256
 
-        model_version_sha256: Union[None, Unset, str]
-        if isinstance(self.model_version_sha256, Unset):
-            model_version_sha256 = UNSET
+        model_content_sha256: Union[None, Unset, str]
+        if isinstance(self.model_content_sha256, Unset):
+            model_content_sha256 = UNSET
         else:
-            model_version_sha256 = self.model_version_sha256
+            model_content_sha256 = self.model_content_sha256
 
         recipe_revision_id: Union[None, Unset, str]
         if isinstance(self.recipe_revision_id, Unset):
@@ -89,8 +89,8 @@ class ModelCacheDownloadRequest:
         })
         if artifact_set_sha256 is not UNSET:
             field_dict["artifact_set_sha256"] = artifact_set_sha256
-        if model_version_sha256 is not UNSET:
-            field_dict["model_version_sha256"] = model_version_sha256
+        if model_content_sha256 is not UNSET:
+            field_dict["model_content_sha256"] = model_content_sha256
         if recipe_revision_id is not UNSET:
             field_dict["recipe_revision_id"] = recipe_revision_id
         if recipe_revision_sha256 is not UNSET:
@@ -121,14 +121,14 @@ class ModelCacheDownloadRequest:
         artifact_set_sha256 = _parse_artifact_set_sha256(d.pop("artifact_set_sha256", UNSET))
 
 
-        def _parse_model_version_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(Union[None, Unset, str], data)
 
-        model_version_sha256 = _parse_model_version_sha256(d.pop("model_version_sha256", UNSET))
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
 
 
         def _parse_recipe_revision_id(data: object) -> Union[None, Unset, str]:
@@ -163,7 +163,7 @@ class ModelCacheDownloadRequest:
             plan_digest=plan_digest,
             request_key=request_key,
             artifact_set_sha256=artifact_set_sha256,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             recipe_revision_sha256=recipe_revision_sha256,
             schema_version=schema_version,

@@ -1,4 +1,12 @@
+from .compiled_execution_plan import (
+    CompiledExecutionPlan,
+    CompiledExecutionPlanError,
+    validate_compiled_execution_plan,
+)
 from .contracts import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
     AgentClaim,
     AgentDirective,
     AgentOperation,
@@ -6,6 +14,8 @@ from .contracts import (
     AgentProtocolError,
     AgentResult,
     canonical_message,
+    format_model_identity,
+    parse_model_identity,
     schema_validator,
     validate_schema_message,
 )
@@ -42,7 +52,12 @@ from .recipe_jobs import (
 from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
+from .recipe_operations import (
+    RECIPE_OPERATIONS,
+    RecipeInstallPayload,
+    RecipeOperationRequest,
+    RecipeStartPayload,
+)
 from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
@@ -60,6 +75,9 @@ from .workload_packages import (
 )
 
 __all__ = [
+    "MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES",
+    "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
+    "MAX_DOCUMENT_BYTES",
     "RECIPE_OPERATIONS",
     "AgentClaim",
     "AgentDirective",
@@ -67,6 +85,8 @@ __all__ = [
     "AgentProgress",
     "AgentProtocolError",
     "AgentResult",
+    "CompiledExecutionPlan",
+    "CompiledExecutionPlanError",
     "ComponentDescriptor",
     "ContainerRuntimeAction",
     "DistributionAssignment",
@@ -83,6 +103,7 @@ __all__ = [
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "RecipeInstallPayload",
     "RecipeJobFile",
     "RecipeJobInputFile",
     "RecipeJobOutputLimits",
@@ -91,6 +112,7 @@ __all__ = [
     "RecipeJobRunResult",
     "RecipeOperationRequest",
     "RecipeRunObservationReceiptClaims",
+    "RecipeStartPayload",
     "RestartUnit",
     "SignedHostHelperGrant",
     "SignedPackageHelperGrant",
@@ -98,13 +120,16 @@ __all__ = [
     "SignedRecipeRunObservationReceipt",
     "TelemetryReport",
     "canonical_message",
+    "format_model_identity",
     "host_artifact_signing_bytes",
     "host_helper_grant_signing_bytes",
     "package_helper_grant_signing_bytes",
     "package_object_receipt_signing_bytes",
+    "parse_model_identity",
     "recipe_job_manifest_document",
     "recipe_job_manifest_sha256",
     "recipe_run_observation_receipt_signing_bytes",
     "schema_validator",
+    "validate_compiled_execution_plan",
     "validate_schema_message",
 ]

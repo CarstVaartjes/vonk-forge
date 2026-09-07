@@ -81,7 +81,7 @@ lifecycle through Controller Run/Switch, or the equivalent normal CLI command:
 cat > run-request.json <<'JSON'
 {
   "schema_version": 2,
-  "model_version_sha256": "<MODEL_CONTENT_SHA256>",
+  "model_content_sha256": "<MODEL_CONTENT_SHA256>",
   "recipe_revision_id": "<RECIPE_REVISION_UUID>",
   "spark_group": {
     "nodes": [

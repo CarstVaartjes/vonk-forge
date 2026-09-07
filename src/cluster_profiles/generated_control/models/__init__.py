@@ -4,22 +4,39 @@ from .agent_repair_manifest_request import AgentRepairManifestRequest
 from .agent_summary import AgentSummary
 from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
 from .agent_upgrade_apply_request_strategy import AgentUpgradeApplyRequestStrategy
+from .agent_upgrade_apply_response import AgentUpgradeApplyResponse
 from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
 from .agent_upgrade_package_request import AgentUpgradePackageRequest
 from .agent_upgrade_preview_request import AgentUpgradePreviewRequest
 from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestStrategy
+from .agent_upgrade_preview_response import AgentUpgradePreviewResponse
+from .agent_upgrade_preview_response_strategy import AgentUpgradePreviewResponseStrategy
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
 from .agents_response import AgentsResponse
-from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
 from .artifact_file_declaration import ArtifactFileDeclaration
+from .artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
+from .artifact_job_list_response import ArtifactJobListResponse
+from .artifact_job_response import ArtifactJobResponse
+from .artifact_job_response_compiled_contract import ArtifactJobResponseCompiledContract
+from .artifact_job_response_interface import ArtifactJobResponseInterface
+from .artifact_job_response_state import ArtifactJobResponseState
+from .artifact_job_result_evidence import ArtifactJobResultEvidence
+from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
+from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
+from .artifact_output_file import ArtifactOutputFile
 from .artifact_storage_impact import ArtifactStorageImpact
 from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCoverage
 from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
 from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
 from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
+from .audit_event_response import AuditEventResponse
+from .audit_response import AuditResponse
+from .authority_response import AuthorityResponse
+from .authority_response_dependencies import AuthorityResponseDependencies
+from .authority_response_documents import AuthorityResponseDocuments
 from .availability_operation_failure import AvailabilityOperationFailure
 from .availability_recovery_action import AvailabilityRecoveryAction
 from .bounded_error_response import BoundedErrorResponse
@@ -43,7 +60,6 @@ from .cache_entry_response import CacheEntryResponse
 from .cache_entry_response_coverage import CacheEntryResponseCoverage
 from .cache_entry_response_state import CacheEntryResponseState
 from .cache_storage_response import CacheStorageResponse
-from .cancel_artifact_job_response_cancelartifactjob import CancelArtifactJobResponseCancelartifactjob
 from .cancel_request import CancelRequest
 from .capability_evidence import CapabilityEvidence
 from .capability_evidence_evidence import CapabilityEvidenceEvidence
@@ -51,6 +67,7 @@ from .capability_evidence_support import CapabilityEvidenceSupport
 from .capacity_reservations import CapacityReservations
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
+from .change_response import ChangeResponse
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
 from .compatibility_preparation_kind import CompatibilityPreparationKind
@@ -59,7 +76,6 @@ from .compatibility_preparation_state import CompatibilityPreparationState
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
-from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
 from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
@@ -72,7 +88,6 @@ from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInst
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
-from .finalize_artifact_job_response_finalizeartifactjob import FinalizeArtifactJobResponseFinalizeartifactjob
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -120,15 +135,12 @@ from .fleet_status_response import FleetStatusResponse
 from .freshness_evidence import FreshnessEvidence
 from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
-from .get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
-from .get_artifact_job_capabilities_response_getartifactjobcapabilities import GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
-from .get_artifact_job_result_response_getartifactjobresult import GetArtifactJobResultResponseGetartifactjobresult
-from .get_artifact_job_status_response_getartifactjobstatus import GetArtifactJobStatusResponseGetartifactjobstatus
-from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .grant_request import GrantRequest
 from .grant_request_purpose import GrantRequestPurpose
 from .http_validation_error import HTTPValidationError
+from .identity_history_item import IdentityHistoryItem
+from .identity_history_response import IdentityHistoryResponse
 from .image_distribution_plan_response import ImageDistributionPlanResponse
 from .image_distribution_preview_input import ImageDistributionPreviewInput
 from .image_distribution_preview_request import ImageDistributionPreviewRequest
@@ -137,7 +149,6 @@ from .image_distribution_request import ImageDistributionRequest
 from .install_node_plan_response import InstallNodePlanResponse
 from .install_plan_response import InstallPlanResponse
 from .install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
-from .install_plan_response_compiled_execution_plans_additional_property import InstallPlanResponseCompiledExecutionPlansAdditionalProperty
 from .install_preview_input import InstallPreviewInput
 from .install_preview_request import InstallPreviewRequest
 from .install_preview_target import InstallPreviewTarget
@@ -149,7 +160,6 @@ from .invocation_metadata_context import InvocationMetadataContext
 from .job_detail_response import JobDetailResponse
 from .job_logs_response import JobLogsResponse
 from .job_operation_progress import JobOperationProgress
-from .job_operation_progress_checkpoint_type_0 import JobOperationProgressCheckpointType0
 from .job_operation_response import JobOperationResponse
 from .job_progress import JobProgress
 from .job_resume_response import JobResumeResponse
@@ -197,9 +207,6 @@ from .library_run_summary import LibraryRunSummary
 from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
-from .list_artifact_jobs_for_run_response_listartifactjobsforrun import ListArtifactJobsForRunResponseListartifactjobsforrun
-from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
-from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
 from .list_recipe_image_availability_state_type_0 import ListRecipeImageAvailabilityStateType0
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
@@ -326,13 +333,12 @@ from .placement_score import PlacementScore
 from .plan_reason import PlanReason
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
-from .preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post import PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost
-from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
 from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
+from .proposal_preview_response import ProposalPreviewResponse
 from .proposal_request import ProposalRequest
 from .recipe_benchmark import RecipeBenchmark
 from .recipe_benchmark_configuration import RecipeBenchmarkConfiguration
@@ -486,8 +492,6 @@ from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
 from .stop_request import StopRequest
-from .submit_artifact_job_response_submitartifactjob import SubmitArtifactJobResponseSubmitartifactjob
-from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
 from .target_asset_state import TargetAssetState
 from .target_asset_state_state import TargetAssetStateState
 from .telemetry_capabilities_response import TelemetryCapabilitiesResponse
@@ -540,21 +544,38 @@ __all__ = (
     "AgentSummary",
     "AgentUpgradeApplyRequest",
     "AgentUpgradeApplyRequestStrategy",
+    "AgentUpgradeApplyResponse",
     "AgentUpgradeDiagnosticsResponse",
     "AgentUpgradeIdentityResponse",
     "AgentUpgradePackageRequest",
     "AgentUpgradePreviewRequest",
     "AgentUpgradePreviewRequestStrategy",
+    "AgentUpgradePreviewResponse",
+    "AgentUpgradePreviewResponseStrategy",
     "AgentUpgradeTargetDiagnosticsResponse",
-    "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
     "ArtifactFileDeclaration",
+    "ArtifactJobCapabilitiesResponse",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
+    "ArtifactJobListResponse",
+    "ArtifactJobResponse",
+    "ArtifactJobResponseCompiledContract",
+    "ArtifactJobResponseInterface",
+    "ArtifactJobResponseState",
+    "ArtifactJobResultEvidence",
+    "ArtifactJobStorageCapabilities",
+    "ArtifactJobTransportCapabilities",
+    "ArtifactOutputFile",
     "ArtifactStorageImpact",
     "ArtifactStorageImpactNasCoverage",
     "ArtifactStorageImpactRetention",
     "ArtifactStorageImpactRunningCoverage",
     "ArtifactStorageImpactSparkCoverage",
+    "AuditEventResponse",
+    "AuditResponse",
+    "AuthorityResponse",
+    "AuthorityResponseDependencies",
+    "AuthorityResponseDocuments",
     "AvailabilityOperationFailure",
     "AvailabilityRecoveryAction",
     "BoundedErrorResponse",
@@ -578,7 +599,6 @@ __all__ = (
     "CacheEntryResponseCoverage",
     "CacheEntryResponseState",
     "CacheStorageResponse",
-    "CancelArtifactJobResponseCancelartifactjob",
     "CancelRequest",
     "CapabilityEvidence",
     "CapabilityEvidenceEvidence",
@@ -586,6 +606,7 @@ __all__ = (
     "CapacityReservations",
     "CatalogProblem",
     "ChangeRequest",
+    "ChangeResponse",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
     "CompatibilityPreparationKind",
@@ -594,7 +615,6 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
-    "CreateArtifactJobResponseCreateartifactjob",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
     "EffectiveSettingsSelectionChangeEffects",
@@ -607,7 +627,6 @@ __all__ = (
     "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
-    "FinalizeArtifactJobResponseFinalizeartifactjob",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -655,15 +674,12 @@ __all__ = (
     "FreshnessEvidence",
     "FreshnessEvidenceState",
     "FreshnessPolicy",
-    "GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet",
-    "GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities",
-    "GetArtifactJobResultResponseGetartifactjobresult",
-    "GetArtifactJobStatusResponseGetartifactjobstatus",
-    "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
     "GrantRequest",
     "GrantRequestPurpose",
     "HTTPValidationError",
+    "IdentityHistoryItem",
+    "IdentityHistoryResponse",
     "ImageDistributionPlanResponse",
     "ImageDistributionPreviewInput",
     "ImageDistributionPreviewRequest",
@@ -672,7 +688,6 @@ __all__ = (
     "InstallNodePlanResponse",
     "InstallPlanResponse",
     "InstallPlanResponseCompiledExecutionPlans",
-    "InstallPlanResponseCompiledExecutionPlansAdditionalProperty",
     "InstallPreviewInput",
     "InstallPreviewRequest",
     "InstallPreviewTarget",
@@ -684,7 +699,6 @@ __all__ = (
     "JobDetailResponse",
     "JobLogsResponse",
     "JobOperationProgress",
-    "JobOperationProgressCheckpointType0",
     "JobOperationResponse",
     "JobProgress",
     "JobResumeResponse",
@@ -732,9 +746,6 @@ __all__ = (
     "LibraryRunSummaryRouteState",
     "LibraryRunSummaryState",
     "LibrarySnapshot",
-    "ListArtifactJobsForRunResponseListartifactjobsforrun",
-    "ListAuditEventsResponseAuditViewApiV1AuditGet",
-    "ListIdentityHistoryResponseListidentityhistory",
     "ListRecipeImageAvailabilityStateType0",
     "ManagedCatalogStaleRecipe",
     "ManagedCatalogSyncProblem",
@@ -861,13 +872,12 @@ __all__ = (
     "PlanReason",
     "PreparationReason",
     "PreparationReasonSeverity",
-    "PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost",
-    "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
     "ProposalChangeRequest",
     "ProposalChangeRequestDocument",
+    "ProposalPreviewResponse",
     "ProposalRequest",
     "RecipeBenchmark",
     "RecipeBenchmarkConfiguration",
@@ -1021,8 +1031,6 @@ __all__ = (
     "StopPlanResponse",
     "StopPreviewRequest",
     "StopRequest",
-    "SubmitArtifactJobResponseSubmitartifactjob",
-    "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
     "TargetAssetState",
     "TargetAssetStateState",
     "TelemetryCapabilitiesResponse",

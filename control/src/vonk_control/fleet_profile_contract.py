@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
 from .preparation_contract import RolloutPreparation
+from .strict_json import StrictJSONModel
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -40,7 +41,7 @@ Alias = Annotated[
 ]
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
@@ -193,10 +194,26 @@ class FleetProfileAssignmentPreview(_StrictModel):
     ] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
 
+    @model_validator(mode="after")
+    def validate_nodes(self) -> FleetProfileAssignmentPreview:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("assignment preview node IDs must be unique")
+        return self
+
 
 class FleetProfileScopePreview(_StrictModel):
     node_ids: list[NodeId] = Field(max_length=32)
     idle_node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> FleetProfileScopePreview:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("preview scope node IDs must be unique")
+        if len(self.idle_node_ids) != len(set(self.idle_node_ids)):
+            raise ValueError("preview idle node IDs must be unique")
+        if not set(self.idle_node_ids) <= set(self.node_ids):
+            raise ValueError("preview idle node IDs must be inside the profile scope")
+        return self
 
 
 class FleetProfilePlanStep(_StrictModel):
@@ -216,6 +233,12 @@ class FleetProfilePlanStep(_StrictModel):
     recipe_revision_id: UuidId | None = None
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     label: Annotated[str, StringConstraints(min_length=1, max_length=240)]
+
+    @model_validator(mode="after")
+    def validate_nodes(self) -> FleetProfilePlanStep:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("plan step node IDs must be unique")
+        return self
 
 
 class FleetProfilePlanSummary(_StrictModel):
