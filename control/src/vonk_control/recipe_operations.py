@@ -1394,7 +1394,7 @@ class RecipeOperationService:
                                     plan.installation_authority_digest
                                 ),
                                 "plan_digest": plan.original_plan_digest,
-                                "cleanup_model_version_sha256": (
+                                "cleanup_model_content_sha256": (
                                     plan.model_impact.model_version_sha256
                                     if node.node_id
                                     in plan.model_impact.cleanup_node_ids
@@ -1477,7 +1477,7 @@ class RecipeOperationService:
                             node.node_id,
                             {
                                 "schema_version": 1,
-                                "model_version_sha256": model_version_sha256,
+                                "model_content_sha256": model_version_sha256,
                                 "plan_digest": plan.plan_digest,
                                 "installations": [
                                     {

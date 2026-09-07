@@ -2781,7 +2781,7 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
             select(AgentOperation).where(AgentOperation.parent_job_id == operation.id)
         )
         assert child is not None
-        assert child.payload["cleanup_model_version_sha256"] is None
+        assert child.payload["cleanup_model_content_sha256"] is None
 
     service.record_node_result(
         operation.id,
@@ -2838,7 +2838,7 @@ def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
                 .order_by(AgentOperation.node_id)
             )
         )
-    assert [child.payload["cleanup_model_version_sha256"] for child in children] == [
+    assert [child.payload["cleanup_model_content_sha256"] for child in children] == [
         None,
         preview.model_impact.model_version_sha256,
     ]
@@ -2908,7 +2908,7 @@ def test_model_deletion_preview_and_apply_cascade_custom_recipe_installation(
         }
         expected_payload = {
             "schema_version": 1,
-            "model_version_sha256": model_digest,
+            "model_content_sha256": model_digest,
             "plan_digest": preview.plan_digest,
             "installations": [
                 {
