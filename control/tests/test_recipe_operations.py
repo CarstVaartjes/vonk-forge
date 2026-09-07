@@ -23,10 +23,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     RecipeInstallPayload,
-    RecipeStartPayload,
     RecipeRunObservationReceiptClaims,
+    RecipeStartPayload,
     SignedRecipeRunObservationReceipt,
     canonical_message,
+    format_model_identity,
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
@@ -242,8 +243,8 @@ def signed_observation_receipt(
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
-    model_identity = (
-        "vonk-forge/synthetic-tiny-fp16/" + _synthetic_model_content_sha256()
+    model_identity = format_model_identity(
+        "vonk-forge", "synthetic-tiny-fp16", _synthetic_model_content_sha256()
     )
     if payload.get("phase") == "rank-launch":
         identity = {
