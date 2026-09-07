@@ -1,7 +1,7 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
-# Resolved from recipes main after the canonical synthetic canary update (PR #74).
+# Resolved from current recipes main during the launch contract update.
 branch = "main"
-revision = "807957c9bae653f618d98fb27620f69bf736fe37"
+revision = "2bd0b1ecf4163fa961791d972968a3a420ecc85d"
 subdirectory = "contracts"
 package = "vonk-forge-public-contracts==0.1.0"
 wheel = "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
