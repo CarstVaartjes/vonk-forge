@@ -299,7 +299,22 @@ def _recovery_authority(
         or failed_rank not in {node.rank for node in nodes}
     ):
         raise DistributedLifecycleError("distributed recovery rank set is invalid")
-    plans = run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
+    run_plan = run.plan if isinstance(run.plan, Mapping) else None
+    if (
+        run.installation_id != installation.id
+        or run.mapping_id != installation.mapping_id
+        or run.mapping_generation != installation.mapping_generation
+        or run_plan is None
+        or run_plan.get("installation_id") != run.installation_id
+        or run_plan.get("mapping_id") != run.mapping_id
+        or run_plan.get("mapping_generation") != run.mapping_generation
+        or run_plan.get("recipe_revision_id") != installation.recipe_revision_id
+        or run_plan.get("plan_digest") != run.plan_digest
+        or run_plan.get("alias") != run.alias
+        or run_plan.get("run_generation") != run.run_generation
+    ):
+        raise DistributedLifecycleError("distributed recovery run authority is stale")
+    plans = run_plan.get("nodes")
     compiled_plans = installation.plan.get("compiled_execution_plans")
     if (
         not isinstance(plans, list)
@@ -308,16 +323,18 @@ def _recovery_authority(
     ):
         raise DistributedLifecycleError("distributed recovery plan is invalid")
     by_rank = {item.get("rank"): item for item in plans if isinstance(item, Mapping)}
-    owner = next(
-        (
-            item
-            for item in plans
-            if isinstance(item, Mapping) and item.get("endpoint_owner") is True
-        ),
-        None,
+    owners = tuple(
+        item
+        for item in plans
+        if isinstance(item, Mapping) and item.get("endpoint_owner") is True
     )
-    if len(by_rank) != len(nodes) or not isinstance(owner, Mapping):
+    if (
+        len(by_rank) != len(nodes)
+        or len(owners) != 1
+        or set(compiled_plans) != {node.node_id for node in nodes}
+    ):
         raise DistributedLifecycleError("distributed recovery plan is invalid")
+    owner = owners[0]
     master_address = owner.get("fabric_address")
     master_port = owner.get("rendezvous_port")
     if not isinstance(master_address, str) or type(master_port) is not int:
@@ -364,7 +381,12 @@ def _recovery_authority(
         local_address = plan.get("fabric_address")
         endpoint_owner = plan.get("endpoint_owner")
         if (
-            not isinstance(local_address, str)
+            plan.get("node_id") != node.node_id
+            or plan.get("rank") != node.rank
+            or plan.get("role") != node.role
+            or plan.get("port") != node.port
+            or plan.get("required_memory_bytes") != node.reserved_memory_bytes
+            or not isinstance(local_address, str)
             or type(endpoint_owner) is not bool
             or not isinstance(compiled_plan, Mapping)
         ):
