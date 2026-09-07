@@ -672,8 +672,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             "phase": "copying",
                             "object_sha256": item.object_sha256,
                             "kind": item.kind,
-                            "bytes": item.bytes,
+                            "completed_bytes": item.bytes,
                             "total_bytes": item.total_bytes,
+                            "total_bytes_known": item.total_bytes.is_some(),
                         }),
                         schema_version: 1,
                     };

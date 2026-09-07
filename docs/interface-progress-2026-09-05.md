@@ -36,7 +36,7 @@ separate results.
   support files remain selectable, and shared object bytes count once.
 - Concurrent Model and image workers claim only the row they will process;
   PostgreSQL no longer over-locks queued work and starves another worker.
-- Current verification: 1,943 Controller tests pass (three documented platform
+- Verification at `e9a2b5b2`, before the ongoing wire consolidation: 1,943 Controller tests pass (three documented platform
   or opt-in skips); all four Controller-to-Rust install/start/uninstall/cleanup
   bridge tests pass. The 432 Rust tests across 40 executables passed in
   unprivileged ARM64 OrbStack before the final response-builder extraction;
@@ -44,10 +44,24 @@ separate results.
   tests, production build, and 25 browser journeys pass (one capture-only skip).
   CLI/generated/supply-chain checks previously passed 328 tests plus 45 subtests;
   the final generated/supply-chain rerun passed all 107 tests.
-- The development lifecycle canary has current source-built Controller images
-  and ARM64 binaries. Its reused target failed the fresh-target check before
-  lifecycle execution; an isolated fresh target is being prepared. This is
-  development evidence, not signed publication or physical Spark acceptance.
+- Distribution now uses the same shared Pydantic model in the Controller's
+  actual response and compiled plan. At `40419e9d`, 562 connected Python tests
+  and 32 Linux Rust protocol tests pass, including the actual HTTP manifest
+  through Rust with safe Unicode, space, and underscore filenames.
+- Removed progress-field aliases and the Rust heartbeat response fallback.
+  Enrollment/renewal use shared Pydantic requests and issued-certificate output;
+  the retired Rust pending-approval response and polling path are removed.
+  Focused validation: 98 Controller enrollment/rotation tests and 12 Linux
+  pairing tests pass. The combined protocol/wire run passed 539 tests, including
+  enrollment and renewal through Rust, and exposed one heartbeat 409 failure
+  following progress canonicalization; that failure remains under repair.
+- The unavailable upstream Skopeo pin is replaced with a verified current
+  official image. All six packaging checks pass; the worker image builds and
+  downloads an OCI archive as UID10001 with a read-only root.
+- The development lifecycle canary is blocked before lifecycle execution:
+  nested Docker on the fresh OrbStack VM cannot unpack the baseline LiteLLM
+  layer containing `/dev/console`. Source-built Controller images and ARM64
+  binaries exist, but this is neither signed release nor physical acceptance.
 - The user approved deleting all remaining legacy code. Removal of old catalog
   ModelGroup/ModelVersion schema branches, validators, and seed/test documents
   is underway in an isolated worker. Active platform harness/runtime wire
