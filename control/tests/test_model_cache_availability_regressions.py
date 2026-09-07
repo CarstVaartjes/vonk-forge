@@ -648,7 +648,12 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     with sessions() as session:
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
+        assert persisted.state == failed.state
         assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
+        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["retry"]["next_retry_at"] is None
+        assert persisted.payload["retry"]["retry_after_seconds"] is None
+    assert service._hf_cooldown_until is None
 
     # Terminal auth failures do not re-enter the automatic scheduler.
     service.tick()
@@ -663,6 +668,15 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     )
     assert denied.id == first.id
     assert denied.state == "failed"
+    assert denied.failure is not None
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.state == denied.state
+        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["retry"]["next_retry_at"] is None
+        assert persisted.payload["retry"]["retry_after_seconds"] is None
+    assert service._hf_cooldown_until is None
     assert len(requests) == 3
     denied_repeat = service.check_access_and_resume(
         first.id,
@@ -692,9 +706,30 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     assert resumed.artifact_set_sha256 == first.artifact_set_sha256
     assert resumed.plan_digest == first.plan_digest
     assert resumed.progress["downloaded_bytes"] >= len(public_data)
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.state == "queued"
+        assert persisted.payload["failure"]["code"] == "model_cache.rate_limited"
+        assert persisted.payload["failure"]["retry_time"] == NOW.replace(
+            second=30
+        ).isoformat()
+        assert persisted.payload["retry"]["next_retry_at"] == persisted.payload[
+            "failure"
+        ]["retry_time"]
+        assert persisted.payload["retry"]["retry_after_seconds"] == 30
+    assert service._hf_cooldown_until == NOW.replace(second=30)
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)
-    assert service.get_operation(resumed.id).state == "succeeded"
+    completed = service.get_operation(resumed.id)
+    assert completed.state == "succeeded"
+    assert completed.failure is None
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.state == completed.state
+        assert "failure" not in persisted.payload
+        assert "claim" not in persisted.payload
     assert len(requests) == 5
     service.close()
     client.close()
