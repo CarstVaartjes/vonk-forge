@@ -288,7 +288,7 @@ class TelemetryWorkload(TelemetryWireModel):
 
 
 class TelemetryMetrics(TelemetryWireModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2]
     series: list[TelemetrySeries] = Field(max_length=512)
     capabilities: list[TelemetryCapability] = Field(max_length=128)
     runtimes: list[TelemetryRuntime] = Field(max_length=32)
@@ -369,14 +369,13 @@ class TelemetryRequest(TelemetryWireModel):
     @classmethod
     def parse(cls, raw: Any) -> TelemetryRequest:
         try:
-            parsed = cls.model_validate(raw)
-            document = json.loads(canonical_message(parsed.model_dump(mode="json")))
+            encoded = canonical_message(raw)
         except (ValidationError, TypeError, ValueError) as error:
             raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
-        if len(canonical_message(document)) > MAX_TELEMETRY_REPORT_BYTES:
+        if len(encoded) > MAX_TELEMETRY_REPORT_BYTES:
             raise AgentProtocolError("telemetry report is too large")
         try:
-            return cls.model_validate(document)
+            return cls.model_validate_json(encoded)
         except ValidationError as error:
             raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
 

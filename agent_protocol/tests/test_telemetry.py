@@ -143,6 +143,17 @@ def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
         TelemetryReport.parse(unknown)
 
 
+@pytest.mark.parametrize("value", [None, True, 2.0], ids=["missing", "bool", "float"])
+def test_metrics_schema_version_requires_exact_integer_two(value: object) -> None:
+    invalid = report()
+    if value is None:
+        del invalid["samples"][0]["metrics"]["schema_version"]  # type: ignore[index]
+    else:
+        invalid["samples"][0]["metrics"]["schema_version"] = value  # type: ignore[index]
+    with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
+        TelemetryReport.parse(invalid)
+
+
 @pytest.mark.parametrize("path", [("samples",), ("samples", 0, "metrics", "series")])
 def test_report_rejects_malformed_collection_shapes(path: tuple[object, ...]) -> None:
     malformed = report()

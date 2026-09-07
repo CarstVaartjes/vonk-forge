@@ -25,15 +25,8 @@ from vonk_agent_protocol.telemetry import (
     TelemetryWorkload,
     TelemetryWorkloadState,
 )
-from vonk_agent_protocol.wire_model import WireModel
-
-# Compatibility name for projection consumers. This is an alias, so the
-# Controller cannot accidentally create a second wire model hierarchy.
-TelemetryContractModel = WireModel
-
 __all__ = [
     "TelemetryCapability",
-    "TelemetryContractModel",
     "TelemetryDetails",
     "TelemetryFreshness",
     "TelemetryMeasurementKind",
