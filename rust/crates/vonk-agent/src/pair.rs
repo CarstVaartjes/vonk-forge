@@ -7,14 +7,14 @@ use std::{
 
 use rcgen::PublicKeyData;
 use reqwest::{Certificate, Client};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x509_pem};
 
-pub use vonk_agent_protocol::EnrollmentEvidence;
-use vonk_agent_protocol::EnrollmentRequest;
+pub use vonk_agent_protocol::generated::{
+    EnrollmentEvidence, EnrollmentSubmitRequest, IssuedCertificateResponse,
+};
 
 use crate::{
     config::AgentConfig,
@@ -50,19 +50,6 @@ pub enum PairingError {
     Certificate,
     #[error("local identity operation failed")]
     Identity(#[from] crate::identity::IdentityError),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct IssuedResponse {
-    pub node_id: String,
-    pub certificate_pem: String,
-    pub chain_pem: String,
-    pub serial: String,
-    pub fingerprint: String,
-    pub not_before: String,
-    pub not_after: String,
-    pub generation: u64,
 }
 
 pub async fn pair(
@@ -115,7 +102,7 @@ pub async fn pair(
     let response = client
         .post(endpoint)
         .header("content-type", "application/json")
-        .json(&EnrollmentRequest {
+        .json(&EnrollmentSubmitRequest {
             csr: csr.to_owned(),
             evidence,
             grant_token: token.to_owned(),
@@ -154,10 +141,10 @@ pub fn validate_enrollment_response(
     status: u16,
     body: &[u8],
     node_id: &str,
-) -> Result<IssuedResponse, PairingError> {
+) -> Result<IssuedCertificateResponse, PairingError> {
     match status {
         200 => {
-            let issued: IssuedResponse =
+            let issued: IssuedCertificateResponse =
                 serde_json::from_slice(body).map_err(|_| PairingError::Response)?;
             if issued.node_id != node_id
                 || issued.generation == 0
@@ -259,7 +246,7 @@ fn bounded_file(path: &Path) -> Result<String, PairingError> {
 }
 
 pub fn validate_issued(
-    issued: &IssuedResponse,
+    issued: &IssuedCertificateResponse,
     pending: &PendingIdentity,
     node_id: &str,
 ) -> Result<(), PairingError> {

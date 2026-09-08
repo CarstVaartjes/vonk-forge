@@ -7,7 +7,6 @@ use std::{
 };
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -20,13 +19,18 @@ use vonk_agent_protocol::{
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
     RecipeRunObservationsWire, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
 };
+use vonk_agent_protocol::generated::{
+    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
+    HostRuntimeGrantRequest, IssuedCertificateResponse, PackageActivationGrantRequest,
+    RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire, RenewRequest,
+};
 
 use crate::{
     config::AgentConfig,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
     oci::MAX_MANAGED_RECIPE_RUNS,
-    pair::{IssuedResponse, verify_ca_pin},
+    pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
     workloads::CompiledExecutionPlan,
@@ -63,19 +67,6 @@ impl ClientError {
     }
 }
 
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ClaimRequest<'a> {
-    capabilities: &'a [&'a str],
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hostname: Option<&'a str>,
-    lease_seconds: u64,
-    node_id: &'a str,
-    protocol_version: u32,
-    runtime_identity: &'a AgentRuntimeIdentity,
-    wait_seconds: u64,
-}
-
 /// Serialize the current claim contract used by the HTTP transport.
 pub fn claim_request_document(
     node_id: &str,
@@ -91,12 +82,12 @@ pub fn claim_request_document(
         .observation_receipt_public_key()
         .map_err(|_| ClientError::Protocol)?;
     canonical_json(&ClaimRequest {
-        capabilities,
-        hostname,
+        capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+        hostname: hostname.map(str::to_owned),
         lease_seconds: 60,
-        node_id,
+        node_id: node_id.to_owned(),
         protocol_version: 3,
-        runtime_identity,
+        runtime_identity: runtime_identity.clone(),
         wait_seconds: wait_seconds.min(60),
     })
     .map_err(|_| ClientError::Protocol)
@@ -163,79 +154,10 @@ pub fn build_exact_recipe_run_observations<'a>(
     })
 }
 
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RenewRequest<'a> {
-    csr: &'a str,
-    node_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ActivateRequest<'a> {
-    generation: u64,
-    node_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct HostRuntimeGrantRequest<'a> {
-    node_id: &'a str,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    action: HostRuntimeAction,
-    request_sha256: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunInspectionGrantRequest<'a> {
-    schema_version: u8,
-    node_id: &'a str,
-    #[serde(flatten)]
-    binding: &'a RecipeRunInspectionBinding,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    request_sha256: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct AgentUpgradeGrantRequest<'a> {
-    node_id: &'a str,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    package_sha256: &'a str,
-    package_signature: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HostRuntimeGrantResponse {
-    grant: SignedHostHelperGrant,
-}
-
 #[derive(Debug)]
 pub struct RecipeRunInspectionGrant {
     pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunInspectionGrantResponse {
-    schema_version: u8,
-    observation_identity_sha256: String,
-    grant: SignedHostHelperGrant,
 }
 
 #[derive(Debug, Clone)]

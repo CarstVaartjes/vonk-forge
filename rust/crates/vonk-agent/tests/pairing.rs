@@ -15,7 +15,8 @@ use vonk_agent::{
         persist_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
     },
     pair::{
-        EnrollmentEvidence, IssuedResponse, PairingError, pair, validate_enrollment_response,
+        EnrollmentEvidence, IssuedCertificateResponse, PairingError, pair,
+        validate_enrollment_response,
         validate_issued,
     },
 };
@@ -219,7 +220,7 @@ fn issued_certificate_must_bind_the_generated_key_and_node_identity() {
         Ia5String::try_from(format!("spiffe://vonk-forge.local/node/{NODE_ID}")).unwrap(),
     )];
     let certificate = parameters.self_signed(&key).unwrap();
-    let response = IssuedResponse {
+    let response = IssuedCertificateResponse {
         node_id: NODE_ID.to_owned(),
         certificate_pem: certificate.pem(),
         chain_pem: certificate.pem(),

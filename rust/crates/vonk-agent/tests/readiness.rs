@@ -5,16 +5,17 @@ use vonk_agent::{
     readiness::{ReadinessReceipt, verify_readiness_at},
     runtime_identity::AgentRuntimeIdentity,
 };
+use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
 
 fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
     AgentRuntimeIdentity {
         semantic_version: "0.1.0".to_owned(),
         build_digest: format!("sha256:{}", build.to_string().repeat(64)),
         binary_digest: binary.to_string().repeat(64),
-        architecture: "linux-amd64".to_owned(),
+        architecture: AgentRuntimeIdentityArchitecture::LinuxAmd64,
         self_test_passed: true,
         package_activation: None,
-        observation_receipt_public_key: Some("d".repeat(64)),
+        observation_receipt_public_key: "d".repeat(64),
     }
 }
 
