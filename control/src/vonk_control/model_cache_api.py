@@ -626,21 +626,6 @@ class ModelCacheOperationProvider:
             None if operation.result is None else operation.result.model_dump(mode="json")
         )
         retryable = operation.state == "failed" and operation.retryable
-        if operation.state == "failed" and result is None:
-            result = {
-                "error_code": "model_cache_operation_failed",
-                "summary": f"Model cache {operation.kind} failed",
-                "detail": (
-                    None
-                    if operation.last_error is None
-                    else operation.last_error[:256]
-                ),
-                "retryable": retryable,
-                "uncertain": False,
-            }
-        elif operation.state == "failed" and result is not None:
-            result.setdefault("retryable", retryable)
-            result.setdefault("uncertain", False)
         return {
             "id": operation.id,
             "parent_id": None,
@@ -653,6 +638,7 @@ class ModelCacheOperationProvider:
             "updated_at": operation.updated_at,
             "supported_actions": ["retry"] if retryable else [],
             "result": result,
+            "failure": operation.failure,
         }
 
     @staticmethod
