@@ -303,7 +303,8 @@ impl AgentHttpClient {
 
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
-        if progress.progress.phase == "executing"
+        if let Some(measured) = progress.progress.as_mut()
+            && measured.phase == "executing"
             && let Some((operation_id, phase)) = self
                 .progress_phase
                 .lock()
@@ -311,7 +312,7 @@ impl AgentHttpClient {
                 .as_ref()
             && *operation_id == progress.operation_id
         {
-            progress.progress.phase.clone_from(phase);
+            measured.phase.clone_from(phase);
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
@@ -2644,13 +2645,13 @@ mod tests {
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-            progress: OperationProgress {
+            progress: Some(OperationProgress {
                 phase: "executing".to_owned(),
-                completed_bytes: 0,
-                total_bytes: None,
-                total_bytes_known: false,
-                completed_items: None,
-                total_items: None,
+                completed_bytes: 21,
+                total_bytes: Some(42),
+                total_bytes_known: true,
+                completed_items: Some(1),
+                total_items: Some(2),
                 object_sha256: None,
                 kind: None,
                 activity: None,
@@ -2662,7 +2663,7 @@ mod tests {
                 elapsed_seconds: None,
                 checkpoint: None,
                 members: Vec::new(),
-            },
+            }),
             schema_version: 1,
         }
     }
@@ -2694,6 +2695,45 @@ mod tests {
                 .unwrap()
                 .starts_with("POST /agent/v1/heartbeat HTTP/1.1\r\n")
         );
+        assert_eq!(
+            serde_json::from_slice::<AgentProgress>(body).unwrap(),
+            progress
+        );
+        assert_eq!(
+            serde_json::from_slice::<AgentProgress>(body)
+                .unwrap()
+                .progress
+                .unwrap()
+                .total_bytes,
+            Some(42)
+        );
+    }
+
+    #[tokio::test]
+    async fn lease_only_heartbeat_omits_measured_progress() {
+        let mut progress = progress();
+        progress.progress = None;
+        let directive = AgentDirective {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline + chrono::Duration::seconds(30),
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id.clone(),
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        };
+        let (client, server) = heartbeat_client(directive.clone());
+
+        assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
+        let request = server.join().unwrap();
+        let body = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| &request[index + 4..])
+            .unwrap();
+        let document: Value = serde_json::from_slice(body).unwrap();
+        assert!(!document.as_object().unwrap().contains_key("progress"));
         assert_eq!(
             serde_json::from_slice::<AgentProgress>(body).unwrap(),
             progress

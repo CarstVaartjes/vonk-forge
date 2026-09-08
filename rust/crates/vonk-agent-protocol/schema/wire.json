@@ -583,7 +583,15 @@
           "type": "string"
         },
         "progress": {
-          "$ref": "#/$defs/OperationProgress"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationProgress"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "schema_version": {
           "const": 1,
@@ -598,8 +606,7 @@
         "attempt",
         "fence",
         "node_id",
-        "deadline",
-        "progress"
+        "deadline"
       ],
       "title": "AgentProgress",
       "type": "object"
@@ -3026,6 +3033,100 @@
         "grant"
       ],
       "title": "HostHelperGrantResponse",
+      "type": "object"
+    },
+    "HostHelperResponse": {
+      "additionalProperties": false,
+      "description": "Shared response shape; consumers also enforce their grant/action context.",
+      "properties": {
+        "error_code": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "evidence_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidence Sha256"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "observation_receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Request Id"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "rejected",
+            "package-installed",
+            "package-activation-confirmed",
+            "unit-restarted",
+            "reboot-scheduled",
+            "container-runtime-request-executed",
+            "container-runtime-stop-uncertain"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "status",
+        "evidence_sha256"
+      ],
+      "title": "HostHelperResponse",
       "type": "object"
     },
     "HostHelperSignature": {
@@ -10132,6 +10233,7 @@
     "FailureProperty": "#/$defs/FailureProperty",
     "HostHelperGrantClaims": "#/$defs/HostHelperGrantClaims",
     "HostHelperGrantResponse": "#/$defs/HostHelperGrantResponse",
+    "HostHelperResponse": "#/$defs/HostHelperResponse",
     "HostHelperSignature": "#/$defs/HostHelperSignature",
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",

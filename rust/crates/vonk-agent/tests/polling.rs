@@ -100,7 +100,7 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        progress: operation_progress("executing"),
+        progress: Some(operation_progress("executing")),
         schema_version: claim.schema_version,
     };
     let renewed = AgentDirective {
@@ -137,7 +137,7 @@ fn heartbeat_renewal_rejects_stale_or_foreign_directives() {
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        progress: operation_progress("executing"),
+        progress: Some(operation_progress("executing")),
         schema_version: claim.schema_version,
     };
     let mut directive = AgentDirective {

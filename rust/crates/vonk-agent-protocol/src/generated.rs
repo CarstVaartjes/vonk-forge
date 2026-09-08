@@ -378,7 +378,8 @@ pub struct AgentProgress {
     pub job_id: ::uuid::Uuid,
     pub node_id: ::std::string::String,
     pub operation_id: ::uuid::Uuid,
-    pub progress: OperationProgress,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub progress: ::std::option::Option<OperationProgress>,
     pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1860,6 +1861,101 @@ pub struct HostHelperGrantClaims {
 #[derive(Eq)]
 pub struct HostHelperGrantResponse {
     pub grant: SignedHostHelperGrant,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct HostHelperResponse {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub error_code: ::std::option::Option<::std::string::String>,
+    pub evidence_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub exit_code: ::std::option::Option<u32>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+    pub request_id: ::std::option::Option<::uuid::Uuid>,
+    pub schema_version: u8,
+    pub status: HostHelperResponseStatus,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum HostHelperResponseStatus {
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "package-installed")]
+    PackageInstalled,
+    #[serde(rename = "package-activation-confirmed")]
+    PackageActivationConfirmed,
+    #[serde(rename = "unit-restarted")]
+    UnitRestarted,
+    #[serde(rename = "reboot-scheduled")]
+    RebootScheduled,
+    #[serde(rename = "container-runtime-request-executed")]
+    ContainerRuntimeRequestExecuted,
+    #[serde(rename = "container-runtime-stop-uncertain")]
+    ContainerRuntimeStopUncertain,
+}
+impl ::std::fmt::Display for HostHelperResponseStatus {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Rejected => f.write_str("rejected"),
+            Self::PackageInstalled => f.write_str("package-installed"),
+            Self::PackageActivationConfirmed => f.write_str("package-activation-confirmed"),
+            Self::UnitRestarted => f.write_str("unit-restarted"),
+            Self::RebootScheduled => f.write_str("reboot-scheduled"),
+            Self::ContainerRuntimeRequestExecuted => {
+                f.write_str("container-runtime-request-executed")
+            }
+            Self::ContainerRuntimeStopUncertain => f.write_str("container-runtime-stop-uncertain"),
+        }
+    }
+}
+impl ::std::str::FromStr for HostHelperResponseStatus {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "rejected" => Ok(Self::Rejected),
+            "package-installed" => Ok(Self::PackageInstalled),
+            "package-activation-confirmed" => Ok(Self::PackageActivationConfirmed),
+            "unit-restarted" => Ok(Self::UnitRestarted),
+            "reboot-scheduled" => Ok(Self::RebootScheduled),
+            "container-runtime-request-executed" => Ok(Self::ContainerRuntimeRequestExecuted),
+            "container-runtime-stop-uncertain" => Ok(Self::ContainerRuntimeStopUncertain),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HostHelperResponseStatus {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for HostHelperResponseStatus {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HostHelperResponseStatus {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -5768,7 +5864,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentProgress {
             pub job_id: ::uuid::Uuid,
             pub node_id: ::std::string::String,
             pub operation_id: ::uuid::Uuid,
-            pub progress: OperationProgress,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub progress: ::std::option::Option<OperationProgress>,
             pub schema_version: u8,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -7319,6 +7416,67 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self { grant: raw.grant })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("HostHelperResponse", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub error_code: ::std::option::Option<::std::string::String>,
+            pub evidence_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub exit_code: ::std::option::Option<u32>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+            pub request_id: ::std::option::Option<::uuid::Uuid>,
+            pub schema_version: u8,
+            pub status: HostHelperResponseStatus,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            error_code: raw.error_code,
+            evidence_sha256: raw.evidence_sha256,
+            exit_code: raw.exit_code,
+            observation_receipt: raw.observation_receipt,
+            request_id: raw.request_id,
+            schema_version: raw.schema_version,
+            status: raw.status,
+        })
+    }
+}
+impl HostHelperResponseStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rejected => "rejected",
+            Self::PackageInstalled => "package-installed",
+            Self::PackageActivationConfirmed => "package-activation-confirmed",
+            Self::UnitRestarted => "unit-restarted",
+            Self::RebootScheduled => "reboot-scheduled",
+            Self::ContainerRuntimeRequestExecuted => "container-runtime-request-executed",
+            Self::ContainerRuntimeStopUncertain => "container-runtime-stop-uncertain",
+        }
+    }
+}
+impl ::std::ops::Deref for HostHelperResponseStatus {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HostHelperResponseStatus {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HostHelperResponseStatus {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
