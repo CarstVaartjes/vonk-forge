@@ -1010,3 +1010,54 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     assert "LIMIT 2" in queries[0]
     assert "attempt_state" in queries[1]
     assert "signed_grant" not in queries[0]
+
+
+def test_failed_canary_uninstall_reports_redacted_operation_evidence(monkeypatch) -> None:
+    from cluster_profiles.generated_control.models.agent_failure_result import (
+        AgentFailureResult,
+    )
+    from cluster_profiles.generated_control.models.operation_response import (
+        OperationResponse,
+    )
+    from cluster_profiles.generated_control.models.recipe_operation_result import (
+        RecipeOperationResult,
+    )
+    from cluster_profiles.generated_control.models.recipe_operation_result_node_evidence import (
+        RecipeOperationResultNodeEvidence,
+    )
+
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = object()
+    secret = "fixture-upstream-secret"
+    monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret)
+    node_id = "spk_" + "b" * 32
+    evidence = RecipeOperationResultNodeEvidence.from_dict({
+        node_id: AgentFailureResult(
+            error_code="recipe_uninstall_failed",
+            reason="runtime cache cleanup failed: " + secret,
+        ).to_dict(),
+    })
+    operation = OperationResponse(
+        id="11111111-1111-4111-8111-111111111111",
+        kind="recipe.uninstall",
+        state="failed",
+        owner_id="22222222-2222-4222-8222-222222222222",
+        plan_digest="a" * 64,
+        nodes=[node_id],
+        result=RecipeOperationResult(
+            successful_nodes=[], failed_nodes=[node_id], node_evidence=evidence,
+        ),
+    )
+    with pytest.raises(lifecycle.LifecycleError) as captured:
+        run._await_canary_recipe_operation(
+            operation.to_dict(),
+            node_id=node_id,
+            owner_id=operation.owner_id,
+            plan_digest=operation.plan_digest,
+        )
+    message = str(captured.value)
+    assert "recipe_uninstall_failed" in message
+    assert "runtime cache cleanup failed" in message
+    assert secret not in message
+    assert "<redacted>" in message

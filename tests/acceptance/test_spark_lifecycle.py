@@ -2390,7 +2390,13 @@ class SparkLifecycle:
             or operation.get("plan_digest") != plan_digest
             or operation.get("nodes") != [node_id]
         ):
-            raise LifecycleError("synthetic canary uninstall evidence is incomplete")
+            details = self._redact_diagnostics(json.dumps({
+                key: operation.get(key)
+                for key in ("id", "kind", "state", "owner_id", "plan_digest", "nodes", "result")
+            }))
+            raise LifecycleError(
+                f"synthetic canary uninstall evidence is incomplete; operation evidence: {details}"
+            )
         return operation
 
     @staticmethod
