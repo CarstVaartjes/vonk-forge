@@ -9,6 +9,8 @@ document parsers, old-response fallbacks, positional compatibility constructors,
 or default values that conceal malformed input. Fix the producer and consumer
 together. Transport retries and partial progress updates remain supported by
 their current contracts; neither requires accepting an older document format.
+Declared optional fields and defaults are part of the current contract, not
+legacy compatibility.
 
 ## Ownership
 
@@ -55,10 +57,48 @@ with its canonical model before use. A database row is not proof that the
 document satisfies the contract.
 
 Persisted progress is a contract too. Validate the complete stored document
-before interpreting a missing child or adapter state. Only a declared nullable
-field may mean absent; malformed JSON must not silently become an empty or
-new operation. Completed phase receipts have phase-specific required fields,
+before interpreting a missing child or adapter state. Only a declared optional
+field may be omitted; nullability independently controls whether `null` is
+valid. Malformed JSON must not silently become an empty or new operation.
+Completed phase receipts have phase-specific required fields,
 and reuse the canonical model-cache and runtime-image receipt types.
+
+## Optional fields and canonical serialization
+
+Accept omission and explicit `null` equivalently for optional nullable fields
+whose declared default is `None`. **Omit those unused fields on output.** This
+is the standard for API, persisted wire, and signed/hashed contract documents.
+Do not change an optional field to required simply because a generator omitted
+it during serialization.
+
+| Declared meaning | Accepted input | Canonical output |
+| --- | --- | --- |
+| Optional nullable field, default `None` | Missing or `null` | Field omitted |
+| Required nullable field | A value or explicit `null` | Field retained; missing is rejected |
+| Optional field with a non-null default | Missing applies its declared default | Preserve the resulting value; `null` follows the field's declared rules |
+| Meaningful `false`, `0`, empty string/list/object | Valid value of the declared type | Preserve the value |
+| Engine-owned JSON content | Values allowed by its extension contract | Preserve content, including meaningful nested `null` |
+
+Use model-aware normalization: validate the selected canonical model, apply
+its declared defaults, omit only its unused optional-null fields, and then
+serialize deterministically. Producers hash or sign that canonical document;
+consumers apply the identical policy before checking its digest or signature.
+When a payload's model is selected by its operation kind, select that model
+before normalization. Do not normalize arbitrary dictionaries by deleting all
+nulls, and do not weaken verification to hide a mismatch.
+
+Schema type and serialization are separate concerns. A formatted string must
+remain a string: changing `+00:00` to `Z` changes its bytes even if both denote
+the same time. Any normalization of a true datetime field must be defined by
+the authoritative contract and shared by both languages. The generator must
+derive field/default/omission behavior from that same source, not a handwritten
+list of special cases.
+
+Connected tests must use actual producer output and the real consumer. Cover
+optional missing versus null producing identical canonical bytes and digest,
+required-null preservation, defaults, false/zero values, engine-owned nulls,
+formatted strings, and real signature verification. A schema-acceptance test
+or equality between two manually written fixtures is insufficient.
 
 ## Rust and generated clients
 
@@ -104,7 +144,8 @@ Rust generation must preserve field presence, nullability, scalar types, and
 tagged unions from this same Pydantic graph. Generation does not replace
 semantic validation or connected wire tests: test the actual producers and
 consumers, including omitted required fields, explicit nulls, and numeric
-boundaries.
+boundaries. Optional-field presence follows the canonical omission policy
+above; absent and explicit-null forms must not create different identities.
 
 ## Required launch checks
 

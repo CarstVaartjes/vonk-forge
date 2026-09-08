@@ -1,5 +1,11 @@
 # Contract handoff audit — 8 September 2026
 
+This is a historical snapshot of the revisions below. Current implementation
+decisions are in [the handoff plan](contract-handoff-implementation-plan-2026-09-08.md)
+and [API contracts](api-contracts.md): typify generates Rust wire structures;
+unused optional-null fields are omitted, while required nullable fields remain
+present. Both languages share canonical normalization before hashing/signing.
+
 The Pydantic chain exists, but the cutover is incomplete. Several consumers
 still interpret independently defined documents or reconstruct a narrower
 document after successful canonical validation. Generated schema checks do
