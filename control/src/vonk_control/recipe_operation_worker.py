@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -11,6 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import RecipeRun, RunNode
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
 from .recipe_routes import RecipeRouteNotReady, RecipeRouteService
 
 
@@ -101,10 +105,13 @@ class RecipeOperationWorker:
             if not runs:
                 return False
             for run in runs:
-                if (
-                    not isinstance(run.plan, Mapping)
-                    or run.plan.get("observation_schema_version") != 2
-                ):
+                try:
+                    exact_observations = (
+                        parse_stored_run_plan(run.plan).observation_schema_version == 2
+                    )
+                except RecipeExecutionContractError:
+                    exact_observations = False
+                if not exact_observations:
                     continue
                 deadline = run.observation_deadline_at
                 if deadline is not None and now < (

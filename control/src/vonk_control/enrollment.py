@@ -36,6 +36,10 @@ from .models import (
     RunNode,
 )
 from .pki import CertificateAuthority, IssuedCertificate
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
 from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
@@ -1041,10 +1045,17 @@ def _invalidate_rotated_observation_receipts(
     )
     for run_node in nodes:
         run = session.get(RecipeRun, run_node.run_id, with_for_update=True)
+        try:
+            exact_observations = (
+                parse_stored_run_plan(run.plan).observation_schema_version == 2
+                if run is not None
+                else False
+            )
+        except RecipeExecutionContractError:
+            exact_observations = False
         if (
             run is None
-            or not isinstance(run.plan, Mapping)
-            or run.plan.get("observation_schema_version") != 2
+            or not exact_observations
         ):
             continue
         run_node.state = "failed"

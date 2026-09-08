@@ -133,8 +133,18 @@ class DistributedRecoveryCoordinator:
                     if worked:
                         break
                     continue
+                try:
+                    run_plan = run_plan_document(run.plan)
+                except RecipeExecutionContractError as error:
+                    run.state = "failed"
+                    run.route_state = "withdrawn"
+                    run.route_error = "stored run plan is invalid"
+                    run.updated_at = now
+                    worked = True
+                    break
                 run.run_generation += 1
-                run.plan = {**run.plan, "run_generation": run.run_generation}
+                run_plan["run_generation"] = run.run_generation
+                run.plan = run_plan_document(run_plan)
                 try:
                     authority = _recovery_authority(session, run, now, failed[0].rank)
                 except DistributedLifecycleError as error:

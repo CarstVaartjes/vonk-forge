@@ -364,12 +364,24 @@ class StopOnlyLifecycle:
 class PendingBuilds:
     """Small build planner double that preserves the real build contract."""
 
-    def __init__(self, sessions, *, build_id: str, builder_node_id: str, revision_id: str, source_digest: str):
+    def __init__(
+        self,
+        sessions,
+        *,
+        build_id: str,
+        builder_node_id: str,
+        revision_id: str,
+        source_digest: str,
+        template_plan: dict[str, object],
+        template_policy_report: dict[str, object],
+    ):
         self.sessions = sessions
         self.build_id = build_id
         self.builder_node_id = builder_node_id
         self.revision_id = revision_id
         self.source_digest = source_digest
+        self.template_plan = template_plan
+        self.template_policy_report = template_policy_report
         self.calls: list[str] = []
 
     def plan(self, recipe_revision_id: str, builder_node_id: str, *, now):
@@ -385,13 +397,13 @@ class PendingBuilds:
                     source_bundle_sha256=self.source_digest,
                     build_input_sha256="d" * 64,
                     state="planned",
-                    policy_report={"passed": True},
+                    policy_report=self.template_policy_report,
                     plan={
+                        **self.template_plan,
                         "build_id": self.build_id,
                         "recipe_revision_id": self.revision_id,
                         "source_bundle_sha256": self.source_digest,
                         "build_input_sha256": "d" * 64,
-                        "platform": "linux/arm64",
                     },
                     created_at=NOW,
                     updated_at=NOW,
@@ -1188,14 +1200,9 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         build.image_bytes = None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_digest,
-            "source_bundle_sha256": build.source_bundle_sha256,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        # Keep the complete persisted build envelope.  A restart consumes the
+        # durable executable plan; an identity-only fixture is malformed DB
+        # state and must fail closed.
         session.add(
             RecipeSourceBundle(
                 sha256=build.source_bundle_sha256,
@@ -1363,6 +1370,8 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
+        template_plan = dict(build.plan)
+        template_policy_report = dict(build.policy_report)
         session.delete(build)
         session.add(
             RecipeSourceBundle(
@@ -1414,6 +1423,8 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             builder_node_id=builder_id,
             revision_id=revision.id,
             source_digest=source_digest,
+            template_plan=template_plan,
+            template_policy_report=template_policy_report,
         )
     lifecycle._builds = fake_builds
     service = _service(
@@ -1467,14 +1478,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": build.recipe_revision_id,
-            "recipe_content_sha256": revision.content_digest,
-            "source_bundle_sha256": source_digest,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        build.plan = {**build.plan, "source_bundle_sha256": source_digest}
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
@@ -1501,7 +1505,10 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         row = session.get(RecipeBuild, build_id)
         assert row is not None
         row.build_input_sha256 = build_plan.build_input_sha256
-        row.plan["build_input_sha256"] = build_plan.build_input_sha256
+        row.plan = {
+            **row.plan,
+            "build_input_sha256": build_plan.build_input_sha256,
+        }
 
     def start_build(*_args, **_kwargs):
         with sessions.begin() as session:

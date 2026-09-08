@@ -43,6 +43,10 @@ from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
 from .operation_progress import observe_progress, progress_write_due
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_build_policy,
+)
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
 ResultConsumer = Callable[
@@ -745,13 +749,16 @@ class AgentJobService:
         build = (
             session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
         )
-        report = build.policy_report if build is not None else None
+        try:
+            report = parse_stored_build_policy(build.policy_report) if build else None
+        except RecipeExecutionContractError:
+            return False
         return bool(
             build is not None
             and build.builder_node_id == operation.node_id
-            and isinstance(report, dict)
-            and report.get("builder_binary_digest") == runtime_identity.binary_digest
-            and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
+            and report is not None
+            and report.builder_binary_digest == runtime_identity.binary_digest
+            and report.artifact_format == BUILD_ARTIFACT_FORMAT
         )
 
     def _reject_recipe_build_claim(

@@ -10,11 +10,11 @@ from typing import Any, Protocol
 from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, model_validator
 from starlette.responses import JSONResponse
+from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_forge_contracts import RecipeDefinition
 
 from .audit import AuditRecord
 from .auth import Actor
-from .compiled_execution_plan import CompiledExecutionPlan
 from .library_contract import Digest, ImageDigest, NodeId, Scalar, Text64, UuidId
 from .recipe_action_plans import SharedCachePolicy
 from .recipe_lifecycle_contract import (
@@ -418,10 +418,6 @@ class RequestKey(StrictModel):
 def _normalize_json(value: object) -> object:
     """Project Python producer containers into JSON array/object containers."""
 
-    if isinstance(value, datetime):
-        # The response boundary is JSON; persisted contracts keep their
-        # lexical timestamp, while fresh admission dataclasses use datetime.
-        return value.isoformat()
     if isinstance(value, tuple):
         return [_normalize_json(item) for item in value]
     if isinstance(value, list):

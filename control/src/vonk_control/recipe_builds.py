@@ -477,18 +477,17 @@ class RecipeBuildService:
             for candidate in candidates:
                 if not _valid_succeeded_receipt(candidate):
                     continue
-                report = candidate.policy_report
-                builder_digest = (
-                    report.get("builder_binary_digest")
-                    if isinstance(report, Mapping)
-                    else None
-                )
+                try:
+                    report = parse_stored_build_policy(candidate.policy_report)
+                    parse_stored_build_plan(candidate.plan)
+                except RecipeExecutionContractError:
+                    continue
+                builder_digest = report.builder_binary_digest
                 if (
                     not isinstance(builder_digest, str)
                     or _SHA256.fullmatch(builder_digest) is None
-                    or not isinstance(report, Mapping)
-                    or report.get("artifact_format") != BUILD_ARTIFACT_FORMAT
-                    or report.get("source_bundle_sha256") != source_sha256
+                    or report.artifact_format != BUILD_ARTIFACT_FORMAT
+                    or report.source_bundle_sha256 != source_sha256
                 ):
                     continue
                 exact = derive_build_input_identity(
@@ -514,8 +513,17 @@ class RecipeBuildService:
                 input_intent_sha256=intent_sha256,
                 input_intent=copy.deepcopy(intent),
             )
-        report = cached.policy_report
-        builder_digest = report["builder_binary_digest"]
+        try:
+            report = parse_stored_build_policy(cached.policy_report)
+        except RecipeExecutionContractError as error:
+            raise RecipeBuildError(
+                "build.plan_invalid", "cached source build envelope is invalid"
+            ) from error
+        builder_digest = report.builder_binary_digest
+        if builder_digest is None:
+            raise RecipeBuildError(
+                "build.plan_invalid", "cached source build policy is incomplete"
+            )
         return RecipeBuildResolution(
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_digest,
@@ -881,6 +889,7 @@ class RecipeBuildService:
         try:
             stored_policy = parse_stored_build_policy(build.policy_report)
             parse_stored_build_plan(build.plan)
+            requested_plan = parse_stored_build_plan(plan.agent_payload)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
                 "build.plan_invalid", "stored source build envelope is invalid"
@@ -891,6 +900,8 @@ class RecipeBuildService:
             build.builder_node_id != plan.builder_node_id
             or build.build_input_sha256 != plan.build_input_sha256
             or expected_format != BUILD_ARTIFACT_FORMAT
+            or requested_plan.build_id != plan.build_id
+            or requested_plan.build_input_sha256 != plan.build_input_sha256
         ):
             raise RecipeBuildError(
                 "build.plan_invalid", "stored build identity is invalid"
@@ -915,14 +926,15 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.inventory_stale", "builder inventory is stale"
             )
-        limits = plan.agent_payload.get("limits")
-        source_bytes = plan.agent_payload.get("source_bundle_bytes")
+        plan_payload = build_plan_document(requested_plan)
+        limits = plan_payload.get("limits")
+        source_bytes = plan_payload.get("source_bundle_bytes")
         if not isinstance(limits, dict) or not isinstance(source_bytes, int):
             raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
         temporary_bytes = limits.get("temporary_bytes")
         memory_bytes = limits.get("memory_bytes")
         output_bytes = limits.get("output_bytes")
-        base_image_storage_bytes = plan.agent_payload.get("base_image_storage_bytes")
+        base_image_storage_bytes = plan_payload.get("base_image_storage_bytes")
         if (
             not isinstance(temporary_bytes, int)
             or not isinstance(memory_bytes, int)

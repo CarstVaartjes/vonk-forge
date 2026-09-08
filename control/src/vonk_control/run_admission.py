@@ -597,6 +597,7 @@ class RunAdmissionService:
                     "recipe_revision_id": plan.recipe_revision_id,
                     "plan_digest": plan.plan_digest,
                     "nodes": [_node_document(item) for item in plan.nodes],
+                    "execution_mode": "one-shot-jobs" if logical_job else None,
                 }
             )
         except RecipeExecutionContractError as error:

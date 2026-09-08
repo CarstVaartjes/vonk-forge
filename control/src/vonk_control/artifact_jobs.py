@@ -56,6 +56,7 @@ from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
+    parse_stored_run_plan,
 )
 from .strict_json import StrictJSONModel
 
@@ -1556,7 +1557,13 @@ class ArtifactJobService:
                 select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
             )
         )
-        plan_nodes = run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
+        try:
+            plan_nodes = [
+                node.model_dump(mode="json")
+                for node in parse_stored_run_plan(run.plan).nodes
+            ]
+        except RecipeExecutionContractError as error:
+            raise ArtifactJobError("recipe run plan is invalid") from error
         endpoint_ids = (
             {
                 item.get("node_id")
