@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "rust/crates/vonk-wire-codegen",
     "rust/crates/vonk-agent-protocol",
     "rust/crates/vonk-agent",
     "rust/crates/vonk-agent-helper",
