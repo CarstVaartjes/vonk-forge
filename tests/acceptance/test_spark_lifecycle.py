@@ -1045,6 +1045,17 @@ class SparkLifecycle:
             )
             if logs is not None:
                 raw = "controller diagnostics:\n" + (logs.stdout or logs.stderr)
+            journal = self._diagnostic_command(
+                [
+                    "sudo", "journalctl", "--no-pager", "--lines=60",
+                    "--unit=vonk-forge-agent.service",
+                    "--unit=vonk-forge-package-helper.service",
+                ]
+            )
+            if journal is not None:
+                raw += "\nSpark agent/helper diagnostics:\n" + (
+                    journal.stdout or journal.stderr
+                )
         raw += "\ninstaller error:\n" + str(error)
         diagnostics = self._redact_diagnostics(raw)
         return LifecycleError(
