@@ -1625,6 +1625,8 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     pub action: ExecuteContainerRuntimeRequestOperationAction,
     pub attempt: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
@@ -1658,6 +1660,8 @@ pub enum ExecuteContainerRuntimeRequestOperationAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -1668,6 +1672,7 @@ impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -1681,6 +1686,7 @@ impl ::std::str::FromStr for ExecuteContainerRuntimeRequestOperationAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -1994,6 +2000,8 @@ pub struct HostRuntimeGrantRequest {
     pub attempt: u32,
     pub expires_in_seconds: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     pub node_id: ::std::string::String,
     pub operation_id: ::uuid::Uuid,
@@ -2024,6 +2032,8 @@ pub enum HostRuntimeGrantRequestAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -2034,6 +2044,7 @@ impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -2047,6 +2058,7 @@ impl ::std::str::FromStr for HostRuntimeGrantRequestAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -2081,6 +2093,8 @@ pub struct HostRuntimeRequest {
     pub arguments: ::std::vec::Vec<::std::string::String>,
     pub attempt: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
@@ -2112,6 +2126,8 @@ pub enum HostRuntimeRequestAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for HostRuntimeRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -2122,6 +2138,7 @@ impl ::std::fmt::Display for HostRuntimeRequestAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -2135,6 +2152,7 @@ impl ::std::str::FromStr for HostRuntimeRequestAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -7245,6 +7263,8 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             pub action: ExecuteContainerRuntimeRequestOperationAction,
             pub attempt: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
@@ -7258,6 +7278,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             action: raw.action,
             attempt: raw.attempt,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             observation_identity_sha256: raw.observation_identity_sha256,
             operation_id: raw.operation_id,
@@ -7275,6 +7296,7 @@ impl ExecuteContainerRuntimeRequestOperationAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }
@@ -7592,6 +7614,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub attempt: u32,
             pub expires_in_seconds: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             pub node_id: ::std::string::String,
             pub operation_id: ::uuid::Uuid,
@@ -7603,6 +7627,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             attempt: raw.attempt,
             expires_in_seconds: raw.expires_in_seconds,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             node_id: raw.node_id,
             operation_id: raw.operation_id,
@@ -7619,6 +7644,7 @@ impl HostRuntimeGrantRequestAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }
@@ -7651,6 +7677,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             pub arguments: ::std::vec::Vec<::std::string::String>,
             pub attempt: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
@@ -7663,6 +7691,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             arguments: raw.arguments,
             attempt: raw.attempt,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             observation: raw.observation,
             operation_id: raw.operation_id,
@@ -7679,6 +7708,7 @@ impl HostRuntimeRequestAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }

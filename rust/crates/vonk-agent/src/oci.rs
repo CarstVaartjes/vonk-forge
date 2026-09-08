@@ -1073,6 +1073,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         expected_recipe_digest: &str,
     ) -> Result<(), OciError> {
+        self.finalize_uninstall(installation_id, expected_recipe_digest)
+    }
+
+    pub fn validate_uninstall(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+    ) -> Result<(), OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let metadata = fs::symlink_metadata(&installation)?;
         if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
@@ -1082,6 +1090,29 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if self.recipe_digest(installation_id)? != expected_recipe_digest {
             return Err(OciError::Artifact);
         }
+        Ok(())
+    }
+
+    pub fn runtime_cache_present(&self, installation_id: &str) -> Result<bool, OciError> {
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let cache = installation.join("runtime-cache");
+        match fs::symlink_metadata(cache) {
+            Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+                Ok(true)
+            }
+            Ok(_) => Err(OciError::Artifact),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn finalize_uninstall(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+    ) -> Result<(), OciError> {
+        self.validate_uninstall(installation_id, expected_recipe_digest)?;
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
         fs::remove_dir_all(installation)?;
         File::open(self.data_root.join("installations"))?.sync_all()?;
         Ok(())
@@ -1092,6 +1123,21 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// model. The global distribution cache is reusable shared state and is
     /// retained for future installs.
     pub fn uninstall_with_model_cleanup(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+        model_content_sha256: &str,
+    ) -> Result<u64, OciError> {
+        let removed_model_bytes = self.validate_uninstall_with_model_cleanup(
+            installation_id,
+            expected_recipe_digest,
+            model_content_sha256,
+        )?;
+        self.uninstall(installation_id, expected_recipe_digest)?;
+        Ok(removed_model_bytes)
+    }
+
+    pub fn validate_uninstall_with_model_cleanup(
         &self,
         installation_id: &str,
         expected_recipe_digest: &str,
@@ -1115,7 +1161,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         let removed_model_bytes =
             materialized_model_bytes(self.data_root, installation_id, &persisted)?;
-        self.uninstall(installation_id, expected_recipe_digest)?;
         Ok(removed_model_bytes)
     }
 
@@ -1125,6 +1170,21 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// still references the same physical object. The global distribution
     /// cache is retained; this operation only removes installation state.
     pub fn uninstall_model(
+        &self,
+        installations: &[(String, String)],
+        model_content_sha256: &str,
+    ) -> Result<u64, OciError> {
+        let removed_model_bytes =
+            self.validate_model_uninstall(installations, model_content_sha256)?;
+        for (installation_id, expected_recipe_digest) in installations {
+            if self.recipe_digest_if_present(installation_id)?.is_some() {
+                self.uninstall(installation_id, expected_recipe_digest)?;
+            }
+        }
+        Ok(removed_model_bytes)
+    }
+
+    pub fn validate_model_uninstall(
         &self,
         installations: &[(String, String)],
         model_content_sha256: &str,
@@ -1141,6 +1201,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         let mut removed_model_bytes = 0_u64;
         for (installation_id, expected_recipe_digest) in installations {
+            if self.recipe_digest_if_present(installation_id)?.is_none() {
+                continue;
+            }
             let (_, persisted) = self.load_persisted_spec(installation_id)?;
             if self.recipe_digest(installation_id)? != *expected_recipe_digest
                 || !spec_references_model(&persisted, model_content_sha256)
@@ -1162,9 +1225,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .any(|(_, spec)| spec_references_model(spec, model_content_sha256))
         {
             return Err(OciError::Artifact);
-        }
-        for (installation_id, expected_recipe_digest) in installations {
-            self.uninstall(installation_id, expected_recipe_digest)?;
         }
         Ok(removed_model_bytes)
     }

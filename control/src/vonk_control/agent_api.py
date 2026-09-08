@@ -57,6 +57,7 @@ from vonk_agent_protocol.enrollment import (
     RenewRequest,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -447,8 +448,17 @@ class AgentGrantRequest(StrictJSONModel):
 
 
 class HostRuntimeGrantRequest(AgentGrantRequest):
-    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+
+    @model_validator(mode="after")
+    def installation_cleanup_binding(self) -> HostRuntimeGrantRequest:
+        if (self.installation_id is not None) != (
+            self.action == "installation-cleanup"
+        ):
+            raise ValueError("host runtime installation binding is invalid")
+        return self
 
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -2170,6 +2180,7 @@ def install_agent_routes(
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
+                installation_id=body.installation_id,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )

@@ -85,6 +85,9 @@ impl HostHelperOperation {
                 operation.job_id.get_version() == Some(uuid::Version::Random)
                     && operation.operation_id.get_version() == Some(uuid::Version::Random)
                     && operation.fence.get_version() == Some(uuid::Version::Random)
+                    && (operation.installation_id.is_some()
+                        == (operation.action
+                            == HostHelperContainerRuntimeAction::InstallationCleanup))
                     && operation
                         .observation_identity_sha256
                         .as_ref()
@@ -144,7 +147,13 @@ impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
             || self.attempt == 0
-            || (self.arguments.is_empty() != (self.action == HostRuntimeAction::RuntimePreflight))
+            || (self.arguments.is_empty()
+                != matches!(
+                    self.action,
+                    HostRuntimeAction::RuntimePreflight | HostRuntimeAction::InstallationCleanup
+                ))
+            || (self.installation_id.is_some()
+                != (self.action == HostRuntimeAction::InstallationCleanup))
             || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
             || self.arguments.iter().any(|value| {
                 value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
@@ -2041,6 +2050,7 @@ mod recipe_run_inspection_tests {
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
+            installation_id: None,
         };
         request.validate().unwrap();
 
@@ -2137,6 +2147,7 @@ mod recipe_run_inspection_tests {
                         fence: Uuid::new_v4(),
                         request_sha256: "b".repeat(64),
                         observation_identity_sha256: Some(identity_sha256.clone()),
+                        installation_id: None,
                     },
                 ),
             },
