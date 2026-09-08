@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
-    canonical_message,
+    canonical_payload,
 )
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
@@ -516,7 +516,9 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
     plan = RecipeBuildService(sessions, bundles=bundles).plan(
         revision.id, node_id, now=now
     )
-    payload_digest = hashlib.sha256(canonical_message(plan.agent_payload)).hexdigest()
+    payload_digest = hashlib.sha256(
+        canonical_payload(ProtocolOperation.RECIPE_BUILD, plan.agent_payload)
+    ).hexdigest()
 
     claim = AgentClaim(
         schema_version=1,
