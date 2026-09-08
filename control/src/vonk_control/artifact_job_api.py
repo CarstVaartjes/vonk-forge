@@ -297,7 +297,7 @@ def install_artifact_job_routes(
             200: {
                 "description": "Artifact result byte stream",
                 "content": {
-                    "application/octet-stream": {
+                    "*/*": {
                         "schema": {"type": "string", "format": "binary"}
                     }
                 },

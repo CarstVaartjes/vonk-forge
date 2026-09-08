@@ -332,3 +332,40 @@ next gate must collect real ASGI producer/consumer witnesses and join them back
 to this discovered operation inventory, then apply independent SQLAlchemy and
 runtime-I/O discovery to persistence. Engine-owned extension values and signed
 passthrough bytes keep their declared semantics.
+
+## Executed response witnesses
+
+Controller tests can collect the actual successful bytes emitted by production
+ASGI routes, including response middleware, with:
+
+```sh
+uv run --project control --frozen --with-editable . pytest -q control/tests \
+  --api-response-witness=/tmp/controller-response-witnesses.json
+```
+
+Run this collector without xdist. It reports the discovered operation inventory,
+the executed method/path/status/media combinations and their test IDs, plus every
+operation lacking a successful response witness in that test selection. Missing
+operations remain explicit; there is no maintained exception list or claim that
+declarations constitute execution. A failing test run is recorded in the report.
+The recorder's deliberate mutation tests are excluded from application evidence.
+
+Validation uses the response's declared JSON Schema and actual media type.
+Structured bodies and SSE data frames are validated after each test so schema
+generation cannot change endpoint timeouts. Binary transfers preserve bytes;
+the observer checks the media declaration and bodyless status rules, while
+individual upload/download tests compare actual bytes and digests. Structured
+capture is bounded to 16 MiB per response. Reports contain counts and test IDs,
+not payload values, credentials, or payload hashes. Mounted applications are
+validated once against the owning application's schema.
+
+These are response-producer witnesses. They do not establish downstream parsing,
+authorization correctness, business transitions, all streaming timing behavior,
+or persistence coverage. Existing tests vary in their application and service
+fixture setup; a handler witness does not imply the full deployed application
+configuration was exercised. The source-bundle client handoff separately exercises
+the generated admin upload client, actual route/storage service, generated
+response parser and exact-byte download. Artifact transport tests additionally
+consume actual JSON with the generated client and verify declared optional
+null/omission equivalence. Other consumer and storage edges still require their
+own connected evidence; raw engine extensions are not exhaustively enumerated.

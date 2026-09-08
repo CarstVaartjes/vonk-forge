@@ -260,6 +260,13 @@ jobs:
         run: |
           uv run --project control --frozen --with-editable . python scripts/tests/check_api_contract_completeness.py
           uv run --project control --frozen --with-editable . pytest -q control/tests/test_api_contract_completeness.py control/tests/test_api_contract_graph.py
+      - name: Validate emitted artifact and admin transfer responses
+        run: >-
+          uv run --project control --frozen --with-editable . pytest -q
+          control/tests/test_api_response_witness.py
+          control/tests/test_source_bundle_client_handoff.py
+          control/tests/test_artifact_job_api.py
+          --api-response-witness=${{ runner.temp }}/api-response-witnesses.json
       - name: Check generated Rust wire contracts
         run: >-
           uv run --project control --frozen --with-editable .

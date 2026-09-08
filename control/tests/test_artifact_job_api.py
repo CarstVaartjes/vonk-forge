@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +9,13 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_control.artifact_job_api import ArtifactJobCreate, install_artifact_job_routes
+from vonk_control.artifact_jobs import ArtifactJobResponse
 from vonk_control.auth import Actor
+from vonk_control.strict_json import ControllerAPIRoute
+
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse as ClientArtifactJobResponse,
+)
 
 JOB_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -110,6 +117,7 @@ def _client(tmp_path: Path) -> tuple[TestClient, _TransferService]:
     result_path.write_bytes(b"png-result")
     service = _TransferService(result_path)
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_artifact_job_routes(
         app,
         actor_dependency=Depends(lambda: Actor("operator", "operator")),
@@ -170,7 +178,7 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
     download = paths["/api/v1/artifact-jobs/{job_id}/results/{sha256}"]["get"]
     assert download["x-vonk-streaming-transport"] is True
     assert download["responses"]["200"]["content"] == {
-        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+        "*/*": {"schema": {"type": "string", "format": "binary"}}
     }
     assert "application/json" not in download["responses"]["200"]["content"]
 
@@ -203,6 +211,23 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
         "enabled": True
     }
     assert upload_document["created_at"].endswith("Z")
+    expected = ArtifactJobResponse.model_validate_json(upload.content)
+    optional_nulls = {
+        name: None
+        for name, field in ArtifactJobResponse.model_fields.items()
+        if not field.is_required() and field.default is None
+    }
+    assert not optional_nulls.keys() & upload_document.keys()
+    # Consume actual emitted output in the generated client, then serialize back
+    # through its public API. Declared optional omission and null agree without
+    # losing meaningful zero, false, empty collections or engine extensions.
+    for document in (upload_document, {**upload_document, **optional_nulls}):
+        parsed = ClientArtifactJobResponse.from_dict(document)
+        assert parsed.input_total_bytes == 0
+        assert (
+            ArtifactJobResponse.model_validate_json(json.dumps(parsed.to_dict()))
+            == expected
+        )
     assert service.upload == {
         "job_id": JOB_ID,
         "name": "input.png",
