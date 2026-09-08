@@ -26,6 +26,7 @@ from vonk_control.models import (
     ModelCacheOperation,
 )
 from vonk_control.operation_api import durable_operation_services
+from vonk_control.strict_json import serialize_json_value
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, NODE_A, STOP_PAYLOAD, Clock, parent
@@ -130,9 +131,9 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
     client, headers = client_for(sessions, tmp_path)
     response = client.get(f"/api/v1/operations/{operation.id}", headers=headers)
     assert response.status_code == 200, response.text
-    assert response.json()["failure"] == AgentFailureResult.model_validate(
-        persisted
-    ).model_dump(mode="json")
+    assert response.json()["failure"] == serialize_json_value(
+        AgentFailureResult.model_validate(persisted)
+    )
     listing = client.get("/api/v1/operations", headers=headers)
     assert listing.status_code == 200, listing.text
     assert listing.json()["operations"][0]["failure"] == response.json()["failure"]

@@ -15,6 +15,7 @@ from vonk_control.library_placement_contract import (
     LibraryPlacementPreview,
     LibraryPlacementStep,
 )
+from vonk_control.strict_json import serialize_json_value
 
 NOW = datetime(2026, 9, 1, 12, tzinfo=UTC)
 RECIPE = "00000000-0000-4000-8000-000000000001"
@@ -163,9 +164,9 @@ def test_preview_and_apply_share_transport_neutral_contract_and_are_audited() ->
     assert preview.json()["invocation"] == "keyboard"
     assert applied.status_code == 202
     assert progress.status_code == 200
-    assert progress.json()["progress"] == FleetProfileApplicationProgress(
-        completed_steps=0, total_steps=1
-    ).model_dump(mode="json")
+    assert progress.json()["progress"] == serialize_json_value(
+        FleetProfileApplicationProgress(completed_steps=0, total_steps=1)
+    )
     audit = audits.for_request(request_id)
     assert audit.action == "library.placement.apply"
     assert audit.targets == (APPLICATION, DIGEST, NODE)
