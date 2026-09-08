@@ -1,5 +1,4 @@
 import json
-import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 
@@ -15,22 +14,22 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
     Base,
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
     ClusterMappingNode,
-    Job,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from .preflight_fixtures import record_passing_preflight
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -383,32 +382,16 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
 
 def _service(sessions, *, preflight=True, **kwargs):
     if preflight:
-        _record_passing_preflight(sessions, kwargs.get("disk_floor_bytes", 10_000_000_000))
+        record_passing_preflight(
+            sessions,
+            datetime(2026, 8, 7, 12, tzinfo=UTC),
+            floor=kwargs.get("disk_floor_bytes", 10_000_000_000),
+        )
     return InstallAdmissionService(
         sessions,
         compiled_plan_provider=_compiled_plan_provider,
         **kwargs,
     )
-
-
-def _record_passing_preflight(sessions, floor):
-    from vonk_control.runtime_preflight import (
-        mandatory_capabilities,
-        recipe_requirements,
-        request_digest,
-    )
-    with sessions.begin() as session:
-        recipe = session.scalar(select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "recipe"))
-        request = recipe_requirements(recipe.document, source_build=False, minimum_free_bytes=floor)
-        digest = request_digest(request)
-        now = datetime(2026, 8, 7, 12, tzinfo=UTC)
-        for node in session.scalars(select(AgentNode)):
-            node.capabilities = [value for value in node.capabilities if not value.startswith("runtime.preflight.fingerprint.")] + ["runtime.preflight.fingerprint." + "a" * 64]
-            job = Job(request_id=str(uuid.uuid4()), kind="runtime.preflight", state="succeeded", actor="test", authority_revision=digest, targets=[node.node_id], payload_digest=digest, payload={}, created_at=now, updated_at=now)
-            session.add(job); session.flush()
-            operation = AgentOperation(parent_job_id=job.id, node_id=node.node_id, kind="runtime.preflight.v1", payload_digest=digest, payload=request.model_dump(mode="json"), authority_revision=digest, state="succeeded", current_attempt=1, created_at=now, updated_at=datetime.now(UTC))
-            session.add(operation); session.flush()
-            session.add(AgentOperationAttempt(operation_id=operation.id, attempt=1, fence=str(uuid.uuid4()), lease_deadline=now + timedelta(seconds=60), agent_certificate_serial="test-preflight", state="succeeded", result={"schema_version": 1, "fingerprint": "a" * 64, "request_sha256": digest, "observed_at": int(now.timestamp()), "duration_ms": 1, "cached": False, "findings": [{"capability": value, "status": "passed", "code": "available"} for value in mandatory_capabilities(request)]}))
 
 
 def setup(
@@ -434,6 +417,16 @@ def setup(
                 state="active",
                 architecture="linux-arm64",
                 capabilities=["runtime.vonk.v1"],
+            )
+        )
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial="serial-install-preflight",
+                node_id=node_id,
+                fingerprint="fingerprint-install-preflight",
+                not_before=now - timedelta(seconds=1),
+                not_after=now + timedelta(days=1),
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
@@ -788,7 +781,7 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     service = _service(sessions, preflight=False, disk_floor_bytes=10)
     blocked = service.plan_install(mapping, None, now=now)
     assert "runtime_preflight.required" in {reason.code for reason in blocked.nodes[0].blockers}
-    _record_passing_preflight(sessions, 10)
+    record_passing_preflight(sessions, now, floor=10)
     assert service.plan_install(mapping, None, now=now).allowed
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
