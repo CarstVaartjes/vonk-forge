@@ -21,6 +21,7 @@ from vonk_control.models import (
     RuntimeImageAuthorization,
 )
 from vonk_control.models import RuntimeImageReceipt as RuntimeImageReceiptRow
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -31,7 +32,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_IMAGE_DIGEST = "sha256:" + "e" * 64
@@ -290,9 +291,17 @@ def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_ide
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    raw_recipe = _recipe("recipe-image.json").model_dump(mode="json")
+    raw_recipe["runtime"]["engine"] = "vllm"
+    raw_recipe["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
+    recipe = RecipeDefinition.model_validate(raw_recipe)
+    model = ModelDefinition.model_validate_json(
+        files("vonk_forge_contracts").joinpath("examples", "model-definition.json").read_bytes()
+    )
+    runtime = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)["runtime"]
     produced = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+        recipe,
+        runtime=runtime,
         storage=storage,
         transport=TinyTransport(),
     )
@@ -944,3 +953,18 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
     assert retry.registry_manifest_digest == IMAGE_DIGEST
     assert attempts == 2
     assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("include_interface", [False, True])
+def test_image_preparation_rejects_retired_runtime_interface_before_transport(tmp_path, include_interface) -> None:
+    runtime = _runtime()
+    runtime["runtime_interface"] = runtime["interface"]
+    if not include_interface:
+        runtime.pop("interface")
+    transport = TinyTransport()
+    with pytest.raises(RuntimeImagePreparationError, match="retired runtime_interface"):
+        prepare_runtime_image(
+            _recipe("recipe-image.json"), runtime=runtime,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "objects"), transport=transport,
+        )
+    assert transport.calls == []

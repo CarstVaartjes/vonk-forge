@@ -951,7 +951,7 @@ def prepare_runtime_image(
     """
 
     parsed = _canonical_recipe(recipe)
-    projection = _runtime_projection(runtime)
+    projection = runtime_image_expectations(runtime)
     source_build = parsed.execution.mode == "build"
     if source_build != (build_receipt is not None):
         raise RuntimeImagePreparationError(
@@ -1184,14 +1184,19 @@ def _canonical_recipe(value: RecipeDefinition | Mapping[str, object] | object) -
         ) from error
 
 
-def _runtime_projection(value: Mapping[str, object] | object) -> dict[str, str]:
+def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str, str]:
+    """Read image verification expectations from the current compiler projection."""
     raw = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
     if not isinstance(raw, Mapping):
         raise RuntimeImagePreparationError(
             "runtime_image.runtime_invalid", "canonical runtime projection is unavailable"
         )
+    if "runtime_interface" in raw:
+        raise RuntimeImagePreparationError(
+            "runtime_image.runtime_invalid", "runtime projection contains retired runtime_interface"
+        )
     architecture = raw.get("architecture")
-    interface = raw.get("interface", raw.get("runtime_interface"))
+    interface = raw.get("interface")
     if not isinstance(architecture, str) or not architecture or not isinstance(interface, str) or not interface:
         raise RuntimeImagePreparationError(
             "runtime_image.runtime_invalid", "runtime projection lacks observed architecture/interface expectations"
@@ -1454,4 +1459,5 @@ __all__ = [
     "persist_runtime_image_receipt",
     "prepare_runtime_image",
     "resolve_persisted_runtime_image_receipt",
+    "runtime_image_expectations",
 ]
