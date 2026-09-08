@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Export the current Pydantic wire graph without a second field registry."""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import pkgutil
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
+
+import vonk_agent_protocol
+from pydantic import BaseModel
+from pydantic.json_schema import models_json_schema
+
+
+def export_schema() -> dict[str, object]:
+    models: set[type[BaseModel]] = set()
+    for entry in pkgutil.iter_modules(vonk_agent_protocol.__path__):
+        module = importlib.import_module(f"vonk_agent_protocol.{entry.name}")
+        for value in vars(module).values():
+            if (
+                isinstance(value, type)
+                and issubclass(value, BaseModel)
+                and value.__module__ == module.__name__
+                and value.model_fields
+                and not value.__name__.startswith("_")
+            ):
+                models.add(value)
+
+    # These transport envelopes are owned by the API, rather than a job model.
+    # The entries select whole canonical models; no field/type definitions live here.
+    from vonk_control import agent_api
+
+    for name in (
+        "HostRuntimeGrantRequest",
+        "PackageActivationGrantRequest",
+        "AgentUpgradeGrantRequest",
+        "PackageHelperReceiptsRequest",
+        "PackageHelperGrantRequest",
+        "PackageHelperGrantResponse",
+        "HostHelperGrantResponse",
+        "PackageHelperReceiptsResponse",
+    ):
+        models.add(getattr(agent_api, name))
+    ordered = sorted(models, key=lambda model: (model.__module__, model.__name__))
+    references, schema = models_json_schema(
+        [(model, "validation") for model in ordered],
+        title="Vonk Agent Wire",
+    )
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["x-vonk-models"] = {
+        model.__name__: references[model, "validation"]["$ref"]
+        for model in ordered
+    }
+    return schema
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    content = json.dumps(export_schema(), indent=2, sort_keys=True) + "\n"
+    if args.check:
+        if not args.output.exists() or args.output.read_text() != content:
+            raise SystemExit(f"Stale Pydantic wire schema: {args.output}")
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(content)
+
+
+if __name__ == "__main__":
+    main()

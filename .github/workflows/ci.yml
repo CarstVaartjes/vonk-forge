@@ -256,6 +256,10 @@ jobs:
         run: >-
           uv run --project control --frozen --with-editable .
           python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Check generated Rust wire contracts
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/generate-agent-wire --check
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen --with-editable .

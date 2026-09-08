@@ -13,3 +13,4 @@ sha2.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 url.workspace = true
+jsonschema = { version = "=0.55.0", default-features = false, features = ["arbitrary-precision"] }

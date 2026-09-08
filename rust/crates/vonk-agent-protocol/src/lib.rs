@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
+#[rustfmt::skip]
+pub mod generated;
 pub mod runtime_preflight;
+mod wire_schema;
 
 pub mod operation_progress;
 pub use operation_progress::{
@@ -2954,5 +2957,30 @@ mod distribution_tests {
         value.validate().unwrap();
         value.objects[0].kind = "oci-archive".to_owned();
         assert!(value.validate().is_err());
+    }
+}
+
+impl generated::AgentRuntimeIdentity {
+    pub fn observation_receipt_public_key(&self) -> Result<[u8; 32], ProtocolError> {
+        if !lower_hex(&self.observation_receipt_public_key, 64) {
+            return Err(ProtocolError::Identity("observation receipt public key"));
+        }
+        let mut bytes = [0; 32];
+        for (index, pair) in self
+            .observation_receipt_public_key
+            .as_bytes()
+            .chunks_exact(2)
+            .enumerate()
+        {
+            let digit = |value: u8| {
+                if value.is_ascii_digit() {
+                    value - b'0'
+                } else {
+                    value - b'a' + 10
+                }
+            };
+            bytes[index] = digit(pair[0]) * 16 + digit(pair[1]);
+        }
+        Ok(bytes)
     }
 }

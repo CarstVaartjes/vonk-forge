@@ -73,6 +73,7 @@ from .database_authority import (
 from .deployment_provenance import DeploymentProvenanceService
 from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
+from .download_contract import download_responses
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -1495,7 +1496,11 @@ def create_app(
 
     @app.get(
         "/api/v1/jobs/{job_id}/logs/{digest}",
-        responses=bounded_error_responses(401, 403, 404, 503),
+        response_class=Response,
+        responses={
+            **bounded_error_responses(401, 403, 404, 503),
+            **download_responses("text/plain"),
+        },
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def job_log_content(

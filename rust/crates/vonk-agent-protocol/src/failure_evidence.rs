@@ -1,48 +1,7 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FailureLogTail {
-    pub text: String,
-    pub truncated: bool,
-    pub dropped_bytes: Option<u64>,
-    pub dropped_lines: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FailureProperty {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum FailureCategory {
-    PlatformPolicy,
-    Capacity,
-    Network,
-    Digest,
-    Timeout,
-    Runtime,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FailureDiagnostics {
-    pub schema_version: u32,
-    pub collected_at: String,
-    pub phase: String,
-    pub category: FailureCategory,
-    pub stdout: FailureLogTail,
-    pub stderr: FailureLogTail,
-    pub versions: Vec<FailureProperty>,
-    pub sandbox: Vec<FailureProperty>,
-    pub storage: Vec<FailureProperty>,
-    pub preflight: Vec<FailureProperty>,
-    pub collector_errors: Vec<String>,
-}
+pub use crate::generated::{
+    FailureDiagnostics, FailureDiagnosticsCategory as FailureCategory, FailureLogTail,
+    FailureProperty,
+};
 
 impl FailureDiagnostics {
     pub fn validate(&self) -> Result<(), crate::ProtocolError> {
