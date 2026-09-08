@@ -121,13 +121,13 @@ class CompiledEnvironmentEntry(_Strict):
 
 
 class CompiledPlacement(_Strict):
-    endpoint_address: str | None
+    endpoint_address: str | None = Field(json_schema_extra={"format": "ip"})
     rank: int = Field(ge=0)
     role: str = Field(min_length=1, max_length=64)
     world_size: int = Field(ge=1)
-    local_address: str | None
-    master_address: str | None
-    master_port: int | None
+    local_address: str | None = Field(json_schema_extra={"format": "ip"})
+    master_address: str | None = Field(json_schema_extra={"format": "ip"})
+    master_port: int | None = Field(ge=1024, le=65535)
     port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
 

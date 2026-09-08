@@ -8,12 +8,26 @@ use syn::{Item, parse_quote};
 fn prepare(value: &mut Value) {
     match value {
         Value::Object(object) => {
+            if let Some(format) = object.get("format").cloned() {
+                if let Some(Value::Array(variants)) = object.get_mut("anyOf") {
+                    for variant in variants {
+                        if variant.get("type").and_then(Value::as_str) == Some("string") {
+                            variant
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("format".into(), format.clone());
+                        }
+                    }
+                    object.remove("format");
+                }
+            }
             let uuid = object.get("format").and_then(Value::as_str) == Some("uuid")
                 || object
                     .get("pattern")
                     .and_then(Value::as_str)
                     .is_some_and(|pattern| pattern.contains("[0-9a-f]{8}-[0-9a-f]{4}"));
             let timestamp = object.get("format").and_then(Value::as_str) == Some("date-time");
+            let ip = object.get("format").and_then(Value::as_str) == Some("ip");
             // Materialize non-null canonical defaults before the generated Raw
             // deserializer. They remain optional in the authoritative schema.
             let defaults: Vec<_> = object
@@ -49,6 +63,9 @@ fn prepare(value: &mut Value) {
                 for key in ["pattern", "minLength", "maxLength", "format"] {
                     object.remove(key);
                 }
+                if ip {
+                    object.insert("format".into(), json!("ip"));
+                }
                 if uuid {
                     object.insert("format".into(), json!("uuid"));
                 }
@@ -66,12 +83,23 @@ fn prepare(value: &mut Value) {
                         .and_then(Value::as_f64)
                         .is_some_and(|v| v >= 0.0)
                     || object.get("const").and_then(Value::as_u64).is_some();
-                let format = if object
+                let format = if object.get("format").and_then(Value::as_str) == Some("int64") {
+                    "int64"
+                } else if object
                     .get("const")
                     .and_then(Value::as_u64)
                     .is_some_and(|v| v <= 255)
                 {
                     "uint8"
+                } else if unsigned && object.get("maximum").and_then(Value::as_u64) == Some(65535) {
+                    "uint16"
+                } else if unsigned
+                    && object
+                        .get("maximum")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|maximum| maximum <= u32::MAX as u64)
+                {
+                    "uint32"
                 } else if unsigned {
                     "uint64"
                 } else {
@@ -101,13 +129,77 @@ fn prepare(value: &mut Value) {
                     object.remove(key);
                 }
             }
-            for child in object.values_mut() {
-                prepare(child);
+            for key in [
+                "$defs",
+                "definitions",
+                "properties",
+                "patternProperties",
+                "dependentSchemas",
+            ] {
+                if let Some(Value::Object(children)) = object.get_mut(key) {
+                    for child in children.values_mut() {
+                        prepare(child);
+                    }
+                }
+            }
+            for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
+                if let Some(Value::Array(children)) = object.get_mut(key) {
+                    for child in children {
+                        prepare(child);
+                    }
+                }
+            }
+            for key in [
+                "items",
+                "additionalProperties",
+                "propertyNames",
+                "contains",
+                "if",
+                "then",
+                "else",
+            ] {
+                if let Some(child) = object.get_mut(key) {
+                    prepare(child);
+                }
             }
         }
         Value::Array(array) => {
             for child in array {
                 prepare(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scalar_conversions(schema: &Value, settings: &mut typify::TypeSpaceSettings) {
+    match schema {
+        Value::Object(object) => {
+            if let Some(variants) = object.get("anyOf").and_then(Value::as_array) {
+                let types: Vec<_> = variants
+                    .iter()
+                    .filter_map(|schema| schema.get("type").and_then(Value::as_str))
+                    .collect();
+                if types.len() == variants.len()
+                    && types.iter().filter(|kind| **kind != "null").count() > 1
+                    && types.iter().all(|kind| {
+                        ["integer", "number", "boolean", "string", "null"].contains(kind)
+                    })
+                {
+                    settings.with_conversion(
+                        serde_json::from_value(schema.clone()).unwrap(),
+                        "::serde_json::Value",
+                        [].into_iter(),
+                    );
+                }
+            }
+            for child in object.values() {
+                scalar_conversions(child, settings);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                scalar_conversions(value, settings);
             }
         }
         _ => {}
@@ -317,9 +409,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut settings = typify::TypeSpaceSettings::default();
     settings.with_derive("PartialEq".into());
     settings.with_map_type("::std::collections::BTreeMap");
+    scalar_conversions(&serde_json::from_str::<Value>(&defs_text)?, &mut settings);
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
         "::chrono::DateTime<::chrono::FixedOffset>",
+        [].into_iter(),
+    );
+    settings.with_conversion(
+        serde_json::from_value(json!({"type":"string","format":"ip"}))?,
+        "::std::net::IpAddr",
         [].into_iter(),
     );
     for name in ["JsonValue", "RuntimeArgumentValue"] {
@@ -374,6 +472,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "// @generated by scripts/generate-agent-wire. Do not edit.\n{}",
         prettyplease::unparse(&syntax)
     );
+    use std::io::Write;
+    let mut formatter = std::process::Command::new("rustfmt")
+        .args(["--edition", "2024", "--emit", "stdout"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    formatter
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(content.as_bytes())?;
+    let formatted = formatter.wait_with_output()?;
+    if !formatted.status.success() {
+        return Err("pinned rustfmt failed".into());
+    }
+    let content = String::from_utf8(formatted.stdout)?;
     if check {
         if fs::read_to_string(&output_path)? != content {
             return Err(format!("stale generated Rust wire types: {output_path}").into());
@@ -382,4 +496,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(output_path, content)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn annotations_do_not_remove_identically_named_properties() {
+        let mut schema = json!({"type":"object", "description":"metadata", "properties": {
+            "description":{"type":"string", "maxLength":256},
+            "default":{"type":"boolean"}, "title":{"type":"string"}, "not":{"type":"integer"}
+        },"required":["description","default","title","not"]});
+        prepare(&mut schema);
+        assert!(schema.get("description").is_none());
+        assert_eq!(schema["properties"]["description"]["type"], "string");
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 4);
+        assert_eq!(schema["properties"]["not"]["type"], "integer");
+    }
 }

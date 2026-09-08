@@ -1,23 +1,7 @@
-//! Current, exact source-bound package rollback authority.
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PackageRollbackSource {
-    pub package_sha256: String,
-    pub package_signature: String,
-    pub package_version: String,
-    pub binary_sha256: String,
-    pub helper_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PackageRollbackAuthority {
-    pub source: PackageRollbackSource,
-    pub attempt_nonce: String,
-    pub activation_deadline: i64,
-}
+pub use crate::generated::{
+    PackageActivationReceipt, PackageActivationReceiptPhase as PackageActivationPhase,
+    PackageRollbackAuthority, PackageRollbackSource,
+};
 
 impl PackageRollbackAuthority {
     pub fn valid(&self) -> bool {
@@ -46,35 +30,6 @@ impl PackageRollbackAuthority {
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || b".+~:-".contains(&c))
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PackageActivationPhase {
-    Armed,
-    ActivationFailed,
-    Acknowledged,
-    RollingBack,
-    RolledBack,
-    RollbackFailed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PackageActivationReceipt {
-    pub schema_version: u8,
-    pub node_id: String,
-    pub source_package_sha256: String,
-    pub source_version: String,
-    pub source_binary_sha256: String,
-    pub candidate_package_sha256: String,
-    pub candidate_version: String,
-    pub candidate_binary_sha256: String,
-    pub attempt_nonce: String,
-    pub phase: PackageActivationPhase,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub outcome: String,
 }
 
 impl PackageActivationReceipt {

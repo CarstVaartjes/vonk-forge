@@ -1,103 +1,11 @@
 //! Typed counterpart of the canonical Pydantic operation progress graph.
 use crate::ProtocolError;
+pub use crate::generated::{
+    OperationCheckpoint, OperationMemberProgress, OperationProgress,
+    OperationProgressActivity as ProgressActivity,
+};
 use chrono::DateTime;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProgressActivity {
-    Active,
-    Waiting,
-    PossiblyStalled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct OperationCheckpoint {
-    pub key: String,
-    pub sequence: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct OperationMemberProgress {
-    pub member_id: String,
-    pub phase: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub object_sha256: Option<String>,
-    #[serde(default)]
-    pub completed_bytes: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_bytes: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub smoothed_bytes_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub eta_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub elapsed_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_items: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_items: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observed_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_progress_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activity: Option<ProgressActivity>,
-    #[serde(default = "running")]
-    pub state: String,
-}
-fn running() -> String {
-    "running".to_owned()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct OperationProgress {
-    pub phase: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub object_sha256: Option<String>,
-    #[serde(default)]
-    pub completed_bytes: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_bytes: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub smoothed_bytes_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub eta_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub elapsed_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_items: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_items: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observed_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_progress_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activity: Option<ProgressActivity>,
-    #[serde(default)]
-    pub total_bytes_known: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoint: Option<OperationCheckpoint>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub members: Vec<OperationMemberProgress>,
-}
 
 fn bounded(value: &str, max: usize) -> bool {
     !value.is_empty() && value.chars().count() <= max

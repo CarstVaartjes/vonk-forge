@@ -56,3 +56,42 @@ fn canonical_default_values_are_materialized_without_hiding_required_fields() {
     assert_eq!(parsed.schema_version, 1);
     assert!(serde_json::from_value::<OperationProgress>(json!({})).is_err());
 }
+
+#[test]
+fn scalar_union_preserves_tokens_and_rejects_integer_and_float_overflow() {
+    use vonk_agent_protocol::generated::TelemetrySeries;
+    let fixture = include_str!("../../../../agent_protocol/fixtures/typify-telemetry-series.json");
+    let original: Value = serde_json::from_str(fixture).unwrap();
+    let parsed: TelemetrySeries = serde_json::from_str(fixture).unwrap();
+    assert_eq!(parsed.value, original["value"]);
+    for token in [
+        "9223372036854775808",
+        "-9223372036854775809",
+        "1e400",
+        "-1e400",
+    ] {
+        let mut document = original.clone();
+        document["value"] = serde_json::from_str(token).unwrap();
+        assert!(
+            serde_json::from_value::<TelemetrySeries>(document).is_err(),
+            "{token}"
+        );
+    }
+    for token in ["1.0", "9.223372036854776e18", "1e300", "-1e300"] {
+        let mut document = original.clone();
+        document["value"] = serde_json::from_str(token).unwrap();
+        let parsed: TelemetrySeries = serde_json::from_value(document.clone()).unwrap();
+        assert_eq!(parsed.value, document["value"]);
+    }
+}
+
+#[test]
+fn metadata_named_fields_keep_their_canonical_type() {
+    use vonk_agent_protocol::generated::CompiledJobInputSlot;
+    let fixture = json!({"id":"image","label":"Image","description":"input image","media_types":["image/png"],"extensions":[".png"],"min_files":0,"max_files":1,"max_file_bytes":1,"max_total_bytes":1});
+    assert!(serde_json::from_value::<CompiledJobInputSlot>(fixture.clone()).is_ok());
+    // The authoritative required fields drive this fixture, including bounds.
+    let mut value = fixture.clone();
+    value["description"] = json!({"unexpected":"object"});
+    assert!(serde_json::from_value::<CompiledJobInputSlot>(value).is_err());
+}
