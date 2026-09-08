@@ -22,6 +22,18 @@ pub enum RotationError {
     Issued(#[from] PairingError),
 }
 
+impl RotationError {
+    pub fn retryable(&self) -> bool {
+        matches!(self, Self::Client(error) if error.retryable())
+    }
+}
+
+pub fn active_identity_is_valid(config: &AgentConfig) -> Result<bool, RotationError> {
+    let root = config.data_dir.join("credentials");
+    let paths = active_identity_paths(&root)?;
+    Ok(!identity_expired(&paths, Utc::now())?)
+}
+
 pub async fn rotate_if_due(
     config: &AgentConfig,
     client: &AgentHttpClient,

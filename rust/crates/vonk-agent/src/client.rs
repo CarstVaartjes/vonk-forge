@@ -41,6 +41,10 @@ use crate::{
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+// Renewal has to finish before the active certificate expires. Keep each
+// controller call bounded so a stalled endpoint cannot consume the entire
+// remaining validity window of the 90-second acceptance certificate.
+const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
 #[derive(Debug, Error)]
@@ -1283,6 +1287,7 @@ impl AgentHttpClient {
         let response = self
             .current_client()
             .post(self.endpoint("/agent/v1/renew")?)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1309,6 +1314,7 @@ impl AgentHttpClient {
         let response = self
             .current_client()
             .post(self.endpoint("/agent/v1/renew/activate")?)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1781,6 +1787,36 @@ mod tests {
             .write()
             .expect("agent client lock is not poisoned") = replacement;
         assert!(Arc::ptr_eq(&client.client, &operation_client.client));
+    }
+
+    #[tokio::test]
+    async fn cloned_operation_client_sends_through_replaced_transport() {
+        let (client, server) = request_capture_client(204, Vec::new(), Vec::new(), None);
+        let operation_client = client.clone();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-rotation-marker",
+            reqwest::header::HeaderValue::from_static("fresh"),
+        );
+        let replacement = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        *client
+            .client
+            .write()
+            .expect("agent client lock is not poisoned") = replacement;
+
+        operation_client
+            .report_telemetry(&[telemetry_sample(1)])
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        assert!(
+            String::from_utf8_lossy(&request)
+                .to_ascii_lowercase()
+                .contains("x-rotation-marker: fresh")
+        );
     }
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
