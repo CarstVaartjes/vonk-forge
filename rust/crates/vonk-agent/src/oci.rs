@@ -956,8 +956,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             plans.push(RecipeRunInspectionPlan {
                 binding,
                 arguments,
-                endpoint_address: endpoint_owner
-                    .then_some(placement.endpoint_address.ok_or(OciError::Artifact)?),
+                endpoint_address: if endpoint_owner {
+                    Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
+                } else {
+                    None
+                },
                 endpoint_port: placement.port.ok_or(OciError::Artifact)?,
                 health_path,
             });

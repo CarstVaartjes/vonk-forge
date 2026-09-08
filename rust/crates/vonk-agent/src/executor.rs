@@ -1514,7 +1514,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("installed recipe is not a persistent service");
                 };
                 let placement = Placement {
-                    endpoint_address: Some(request.endpoint_address),
+                    endpoint_address: spec.runtime.placement.endpoint_address,
                     rank: request.rank,
                     role: request.role.clone(),
                     world_size: request.world_size,
