@@ -122,6 +122,21 @@ def validate_fleet_event_payload(
 ) -> FleetEventPayload:
     """Validate one outbox payload against its producer/source identity."""
 
+    allowed_kinds: dict[str, frozenset[str]] = {
+        "node-profile": frozenset({"node-profile"}),
+        "node-telemetry": frozenset({"node-telemetry-latest"}),
+        "recipe-state": frozenset(
+            {
+                "recipe-installation",
+                "installation-node",
+                "recipe-run",
+                "run-node",
+            }
+        ),
+        "operation-state": frozenset({"job", "agent-operation"}),
+    }
+    if entity_kind not in allowed_kinds.get(event_type, frozenset()):
+        raise ValueError("Fleet event source kind does not match event type")
     if event_type == "node-profile":
         value = NodeProfilePayload.model_validate(payload)
         if value.node_id != entity_id or value.node_id != node_id:

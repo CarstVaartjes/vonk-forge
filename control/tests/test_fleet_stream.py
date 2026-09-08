@@ -202,13 +202,14 @@ def _event(
     payload: dict[str, object],
     node_id: str | None = None,
     entity_kind: str = "entity",
+    entity_id: str | None = None,
 ) -> FleetEvent:
     return FleetEvent(
         id=identifier,
         event_type=event_type,
         node_id=node_id,
         entity_kind=entity_kind,
-        entity_id=f"entity-{identifier}",
+        entity_id=entity_id or f"entity-{identifier}",
         payload=payload,
         occurred_at=NOW + timedelta(seconds=identifier),
         expires_at=NOW + timedelta(hours=24),
@@ -301,6 +302,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "node-telemetry",
         node_id=NODE_ID,
         entity_kind="node-telemetry-latest",
+        entity_id=NODE_ID,
         payload={"schema_version": 1, "node_id": NODE_ID, "sample_id": SAMPLE_ID},
     )
     recipe_event = _event(
@@ -512,6 +514,30 @@ def test_fleet_change_schema_rejects_unknown_typed_fields() -> None:
         FleetChangeEvent.model_validate(data)
 
 
+def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
+    event = _event(
+        8,
+        "recipe-state",
+        entity_kind="job",
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-8",
+            "kind": "deploy",
+            "state": "queued",
+            "target_count": 1,
+        },
+    )
+    stream = FleetStream(
+        Events(high_watermark=8, first_retained_id=1),
+        Telemetry(),
+        Projection(),
+    )
+
+    with pytest.raises(ValueError, match="does not match event type"):
+        stream._event_data(event, {})
+
+
 @pytest.mark.parametrize(
     ("cursor", "high_watermark", "first_retained", "reason"),
     [
@@ -572,6 +598,8 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
                     6,
                     "node-telemetry",
                     node_id=NODE_ID,
+                    entity_kind="node-telemetry-latest",
+                    entity_id=NODE_ID,
                     payload={
                         "schema_version": 1,
                         "node_id": NODE_ID,

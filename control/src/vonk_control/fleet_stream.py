@@ -223,6 +223,13 @@ class FleetStream:
         event: FleetEvent, samples: Mapping[str, TelemetrySampleView]
     ) -> dict[str, object]:
         if event.event_type == "node-telemetry":
+            validate_fleet_event_payload(
+                event.event_type,
+                event.entity_kind,
+                event.entity_id,
+                event.node_id,
+                event.payload,
+            )
             sample_id = event.payload.get("sample_id")
             sample = samples.get(sample_id) if isinstance(sample_id, str) else None
             if sample is None or sample.node_id != event.node_id:
