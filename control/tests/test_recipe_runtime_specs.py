@@ -238,11 +238,12 @@ def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
         "interface": "image-job",
         "input": None,
         "output_path": "/outputs",
-        "timeout_seconds": 30,
+        "timeout_seconds": 3600,
     }
     assert spec["security"]["mounts"] == [
         {"source": "/run/vonk/models/primary", "target": "/models", "read_only": True},
         {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False},
+        {"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True},
     ]
     assert spec["runtime"]["entrypoint"][-2:] == ["--output-dir", "/outputs"]
 

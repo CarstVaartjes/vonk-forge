@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_payload
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
@@ -237,7 +238,8 @@ class AgentJobService:
         if node_id not in parent.targets:
             raise ValueError("agent operation node must be a parent target")
         reserved_fence = str(uuid.uuid4())
-        final_payload: Mapping[str, object] = payload
+        payload_bytes = canonical_payload(protocol_operation, payload)
+        final_payload = json.loads(payload_bytes)
         validated = AgentClaim(
             schema_version=1,
             job_id=parent_job_id,
@@ -247,7 +249,7 @@ class AgentJobService:
             node_id=node_id,
             operation=protocol_operation,
             authority_revision=authority_revision,
-            payload_digest=hashlib.sha256(canonical_message(final_payload)).hexdigest(),
+            payload_digest=hashlib.sha256(payload_bytes).hexdigest(),
             payload=final_payload,
             deadline=now,
         )
@@ -583,8 +585,9 @@ class AgentJobService:
                 # already enforced the full previous rollback safety fence.
                 document = payload.model_dump(mode="json")
                 document["rollback"].update(attempt_nonce=secrets.token_hex(32), activation_deadline=int(now.timestamp()) + 900)
-                operation.payload = AgentUpgradePayload.model_validate(document).model_dump(mode="json")
-                operation.payload_digest = hashlib.sha256(canonical_message(operation.payload)).hexdigest()
+                payload_bytes = canonical_payload(AgentOperation.AGENT_UPGRADE, document)
+                operation.payload = json.loads(payload_bytes)
+                operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             operation.current_attempt += 1
             operation.state = "running"
             operation.updated_at = now
@@ -937,7 +940,7 @@ class AgentJobService:
     def heartbeat(
         self,
         fence: AgentFence,
-        progress: Mapping[str, object],
+        progress: Mapping[str, object] | None,
         lease_seconds: int,
         *,
         source: AgentSource | None = None,
@@ -962,20 +965,22 @@ class AgentJobService:
                 deadline=deadline,
                 progress=progress,
             )
-            try:
-                current_progress = dict(message.progress)
-                if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
-                    # A restarted transfer walks already durable objects again.
-                    # Replayed offsets are not loss of retained operation bytes.
-                    for key in ("completed_bytes", "completed_items"):
-                        if key in current_progress and key in attempt.progress:
-                            current_progress[key] = max(current_progress[key], attempt.progress[key])
-                validated = validate_progress_update(attempt.progress, current_progress)
-                write_progress = progress_write_due(attempt.progress, validated, _aware(now))
-                if write_progress:
-                    attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
-            except (TypeError, ValueError) as error:
-                raise ValueError(f"operation progress is invalid: {error}") from error
+            write_progress = message.progress is None
+            if message.progress is not None:
+                try:
+                    current_progress = dict(message.progress)
+                    if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
+                        # A restarted transfer walks already durable objects again.
+                        # Replayed offsets are not loss of retained operation bytes.
+                        for key in ("completed_bytes", "completed_items"):
+                            if key in current_progress and key in attempt.progress:
+                                current_progress[key] = max(current_progress[key], attempt.progress[key])
+                    validated = validate_progress_update(attempt.progress, current_progress, partial=False)
+                    write_progress = progress_write_due(attempt.progress, validated, _aware(now))
+                    if write_progress:
+                        attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"operation progress is invalid: {error}") from error
             if write_progress:
                 attempt.lease_deadline = deadline
                 operation.updated_at = now

@@ -1,5 +1,39 @@
 #![forbid(unsafe_code)]
+#[rustfmt::skip]
+pub mod compiled_execution_plan;
+pub mod generated;
 pub mod runtime_preflight;
+mod wire_datetime;
+mod wire_schema;
+pub use generated::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult,
+    AgentUpgradePayload as AgentUpgradeRequest,
+    ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
+    DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
+    InventoryRequest, RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage,
+    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
+    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeImageImportEvidence, RecipeImageImportRequest,
+    RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
+    RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
+    RecipeJobRunRequest, RecipeJobRunResult, RecipeModelCleanupInstallation,
+    RecipeModelCleanupPayload as RecipeModelCleanupRequest, RecipeModelCleanupResult,
+    RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
+    RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
+    RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+};
+pub use generated::{
+    ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
+    HostHelperGrantClaims, HostHelperSignature as HostHelperGrantSignature,
+    HostHelperSignature as RecipeRunObservationReceiptSignature,
+    HostOperation as HostHelperOperation, HostRuntimeRequest,
+    HostRuntimeRequestAction as HostRuntimeAction, RecipeRunInspectionBinding,
+    RecipeRunObservationReceiptClaims,
+    RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
+    RecipeRunObservationWire, RecipeRunObservationsWire,
+    RestartVonkUnitOperationUnit as HostHelperRestartUnit, SignedHostHelperGrant,
+    SignedRecipeRunObservationReceipt as RecipeRunObservationReceipt,
+};
 
 pub mod operation_progress;
 pub use operation_progress::{
@@ -16,11 +50,13 @@ pub use package_upgrade::{
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, FixedOffset, Utc};
-use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as DeError};
+#[cfg(test)]
+use chrono::DateTime;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+#[cfg(test)]
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
@@ -34,106 +70,28 @@ const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATI
 pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
 const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostHelperManagedArea {
-    Models,
-    State,
-    Workloads,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostHelperRestartUnit {
-    Agent,
-    Helper,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostHelperContainerRuntimeAction {
-    RuntimePreflight,
-    ImageImport,
-    ImageInspect,
-    RunInspect,
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum HostHelperOperation {
-    CreateManagedDirectory {
-        area: HostHelperManagedArea,
-        relative_path: String,
-    },
-    InstallVonkDeb {
-        package_sha256: String,
-        package_signature: String,
-        rollback: PackageRollbackAuthority,
-    },
-    ConfirmPackageActivation {
-        package_sha256: String,
-        attempt_nonce: String,
-    },
-    RestartVonkUnit {
-        unit: HostHelperRestartUnit,
-    },
-    ScheduleReboot {
-        delay_seconds: u16,
-    },
-    ExecuteContainerRuntimeRequest {
-        action: HostHelperContainerRuntimeAction,
-        job_id: Uuid,
-        operation_id: Uuid,
-        attempt: u32,
-        fence: Uuid,
-        request_sha256: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        observation_identity_sha256: Option<String>,
-    },
-}
-
 impl HostHelperOperation {
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        canonical_generated_json(self)?;
         let valid = match self {
-            Self::CreateManagedDirectory { relative_path, .. } => {
-                valid_host_helper_relative_path(relative_path)
+            Self::InstallVonkDebOperation(operation) => {
+                operation.rollback.valid()
+                    && operation.rollback.source.package_sha256 != operation.package_sha256
             }
-            Self::InstallVonkDeb {
-                package_sha256,
-                package_signature,
-                rollback,
-            } => {
-                lower_hex(package_sha256, 64)
-                    && lower_hex(package_signature, 128)
-                    && rollback.valid()
-                    && rollback.source.package_sha256 != *package_sha256
-            }
-            Self::ConfirmPackageActivation {
-                package_sha256,
-                attempt_nonce,
-            } => lower_hex(package_sha256, 64) && lower_hex(attempt_nonce, 64),
-            Self::RestartVonkUnit { .. } => true,
-            Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
-            Self::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256,
-                observation_identity_sha256,
-            } => {
-                job_id.get_version() == Some(uuid::Version::Random)
-                    && operation_id.get_version() == Some(uuid::Version::Random)
-                    && *attempt > 0
-                    && fence.get_version() == Some(uuid::Version::Random)
-                    && lower_hex(request_sha256, 64)
-                    && observation_identity_sha256.as_ref().is_none_or(|digest| {
-                        *action == HostHelperContainerRuntimeAction::RunInspect
-                            && lower_hex(digest, 64)
-                    })
+            Self::ConfirmPackageActivationOperation(_)
+            | Self::RestartVonkUnitOperation(_)
+            | Self::ScheduleRebootOperation(_) => true,
+            Self::ExecuteContainerRuntimeRequestOperation(operation) => {
+                operation.job_id.get_version() == Some(uuid::Version::Random)
+                    && operation.operation_id.get_version() == Some(uuid::Version::Random)
+                    && operation.fence.get_version() == Some(uuid::Version::Random)
+                    && operation
+                        .observation_identity_sha256
+                        .as_ref()
+                        .is_none_or(|digest| {
+                            operation.action == HostHelperContainerRuntimeAction::RunInspect
+                                && lower_hex(digest, 64)
+                        })
             }
         };
         if valid {
@@ -142,18 +100,6 @@ impl HostHelperOperation {
             Err(ProtocolError::Identity("host helper operation"))
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostHelperGrantClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub request_id: Uuid,
-    pub node_id: String,
-    pub issued_at: i64,
-    pub expires_at: i64,
-    pub operation: HostHelperOperation,
 }
 
 impl HostHelperGrantClaims {
@@ -169,22 +115,6 @@ impl HostHelperGrantClaims {
         }
         self.operation.validate()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostHelperGrantSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct SignedHostHelperGrant {
-    pub schema_version: u8,
-    pub claims: HostHelperGrantClaims,
-    pub signature: HostHelperGrantSignature,
 }
 
 impl SignedHostHelperGrant {
@@ -210,39 +140,6 @@ pub fn host_helper_grant_signing_bytes(
     Ok(value)
 }
 
-fn required_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostRuntimeAction {
-    RuntimePreflight,
-    ImageImport,
-    ImageInspect,
-    RunInspect,
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostRuntimeRequest {
-    pub schema_version: u8,
-    pub action: HostRuntimeAction,
-    pub job_id: Uuid,
-    pub operation_id: Uuid,
-    pub attempt: u32,
-    pub fence: Uuid,
-    pub arguments: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observation: Option<RecipeRunInspectionBinding>,
-}
-
 impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
@@ -259,7 +156,7 @@ impl HostRuntimeRequest {
             (HostRuntimeAction::RunInspect, Some(binding)) => {
                 binding.validate()?;
                 if self.job_id != binding.run_id
-                    || u32::try_from(binding.run_generation).ok() != Some(self.attempt)
+                    || binding.run_generation != self.attempt
                     || hex_sha256(&canonical_json(&self.arguments)?)
                         != binding.runtime_arguments_sha256
                 {
@@ -280,32 +177,6 @@ impl HostRuntimeRequest {
 /// inspection request.  Because the host-helper grant signs the canonical
 /// request digest, these fields are bound to the exact RunInspect arguments and
 /// cannot be replayed for another generation or installed recipe.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunInspectionBinding {
-    pub artifact_set_digest: String,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    #[serde(deserialize_with = "required_optional")]
-    pub local_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "required_optional")]
-    pub master_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "required_optional")]
-    pub master_port: Option<u16>,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    pub model_identity: String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub role: String,
-    pub run_id: Uuid,
-    pub run_generation: u64,
-    pub runtime_arguments_sha256: String,
-    pub world_size: u32,
-}
-
 impl RecipeRunInspectionBinding {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.mapping_generation == 0
@@ -345,26 +216,6 @@ impl RecipeRunInspectionBinding {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RecipeRunObservationOutcome {
-    Running,
-    NotRunning,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceiptClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub node_id: String,
-    pub request_id: Uuid,
-    pub request_sha256: String,
-    pub observation_identity_sha256: String,
-    pub outcome: RecipeRunObservationOutcome,
-    pub observed_at: i64,
-}
-
 impl RecipeRunObservationReceiptClaims {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
@@ -383,22 +234,6 @@ impl RecipeRunObservationReceiptClaims {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceiptSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceipt {
-    pub schema_version: u8,
-    pub claims: RecipeRunObservationReceiptClaims,
-    pub signature: RecipeRunObservationReceiptSignature,
-}
-
 impl RecipeRunObservationReceipt {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         self.claims.validate()?;
@@ -413,28 +248,9 @@ impl RecipeRunObservationReceipt {
     }
 }
 
-/// The only current Controller observation payload.  The receipt and its
-/// enrolled public key are mandatory so a plain run/readiness boolean can
-/// never cross the authenticated agent boundary.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationWire {
-    pub schema_version: u8,
-    pub node_id: String,
-    #[serde(flatten)]
-    pub binding: RecipeRunInspectionBinding,
-    pub observed_at: DateTime<Utc>,
-    #[serde(deserialize_with = "required_optional")]
-    pub endpoint_ready: Option<bool>,
-    pub observation_identity_sha256: String,
-    pub grant: SignedHostHelperGrant,
-    pub helper_receipt: RecipeRunObservationReceipt,
-    pub observation_receipt_public_key: String,
-}
-
 impl RecipeRunObservationWire {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        self.binding.validate()?;
+        RecipeRunInspectionBinding::from(self).validate()?;
         self.helper_receipt.validate()?;
         if self.schema_version != 1
             || !valid_node_id(&self.node_id)
@@ -448,39 +264,23 @@ impl RecipeRunObservationWire {
             || self.helper_receipt.claims.observation_identity_sha256
                 != self.observation_identity_sha256
             || match &self.grant.claims.operation {
-                HostHelperOperation::ExecuteContainerRuntimeRequest {
-                    action,
-                    job_id,
-                    attempt,
-                    request_sha256,
-                    observation_identity_sha256,
-                    ..
-                } => {
-                    *action != HostHelperContainerRuntimeAction::RunInspect
-                        || *job_id != self.binding.run_id
-                        || u32::try_from(self.binding.run_generation).ok() != Some(*attempt)
-                        || request_sha256 != &self.helper_receipt.claims.request_sha256
-                        || observation_identity_sha256.as_deref()
+                HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
+                    operation.action != HostHelperContainerRuntimeAction::RunInspect
+                        || operation.job_id != self.run_id
+                        || self.run_generation != operation.attempt
+                        || operation.request_sha256 != self.helper_receipt.claims.request_sha256
+                        || operation.observation_identity_sha256.as_deref()
                             != Some(self.observation_identity_sha256.as_str())
                 }
                 _ => true,
             }
             || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
-            || (self.binding.local_address == self.binding.master_address)
-                != self.endpoint_ready.is_some()
+            || (self.local_address == self.master_address) != self.endpoint_ready.is_some()
         {
             return Err(ProtocolError::Identity("recipe run observation"));
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationsWire<'a> {
-    pub schema_version: u8,
-    pub observed_at: DateTime<Utc>,
-    pub runs: &'a [RecipeRunObservationWire],
 }
 
 pub fn recipe_run_observation_receipt_signing_bytes(
@@ -498,22 +298,6 @@ pub enum ProtocolError {
     Json(#[from] serde_json::Error),
     #[error("protocol identity is invalid: {0}")]
     Identity(&'static str),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentClaim {
-    pub attempt: u32,
-    pub authority_revision: String,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation: String,
-    pub operation_id: Uuid,
-    pub payload: Value,
-    pub payload_digest: String,
-    pub schema_version: u8,
 }
 
 impl AgentClaim {
@@ -541,16 +325,15 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
-        let maximum_bytes = if matches!(self.operation.as_str(), "recipe.install" | "recipe.start")
-        {
+        let maximum_bytes = if matches!(
+            self.operation.as_str(),
+            "recipe.install" | "recipe.start" | "recipe.job.run.v1"
+        ) {
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
         } else {
             MAX_DOCUMENT_BYTES
         };
-        if !self.payload.is_object()
-            || payload.len() > maximum_bytes
-            || hex_sha256(&payload) != self.payload_digest
-        {
+        if payload.len() > maximum_bytes || hex_sha256(&payload) != self.payload_digest {
             return Err(ProtocolError::Identity("claim payload digest"));
         }
         Ok(())
@@ -560,53 +343,7 @@ impl AgentClaim {
 /// Agent command to consume one Controller assignment. The destination is
 /// selected by the agent configuration, so claims cannot choose a filesystem
 /// path; only the plan identity crosses the wire.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactDistributionRequest {
-    pub authority_revision: String,
-    pub plan_digest: String,
-    pub schema_version: u8,
-}
-
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct InventoryRequest {
-    pub schema_version: u8,
-    pub observed_at: DateTime<Utc>,
-    pub disk_total_bytes: u64,
-    pub disk_free_bytes: u64,
-    pub host_memory_total_bytes: u64,
-    pub host_memory_free_bytes: u64,
-    pub gpu_memory_total_bytes: u64,
-    pub gpu_memory_free_bytes: u64,
-    pub gpu_count: u32,
-    pub artifact_store_read_only: bool,
-    pub capabilities: Vec<String>,
-    #[serde(deserialize_with = "deserialize_canonical_ip")]
-    pub fabric_address: Option<std::net::IpAddr>,
-    pub fabric_bandwidth_mbps: Option<u64>,
-    pub nvidia_driver_version: String,
-    pub container_runtime_version: String,
-}
-
-fn deserialize_canonical_ip<'de, D>(deserializer: D) -> Result<Option<std::net::IpAddr>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = Option::<String>::deserialize(deserializer)?;
-    raw.map(|value| {
-        let parsed: std::net::IpAddr = value
-            .parse()
-            .map_err(|_| D::Error::custom("invalid IP address"))?;
-        if parsed.to_string() != value {
-            return Err(D::Error::custom("non-canonical IP address"));
-        }
-        Ok(parsed)
-    })
-    .transpose()
-}
-
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
@@ -668,29 +405,15 @@ impl ArtifactDistributionRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentUpgradeRequest {
-    pub rollback: PackageRollbackAuthority,
-    pub source_package_url: String,
-    pub source_package_bytes: u64,
-    pub architecture: String,
-    pub package_bytes: u64,
-    pub package_sha256: String,
-    pub package_signature: String,
-    pub package_url: String,
-    pub package_version: String,
-    pub schema_version: u8,
-    pub target_binary_digest: String,
-    pub target_build_digest: String,
-}
-
 impl AgentUpgradeRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         if claim.operation != "agent.upgrade.v1" {
             return Err(ProtocolError::Identity("agent upgrade operation"));
         }
-        let value: Self = serde_json::from_value(claim.payload.clone())?;
+        let generated::AgentClaimPayload::AgentUpgradePayload(value) = &claim.payload else {
+            return Err(ProtocolError::Identity("agent upgrade payload"));
+        };
+        let value = value.clone();
         let url = url::Url::parse(&value.package_url)
             .map_err(|_| ProtocolError::Identity("agent upgrade URL"))?;
         let source_url = url::Url::parse(&value.source_package_url)
@@ -742,44 +465,17 @@ impl AgentUpgradeRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentProgress {
-    pub attempt: u32,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub progress: Value,
-    pub schema_version: u8,
-}
-
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
-        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES
-        {
-            return Err(ProtocolError::Identity("progress document"));
+        if let Some(progress) = &self.progress {
+            if canonical_json(progress)?.len() > MAX_DOCUMENT_BYTES {
+                return Err(ProtocolError::Identity("progress document"));
+            }
+            progress.validate()?;
         }
-        let progress: OperationProgress = serde_json::from_value(self.progress.clone())
-            .map_err(|_| ProtocolError::Identity("operation progress"))?;
-        progress.validate()?;
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentDirective {
-    pub attempt: u32,
-    pub cancel_requested: bool,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub schema_version: u8,
 }
 
 impl AgentDirective {
@@ -788,30 +484,7 @@ impl AgentDirective {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentResult {
-    pub attempt: u32,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub result: Value,
-    pub schema_version: u8,
-    pub state: String,
-}
-
 /// A content-addressed object authorized by one exact Controller assignment.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DistributionObject {
-    pub name: String,
-    pub sha256: String,
-    pub bytes: u64,
-    pub kind: String,
-}
-
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         let valid_name = !self.name.is_empty()
@@ -840,21 +513,6 @@ impl DistributionObject {
 /// Controller-issued, node-scoped authorization for a complete model and
 /// executable image set.  The assignment is carried alongside every fetch;
 /// an enrolled agent cannot turn a digest into a general object browser.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DistributionAssignment {
-    pub schema_version: u8,
-    pub assignment_id: Uuid,
-    pub plan_digest: String,
-    pub generation: u64,
-    pub node_id: String,
-    pub expires_at: DateTime<FixedOffset>,
-    pub model_artifact_set_sha256: String,
-    pub objects: Vec<DistributionObject>,
-    pub oci_image_digest: String,
-    pub oci_archive_sha256: String,
-}
-
 impl DistributionAssignment {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 2
@@ -907,26 +565,6 @@ impl AgentResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentRequest {
-    pub csr: String,
-    pub evidence: EnrollmentEvidence,
-    pub grant_token: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentEvidence {
-    pub agent_digest: String,
-    pub boot_id: String,
-    pub csr_public_key_fingerprint: String,
-    pub hardware_fingerprint: String,
-    pub host_key_fingerprint: String,
-    pub node_id: String,
-    pub observation_receipt_public_key: String,
-}
-
 impl EnrollmentEvidence {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if !lower_hex(&self.observation_receipt_public_key, 64) {
@@ -949,98 +587,6 @@ pub enum RecipeOperationRequest {
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
     ModelCleanup(RecipeModelCleanupRequest),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobFile {
-    pub name: String,
-    pub media_type: String,
-    pub size_bytes: u64,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobInputFile {
-    pub slot: String,
-    pub name: String,
-    pub media_type: String,
-    pub size_bytes: u64,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputLimits {
-    pub max_files: u16,
-    pub max_file_bytes: u64,
-    pub max_total_bytes: u64,
-    pub allowed_media_types: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputMapping {
-    pub slot: String,
-    pub media_type: String,
-    pub extensions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobRunRequest {
-    pub schema_version: u8,
-    pub job_id: Uuid,
-    pub run_id: Uuid,
-    pub installation_id: Uuid,
-    pub recipe_revision_id: Uuid,
-    pub recipe_content_sha256: String,
-    pub image_digest: String,
-    pub plan_digest: String,
-    pub interface: String,
-    pub rank: u32,
-    pub role: String,
-    pub contract_sha256: String,
-    pub input_manifest_sha256: String,
-    pub input_total_bytes: u64,
-    pub inputs: Vec<RecipeJobInputFile>,
-    pub parameters: Value,
-    pub output_mappings: Vec<RecipeJobOutputMapping>,
-    pub output_limits: RecipeJobOutputLimits,
-    pub timeout_seconds: u16,
-    pub reserved_memory_bytes: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputManifest {
-    pub schema_version: u8,
-    pub manifest_sha256: String,
-    pub total_bytes: u64,
-    pub files: Vec<RecipeJobFile>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobEvidence {
-    pub elapsed_milliseconds: u64,
-    pub peak_memory_bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobRunResult {
-    pub schema_version: u8,
-    pub job_id: Uuid,
-    pub run_id: Uuid,
-    pub exit_code: i32,
-    pub output_manifest: RecipeJobOutputManifest,
-    pub evidence: RecipeJobEvidence,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostics: Option<failure_evidence::FailureDiagnostics>,
 }
 
 impl RecipeJobRunResult {
@@ -1073,8 +619,10 @@ impl RecipeJobRunResult {
                 .output_manifest
                 .files
                 .iter()
-                .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
-                == Some(self.output_manifest.total_bytes)
+                .try_fold(0_u64, |total, file| {
+                    total.checked_add(u64::from(file.size_bytes))
+                })
+                == Some(u64::from(self.output_manifest.total_bytes))
             && self.output_manifest.total_bytes <= 2 * 1024 * 1024 * 1024
             && canonical_json(&manifest)
                 .ok()
@@ -1095,266 +643,10 @@ impl RecipeJobRunResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildRequest {
-    pub arguments: Vec<RecipeBuildArgument>,
-    pub base_image_storage_bytes: u64,
-    pub base_images: Vec<RecipeBuildBaseImage>,
-    pub capabilities: Vec<String>,
-    pub build_id: Uuid,
-    pub build_input_sha256: String,
-    pub dockerfile: String,
-    pub kind: String,
-    pub limits: RecipeBuildLimits,
-    pub network: RecipeBuildNetwork,
-    pub options: RecipeBuildOptions,
-    pub platform: String,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub schema_version: u8,
-    pub source_bundle_bytes: u64,
-    pub source_bundle_sha256: String,
-    pub target: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildBaseImage {
-    pub manifest_digest: String,
-    pub reference: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildArgument {
-    pub name: String,
-    pub value: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildNetwork {
-    pub hosts: Vec<String>,
-    pub mode: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildOptions {
-    pub additional_contexts: Vec<RecipeBuildAdditionalContext>,
-    pub annotations: Vec<RecipeBuildMetadata>,
-    pub environment: Vec<RecipeBuildArgument>,
-    pub format: String,
-    pub identity_label: bool,
-    pub ignorefile: Option<String>,
-    pub jobs: u8,
-    pub labels: Vec<RecipeBuildMetadata>,
-    pub layer_compression: String,
-    pub layer_labels: Vec<RecipeBuildMetadata>,
-    pub layers: bool,
-    pub no_hostname: bool,
-    pub no_hosts: bool,
-    pub omit_history: bool,
-    pub os_features: Vec<String>,
-    pub os_version: Option<String>,
-    pub shm_bytes: u64,
-    pub skip_unused_stages: bool,
-    pub squash: String,
-    pub timestamp: Option<u64>,
-    pub unset_environment: Vec<String>,
-    pub unset_labels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildAdditionalContext {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildMetadata {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildLimits {
-    pub container_socket: bool,
-    pub cpu_cores: u16,
-    pub gpu: u8,
-    pub host_mounts: bool,
-    pub memory_bytes: u64,
-    pub output_bytes: u64,
-    pub privileged: bool,
-    pub processes: u32,
-    pub temporary_bytes: u64,
-    pub timeout_seconds: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeImageImportRequest {
-    pub build_id: Uuid,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub kind: String,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    // The field binds the complete Docker archive digest for the imported
-    // image, including when the producer uses Docker-backed storage.
-    pub oci_layout_sha256: String,
-    pub schema_version: u8,
-    pub source_node_id: String,
-}
-
 /// Typed receipt emitted after a recipe image has been built and the exported
 /// archive has been bound to its content identity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildEvidence {
-    pub build_input_sha256: String,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub oci_layout_sha256: String,
-    pub policy: RecipeBuildPolicy,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildPolicy {
-    pub passed: bool,
-    pub dockerfile: String,
-    pub findings: Vec<RecipeBuildPolicyFinding>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildPolicyFinding {
-    pub code: String,
-    pub path: String,
-    pub line: Option<usize>,
-    pub detail: String,
-}
-
 /// Typed receipt emitted after a node verifies and imports the exact build
 /// archive identified by the Controller operation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeImageImportEvidence {
-    pub build_id: Uuid,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub oci_layout_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeInstallRequest {
-    pub schema_version: u8,
-    pub installation_id: Uuid,
-    pub plan_digest: String,
-    pub expected_bytes: u64,
-    pub rank: u32,
-    pub role: String,
-    pub compiled_execution_plan: Value,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub enum RecipeStartPhase {
-    #[serde(rename = "rank-launch")]
-    RankLaunch,
-    #[serde(rename = "collective-readiness")]
-    CollectiveReadiness,
-}
-
-fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStartRequest {
-    pub alias: String,
-    pub compiled_execution_plan: Value,
-    pub endpoint_address: std::net::IpAddr,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub local_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub master_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub master_port: Option<u16>,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase: Option<RecipeStartPhase>,
-    pub plan_digest: String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub reserved_memory_bytes: u64,
-    pub role: String,
-    pub run_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_generation: Option<u64>,
-    pub schema_version: u8,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_deadline: Option<DateTime<FixedOffset>>,
-    pub world_size: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStopRequest {
-    pub plan_digest: String,
-    pub run_id: Uuid,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeUninstallRequest {
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub cleanup_model_content_sha256: Option<String>,
-    pub installation_id: Uuid,
-    pub plan_digest: String,
-    pub recipe_content_sha256: String,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupInstallation {
-    pub installation_id: Uuid,
-    pub recipe_content_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupRequest {
-    pub installations: Vec<RecipeModelCleanupInstallation>,
-    pub model_content_sha256: String,
-    pub plan_digest: String,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStopResult {
-    pub stopped: bool,
-}
-
 impl RecipeStopResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.stopped {
@@ -1365,13 +657,6 @@ impl RecipeStopResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeUninstallResult {
-    pub uninstalled: bool,
-    pub removed_model_bytes: u64,
-}
-
 impl RecipeUninstallResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.uninstalled && self.removed_model_bytes <= 16 * 1024_u64.pow(4) {
@@ -1380,13 +665,6 @@ impl RecipeUninstallResult {
             Err(ProtocolError::Identity("recipe uninstall result"))
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupResult {
-    pub uninstalled_installations: u16,
-    pub removed_model_bytes: u64,
 }
 
 impl RecipeModelCleanupResult {
@@ -1404,29 +682,38 @@ impl RecipeModelCleanupResult {
 impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
-        let request = match claim.operation.as_str() {
-            "runtime.preflight.v1" => {
-                Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?)
+        let request = match (claim.operation.as_str(), &claim.payload) {
+            (
+                "runtime.preflight.v1",
+                generated::AgentClaimPayload::RuntimePreflightRequest(value),
+            ) => Self::RuntimePreflight(value.clone()),
+            ("recipe.build.v1", generated::AgentClaimPayload::RecipeBuildRequest(value)) => {
+                Self::Build(Box::new(value.clone()))
             }
-            "recipe.build.v1" => {
-                validate_build_wire(&claim.payload)?;
-                Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
+            (
+                "recipe.image.import.v1",
+                generated::AgentClaimPayload::RecipeImageImportRequest(value),
+            ) => Self::ImageImport(value.clone()),
+            ("recipe.job.run.v1", generated::AgentClaimPayload::RecipeJobRunRequest(value)) => {
+                Self::JobRun(value.clone())
             }
-            "recipe.image.import.v1" => {
-                Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.install", generated::AgentClaimPayload::RecipeInstallPayload(value)) => {
+                Self::Install(value.clone())
             }
-            "recipe.job.run.v1" => {
-                validate_job_wire(&claim.payload)?;
-                Self::JobRun(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.start", generated::AgentClaimPayload::RecipeStartPayload(value)) => {
+                Self::Start(value.clone())
             }
-            "recipe.install" => Self::Install(serde_json::from_value(claim.payload.clone())?),
-            "recipe.start" => Self::Start(serde_json::from_value(claim.payload.clone())?),
-            "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
-            "recipe.uninstall" => Self::Uninstall(serde_json::from_value(claim.payload.clone())?),
-            "recipe.model-uninstall.v1" => {
-                Self::ModelCleanup(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.stop", generated::AgentClaimPayload::RecipeStopPayload(value)) => {
+                Self::Stop(value.clone())
             }
-            _ => return Err(ProtocolError::Identity("recipe operation")),
+            ("recipe.uninstall", generated::AgentClaimPayload::RecipeUninstallPayload(value)) => {
+                Self::Uninstall(value.clone())
+            }
+            (
+                "recipe.model-uninstall.v1",
+                generated::AgentClaimPayload::RecipeModelCleanupPayload(value),
+            ) => Self::ModelCleanup(value.clone()),
+            _ => return Err(ProtocolError::Identity("recipe operation payload")),
         };
         request.validate()?;
         Ok(request)
@@ -1452,7 +739,7 @@ impl RecipeOperationRequest {
                     && lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
                     && valid_role(&value.role)
-                    && value.compiled_execution_plan.is_object()
+                    && value.compiled_execution_plan.schema_version == 2
             }
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
@@ -1468,7 +755,8 @@ impl RecipeOperationRequest {
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
-                            && deadline.offset().local_minus_utc() == 0
+                            && chrono::DateTime::parse_from_rfc3339(deadline)
+                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
                     }
                     (
                         Some(RecipeStartPhase::CollectiveReadiness),
@@ -1479,7 +767,8 @@ impl RecipeOperationRequest {
                             && value.world_size > 1
                             && value.local_address.is_some()
                             && value.local_address == value.master_address
-                            && deadline.offset().local_minus_utc() == 0
+                            && chrono::DateTime::parse_from_rfc3339(deadline)
+                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
                     }
                     _ => false,
                 };
@@ -1510,7 +799,7 @@ impl RecipeOperationRequest {
                             && value.master_port.is_some_and(|port| port >= 1024)
                     }
                     && valid_alias(&value.alias)
-                    && value.compiled_execution_plan.is_object()
+                    && value.compiled_execution_plan.schema_version == 2
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
@@ -1595,20 +884,21 @@ mod inventory_tests {
 mod recipe_model_cleanup_tests {
     use super::*;
 
-    fn claim(payload: Value) -> AgentClaim {
-        AgentClaim {
+    fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
+        Ok(AgentClaim {
             attempt: 1,
             authority_revision: "a".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation: "recipe.model-uninstall.v1".parse().unwrap(),
             operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        })
     }
 
     #[test]
@@ -1622,7 +912,7 @@ mod recipe_model_cleanup_tests {
                 "recipe_content_sha256": "c".repeat(64)
             }]
         });
-        let parsed = RecipeOperationRequest::parse(&claim(payload.clone())).unwrap();
+        let parsed = RecipeOperationRequest::parse(&claim(payload.clone()).unwrap()).unwrap();
         let RecipeOperationRequest::ModelCleanup(request) = parsed else {
             panic!("model cleanup payload parsed as the wrong operation");
         };
@@ -1630,7 +920,7 @@ mod recipe_model_cleanup_tests {
 
         let mut retired = payload;
         retired["model_version_sha256"] = retired["model_content_sha256"].take();
-        assert!(RecipeOperationRequest::parse(&claim(retired)).is_err());
+        assert!(claim(retired).is_err());
     }
 
     #[test]
@@ -1648,17 +938,15 @@ mod recipe_model_cleanup_tests {
             "plan_digest": "b".repeat(64),
             "recipe_content_sha256": "c".repeat(64),
             "cleanup_model_content_sha256": null,
-        }));
-        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        }))
+        .unwrap();
+        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
         assert!(RecipeOperationRequest::parse(&uninstall_claim).is_ok());
         payload
             .as_object_mut()
             .unwrap()
             .remove("cleanup_model_content_sha256");
-        uninstall_claim.payload = payload;
-        uninstall_claim.payload_digest =
-            hex_sha256(&canonical_json(&uninstall_claim.payload).unwrap());
-        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_err());
+        assert!(serde_json::from_value::<generated::RecipeUninstallPayload>(payload).is_err());
     }
 
     #[test]
@@ -1677,11 +965,12 @@ mod recipe_model_cleanup_tests {
         )
         .unwrap();
         assert!(uninstall.validate().is_ok());
-        let oversized_uninstall: RecipeUninstallResult = serde_json::from_value(
-            serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64}),
-        )
-        .unwrap();
-        assert!(oversized_uninstall.validate().is_err());
+        assert!(
+            serde_json::from_value::<RecipeUninstallResult>(
+                serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64})
+            )
+            .is_err()
+        );
         let cleanup: RecipeModelCleanupResult = serde_json::from_value(
             serde_json::json!({"uninstalled_installations": 1, "removed_model_bytes": 0}),
         )
@@ -1691,8 +980,6 @@ mod recipe_model_cleanup_tests {
             serde_json::from_value::<RecipeModelCleanupResult>(
                 serde_json::json!({"uninstalled_installations": 0, "removed_model_bytes": 0})
             )
-            .unwrap()
-            .validate()
             .is_err()
         );
     }
@@ -1711,7 +998,7 @@ mod recipe_start_tests {
     ) -> Value {
         let mut payload = serde_json::json!({
             "alias": "distributed-model",
-            "compiled_execution_plan": {},
+            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json")).unwrap(),
             "endpoint_address": "100.100.20.30",
             "image_digest": format!("sha256:{}", "a".repeat(64)),
             "installation_id": "00000000-0000-4000-8000-000000000001",
@@ -1749,24 +1036,25 @@ mod recipe_start_tests {
         payload
     }
 
-    fn claim(payload: Value) -> AgentClaim {
-        AgentClaim {
+    fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
+        Ok(AgentClaim {
             attempt: 1,
             authority_revision: "d".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
             job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.start".to_owned(),
+            operation: "recipe.start".parse().unwrap(),
             operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        })
     }
 
     fn parsed_start(payload: Value) -> Result<RecipeStartRequest, ProtocolError> {
-        match RecipeOperationRequest::parse(&claim(payload))? {
+        match RecipeOperationRequest::parse(&claim(payload)?)? {
             RecipeOperationRequest::Start(request) => Ok(request),
             _ => unreachable!(),
         }
@@ -1929,22 +1217,38 @@ mod recipe_start_tests {
     }
 
     #[test]
+    fn formatted_start_deadlines_preserve_lexical_bytes() {
+        for deadline in [
+            "2026-09-01T12:00:00.123000+00:00",
+            "2026-09-01T12:00:00.123Z",
+        ] {
+            let mut payload = start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("rank-launch"),
+            );
+            payload["start_deadline"] = Value::String(deadline.into());
+            let request = parsed_start(payload).unwrap();
+            assert_eq!(request.start_deadline.as_deref(), Some(deadline));
+            assert_eq!(
+                serde_json::to_value(request).unwrap()["start_deadline"],
+                deadline
+            );
+        }
+    }
+
+    #[test]
     fn authenticated_launch_claims_use_the_dedicated_document_ceiling() {
         let mut payload = start_payload(1, 0, None, None, None);
-        payload
-            .as_object_mut()
-            .unwrap()
-            .get_mut("compiled_execution_plan")
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .insert("artifact".to_owned(), Value::String("x".repeat(516 * 1024)));
-        assert!(claim(payload).validate().is_ok());
+        payload["compiled_execution_plan"]["runtime"]["argv"] =
+            serde_json::json!(["x".repeat(516 * 1024)]);
+        assert!(claim(payload.clone()).unwrap().validate().is_ok());
 
-        let oversized = serde_json::json!({
-            "value": "x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)
-        });
-        assert!(claim(oversized).validate().is_err());
+        payload["compiled_execution_plan"]["runtime"]["argv"] =
+            serde_json::json!(["x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)]);
+        assert!(claim(payload).unwrap().validate().is_err());
     }
 }
 
@@ -1955,7 +1259,7 @@ mod recipe_install_tests {
     #[test]
     fn schema_two_install_requires_the_inline_compiled_plan() {
         let payload = serde_json::json!({
-            "compiled_execution_plan": {},
+            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json")).unwrap(),
             "expected_bytes": 1024,
             "installation_id": "00000000-0000-4000-8000-000000000001",
             "plan_digest": "a".repeat(64),
@@ -1963,6 +1267,7 @@ mod recipe_install_tests {
             "role": "entrypoint",
             "schema_version": 2,
         });
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
         let claim = AgentClaim {
             attempt: 1,
             authority_revision: "b".repeat(64),
@@ -1970,7 +1275,7 @@ mod recipe_install_tests {
             fence: Uuid::new_v4(),
             job_id: Uuid::new_v4(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.install".to_owned(),
+            operation: "recipe.install".parse().unwrap(),
             operation_id: Uuid::new_v4(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
@@ -1982,22 +1287,8 @@ mod recipe_install_tests {
             panic!("expected install request");
         };
         assert_eq!(request.schema_version, 2);
-        assert!(request.compiled_execution_plan.is_object());
+        assert_eq!(request.compiled_execution_plan.schema_version, 2);
     }
-}
-
-fn validate_job_wire(value: &Value) -> Result<(), ProtocolError> {
-    for field in ["job_id", "run_id", "installation_id", "recipe_revision_id"] {
-        let canonical = value
-            .get(field)
-            .and_then(Value::as_str)
-            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
-            .is_some_and(|(raw, parsed)| parsed.to_string() == raw);
-        if !canonical {
-            return Err(ProtocolError::Identity("recipe job payload"));
-        }
-    }
-    Ok(())
 }
 
 fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
@@ -2013,11 +1304,9 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 && file.size_bytes <= 512 * 1024 * 1024
                 && lower_hex(&file.sha256, 64)
         })
-        && value
-            .inputs
-            .iter()
-            .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
-            == Some(value.input_total_bytes)
+        && value.inputs.iter().try_fold(0_u64, |total, file| {
+            total.checked_add(u64::from(file.size_bytes))
+        }) == Some(u64::from(value.input_total_bytes))
         && value.input_total_bytes <= 1024 * 1024 * 1024;
     let manifest = serde_json::json!({
         "schema_version": 1,
@@ -2067,9 +1356,7 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && value.role == "entrypoint"
         && inputs_valid
         && manifest_valid
-        && value.parameters.is_object()
-        && canonical_json(&value.parameters).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
-        && valid_job_parameter(&value.parameters, 0)
+        && value.compiled_execution_plan.schema_version == 2
         && mappings_valid
         && (1..=32).contains(&limits.max_files)
         && (1..=1024 * 1024 * 1024).contains(&limits.max_file_bytes)
@@ -2146,68 +1433,6 @@ fn valid_media_type(value: &str) -> bool {
     })
 }
 
-fn valid_job_parameter(value: &Value, depth: usize) -> bool {
-    if depth > 8 {
-        return false;
-    }
-    match value {
-        Value::Null | Value::Bool(_) | Value::Number(_) => true,
-        Value::String(value) => value.len() <= 4096 && !value.contains('\0'),
-        Value::Array(values) => {
-            values.len() <= 128
-                && values
-                    .iter()
-                    .all(|value| valid_job_parameter(value, depth + 1))
-        }
-        Value::Object(values) => values.iter().all(|(key, value)| {
-            let key = key.to_ascii_lowercase();
-            values.len() <= 128
-                && !key.is_empty()
-                && key.len() <= 64
-                && !unsafe_parameter_key(&key)
-                && valid_job_parameter(value, depth + 1)
-        }),
-    }
-}
-
-fn unsafe_parameter_key(key: &str) -> bool {
-    [
-        "password",
-        "secret",
-        "token",
-        "authorization",
-        "command",
-        "shell",
-        "environment",
-    ]
-    .iter()
-    .any(|value| key.contains(value))
-        || key.match_indices("private").any(|(index, _)| {
-            let tail = &key[index + "private".len()..];
-            tail.starts_with("key") || tail.get(1..).is_some_and(|value| value.starts_with("key"))
-        })
-        || key.split(['_', '-']).any(|part| {
-            matches!(
-                part,
-                "path" | "file" | "filename" | "filepath" | "directory" | "folder"
-            )
-        })
-}
-
-fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
-    let canonical_uuid = |field: &str| {
-        value
-            .get(field)
-            .and_then(Value::as_str)
-            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
-            .is_some_and(|(raw, parsed)| parsed.to_string() == raw)
-    };
-    if !canonical_uuid("build_id") || !canonical_uuid("recipe_revision_id") {
-        return Err(ProtocolError::Identity("recipe payload"));
-    }
-    Ok(())
-}
-
 fn validate_build(value: &RecipeBuildRequest) -> bool {
     value.schema_version == 1
         && value.kind == "recipe.build.v1"
@@ -2281,7 +1506,6 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         && value.limits.temporary_bytes > 0
         && value.limits.temporary_bytes <= 16 * 1024_u64.pow(4)
         && value.limits.processes >= 1
-        && value.limits.processes <= 65_535
         && value.limits.timeout_seconds >= 1
         && value.limits.timeout_seconds <= 86_400
         && value.limits.output_bytes >= 1
@@ -2329,20 +1553,6 @@ fn valid_node_id(value: &str) -> bool {
         && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
-fn valid_host_helper_relative_path(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value.split('/').all(|component| {
-            !component.is_empty()
-                && component != "."
-                && component != ".."
-                && component.len() <= 128
-                && component
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
 }
 
 fn validate_attempt_identity(
@@ -2624,14 +1834,14 @@ mod recipe_job_tests {
             recipe_content_sha256: "b".repeat(64),
             image_digest: format!("sha256:{}", "c".repeat(64)),
             plan_digest: "d".repeat(64),
-            interface: "video-job".to_owned(),
+            interface: "video-job".parse().unwrap(),
             rank: 0,
             role: "entrypoint".to_owned(),
             contract_sha256: "e".repeat(64),
             input_manifest_sha256: hex_sha256(&canonical_json(&manifest).unwrap()),
             input_total_bytes: 123,
             inputs,
-            parameters: serde_json::json!({"guidance_scale": 7}),
+            compiled_execution_plan: serde_json::from_value(serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json")).unwrap()["payload"]["compiled_execution_plan"].clone()).unwrap(),
             output_mappings: vec![RecipeJobOutputMapping {
                 slot: "video".to_owned(),
                 media_type: "video/mp4".to_owned(),
@@ -2649,7 +1859,7 @@ mod recipe_job_tests {
     }
 
     #[test]
-    fn job_contract_binds_canonical_inputs_and_rejects_unsafe_parameters() {
+    fn job_contract_binds_canonical_inputs_and_requires_plan_object() {
         let valid = request();
         assert!(validate_recipe_job(&valid));
 
@@ -2675,9 +1885,9 @@ mod recipe_job_tests {
         reserved_manifest.input_manifest_sha256 = hex_sha256(&canonical_json(&manifest).unwrap());
         assert!(!validate_recipe_job(&reserved_manifest));
 
-        let mut command = valid;
-        command.parameters = serde_json::json!({"shell_command": "curl example.invalid"});
-        assert!(!validate_recipe_job(&command));
+        let mut command = serde_json::to_value(valid).unwrap();
+        command["compiled_execution_plan"] = Value::Null;
+        assert!(serde_json::from_value::<RecipeJobRunRequest>(command).is_err());
     }
 
     #[test]
@@ -2747,10 +1957,12 @@ mod recipe_job_tests {
         ))
         .unwrap();
         result.validate().unwrap();
-        let typed: RecipeJobRunResult = serde_json::from_value(result.result.clone()).unwrap();
+        let generated::AgentResultResult::RecipeJobRunResult(typed) = result.result else {
+            panic!("expected typed job result")
+        };
         typed.validate().unwrap();
         assert_eq!(
-            result.result["output_manifest"]["manifest_sha256"],
+            typed.output_manifest.manifest_sha256,
             "9f7781fb8415bc1cb9e835fe4bcc9c8dd8f45f6a6b333f0e0550e812db1da9cd"
         );
 
@@ -2772,9 +1984,12 @@ mod recipe_job_tests {
             job_id: Uuid::new_v4(),
             node_id: "spk_11111111111111111111111111111111".to_owned(),
             operation_id: Uuid::new_v4(),
-            result: serde_json::json!({"reason": "controller cancellation requested"}),
+            result: serde_json::from_value(
+                serde_json::json!({"reason": "controller cancellation requested"}),
+            )
+            .unwrap(),
             schema_version: 1,
-            state: "cancelled".to_owned(),
+            state: "cancelled".parse().unwrap(),
         };
 
         result.validate().unwrap();
@@ -2822,7 +2037,7 @@ mod recipe_run_inspection_tests {
             action: HostRuntimeAction::RunInspect,
             job_id: binding.run_id,
             operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation as u32,
+            attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
@@ -2912,15 +2127,18 @@ mod recipe_run_inspection_tests {
                 node_id: receipt.claims.node_id.clone(),
                 issued_at: observed_at.timestamp(),
                 expires_at: observed_at.timestamp() + 60,
-                operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
-                    action: HostHelperContainerRuntimeAction::RunInspect,
-                    job_id: binding.run_id,
-                    operation_id: Uuid::new_v4(),
-                    attempt: binding.run_generation as u32,
-                    fence: Uuid::new_v4(),
-                    request_sha256: "b".repeat(64),
-                    observation_identity_sha256: Some(identity_sha256.clone()),
-                },
+                operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                    generated::ExecuteContainerRuntimeRequestOperation {
+                        type_: "execute-container-runtime-request".into(),
+                        action: HostHelperContainerRuntimeAction::RunInspect,
+                        job_id: binding.run_id,
+                        operation_id: Uuid::new_v4(),
+                        attempt: binding.run_generation,
+                        fence: Uuid::new_v4(),
+                        request_sha256: "b".repeat(64),
+                        observation_identity_sha256: Some(identity_sha256.clone()),
+                    },
+                ),
             },
             signature: HostHelperGrantSignature {
                 algorithm: "ed25519".to_owned(),
@@ -2931,8 +2149,25 @@ mod recipe_run_inspection_tests {
         let observation = RecipeRunObservationWire {
             schema_version: 1,
             node_id: receipt.claims.node_id.clone(),
-            binding,
-            observed_at,
+            artifact_set_digest: binding.artifact_set_digest,
+            image_digest: binding.image_digest,
+            installation_id: binding.installation_id,
+            local_address: binding.local_address,
+            mapping_generation: binding.mapping_generation,
+            mapping_id: binding.mapping_id,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            model_identity: binding.model_identity,
+            port: binding.port,
+            rank: binding.rank,
+            recipe_content_sha256: binding.recipe_content_sha256,
+            recipe_revision_id: binding.recipe_revision_id,
+            role: binding.role,
+            run_generation: binding.run_generation,
+            run_id: binding.run_id,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256,
+            world_size: binding.world_size,
+            observed_at: observed_at.into(),
             endpoint_ready: Some(true),
             observation_identity_sha256: identity_sha256,
             grant,
@@ -2941,13 +2176,14 @@ mod recipe_run_inspection_tests {
         };
         observation.validate().unwrap();
         let mut wrong_operation = observation.clone();
-        wrong_operation.grant.claims.operation = HostHelperOperation::CreateManagedDirectory {
-            area: HostHelperManagedArea::Models,
-            relative_path: "observation".to_owned(),
-        };
+        wrong_operation.grant.claims.operation =
+            HostHelperOperation::RestartVonkUnitOperation(generated::RestartVonkUnitOperation {
+                type_: "restart-vonk-unit".into(),
+                unit: HostHelperRestartUnit::Agent,
+            });
         assert!(wrong_operation.validate().is_err());
 
-        let mut partial_rendezvous = observation.binding.clone();
+        let mut partial_rendezvous = RecipeRunInspectionBinding::from(&observation);
         partial_rendezvous.world_size = 2;
         partial_rendezvous.master_address = Some("10.0.0.2".parse().unwrap());
         assert!(partial_rendezvous.validate().is_err());
@@ -2976,13 +2212,13 @@ mod distribution_tests {
                     name: "weights/model.bin".to_owned(),
                     sha256: "d".repeat(64),
                     bytes: 13,
-                    kind: "model".to_owned(),
+                    kind: "model".parse().unwrap(),
                 },
                 DistributionObject {
                     name: "image.oci.tar".to_owned(),
                     sha256: "e".repeat(64),
                     bytes: 11,
-                    kind: "oci-archive".to_owned(),
+                    kind: "oci-archive".parse().unwrap(),
                 },
             ],
             oci_image_digest: "sha256:".to_owned() + &"f".repeat(64),
@@ -3027,10 +2263,45 @@ mod distribution_tests {
             name: "tokenizer_config.json".to_owned(),
             sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_owned(),
             bytes: 0,
-            kind: "model".to_owned(),
+            kind: "model".parse().unwrap(),
         };
         value.validate().unwrap();
-        value.objects[0].kind = "oci-archive".to_owned();
+        value.objects[0].kind = "oci-archive".parse().unwrap();
         assert!(value.validate().is_err());
     }
+}
+
+impl generated::AgentRuntimeIdentity {
+    pub fn observation_receipt_public_key(&self) -> Result<[u8; 32], ProtocolError> {
+        if !lower_hex(&self.observation_receipt_public_key, 64) {
+            return Err(ProtocolError::Identity("observation receipt public key"));
+        }
+        let mut bytes = [0; 32];
+        for (index, pair) in self
+            .observation_receipt_public_key
+            .as_bytes()
+            .chunks_exact(2)
+            .enumerate()
+        {
+            let digit = |value: u8| {
+                if value.is_ascii_digit() {
+                    value - b'0'
+                } else {
+                    value - b'a' + 10
+                }
+            };
+            bytes[index] = digit(pair[0]) * 16 + digit(pair[1]);
+        }
+        Ok(bytes)
+    }
+}
+
+/// Validate an outgoing generated document before producing its canonical bytes.
+/// This also covers direct Rust construction, which does not invoke Deserialize.
+pub fn canonical_generated_json<T: Serialize + DeserializeOwned>(
+    document: &T,
+) -> Result<Vec<u8>, ProtocolError> {
+    let value = serde_json::to_value(document)?;
+    let validated: T = serde_json::from_value(value)?;
+    canonical_json(&validated)
 }

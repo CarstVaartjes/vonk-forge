@@ -19,6 +19,7 @@ from vonk_control.fleet_projection import (
     TelemetryPoint,
     telemetry_point,
 )
+from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -30,6 +31,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     FleetEventCursor,
+    FleetStreamEvent,
     InstallationNode,
     NodeInventorySnapshot,
     NodeTelemetryLatest,
@@ -678,6 +680,22 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
     assert snapshot.nodes[0].display_name == "Studio Spark"
     assert snapshot.nodes[0].ip_address == "192.168.1.211"
     assert snapshot.event_cursor == 1
+    with sessions() as session:
+        event = session.get(FleetStreamEvent, 1)
+        assert event is not None
+        FleetChangeEvent.model_validate(
+            {
+                "schema_version": 1,
+                "projection_refresh_required": True,
+                "change": {
+                    "entity_kind": event.entity_kind,
+                    "entity_id": event.entity_id,
+                    "node_id": event.node_id,
+                    "occurred_at": event.occurred_at.replace(tzinfo=UTC),
+                    "fields": event.payload,
+                },
+            }
+        )
 
 
 def test_read_captures_the_committed_cursor_before_repository_projection() -> None:

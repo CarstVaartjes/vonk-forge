@@ -162,6 +162,10 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
             },
         }
     ]
+    document["runtime"]["arguments"].extend([
+        {"name": "prompt", "value": None, "setting": "prompt"},
+        {"name": "seed", "value": None, "setting": "seed"},
+    ])
     document["settings"]["knobs"] = {
         "prompt": {"value": "", "change_effect": "restart"},
         "seed": {"value": 0, "change_effect": "restart"},
@@ -483,7 +487,7 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         assert operation.payload["reserved_memory_bytes"] == 225
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         assert operation.payload["contract_sha256"] == job.contract_sha256
-        assert operation.payload["parameters"]["prompt"] == "fox / meadow"
+        assert "fox / meadow" in operation.payload["compiled_execution_plan"]["runtime"]["argv"]
         assert operation.payload["output_mappings"] == [
             {
                 "slot": "image",
@@ -932,7 +936,6 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     agent_jobs = AgentJobService(sessions, clock=MutableClock(NOW))
 
     def consume(session, operation, attempt, message) -> None:
@@ -940,6 +943,9 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         recipe_operations.consume_agent_result(session, operation, attempt, message)
 
     agent_jobs.set_result_consumer(consume)
+    recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
     assert claim is not None
 
@@ -974,7 +980,6 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=121)
     agent_jobs = AgentJobService(sessions, clock=MutableClock(NOW))
 
     def consume(session, operation, attempt, message) -> None:
@@ -982,6 +987,9 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
         recipe_operations.consume_agent_result(session, operation, attempt, message)
 
     agent_jobs.set_result_consumer(consume)
+    recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=121)
     claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
     assert claim is not None
     service.cancel(
@@ -1017,9 +1025,11 @@ def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=124)
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
+    recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0", 30) is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=124)
     claim = claim_agent(agent_jobs, node_id, "serial-0", 30)
     assert claim is not None
 

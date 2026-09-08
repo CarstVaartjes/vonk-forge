@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .artifact_blob_store import (
@@ -39,6 +40,7 @@ from .compiled_artifact_contract import (
     compile_artifact_contract,
     validate_parameter_definition,
 )
+from .execution_plan_service import compile_job_invocation
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -46,6 +48,7 @@ from .models import (
     ArtifactJobFile,
     CatalogDocumentRevision,
     Job,
+    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RunNode,
@@ -651,7 +654,9 @@ class ArtifactJobService:
         supplied_parameters = _json_copy(parameters)
         if not isinstance(supplied_parameters, dict):
             raise ArtifactJobError("artifact job parameters must be an object")
-        manifest = recipe_job_manifest_document(parsed_inputs)
+        manifest = RecipeJobInputManifest(
+            schema_version=1, total_bytes=total, files=list(parsed_inputs)
+        ).model_dump(mode="json")
         manifest_digest = recipe_job_manifest_sha256(parsed_inputs)
         now = self._clock()
         try:
@@ -984,8 +989,20 @@ class ArtifactJobService:
             )
             if installation is None or resolved is None:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
-            revision, _recipe = resolved
+            revision, recipe = resolved
             node = self._job_node_in_session(session, run)
+            plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(plans, Mapping) or node.node_id not in plans:
+                raise ArtifactJobError("installed job execution plan is unavailable")
+            invocation = compile_job_invocation(
+                session,
+                recipe=recipe,
+                installed=plans[node.node_id],
+                build=(session.get(RecipeBuild, installation.recipe_build_id)
+                       if installation.recipe_build_id is not None else None),
+                parameters=artifact_job.parameters,
+                timeout_seconds=artifact_job.timeout_seconds,
+            )
             raw_files = artifact_job.input_manifest["files"]
             payload = {
                 "schema_version": 1,
@@ -1004,7 +1021,7 @@ class ArtifactJobService:
                 "input_manifest_sha256": artifact_job.input_manifest_sha256,
                 "input_total_bytes": artifact_job.input_total_bytes,
                 "inputs": raw_files,
-                "parameters": artifact_job.parameters,
+                "compiled_execution_plan": invocation,
                 "output_mappings": _output_mappings(artifact_job.compiled_contract),
                 "output_limits": artifact_job.output_limits,
                 "timeout_seconds": artifact_job.timeout_seconds,

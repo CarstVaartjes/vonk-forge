@@ -6,8 +6,11 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, cast
+from uuid import UUID
+import datetime
 
 if TYPE_CHECKING:
   from ..models.distribution_object import DistributionObject
@@ -25,8 +28,8 @@ class DistributionAssignment:
     """ Controller authorization for one node, generation and object set.
 
         Attributes:
-            assignment_id (str):
-            expires_at (str):
+            assignment_id (UUID):
+            expires_at (datetime.datetime):
             generation (int):
             model_artifact_set_sha256 (str):
             node_id (str):
@@ -37,8 +40,8 @@ class DistributionAssignment:
             schema_version (Literal[2]):
      """
 
-    assignment_id: str
-    expires_at: str
+    assignment_id: UUID
+    expires_at: datetime.datetime
     generation: int
     model_artifact_set_sha256: str
     node_id: str
@@ -54,9 +57,9 @@ class DistributionAssignment:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.distribution_object import DistributionObject
-        assignment_id = self.assignment_id
+        assignment_id = str(self.assignment_id)
 
-        expires_at = self.expires_at
+        expires_at = self.expires_at.isoformat()
 
         generation = self.generation
 
@@ -103,9 +106,15 @@ class DistributionAssignment:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.distribution_object import DistributionObject
         d = dict(src_dict)
-        assignment_id = d.pop("assignment_id")
+        assignment_id = UUID(d.pop("assignment_id"))
 
-        expires_at = d.pop("expires_at")
+
+
+
+        expires_at = isoparse(d.pop("expires_at"))
+
+
+
 
         generation = d.pop("generation")
 

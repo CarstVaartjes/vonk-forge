@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Generate (or check) Rust wire declarations from the current Pydantic graph."""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    schema = ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json"
+    output = ROOT / "rust/crates/vonk-agent-protocol/src/generated.rs"
+    check = ["--check"] if args.check else []
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/export-agent-wire-schema"), "--output", str(schema), *check],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(
+        ["cargo", "run", "--locked", "--quiet", "-p", "vonk-wire-codegen", "--", str(schema), str(output), *check],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

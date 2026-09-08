@@ -13,7 +13,7 @@ use vonk_agent::client::{ExactRecipeRunObservation, build_exact_recipe_run_obser
 use vonk_agent::executor::{recipe_start_success_body, runtime_arguments_for_plan};
 use vonk_agent::oci::{OciRuntime, RecipeRunStartIdentity};
 use vonk_agent::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
-use vonk_agent::workloads::{CompiledExecutionPlan, Placement};
+use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::{RecipeStartRequest, parse_strict};
 
 struct NoProcess;
@@ -52,19 +52,8 @@ struct SerializeInput {
 fn persist_binding(
     input: PersistBindingInput,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let spec: CompiledExecutionPlan =
-        serde_json::from_value(input.request.compiled_execution_plan.clone())?;
-    let placement = Placement {
-        endpoint_address: Some(input.request.endpoint_address),
-        rank: input.request.rank,
-        role: input.request.role.clone(),
-        world_size: input.request.world_size,
-        local_address: input.request.local_address,
-        master_address: input.request.master_address,
-        master_port: input.request.master_port,
-        port: input.request.port,
-        reserved_memory_bytes: input.request.reserved_memory_bytes,
-    };
+    let spec: CompiledExecutionPlan = input.request.compiled_execution_plan.clone();
+    let placement = spec.runtime.placement.clone();
     let run_generation = input
         .request
         .run_generation

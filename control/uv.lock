@@ -1241,7 +1241,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:c69ddc6b05b6a756d1072ef0781daa41d0e9a9c3e7ede8f2f07578befec3797c" },
+    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:c260dcc2664a4717a0548cee921a1b86fd472a50d77ad415de401486cf3ee787" },
 ]
 
 [package.metadata]
@@ -1340,7 +1340,7 @@ dev = [
 [[package]]
 name = "vonk-forge-public-contracts"
 version = "0.1.0"
-source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#d55389b5cc144d0483cf89b95770198c6125cb15" }
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#6001adcb12443701c8d695271deedbab6810217e" }
 dependencies = [
     { name = "pydantic" },
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -36,10 +37,68 @@ Uuid4Text = Annotated[
 ]
 
 
-class ManagedArea(StrEnum):
-    MODELS = "models"
-    STATE = "state"
-    WORKLOADS = "workloads"
+class RecipeRunInspectionBinding(WireModel):
+    """Exact run identity bound into a signed helper inspection request."""
+
+    run_id: Uuid4Text
+    installation_id: Uuid4Text
+    recipe_revision_id: Uuid4Text
+    recipe_content_sha256: Digest
+    mapping_id: Uuid4Text
+    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
+    image_digest: Digest
+    artifact_set_digest: Digest
+    model_identity: str = Field(min_length=3, max_length=1024)
+    rank: int = Field(ge=0, le=1023, strict=True)
+    role: str = Field(min_length=1, max_length=64)
+    world_size: int = Field(ge=1, le=1024, strict=True)
+    local_address: str | None = Field(min_length=2, max_length=45, json_schema_extra={"format": "ip"})
+    master_address: str | None = Field(min_length=2, max_length=45, json_schema_extra={"format": "ip"})
+    master_port: int | None = Field(ge=1024, le=65535, strict=True)
+    port: int = Field(ge=1024, le=65535, strict=True)
+    runtime_arguments_sha256: Digest
+
+    @field_validator("local_address", "master_address")
+    @classmethod
+    def canonical_fabric_address(cls, value: str | None) -> str | None:
+        if value is not None:
+            address = ipaddress.ip_address(value)
+            if str(address) != value or address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local:
+                raise ValueError("inspection address must be canonical and routable")
+        return value
+
+    @model_validator(mode="after")
+    def exact_rendezvous(self) -> RecipeRunInspectionBinding:
+        if self.rank >= self.world_size:
+            raise ValueError("inspection rank is outside its world")
+        rendezvous = (self.local_address, self.master_address, self.master_port)
+        if (self.world_size == 1 and any(value is not None for value in rendezvous)) or (self.world_size > 1 and any(value is None for value in rendezvous)):
+            raise ValueError("inspection rendezvous is invalid")
+        return self
+
+
+class HostRuntimeRequest(WireModel):
+    """The complete bytes hashed by the agent and admitted by the root helper."""
+
+    schema_version: Literal[1]
+    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
+    job_id: Uuid4Text
+    operation_id: Uuid4Text
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: Uuid4Text
+    arguments: list[Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]] = Field(max_length=512)
+    observation: RecipeRunInspectionBinding | None = None
+
+    @model_validator(mode="after")
+    def bind_runtime_inspection(self) -> HostRuntimeRequest:
+        if (not self.arguments) != (self.action == "runtime-preflight"):
+            raise ValueError("runtime arguments do not match the action")
+        if self.observation is not None:
+            import hashlib
+            if self.action != "run-inspect" or self.job_id != self.observation.run_id or self.attempt != self.observation.run_generation or hashlib.sha256(canonical_message(self.arguments)).hexdigest() != self.observation.runtime_arguments_sha256:
+                raise ValueError("runtime observation binding does not match the request")
+        return self
 
 
 class RestartUnit(StrEnum):
@@ -57,7 +116,6 @@ class ContainerRuntimeAction(StrEnum):
 
 
 class HostOperationKind(StrEnum):
-    CREATE_MANAGED_DIRECTORY = "create-managed-directory"
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
     RESTART_VONK_UNIT = "restart-vonk-unit"
@@ -68,21 +126,6 @@ class HostOperationKind(StrEnum):
 class _HostOperation(WireModel):
     def to_mapping(self) -> dict[str, object]:
         return self.model_dump(mode="json")
-
-
-class CreateManagedDirectoryOperation(_HostOperation):
-    type: Literal["create-managed-directory"]
-    area: Literal["models", "state", "workloads"]
-    relative_path: str = Field(min_length=1, max_length=512, strict=True)
-
-    @field_validator("relative_path")
-    @classmethod
-    def safe_relative_path(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 512 or not _relative_path(value):
-            raise ValueError("managed relative path is invalid")
-        return value
-
-
 
 
 class InstallVonkDebOperation(_HostOperation):
@@ -133,8 +176,7 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 
 
 type HostOperation = Annotated[
-    CreateManagedDirectoryOperation
-    | InstallVonkDebOperation
+    InstallVonkDebOperation
     | ConfirmPackageActivationOperation
     | RestartVonkUnitOperation
     | ScheduleRebootOperation
@@ -157,8 +199,8 @@ class HostHelperGrantClaims(WireModel):
     authority: Literal["vonk.host-maintenance-helper"]
     request_id: Uuid4Text
     node_id: NodeId
-    issued_at: int = Field(gt=0, strict=True)
-    expires_at: int = Field(strict=True)
+    issued_at: int = Field(gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
+    expires_at: int = Field(strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
     operation: HostOperation
 
     @model_validator(mode="after")
@@ -209,7 +251,7 @@ class RecipeRunObservationReceiptClaims(WireModel):
     request_sha256: Digest
     observation_identity_sha256: Digest
     outcome: Literal["running", "not-running"]
-    observed_at: int = Field(gt=0, strict=True)
+    observed_at: int = Field(gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
 
     @classmethod
     def parse(cls, value: Any) -> RecipeRunObservationReceiptClaims:
@@ -259,14 +301,6 @@ def host_artifact_signing_bytes(kind: str, digest: str) -> bytes:
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_COMPONENT = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
-
-
-def _relative_path(value: object) -> bool:
-    return isinstance(value, str) and all(
-        component not in {"", ".", ".."} and _COMPONENT.fullmatch(component) is not None
-        for component in value.split("/")
-    )
 
 
 def _parse_model(cls: type[WireModel], value: Any, name: str) -> Any:

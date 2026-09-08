@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +33,7 @@ from vonk_control.models import (
     Job,
     RecipeInstallation,
     RecipeRun,
+    RecipeRunObservationGrant,
     RunNode,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
@@ -140,6 +141,10 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         assert pending
         for child in pending:
             assert child.payload.get("run_generation") is not None
+            placement = child.payload["compiled_execution_plan"]["runtime"]["placement"]
+            if nodes > 1 and child.payload["local_address"] != child.payload["master_address"]:
+                assert placement["endpoint_address"] is None
+                assert child.payload["endpoint_address"] == child.payload["local_address"]
             with sessions() as session:
                 run = session.get(RecipeRun, started.owner_id)
                 assert run is not None
@@ -260,11 +265,13 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
 
 
 @pytest.mark.parametrize("nodes", [1, 2])
+@pytest.mark.parametrize("same_second", [False, True])
 def test_production_start_grant_helper_receipt_rust_and_controller_consume(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
     host_helper_wire_probe: Path,
     nodes: int,
+    same_second: bool,
 ) -> None:
     """Connect the Controller start evidence, typed helper, Rust wire, and consume route."""
     from fastapi.testclient import TestClient
@@ -304,6 +311,10 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         assert binding["local_address"] == launch.get("local_address")
         assert binding["master_address"] == launch.get("master_address")
         assert binding["master_port"] == launch.get("master_port")
+    if same_second:
+        with sessions.begin() as session:
+            node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+            node.updated_at = NOW + timedelta(microseconds=500_000)
     operation_id = str(uuid.uuid4())
     fence = str(uuid.uuid4())
     request = {
@@ -337,13 +348,13 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
             env={
                 **os.environ,
                 "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
-                "VONK_HOST_HELPER_WIRE_NOW": str(int(NOW.timestamp())),
+                "VONK_HOST_HELPER_WIRE_NOW": str(int(NOW.timestamp()) - int(same_second)),
             },
             check=False,
         )
         assert helper.returncode == 0, helper.stderr
         receipt = json.loads(helper.stdout)
-        observed_at = NOW + timedelta(seconds=1)
+        observed_at = NOW + timedelta(seconds=0 if same_second else 1)
         payload = {
             **identity,
             "observed_at": observed_at.isoformat(),
@@ -388,6 +399,33 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.observed_run_generation == identity["run_generation"]
         assert node.state == "running"
+        assert node.updated_at.replace(tzinfo=UTC) == max(
+            observed_at, NOW + timedelta(microseconds=500_000) if same_second else NOW
+        )
+        accepted_receipt = node.observation_receipt_sha256
+        accepted_at = node.updated_at
+        pending = session.get(RecipeRunObservationGrant, node.id)
+        assert pending is not None and pending.consumed is True
+    with TestClient(app) as client:
+        replay = client.post(
+            "/agent/v1/recipe-runs/observations", headers=headers, json=envelope
+        )
+        assert replay.status_code == 422
+        assert "replayed" in replay.json()["detail"]
+    with sessions() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        assert node.state == "running"
+        assert node.observation_receipt_sha256 == accepted_receipt
+        assert node.updated_at == accepted_at
+    with sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        node.state = "failed"
+    with TestClient(app) as client:
+        client.post("/agent/v1/recipe-runs/observations", headers=headers, json=envelope)
+    with sessions() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        assert node.state == "failed"
+        assert node.observation_receipt_sha256 is None
 
 
 @pytest.mark.parametrize("singleton", [False, True])

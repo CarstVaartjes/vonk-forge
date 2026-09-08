@@ -1,8 +1,8 @@
-use std::collections::BTreeSet;
 use std::fs;
 use std::process::Command;
 
-use vonk_agent::runtime_identity::AgentRuntimeIdentity;
+use vonk_agent::runtime_identity::PreparedRuntimeIdentity;
+use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
 
 #[test]
 fn direct_identity_binds_version_build_and_binary_to_the_executable() {
@@ -10,7 +10,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
     let executable = directory.path().join("vonk-agent");
     fs::write(&executable, b"direct-agent-binary").unwrap();
 
-    let identity = AgentRuntimeIdentity::from_executable(&executable).unwrap();
+    let identity = PreparedRuntimeIdentity::from_executable(&executable).unwrap();
 
     assert_eq!(
         identity.semantic_version,
@@ -19,9 +19,9 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
     assert_eq!(
         identity.architecture,
         if cfg!(target_arch = "aarch64") {
-            "linux-arm64"
+            AgentRuntimeIdentityArchitecture::LinuxArm64
         } else {
-            "linux-amd64"
+            AgentRuntimeIdentityArchitecture::LinuxAmd64
         }
     );
     assert_eq!(
@@ -34,25 +34,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         identity.build_digest,
         format!("sha256:{}", identity.binary_digest)
     );
-    assert!(!identity.self_test_passed);
-    assert!(identity.package_activation.is_none());
-    let fields = serde_json::to_value(&identity).unwrap();
-    assert_eq!(
-        fields
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>(),
-        BTreeSet::from([
-            "architecture",
-            "binary_digest",
-            "build_digest",
-            "package_activation",
-            "self_test_passed",
-            "semantic_version",
-        ])
-    );
+    assert!(identity.mark_self_test_passed().is_err());
 }
 
 #[test]
@@ -76,5 +58,5 @@ fn direct_identity_rejects_a_symlinked_executable() {
     fs::write(&executable, b"direct-agent-binary").unwrap();
     std::os::unix::fs::symlink(&executable, &linked).unwrap();
 
-    assert!(AgentRuntimeIdentity::from_executable(&linked).is_err());
+    assert!(PreparedRuntimeIdentity::from_executable(&linked).is_err());
 }

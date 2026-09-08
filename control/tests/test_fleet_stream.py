@@ -26,6 +26,11 @@ from vonk_control.fleet_events import (
 )
 from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.fleet_stream import FleetStream, parse_last_event_id
+from vonk_control.fleet_stream_contract import (
+    FleetChangeEvent,
+    FleetSnapshotEvent,
+    FleetTelemetryEvent,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -173,12 +178,20 @@ def _production_stream_store():
 
 
 def _operation_draft(identifier: int) -> FleetEventDraft:
+    entity_id = f"job-{identifier}"
     return FleetEventDraft(
         event_type="operation-state",
         node_id=None,
         entity_kind="job",
-        entity_id=f"job-{identifier}",
-        payload={"schema_version": 1, "state": "running"},
+        entity_id=entity_id,
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": entity_id,
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
     )
 
 
@@ -189,13 +202,14 @@ def _event(
     payload: dict[str, object],
     node_id: str | None = None,
     entity_kind: str = "entity",
+    entity_id: str | None = None,
 ) -> FleetEvent:
     return FleetEvent(
         id=identifier,
         event_type=event_type,
         node_id=node_id,
         entity_kind=entity_kind,
-        entity_id=f"entity-{identifier}",
+        entity_id=entity_id or f"entity-{identifier}",
         payload=payload,
         occurred_at=NOW + timedelta(seconds=identifier),
         expires_at=NOW + timedelta(hours=24),
@@ -288,6 +302,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "node-telemetry",
         node_id=NODE_ID,
         entity_kind="node-telemetry-latest",
+        entity_id=NODE_ID,
         payload={"schema_version": 1, "node_id": NODE_ID, "sample_id": SAMPLE_ID},
     )
     recipe_event = _event(
@@ -298,8 +313,14 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         payload={
             "schema_version": 1,
             "entity_kind": "installation-node",
-            "entity_id": "rank-1",
+            "entity_id": "entity-7",
+            "installation_id": "installation-1",
+            "node_id": NODE_ID,
+            "rank": 0,
+            "role": "leader",
             "state": "installed",
+            "installed_bytes": 0,
+            "required_bytes": 0,
         },
     )
     events = Events(
@@ -344,36 +365,40 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
                 "accelerator_name": "NVIDIA GB10",
                 "accelerator_performance_state": "P0",
             },
-            "disk_free_bytes": None,
-            "disk_total_bytes": None,
             "gap_samples": 0,
-            "gpu_memory_free_bytes": None,
-            "gpu_memory_total_bytes": None,
-            "gpu_utilization_percent": None,
             "id": SAMPLE_ID,
-            "load_average_1m": None,
-            "memory_available_bytes": None,
-            "memory_total_bytes": None,
-            "network_receive_bytes_per_second": None,
-            "network_transmit_bytes_per_second": None,
             "node_id": NODE_ID,
             "observed_at": "2026-08-15T11:59:58Z",
-            "power_watts": None,
             "received_at": "2026-08-15T11:59:59Z",
             "sequence": 3,
-            "temperature_c": None,
-            "metrics": telemetry_metrics_document(),
-        },
-        "schema_version": 1,
-    }
+                "metrics": {
+                    "capabilities": [],
+                    "provenance": {
+                        "collector": "test",
+                        "collector_version": "1",
+                    },
+                    "runtimes": [],
+                    "schema_version": 2,
+                    "series": [],
+                    "workloads": [],
+                },
+            },
+            "schema_version": 1,
+        }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
         "change": {
             "entity_id": "entity-7",
             "entity_kind": "installation-node",
             "fields": {
-                "entity_id": "rank-1",
+                "entity_id": "entity-7",
                 "entity_kind": "installation-node",
+                "installation_id": "installation-1",
+                "installed_bytes": 0,
+                "node_id": NODE_ID,
+                "rank": 0,
+                "required_bytes": 0,
+                "role": "leader",
                 "schema_version": 1,
                 "state": "installed",
             },
@@ -392,7 +417,14 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     operation_event = _event(
         6,
         "operation-state",
-        payload={"schema_version": 1, "entity_id": "job-1", "state": "running"},
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-6",
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
         entity_kind="job",
     )
     events = Events(
@@ -440,9 +472,68 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     }
     assert replay_fields == {"id": "6", "event": "operation-state"}
     assert replay_data["projection_refresh_required"] is True
+    assert FleetSnapshotEvent.model_validate_json(
+        json.dumps(snapshot_data)
+    ).snapshot.event_cursor == 5
+    assert FleetChangeEvent.model_validate_json(
+        json.dumps(replay_data)
+    ).change.entity_id == "entity-6"
     assert events.high_watermark_calls == 1
     assert projection.cursors == [5]
     assert events.replay_calls == [(5, NOW, 128)]
+
+
+def test_fleet_change_schema_rejects_unknown_typed_fields() -> None:
+    data = {
+        "schema_version": 1,
+        "projection_refresh_required": True,
+        "change": {
+            "entity_kind": "job",
+            "entity_id": "job-typed",
+            "node_id": None,
+            "occurred_at": "2026-08-15T12:00:00Z",
+            "fields": {
+                "schema_version": 1,
+                "entity_kind": "job",
+                "entity_id": "job-typed",
+                "kind": "deploy",
+                "state": "queued",
+                "target_count": 1,
+                "unexpected": "must be rejected",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        FleetChangeEvent.model_validate(data)
+    data["change"]["fields"].pop("unexpected")
+    data["change"]["fields"]["target_count"] = "1"
+    with pytest.raises(ValueError, match="int_type"):
+        FleetChangeEvent.model_validate(data)
+
+
+def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
+    event = _event(
+        8,
+        "recipe-state",
+        entity_kind="job",
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-8",
+            "kind": "deploy",
+            "state": "queued",
+            "target_count": 1,
+        },
+    )
+    stream = FleetStream(
+        Events(high_watermark=8, first_retained_id=1),
+        Telemetry(),
+        Projection(),
+    )
+
+    with pytest.raises(ValueError, match="does not match event type"):
+        stream._event_data(event, {})
 
 
 @pytest.mark.parametrize(
@@ -505,6 +596,8 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
                     6,
                     "node-telemetry",
                     node_id=NODE_ID,
+                    entity_kind="node-telemetry-latest",
+                    entity_id=NODE_ID,
                     payload={
                         "schema_version": 1,
                         "node_id": NODE_ID,
@@ -548,7 +641,14 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
     later = _event(
         6,
         "operation-state",
-        payload={"schema_version": 1, "entity_id": "job-6", "state": "running"},
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-6",
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
         entity_kind="job",
     )
     events = Events(
@@ -741,6 +841,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     assert fields["id"] == "1"
     assert fields["event"] == "node-telemetry"
     assert data["sample"]["boot_id"] == NON_RFC_BOOT_ID
+    assert FleetTelemetryEvent.model_validate_json(json.dumps(data)).node_id == NODE_ID
     assert sum("fleet_stream_events" in statement for statement in selects) == 1
     assert sum("from node_telemetry_samples" in statement for statement in selects) == 1
     assert len(selects) == 2
@@ -907,7 +1008,14 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         node_id=None,
                         entity_kind="job",
                         entity_id="job-5",
-                        payload={"schema_version": 1, "state": "running"},
+                        payload={
+                            "schema_version": 1,
+                            "entity_kind": "job",
+                            "entity_id": "job-5",
+                            "kind": "deploy",
+                            "state": "running",
+                            "target_count": 1,
+                        },
                         occurred_at=NOW - timedelta(hours=23, minutes=59),
                         expires_at=NOW + timedelta(milliseconds=500),
                     ),
@@ -917,7 +1025,14 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         node_id=None,
                         entity_kind="job",
                         entity_id="job-6",
-                        payload={"schema_version": 1, "state": "running"},
+                        payload={
+                            "schema_version": 1,
+                            "entity_kind": "job",
+                            "entity_id": "job-6",
+                            "kind": "deploy",
+                            "state": "running",
+                            "target_count": 1,
+                        },
                         occurred_at=NOW,
                         expires_at=NOW + timedelta(hours=24),
                     ),

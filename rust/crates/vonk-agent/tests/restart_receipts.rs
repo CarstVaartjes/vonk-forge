@@ -5,16 +5,18 @@ use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateStore};
+use vonk_agent_protocol::generated::{AgentClaimPayload, AgentOperation, RecipeStopPayload};
 use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
 fn claim() -> AgentClaim {
-    let payload = json!({
-        "plan_digest": "a".repeat(64),
-        "run_id": "00000000-0000-4000-8000-000000000003",
-        "schema_version": 1,
-    });
+    let payload = RecipeStopPayload {
+        plan_digest: "a".repeat(64),
+        run_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
+        schema_version: 1,
+    };
+    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     AgentClaim {
         attempt: 1,
         authority_revision: "b".repeat(64),
@@ -22,10 +24,10 @@ fn claim() -> AgentClaim {
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
         node_id: NODE_ID.to_owned(),
-        operation: "recipe.stop".to_owned(),
+        operation: AgentOperation::RecipeStop,
         operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-        payload,
+        payload_digest,
+        payload: AgentClaimPayload::RecipeStopPayload(payload),
         schema_version: 1,
     }
 }
@@ -42,7 +44,7 @@ fn completed_result_is_redelivered_until_acknowledged() {
             BeginDecision::Execute
         );
         state
-            .finish(&claim, "succeeded", json!({"installed": true}))
+            .finish(&claim, "succeeded", json!({"stopped": true}))
             .unwrap()
     };
 

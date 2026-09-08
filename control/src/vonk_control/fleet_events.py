@@ -12,6 +12,7 @@ from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
+from .fleet_event_contract import validate_fleet_event_payload
 from .models import (
     AgentNodeProfile,
     AgentOperation,
@@ -138,6 +139,13 @@ def _validated_payload(draft: FleetEventDraft) -> dict[str, object]:
         raise TypeError("Fleet event payload must be an object")
     _walk_payload(draft.payload)
     payload = dict(draft.payload)
+    validate_fleet_event_payload(
+        draft.event_type,
+        draft.entity_kind,
+        draft.entity_id,
+        draft.node_id,
+        payload,
+    )
     try:
         encoded = json.dumps(
             payload,

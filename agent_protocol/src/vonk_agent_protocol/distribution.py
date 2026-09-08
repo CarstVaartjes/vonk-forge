@@ -9,7 +9,6 @@ from uuid import UUID
 from pydantic import (
     Field,
     ValidationError,
-    field_serializer,
     field_validator,
     model_validator,
 )
@@ -64,7 +63,7 @@ class DistributionAssignment(WireModel):
     """Controller authorization for one node, generation and object set."""
 
     schema_version: Literal[2]
-    assignment_id: str
+    assignment_id: str = Field(json_schema_extra={"format": "uuid"})
     plan_digest: Digest
     generation: int = Field(ge=1)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -88,10 +87,6 @@ class DistributionAssignment(WireModel):
         if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(value):
             raise ValueError("distribution expiration must be UTC")
         return value
-
-    @field_serializer("expires_at")
-    def serialize_expiration(self, value: datetime) -> str:
-        return value.isoformat()
 
     @model_validator(mode="after")
     def object_set_is_complete(self) -> DistributionAssignment:

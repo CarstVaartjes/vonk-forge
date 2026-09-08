@@ -16,7 +16,13 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol import (
+    OperationMemberProgress,
+    OperationProgress,
+    validate_result_for_operation,
+)
+from vonk_agent_protocol.contracts import AgentFailureResult
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -37,8 +43,10 @@ from .models import (
     RoutePublicationOwner,
 )
 from .operation_contract import (
+    AvailabilityOperationFailure,
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
+    OperationFailure,
     OperationFailureEvidence,
     OperationRecovery,
     OperationRecoveryAction,
@@ -293,7 +301,7 @@ class JobOperationResponse(StrictModel):
     attempt: int = Field(ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
-    failure: OperationFailureEvidence | None = None
+    failure: OperationFailure | None = None
     provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
@@ -318,7 +326,7 @@ class OperationDetailResponse(StrictModel):
     progress: JobOperationProgress | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
-    failure: OperationFailureEvidence | None = None
+    failure: OperationFailure | None = None
     provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
@@ -630,7 +638,7 @@ def job_response(
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
             ),
-            failure=_failure_projection(item.get("result")),
+            failure=_item_failure(item),
             provenance=_provenance_projection(item.get("result")),
             evidence_download=_evidence_download_projection(item.get("result")),
             recovery=recovery_for_operation(
@@ -732,39 +740,54 @@ def _progress_document(value: object, state: object = None) -> dict[str, object]
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
-    if not isinstance(value, Mapping):
+    """Project Controller-owned result metadata into its bounded failure model."""
+    if value is None:
         return None
+    if not isinstance(value, Mapping):
+        raise TypeError("operation result must be a JSON object")
     raw = value.get("failure", value)
     if not isinstance(raw, Mapping):
+        raise TypeError("operation failure must be a JSON object")
+    if "error_code" not in raw:
         return None
-    try:
-        safe = sanitize_failure_evidence(raw)
-        error_code = safe.get("error_code")
-        if not isinstance(error_code, str) or not re.fullmatch(
-            r"[a-z][a-z0-9_]{0,63}", error_code
-        ):
+    safe = sanitize_failure_evidence(raw)
+    summary = safe.get("summary") or safe.get("reason") or safe["error_code"]
+    return OperationFailureEvidence(
+        error_code=safe["error_code"],
+        summary=summary[:256] if isinstance(summary, str) else summary,
+        detail=safe.get("detail"),
+        retryable=safe.get("retryable", False),
+        uncertain=safe.get("uncertain", False),
+    )
+
+
+def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
+    """Select the authoritative contract by producer, before union egress."""
+    if "failure" in item:
+        value = item["failure"]
+        if value is None:
             return None
-        summary = safe.get("summary") or safe.get("reason") or error_code
-        if not isinstance(summary, str) or not summary.strip():
+        if str(item["kind"]).startswith("model-cache."):
+            return AvailabilityOperationFailure.model_validate(value)
+        return OperationFailureEvidence.model_validate(value, strict=True)
+    if item["kind"] in {operation.value for operation in ProtocolAgentOperation}:
+        if item["state"] not in {"failed", "waiting-for-operator"} or item.get("result") is None:
             return None
-        detail = safe.get("detail")
-        return OperationFailureEvidence(
-            error_code=error_code,
-            summary=summary,
-            detail=detail if isinstance(detail, str) else None,
-            retryable=(
-                safe.get("retryable", False)
-                if isinstance(safe.get("retryable", False), bool)
-                else None
-            ),
-            uncertain=(
-                safe.get("uncertain", False)
-                if isinstance(safe.get("uncertain", False), bool)
-                else None
-            ),
-        )
-    except (TypeError, ValueError):
-        return None
+        value = item["result"]
+        if not isinstance(value, Mapping):
+            raise ValueError("agent result must be a JSON object")
+        # The evidence collector adds these separate, typed read decorations.
+        result = {key: child for key, child in value.items()
+                  if key not in {"provenance", "evidence_download"}}
+        parsed = validate_result_for_operation(item["kind"], result, state=item["state"])
+        if isinstance(parsed, AgentFailureResult):
+            return parsed
+        # A job process receipt has its own canonical result contract. Its
+        # complete manifest remains on the artifact-job result endpoint.
+        reason = parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
+        return OperationFailureEvidence(error_code="artifact_process_failed",
+                                       summary=reason[:256], detail=reason)
+    return _failure_projection(item.get("result"))
 
 
 def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
@@ -827,13 +850,7 @@ def operation_detail_response(
 ) -> OperationDetailResponse:
     """Build the bounded generic read representation from a durable projection."""
 
-    # Families with a separate canonical failure field must retain that field;
-    # successful/partial result receipts are not a substitute for the failure.
-    failure = (
-        OperationFailureEvidence.model_validate(item["failure"], strict=True)
-        if item.get("failure") is not None
-        else None
-    ) if "failure" in item else _failure_projection(item.get("result"))
+    failure = _item_failure(item)
     return OperationDetailResponse(
         id=item["id"],
         parent_id=item.get("parent_id"),
@@ -851,7 +868,7 @@ def operation_detail_response(
             item["state"],
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
-            uncertain=bool(failure is not None and failure.uncertain) or bool(
+            uncertain=bool(failure is not None and getattr(failure, "uncertain", False)) or bool(
                 isinstance(item.get("result"), Mapping)
                 and item["result"].get("uncertain") is True
             ),

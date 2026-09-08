@@ -12,15 +12,17 @@ use ring::signature;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::{
+    ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
+    InstallVonkDebOperation, RestartVonkUnitOperation, ScheduleRebootOperation,
+};
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
     canonical_json, hex_sha256, parse_strict,
 };
 use wait_timeout::ChildExt;
 
-use crate::protocol::{
-    ContainerRuntimeAction, HostOperation, ManagedArea, RestartUnit, artifact_signing_bytes,
-};
+use crate::protocol::{ContainerRuntimeAction, HostOperation, RestartUnit, artifact_signing_bytes};
 
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -67,9 +69,6 @@ pub enum OperationError {
 #[derive(Debug, Clone)]
 pub struct ManagedRoots {
     pub data: PathBuf,
-    pub models: PathBuf,
-    pub state: PathBuf,
-    pub workloads: PathBuf,
     pub incoming: PathBuf,
     pub package_custody: PathBuf,
     pub runtime_requests: PathBuf,
@@ -81,9 +80,6 @@ impl ManagedRoots {
     pub fn under(data: &Path) -> Self {
         Self {
             data: data.to_path_buf(),
-            models: data.join("models"),
-            state: data.join("state"),
-            workloads: data.join("workloads"),
             incoming: data.join("incoming"),
             package_custody: data.join("helper/package-candidates"),
             runtime_requests: data.join("runtime-requests"),
@@ -471,16 +467,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let release_public_key = release_public_key
             .try_into()
             .map_err(|_| OperationError::InvalidArtifact)?;
-        if !roots.data.is_absolute()
-            || ![
-                &roots.models,
-                &roots.state,
-                &roots.workloads,
-                &roots.incoming,
-            ]
-            .iter()
-            .all(|path| path.starts_with(&roots.data))
-        {
+        if !roots.data.is_absolute() || !roots.incoming.starts_with(&roots.data) {
             return Err(OperationError::UnsafePath);
         }
         Ok(Self {
@@ -570,23 +557,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
         let (status, evidence, exit_code, recipe_run_observation) = match operation {
-            HostOperation::CreateManagedDirectory {
-                area,
-                relative_path,
-            } => {
-                let path = self.create_managed_directory(area, relative_path)?;
-                (
-                    "directory-created",
-                    path.to_string_lossy().into_owned(),
-                    None,
-                    None,
-                )
-            }
-            HostOperation::InstallVonkDeb {
+            HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
                 rollback,
-            } => {
+                ..
+            }) => {
                 self.install_package(
                     package_sha256,
                     package_signature,
@@ -595,10 +571,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 )?;
                 ("package-installed", package_sha256.clone(), None, None)
             }
-            HostOperation::ConfirmPackageActivation {
-                package_sha256,
-                attempt_nonce,
-            } => {
+            HostOperation::ConfirmPackageActivationOperation(
+                ConfirmPackageActivationOperation {
+                    package_sha256,
+                    attempt_nonce,
+                    ..
+                },
+            ) => {
                 crate::package_rollback::Store::system()
                     .acknowledge(
                         observation_node_id.ok_or(OperationError::InvalidOperation)?,
@@ -613,23 +592,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     None,
                 )
             }
-            HostOperation::RestartVonkUnit { unit } => {
+            HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation { unit, .. }) => {
                 let unit_name = self.restart_unit(unit)?;
                 ("unit-restarted", unit_name.to_owned(), None, None)
             }
-            HostOperation::ScheduleReboot { delay_seconds } => {
+            HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
+                delay_seconds,
+                ..
+            }) => {
                 self.schedule_reboot(*delay_seconds)?;
                 ("reboot-scheduled", delay_seconds.to_string(), None, None)
             }
-            HostOperation::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256,
-                observation_identity_sha256,
-            } => {
+            HostOperation::ExecuteContainerRuntimeRequestOperation(
+                ExecuteContainerRuntimeRequestOperation {
+                    action,
+                    job_id,
+                    operation_id,
+                    attempt,
+                    fence,
+                    request_sha256,
+                    observation_identity_sha256,
+                    ..
+                },
+            ) => {
                 let outcome = self.execute_runtime_request(
                     action,
                     RuntimeRequestGrantBinding {
@@ -668,54 +653,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             exit_code,
             recipe_run_observation,
         })
-    }
-
-    fn create_managed_directory(
-        &self,
-        area: &ManagedArea,
-        relative_path: &str,
-    ) -> Result<PathBuf, OperationError> {
-        let root = match area {
-            ManagedArea::Models => &self.roots.models,
-            ManagedArea::State => &self.roots.state,
-            ManagedArea::Workloads => &self.roots.workloads,
-        };
-        let canonical_root = fs::canonicalize(root).map_err(|_| OperationError::UnsafePath)?;
-        self.require_directory(root)?;
-        let relative = Path::new(relative_path);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|component| !matches!(component, Component::Normal(_)))
-        {
-            return Err(OperationError::UnsafePath);
-        }
-        let mut current = root.clone();
-        for component in relative.components() {
-            let Component::Normal(component) = component else {
-                return Err(OperationError::UnsafePath);
-            };
-            current.push(component);
-            match fs::symlink_metadata(&current) {
-                Ok(metadata) => {
-                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                        return Err(OperationError::UnsafePath);
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    fs::create_dir(&current)?;
-                    fs::set_permissions(&current, fs::Permissions::from_mode(0o750))?;
-                }
-                Err(error) => return Err(OperationError::Io(error)),
-            }
-            let canonical = fs::canonicalize(&current).map_err(|_| OperationError::UnsafePath)?;
-            if !canonical.starts_with(&canonical_root) {
-                return Err(OperationError::UnsafePath);
-            }
-            self.require_directory(&current)?;
-        }
-        sync_directory(root)?;
-        Ok(current)
     }
 
     fn install_package(
@@ -918,7 +855,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(unit)
     }
 
-    fn schedule_reboot(&self, delay_seconds: u16) -> Result<(), OperationError> {
+    fn schedule_reboot(&self, delay_seconds: u32) -> Result<(), OperationError> {
         if !(60..=3600).contains(&delay_seconds) {
             return Err(OperationError::InvalidOperation);
         }
@@ -2339,6 +2276,17 @@ fn validate_docker_run_with_archive(
         return Err(OperationError::InvalidOperation);
     }
     let canonical_model_root = canonical_model_root(roots, &models, agent_data_owner_uid)?;
+    // The writable cache belongs to the same installation as the validated
+    // models. Checking the leaf alone would permit another installation or
+    // an installation symlink to redirect the privileged mount and ACLs.
+    let cache_installation = cache_root.parent().ok_or(OperationError::UnsafePath)?;
+    require_safe_directory(cache_installation, agent_data_owner_uid)?;
+    let canonical_cache = cache_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if canonical_cache.parent() != canonical_model_root.parent() {
+        return Err(OperationError::UnsafePath);
+    }
     let mut model_files = 0_usize;
     let mut model_bytes = 0_u64;
     for path in &models {
@@ -3692,23 +3640,17 @@ mod tests {
 
     #[test]
     fn compiled_workload_fixture_reaches_helper_validation_with_scoped_receipts() {
-        let plan: serde_json::Value =
+        let plan: vonk_agent_protocol::compiled_execution_plan::CompiledExecutionPlan =
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
                 .unwrap();
-        assert_eq!(plan["schema_version"], 2);
-        assert_eq!(plan["runtime"]["executable"], "/opt/vonk/bin/vllm");
-        assert_eq!(
-            plan["runtime_image"]["distribution_object"]["kind"],
-            "oci-archive"
-        );
-        assert_eq!(plan["security"]["host_network"], false);
+        plan.validate().unwrap();
+        assert_eq!(plan.schema_version, 2);
+        assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
+        assert_eq!(plan.runtime_image.distribution_object.kind, "oci-archive");
+        assert!(!plan.security.host_network);
 
         let (_temp, roots) = runtime_fixture();
-        let model_set = runtime_models(&roots).join(
-            plan["identity"]["model_artifact_set_sha256"]
-                .as_str()
-                .unwrap(),
-        );
+        let model_set = runtime_models(&roots).join(&plan.identity.model_artifact_set_sha256);
         let primary = model_set.join("primary");
         let draft = model_set.join("draft");
         fs::create_dir_all(&primary).unwrap();
@@ -3730,14 +3672,13 @@ mod tests {
             .unwrap();
         *image = format!(
             "localhost/vonk/compiled-runtime-{}@{}",
-            plan["runtime_image"]["oci_layout_sha256"].as_str().unwrap(),
-            plan["runtime_image"]["image_digest"].as_str().unwrap(),
+            plan.runtime_image.oci_layout_sha256, plan.runtime_image.image_digest,
         );
         let validated = validate_docker_run(&arguments, &roots, None).unwrap();
         assert_eq!(validated.models.len(), 2);
         assert_eq!(
             validated.platform_manifest_digest,
-            plan["runtime"]["image_digest"].as_str().unwrap()
+            plan.runtime.image_digest
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
     }
@@ -4286,7 +4227,11 @@ mod tests {
             .is_ok()
         );
 
-        let legacy_model = roots.models.join("sha256").join("b".repeat(64));
+        let legacy_model = roots
+            .data
+            .join("models")
+            .join("sha256")
+            .join("b".repeat(64));
         fs::create_dir_all(&legacy_model).unwrap();
         assert!(
             validate_docker_run(
@@ -4311,6 +4256,51 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn runtime_cache_rejects_other_installations_and_symlinked_ancestors() {
+        for case in [
+            "other-installation",
+            "installation-alias",
+            "outside-installation",
+        ] {
+            let (temp, roots) = runtime_fixture_with_separate_agent_data();
+            let model = artifact_path(&roots, 'a');
+            fs::create_dir_all(&model).unwrap();
+            let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+            validate_docker_run(&arguments, &roots, None).unwrap();
+
+            let installation = runtime_models(&roots).parent().unwrap().to_path_buf();
+            let other = roots
+                .agent_data
+                .join("installations")
+                .join("installation-2");
+            match case {
+                "other-installation" => fs::create_dir_all(other.join("runtime-cache")).unwrap(),
+                "installation-alias" => symlink(&installation, &other).unwrap(),
+                "outside-installation" => {
+                    let outside = temp.path().join("outside-installation");
+                    fs::create_dir_all(outside.join("runtime-cache")).unwrap();
+                    symlink(&outside, &other).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            *arguments
+                .iter_mut()
+                .find(|value| value.ends_with("dst=/outputs/cache"))
+                .unwrap() = format!(
+                "type=bind,src={},dst=/outputs/cache",
+                other.join("runtime-cache").display()
+            );
+            assert!(
+                matches!(
+                    validate_docker_run(&arguments, &roots, None),
+                    Err(OperationError::UnsafePath)
+                ),
+                "cache boundary accepted {case}"
+            );
+        }
     }
 
     #[test]

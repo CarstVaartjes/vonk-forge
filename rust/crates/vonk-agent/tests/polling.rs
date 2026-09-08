@@ -6,6 +6,9 @@ use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
+use vonk_agent_protocol::generated::{
+    AgentClaimPayload, AgentOperation, OperationProgress, RecipeInstallPayload, RecipeStopPayload,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, MAX_DOCUMENT_BYTES, RecipeOperationRequest,
     canonical_json, hex_sha256,
@@ -14,11 +17,12 @@ use vonk_agent_protocol::{
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
 fn claim(attempt: u32, deadline: &str) -> AgentClaim {
-    let payload = json!({
-        "plan_digest": "a".repeat(64),
-        "run_id": "00000000-0000-4000-8000-000000000003",
-        "schema_version": 1,
-    });
+    let payload = RecipeStopPayload {
+        plan_digest: "a".repeat(64),
+        run_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
+        schema_version: 1,
+    };
+    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     AgentClaim {
         attempt,
         authority_revision: "b".repeat(64),
@@ -26,11 +30,33 @@ fn claim(attempt: u32, deadline: &str) -> AgentClaim {
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
         node_id: NODE_ID.to_owned(),
-        operation: "recipe.stop".to_owned(),
+        operation: AgentOperation::RecipeStop,
         operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-        payload,
+        payload_digest,
+        payload: AgentClaimPayload::RecipeStopPayload(payload),
         schema_version: 1,
+    }
+}
+
+fn operation_progress(phase: &str) -> OperationProgress {
+    OperationProgress {
+        activity: None,
+        bytes_per_second: None,
+        checkpoint: None,
+        completed_bytes: 0,
+        completed_items: None,
+        elapsed_seconds: None,
+        eta_seconds: None,
+        kind: None,
+        last_progress_at: None,
+        members: Vec::new(),
+        object_sha256: None,
+        observed_at: None,
+        phase: phase.to_owned(),
+        smoothed_bytes_per_second: None,
+        total_bytes: None,
+        total_bytes_known: false,
+        total_items: None,
     }
 }
 
@@ -74,7 +100,7 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        progress: json!({"phase": "executing"}),
+        progress: Some(operation_progress("executing")),
         schema_version: claim.schema_version,
     };
     let renewed = AgentDirective {
@@ -92,7 +118,7 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
     drop(state);
     let mut reopened = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let result = reopened
-        .finish(&claim, "succeeded", json!({"status": "ok"}))
+        .finish(&claim, "succeeded", json!({"stopped": true}))
         .unwrap();
 
     assert_eq!(result.deadline, renewed.deadline);
@@ -111,7 +137,7 @@ fn heartbeat_renewal_rejects_stale_or_foreign_directives() {
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        progress: json!({"phase": "executing"}),
+        progress: Some(operation_progress("executing")),
         schema_version: claim.schema_version,
     };
     let mut directive = AgentDirective {
@@ -166,16 +192,6 @@ fn claim_response_parser_enforces_status_size_and_protocol() {
         claim(1, "2099-01-01T00:00:00+00:00").operation_id
     );
 
-    let mut large_claim = claim(1, "2099-01-01T00:00:00+00:00");
-    large_claim
-        .payload
-        .as_object_mut()
-        .unwrap()
-        .insert("padding".to_owned(), json!("x".repeat(MAX_DOCUMENT_BYTES)));
-    large_claim.payload_digest = hex_sha256(&canonical_json(&large_claim.payload).unwrap());
-    let large_body = canonical_json(&large_claim).unwrap();
-    assert!(large_body.len() > MAX_DOCUMENT_BYTES);
-    assert!(vonk_agent::client::parse_claim_response(200, &large_body).is_err());
     assert!(
         vonk_agent::client::parse_claim_response(200, &vec![b'x'; MAX_DOCUMENT_BYTES + 1]).is_err()
     );
@@ -188,19 +204,21 @@ fn real_751_artifact_claim_parses_through_rust_and_full_plan_dto() {
     ))
     .unwrap();
     assert_eq!(plan["artifacts"].as_array().unwrap().len(), 751);
-    let payload = json!({
-        "schema_version": 2,
-        "installation_id": "00000000-0000-4000-8000-000000000001",
-        "plan_digest": "a".repeat(64),
-        "expected_bytes": 4096,
-        "rank": 0,
-        "role": "entrypoint",
-        "compiled_execution_plan": plan,
-    });
+    let compiled_execution_plan: CompiledExecutionPlan = serde_json::from_value(plan).unwrap();
+    let payload = RecipeInstallPayload {
+        schema_version: 2,
+        installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        plan_digest: "a".repeat(64),
+        expected_bytes: 4096,
+        rank: 0,
+        role: "entrypoint".to_owned(),
+        compiled_execution_plan,
+    };
+    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     let mut raw = claim(1, "2099-01-01T00:00:00+00:00");
-    raw.operation = "recipe.install".to_owned();
-    raw.payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
-    raw.payload = payload;
+    raw.operation = AgentOperation::RecipeInstall;
+    raw.payload_digest = payload_digest;
+    raw.payload = AgentClaimPayload::RecipeInstallPayload(payload);
     let body = canonical_json(&raw).unwrap();
     assert!(body.len() > 500 * 1024);
     let parsed = vonk_agent::client::parse_claim_response(200, &body)
@@ -210,8 +228,7 @@ fn real_751_artifact_claim_parses_through_rust_and_full_plan_dto() {
     let RecipeOperationRequest::Install(request) = request else {
         panic!("expected install request");
     };
-    let plan: CompiledExecutionPlan =
-        serde_json::from_value(request.compiled_execution_plan).unwrap();
+    let plan = request.compiled_execution_plan;
     plan.validate().unwrap();
     assert_eq!(plan.artifacts.len(), 751);
 }

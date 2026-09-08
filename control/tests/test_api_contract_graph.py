@@ -20,7 +20,6 @@ EXTENSION_OBJECTS = {
     "EffectiveSettingsSelection.properties.knobs": "Recipe-declared settings values",
     "MappingSelection.properties.parameters": "Recipe-declared parameter values",
     "ProposalChangeRequest.properties.document": "Authority document selected by path",
-    "RecipeJobRunRequest.properties.parameters": "Engine-defined parameter values",
 }
 
 
@@ -35,11 +34,11 @@ def _open_objects(value: object, path: tuple[str, ...] = ()) -> Iterator[str]:
             yield from _open_objects(child, (*path, str(index)))
 
 
-def test_published_contract_graph_only_leaves_engine_and_document_values_open() -> None:
+def _application():
     # Inspect FastAPI's actual serialization schema, including agent routes.
     # Validation-mode Pydantic schemas alone miss custom serializer regressions.
     key = b"schema-test-signing-key-32-bytes!"
-    app = create_app(
+    return create_app(
         jobs=object(),
         tokens=TokenCodec(key),
         audits=MemoryAuditStore(),
@@ -49,12 +48,67 @@ def test_published_contract_graph_only_leaves_engine_and_document_values_open() 
             clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
         ),
     )
-    schemas = app.openapi()["components"]["schemas"]
+
+
+def test_published_contract_graph_only_leaves_engine_and_document_values_open() -> None:
+    schemas = _application().openapi()["components"]["schemas"]
     actual = set(_open_objects(schemas))
     unexpected = actual - EXTENSION_OBJECTS.keys()
     stale_exceptions = EXTENSION_OBJECTS.keys() - actual
     assert not unexpected, f"Fixed documents became untyped: {sorted(unexpected)}"
     assert not stale_exceptions, f"Remove unused exceptions: {sorted(stale_exceptions)}"
+
+
+def test_download_responses_describe_actual_bytes_and_range_support() -> None:
+    paths = _application().openapi()["paths"]
+    downloads = {
+        "/agent/v1/source-bundles/{source_sha256}": (
+            "application/vnd.vonk-forge.source-bundle.v1+tar",
+            False,
+        ),
+        "/agent/v1/artifacts/{sha256}": ("application/octet-stream", True),
+        "/agent/v1/distribution/objects/{sha256}": ("application/octet-stream", True),
+        "/agent/v1/workload-tuf/metadata/{name}": ("application/json", False),
+        "/agent/v1/workload-tuf/targets/{name}": ("application/octet-stream", False),
+        "/api/v1/jobs/{job_id}/logs/{digest}": ("text/plain", False),
+    }
+    for path, (media_type, partial) in downloads.items():
+        operation = paths[path]["get"]
+        assert operation["x-vonk-streaming-transport"] is True
+        for code in ("200", "206") if partial else ("200",):
+            assert operation["responses"][code]["content"] == {
+                media_type: {"schema": {"type": "string", "format": "binary"}}
+            }
+
+
+def test_successful_response_content_has_a_declared_schema() -> None:
+    # Components alone cannot detect an empty schema on a route response.
+    for path, methods in _application().openapi()["paths"].items():
+        for method, operation in methods.items():
+            if not isinstance(operation, dict):
+                continue
+            for code, response in operation.get("responses", {}).items():
+                if not code.startswith("2"):
+                    continue
+                for media_type, content in response.get("content", {}).items():
+                    assert content.get("schema"), (method, path, code, media_type)
+
+
+def test_fleet_stream_describes_canonical_frames_under_only_its_actual_media_type() -> (
+    None
+):
+    schema = _application().openapi()
+    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    assert operation["x-vonk-streaming-transport"] is True
+    content = operation["responses"]["200"]["content"]
+    assert set(content) == {"text/event-stream"}
+    reference = content["text/event-stream"]["schema"]["$ref"]
+    event = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
+    assert {item["$ref"].rsplit("/", 1)[-1] for item in event["anyOf"]} == {
+        "FleetSnapshotEvent",
+        "FleetTelemetryEvent",
+        "FleetChangeEvent",
+    }
 
 
 def _structural_schema(value: object, definitions: dict[str, object]) -> object:

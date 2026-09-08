@@ -4,9 +4,12 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use rustix::fs::{Mode, OFlags};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+use vonk_agent_protocol::canonical_generated_json;
+pub use vonk_agent_protocol::generated::AgentRuntimeIdentity;
+use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
 
 const MAX_AGENT_BYTES: u64 = 512 * 1024 * 1024;
 pub const OBSERVATION_RECEIPT_PUBLIC_KEY_PATH: &str =
@@ -20,6 +23,8 @@ pub enum RuntimeIdentityError {
     Io(#[from] std::io::Error),
     #[error("observation receipt public key is unsafe")]
     UnsafeObservationReceiptKey,
+    #[error("agent runtime identity is invalid")]
+    InvalidIdentity,
 }
 
 #[used]
@@ -31,21 +36,20 @@ static SEMANTIC_VERSION_MARKER: &str = concat!(
     env!("VONK_AGENT_SEMANTIC_VERSION")
 );
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentRuntimeIdentity {
+/// Identity material collected before the local self-test succeeds.
+///
+/// This deliberately is not serializable: only the generated canonical
+/// `AgentRuntimeIdentity` may cross the Controller transport boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedRuntimeIdentity {
     pub semantic_version: String,
     pub build_digest: String,
     pub binary_digest: String,
-    pub architecture: String,
-    pub self_test_passed: bool,
-    #[serde(default)]
-    pub package_activation: Option<vonk_agent_protocol::PackageActivationReceipt>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observation_receipt_public_key: Option<String>,
+    pub architecture: AgentRuntimeIdentityArchitecture,
+    observation_receipt_public_key: Option<[u8; 32]>,
 }
 
-impl AgentRuntimeIdentity {
+impl PreparedRuntimeIdentity {
     pub fn from_current_executable() -> Result<Self, RuntimeIdentityError> {
         Self::from_executable(&std::env::current_exe()?)
     }
@@ -76,12 +80,10 @@ impl AgentRuntimeIdentity {
             build_digest: env!("VONK_AGENT_BUILD_DIGEST").to_owned(),
             binary_digest,
             architecture: if cfg!(target_arch = "aarch64") {
-                "linux-arm64".to_owned()
+                AgentRuntimeIdentityArchitecture::LinuxArm64
             } else {
-                "linux-amd64".to_owned()
+                AgentRuntimeIdentityArchitecture::LinuxAmd64
             },
-            self_test_passed: false,
-            package_activation: None,
             observation_receipt_public_key: None,
         })
     }
@@ -90,29 +92,31 @@ impl AgentRuntimeIdentity {
         mut self,
         path: &Path,
     ) -> Result<Self, RuntimeIdentityError> {
-        self.observation_receipt_public_key = Some(hex::encode(load_observation_public_key(path)?));
+        self.observation_receipt_public_key = Some(load_observation_public_key(path)?);
         Ok(self)
     }
 
     pub(crate) fn with_observation_receipt_public_key_bytes(mut self, key: [u8; 32]) -> Self {
-        self.observation_receipt_public_key = Some(hex::encode(key));
+        self.observation_receipt_public_key = Some(key);
         self
     }
 
-    pub fn observation_receipt_public_key(&self) -> Result<[u8; 32], RuntimeIdentityError> {
-        let encoded = self
+    pub fn mark_self_test_passed(self) -> Result<AgentRuntimeIdentity, RuntimeIdentityError> {
+        let observation_receipt_public_key = self
             .observation_receipt_public_key
-            .as_deref()
             .ok_or(RuntimeIdentityError::UnsafeObservationReceiptKey)?;
-        let raw =
-            hex::decode(encoded).map_err(|_| RuntimeIdentityError::UnsafeObservationReceiptKey)?;
-        raw.try_into()
-            .map_err(|_| RuntimeIdentityError::UnsafeObservationReceiptKey)
-    }
-
-    pub fn mark_self_test_passed(mut self) -> Self {
-        self.self_test_passed = true;
-        self
+        let identity = AgentRuntimeIdentity {
+            semantic_version: self.semantic_version,
+            build_digest: self.build_digest,
+            binary_digest: self.binary_digest,
+            architecture: self.architecture,
+            self_test_passed: true,
+            package_activation: None,
+            observation_receipt_public_key: hex::encode(observation_receipt_public_key),
+        };
+        let document = canonical_generated_json(&identity)
+            .map_err(|_| RuntimeIdentityError::InvalidIdentity)?;
+        serde_json::from_slice(&document).map_err(|_| RuntimeIdentityError::InvalidIdentity)
     }
 }
 
@@ -140,4 +144,27 @@ pub(crate) fn load_observation_public_key(path: &Path) -> Result<[u8; 32], Runti
     }
     raw.try_into()
         .map_err(|_| RuntimeIdentityError::UnsafeObservationReceiptKey)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PreparedRuntimeIdentity;
+
+    #[test]
+    fn prepared_identity_becomes_wire_identity_only_after_key_and_self_test() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("vonk-agent");
+        std::fs::write(&executable, b"direct-agent-binary").unwrap();
+
+        let prepared = PreparedRuntimeIdentity::from_executable(&executable).unwrap();
+        assert!(prepared.clone().mark_self_test_passed().is_err());
+
+        let complete = prepared
+            .with_observation_receipt_public_key_bytes([9; 32])
+            .mark_self_test_passed()
+            .unwrap();
+        assert!(complete.self_test_passed);
+        assert_eq!(complete.observation_receipt_public_key, "09".repeat(32));
+        assert!(complete.package_activation.is_none());
+    }
 }

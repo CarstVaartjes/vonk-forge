@@ -1,4 +1,5 @@
 import {availabilityProgress, LibraryAvailabilityProgress} from "../components/library-availability-progress";
+import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
 import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
@@ -13,6 +14,19 @@ type TimestampedJob = JobSummary & {created_at?: string};
 type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation" | "retryFleetProfileApplication" | "retryLibraryPlacement">;
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
+
+function failureSummary(failure: OperationDetail["failure"]): string {
+  if (!failure) return "";
+  if ("code" in failure) return failure.detail;
+  if ("reason" in failure) return failure.summary ?? failure.reason ?? failure.error_code ?? "";
+  return failure.summary ?? failure.error_code ?? "";
+}
+
+function failureText(failure: OperationDetail["failure"]): string {
+  if (!failure) return "";
+  return [failureSummary(failure), "detail" in failure ? failure.detail : "",
+    "code" in failure ? failure.code : failure.error_code].filter(Boolean).join(" ");
+}
 
 const ACTION_LABELS: Record<string, string> = {
   "agent.enrollment.grant.create": "Created enrollment grant",
@@ -539,6 +553,8 @@ function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
   const placement = detail.kind === "library.placement";
   const supported = placement || detail.kind.startsWith("fleet-profile.");
   const retryable = supported && detail.recovery?.actions?.includes("retry");
+  const availability = detail.failure && "code" in detail.failure
+    ? availabilityFailure(detail.failure) : undefined;
   async function retry(): Promise<void> {
     if (!retryable || inFlight.current || retryRequests.get(detail.id)?.accepted) return;
     inFlight.current = true;
@@ -571,11 +587,13 @@ function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
     }
   }
   return <div className="activity-job-reason" style={{gap: ".5rem"}}>
-    {detail.failure && <><strong>{detail.failure.summary}</strong>{detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
+    {availability
+      ? <LibraryAvailabilityFeedback failure={availability}/>
+      : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
     {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={detail.attempt}/>}
     {detail.progress && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)}/>}
     <p className="activity-job-attempt" style={{margin: 0}}>Attempt {detail.attempt}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
-    {(detail.recovery?.uncertain || detail.failure?.uncertain)
+    {(detail.recovery?.uncertain || (detail.failure && "uncertain" in detail.failure && detail.failure.uncertain))
       ? <p style={{margin: 0}}>Outcome uncertain. {detail.recovery?.explanation ?? "Inspect the observed state before recovery."}</p>
       : detail.recovery?.explanation && <p style={{margin: 0}}>{detail.recovery.explanation}</p>}
     <div style={{display: "flex", flexWrap: "wrap", gap: ".5rem"}}><button type="button" className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh operation</button>{retryable && <button type="button" className="button secondary" disabled={busy || retryRequests.get(detail.id)?.accepted} onClick={() => void retry()}>{busy ? "Retrying…" : "Retry operation"}</button>}</div>
@@ -758,7 +776,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       if (actor && event.actor !== actor) return false;
       if (status && activityStatus(event) !== status) return false;
       if (!normalized) return true;
-      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, event.authority_revision ?? "", event.operation?.failure?.summary ?? "", event.operation?.failure?.detail ?? "", ...event.targets, ...(event.target_names ?? [])]
+      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, event.authority_revision ?? "", failureText(event.operation?.failure), ...event.targets, ...(event.target_names ?? [])]
         .some(value => value.toLocaleLowerCase().includes(normalized));
     });
   }, [actor, category, events, query, status]);

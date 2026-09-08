@@ -9,8 +9,8 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ring::signature;
-use serde::Deserialize;
 use thiserror::Error;
+use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding,
     RecipeRunObservationOutcome, RecipeRunObservationReceipt, SignedHostHelperGrant,
@@ -50,21 +50,6 @@ impl HostRuntimeError {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HelperResponse {
-    schema_version: u8,
-    request_id: Option<String>,
-    status: String,
-    evidence_sha256: Option<String>,
-    #[serde(default)]
-    exit_code: Option<i32>,
-    #[serde(default)]
-    error_code: Option<String>,
-    #[serde(default)]
-    observation_receipt: Option<RecipeRunObservationReceipt>,
-}
-
 pub struct HostRuntimeOutcome {
     pub exit_code: Option<i32>,
     pub stop_uncertain: bool,
@@ -99,8 +84,7 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
     ) -> Result<RecipeRunInspectionOutcome, HostRuntimeError> {
         binding.validate().map_err(|_| HostRuntimeError::Protocol)?;
-        let attempt =
-            u32::try_from(binding.run_generation).map_err(|_| HostRuntimeError::Protocol)?;
+        let attempt = binding.run_generation;
         let request = HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::RunInspect,
@@ -129,7 +113,9 @@ impl HostRuntimeBoundary<'_> {
         })
         .await
         .map_err(|_| HostRuntimeError::Protocol)??;
-        if response.schema_version != 1 || response.request_id.as_deref() != Some(&request_id) {
+        if response.schema_version != 1
+            || response.request_id.map(|id| id.to_string()).as_deref() != Some(request_id.as_str())
+        {
             return Err(HostRuntimeError::Protocol);
         }
         let receipt = require_inspection_receipt(&response)?.clone();
@@ -218,7 +204,8 @@ impl HostRuntimeBoundary<'_> {
             .map_err(|_| HostRuntimeError::Protocol)??;
             let stop_uncertain = response.status == "container-runtime-stop-uncertain";
             if response.schema_version != 1
-                || response.request_id.as_deref() != Some(request_id.as_str())
+                || response.request_id.map(|id| id.to_string()).as_deref()
+                    != Some(request_id.as_str())
                 || response.observation_receipt.is_some()
             {
                 return Err(HostRuntimeError::Protocol);
@@ -250,7 +237,7 @@ impl HostRuntimeBoundary<'_> {
                 return Err(HostRuntimeError::Protocol);
             }
             Ok(HostRuntimeOutcome {
-                exit_code: response.exit_code,
+                exit_code: response.exit_code.map(|code| code as i32),
                 stop_uncertain,
             })
         }

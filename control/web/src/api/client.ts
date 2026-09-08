@@ -4,11 +4,12 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   AgentRepairManifest,
+  AgentUpgradeApplyInput,
+  AgentUpgradeApplyResponse,
   AgentUpgradePlan,
   AgentUpgradeStrategy,
   AgentsResponse,
   AuditResponse,
-  AuditSummary,
   ControlApi,
   DeploymentProvenance,
   EnrollmentGrantResponse,
@@ -742,29 +743,28 @@ export class ApiClient implements ControlApi {
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 
-  previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan> {
-    return this.request("/api/v1/agents/upgrades/preview", {
-      method: "POST",
-      body: JSON.stringify({
+  async previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan> {
+    return resultData(await this.generated.POST("/api/v1/agents/upgrades/preview", {
+      body: {
         node_ids: nodeIds,
         ...(repairManifest ? {repair_manifest: repairManifest} : {}),
         strategy,
-      }),
+      },
       signal,
-    });
+    }));
   }
 
-  applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<{id: string; state: string}> {
-    return this.request("/api/v1/agents/upgrades", {
-      method: "POST",
-      body: JSON.stringify({
+  async applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<AgentUpgradeApplyResponse> {
+    const body: AgentUpgradeApplyInput = {
         node_ids: plan.node_ids,
         ...(plan.repair_manifest ? {repair_manifest: plan.repair_manifest} : {package: plan.package}),
         plan_digest: plan.plan_digest,
         strategy: plan.strategy,
-      }),
+    };
+    return resultData(await this.generated.POST("/api/v1/agents/upgrades", {
+      body,
       signal,
-    });
+    }));
   }
 
   async jobs(cursor?: string): Promise<JobsResponse> {
@@ -800,7 +800,9 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  audit() { return this.request<AuditResponse>("/api/v1/audit"); }
+  async audit(signal?: AbortSignal): Promise<AuditResponse> {
+    return resultData(await this.generated.GET("/api/v1/audit", {signal}));
+  }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<ChangeResponse>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
 }

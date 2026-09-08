@@ -73,6 +73,12 @@
       "reserved_memory_bytes": 67108864,
       "role": "entrypoint",
       "world_size": 1
+    },
+    "telemetry": {
+      "engine": "vllm",
+      "engine_version": null,
+      "metrics_format": "prometheus",
+      "metrics_path": "/metrics"
     }
   },
   "runtime_image": {

@@ -21,7 +21,10 @@ use crate::{
     health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
-    workloads::{CompiledExecutionPlan, Placement, WorkloadError, managed_path},
+    workloads::{
+        CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
+        same_installed_workload, same_job_workload,
+    },
 };
 
 #[derive(Debug, Error)]
@@ -58,7 +61,7 @@ impl OciError {
         }
     }
 
-    fn safe_category(&self) -> &'static str {
+    pub(crate) fn safe_category(&self) -> &'static str {
         match self {
             Self::Process(_) => "process",
             Self::Workload(_) => "workload",
@@ -95,7 +98,7 @@ pub struct RecipeRunInspectionPlan {
 type LoadedRunLifecycle = (
     CompiledExecutionPlan,
     String,
-    Placement,
+    CompiledRuntimePlacement,
     Option<RecipeRunInspectionBinding>,
 );
 
@@ -180,7 +183,7 @@ struct RuntimePolicyLabel {
 #[serde(deny_unknown_fields)]
 struct RunLifecycle {
     installation_id: String,
-    placement: Placement,
+    placement: CompiledRuntimePlacement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observation: Option<RecipeRunInspectionBinding>,
 }
@@ -484,16 +487,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
-        placement.validate()?;
-        if placement.rank != spec.runtime.placement.rank
-            || placement.role != spec.runtime.placement.role
-            || placement.world_size != spec.runtime.placement.world_size
-            || Some(placement.port) != spec.runtime.placement.port
-            || placement.reserved_memory_bytes != spec.runtime.placement.reserved_memory_bytes
-        {
+        placement.validate_bound()?;
+        if placement != &spec.runtime.placement {
             return Err(OciError::Runtime);
         }
         managed_path(self.data_root, "installations", installation_id)?;
@@ -540,7 +538,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.prepare_start_internal(spec, installation_id, run_id, placement, None)
     }
@@ -550,7 +548,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: &RecipeRunStartIdentity,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.prepare_start_internal(spec, installation_id, run_id, placement, Some(identity))
@@ -561,7 +559,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.verify_image(spec)?;
@@ -581,7 +579,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
         let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
+        self.write_runtime_contract(spec, run_id)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let runtime_image_reference = spec.runtime_image.local_image_reference();
@@ -643,17 +641,19 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                             )
                         })
                         .ok_or(OciError::Artifact)?,
-                    port: placement.port,
-                    rank: placement.rank,
+                    port: placement.port.ok_or(OciError::Artifact)?,
+                    rank: u32::try_from(placement.rank).map_err(|_| OciError::Artifact)?,
                     recipe_content_sha256: identity.recipe_content_sha256.clone(),
                     recipe_revision_id: identity.recipe_revision_id,
                     role: placement.role.clone(),
                     run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
-                    run_generation: identity.run_generation,
+                    run_generation: u32::try_from(identity.run_generation)
+                        .map_err(|_| OciError::Artifact)?,
                     runtime_arguments_sha256: protocol_sha256(
                         &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
                     ),
-                    world_size: placement.world_size,
+                    world_size: u32::try_from(placement.world_size)
+                        .map_err(|_| OciError::Artifact)?,
                 };
                 binding.validate().map_err(|_| OciError::Artifact)?;
                 Ok(binding)
@@ -695,7 +695,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.verify_image(spec)?;
         let Some((retained_spec, retained_installation_id, retained_placement, _)) =
@@ -731,7 +731,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: &RecipeRunStartIdentity,
     ) -> Result<RuntimeStartPlan, OciError> {
         let plan = self.prepare_retained_start(spec, installation_id, run_id, placement)?;
@@ -742,7 +742,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             || binding.mapping_generation != identity.mapping_generation
             || binding.recipe_revision_id != identity.recipe_revision_id
             || binding.recipe_content_sha256 != identity.recipe_content_sha256
-            || binding.run_generation != identity.run_generation
+            || u64::from(binding.run_generation) != identity.run_generation
         {
             return Err(OciError::Runtime);
         }
@@ -754,31 +754,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
-        parameters: &serde_json::Value,
-        timeout_seconds: u16,
+        placement: &CompiledRuntimePlacement,
+        invocation: &CompiledExecutionPlan,
     ) -> Result<RuntimeStartPlan, OciError> {
-        let Some(installed_job) = spec.job.as_ref() else {
-            return Err(OciError::Runtime);
-        };
-        if timeout_seconds == 0 || timeout_seconds > installed_job.timeout_seconds {
+        invocation.validate()?;
+        if !same_job_workload(spec, invocation) {
             return Err(OciError::Runtime);
         }
-        let mut effective = spec.clone();
-        effective
-            .job
-            .as_mut()
-            .ok_or(OciError::Runtime)?
-            .timeout_seconds = timeout_seconds;
-        let plan = self.prepare_start(&effective, installation_id, run_id, placement)?;
-        self.write_runtime_contract(
-            &effective,
-            installation_id,
-            run_id,
-            placement,
-            Some(parameters),
-        )?;
-        Ok(plan)
+        self.prepare_start(invocation, installation_id, run_id, placement)
     }
 
     pub fn prepare_stop(&self, run_id: &str) -> Result<RuntimeStopPlan, OciError> {
@@ -884,9 +867,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             binding.validate().map_err(|_| OciError::Artifact)?;
             if binding.run_id.to_string() != run_id
                 || binding.installation_id.to_string() != installation_id
-                || binding.rank != placement.rank
+                || u64::from(binding.rank) != placement.rank
                 || binding.role != placement.role
-                || binding.world_size != placement.world_size
+                || u64::from(binding.world_size) != placement.world_size
                 || binding.local_address
                     != if placement.world_size == 1 {
                         None
@@ -905,7 +888,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     } else {
                         placement.master_port
                     }
-                || binding.port != placement.port
+                || Some(binding.port) != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
                 || binding.image_digest != spec.runtime_image.image_digest[7..]
@@ -954,9 +937,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             plans.push(RecipeRunInspectionPlan {
                 binding,
                 arguments,
-                endpoint_address: endpoint_owner
-                    .then_some(placement.endpoint_address.ok_or(OciError::Artifact)?),
-                endpoint_port: placement.port,
+                endpoint_address: if endpoint_owner {
+                    Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
+                } else {
+                    None
+                },
+                endpoint_port: placement.port.ok_or(OciError::Artifact)?,
                 health_path,
             });
         }
@@ -998,18 +984,38 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .is_some_and(|status| (200..300).contains(&status))
     }
 
+    pub(crate) fn retained_telemetry_plan(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<CompiledExecutionPlan>, OciError> {
+        Ok(self.load_run_lifecycle(run_id)?.map(|(plan, _, _, _)| plan))
+    }
+
     fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let path = metadata.join("lifecycle.json");
         let Some(record) = self.read_run_lifecycle(&path)? else {
             return Ok(None);
         };
-        record.placement.validate()?;
+        record.placement.validate_bound()?;
         if !canonical_uuid(&record.installation_id) {
             return Err(OciError::Artifact);
         }
         managed_path(self.data_root, "installations", &record.installation_id)?;
-        let spec = self.load_spec(&record.installation_id)?;
+        let spec: CompiledExecutionPlan = serde_json::from_slice(&read_regular_file(
+            &metadata.join("runtime.json"),
+            MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
+        )?)?;
+        spec.validate()?;
+        let installed = self.load_spec(&record.installation_id)?;
+        let matches = if spec.job.is_some() {
+            same_job_workload(&installed, &spec)
+        } else {
+            same_installed_workload(&installed, &spec)
+        };
+        if !matches || spec.runtime.placement != record.placement {
+            return Err(OciError::Artifact);
+        }
         Ok(Some((
             spec,
             record.installation_id,
@@ -1346,12 +1352,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     fn write_runtime_contract(
         &self,
         spec: &CompiledExecutionPlan,
-        _installation_id: &str,
-        _run_id: &str,
-        _placement: &Placement,
-        _parameters: Option<&serde_json::Value>,
+        run_id: &str,
     ) -> Result<(), OciError> {
-        let metadata = self.run_metadata_path(_run_id)?;
+        let metadata = self.run_metadata_path(run_id)?;
         atomic_write(&metadata, "runtime.json", &serde_json::to_vec(spec)?)?;
         Ok(())
     }
@@ -1727,7 +1730,7 @@ fn materialize_compiled_models(
             artifact.distribution_object.name.clone(),
             artifact.distribution_object.sha256.clone(),
             artifact.distribution_object.bytes,
-            artifact.distribution_object.kind.clone(),
+            artifact.distribution_object.kind.as_str().to_owned(),
         );
         if let Some((_, previous)) = physical_by_path.get(&physical_key) {
             if previous != &physical {
@@ -2003,6 +2006,10 @@ mod tests {
     }
 
     fn compiled_plan() -> Value {
+        let canonical: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
         let primary = digest(b"primary");
         let secondary = digest(b"secondary");
         json!({
@@ -2016,6 +2023,7 @@ mod tests {
                 "model_artifact_bytes": 16
             },
             "runtime": {
+                "telemetry": canonical["runtime"]["telemetry"],
                 "executable": "/opt/vonk/bin/vllm",
                 "argv": ["serve", "/models"],
                 "env": [],
@@ -2169,8 +2177,7 @@ mod tests {
         let recipe_digest = "9".repeat(64);
         authorize_installation(&installation, &recipe_digest);
         let run_id = Uuid::new_v4().to_string();
-        let placement: crate::workloads::Placement =
-            serde_json::from_value(serde_json::to_value(&plan.runtime.placement).unwrap()).unwrap();
+        let placement = plan.runtime.placement.clone();
         let identity = super::RecipeRunStartIdentity {
             mapping_generation: 12,
             mapping_id: Uuid::new_v4(),

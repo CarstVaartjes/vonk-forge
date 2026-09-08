@@ -20,7 +20,6 @@ from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
-    CreateManagedDirectoryOperation,
     ExecuteContainerRuntimeRequestOperation,
     HostHelperGrantClaims,
     HostHelperSignature,
@@ -34,6 +33,8 @@ from vonk_agent_protocol.host_helper import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
+from pydantic import ValidationError
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .models import (
@@ -59,6 +60,10 @@ def _aware(value: datetime) -> datetime:
 
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
+
+
+class RecipeRunObservationReplayError(HostHelperAuthorityError):
+    """A valid observation repeats an already consumed current grant."""
 
 
 class HostHelperGrantIssuer:
@@ -119,7 +124,6 @@ class HostHelperGrantIssuer:
         if not isinstance(
             operation,
             (
-                CreateManagedDirectoryOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
     ConfirmPackageActivationOperation,
@@ -439,9 +443,10 @@ class HostRuntimeAuthorityService:
             pending is None
             or pending.request_id != grant.claims.request_id
             or pending.identity_sha256 != observation_identity
-            or pending.consumed is not False
         ):
             raise HostHelperAuthorityError("recipe run observation grant was replayed")
+        if pending.consumed is not False:
+            raise RecipeRunObservationReplayError("recipe run observation grant was replayed")
         pending.consumed = True
         receipt_digest = hashlib.sha256(
             canonical_message(receipt.to_mapping())
@@ -457,30 +462,10 @@ class HostRuntimeAuthorityService:
         identity: Mapping[str, object],
         now: datetime,
     ) -> str:
-        expected_fields = {
-            "schema_version",
-            "node_id",
-            "run_id",
-            "installation_id",
-            "recipe_revision_id",
-            "recipe_content_sha256",
-            "mapping_id",
-            "mapping_generation",
-            "run_generation",
-            "image_digest",
-            "artifact_set_digest",
-            "model_identity",
-            "rank",
-            "role",
-            "world_size",
-            "local_address",
-            "master_address",
-            "master_port",
-            "port",
-            "runtime_arguments_sha256",
-        }
-        if set(identity) != expected_fields or identity.get("schema_version") != 1:
-            raise HostHelperAuthorityError("recipe run observation identity is invalid")
+        try:
+            identity = RecipeRunObservationIdentity.model_validate(dict(identity)).model_dump(mode="json")
+        except ValidationError as error:
+            raise HostHelperAuthorityError("recipe run observation identity is invalid") from error
         run = session.get(RecipeRun, identity.get("run_id"))
         installation = session.get(RecipeInstallation, identity.get("installation_id"))
         revision = session.get(
@@ -549,7 +534,7 @@ class HostRuntimeAuthorityService:
                 break
         if launch is None:
             raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
-        expected = {
+        expected = RecipeRunObservationIdentity.model_validate({
             "schema_version": 1,
             "node_id": node_id,
             "run_id": run.id,
@@ -570,7 +555,7 @@ class HostRuntimeAuthorityService:
             "master_port": launch.get("master_port"),
             "port": run_node.port,
             "runtime_arguments_sha256": launch.get("runtime_arguments_sha256"),
-        }
+        }).model_dump(mode="json")
         if dict(identity) != expected:
             raise HostHelperAuthorityError("recipe run observation identity is stale")
         return hashlib.sha256(canonical_message(expected)).hexdigest()

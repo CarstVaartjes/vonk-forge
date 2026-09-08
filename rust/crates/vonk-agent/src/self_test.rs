@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
-    runtime_identity::{AgentRuntimeIdentity, RuntimeIdentityError},
+    runtime_identity::{AgentRuntimeIdentity, PreparedRuntimeIdentity, RuntimeIdentityError},
 };
 
 const HELPER_UPGRADE_PENDING: &str = "/var/lib/vonk-forge/helper-upgrade.pending";
@@ -45,14 +45,14 @@ pub fn run_with_observation_receipt_key(
     verify_private_directory(runtime_directory, "runtime")?;
     verify_no_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING))?;
     AgentHttpClient::from_config(config)?;
-    let identity = AgentRuntimeIdentity::from_executable(executable)?;
+    let identity = PreparedRuntimeIdentity::from_executable(executable)?;
     let identity = match observation_receipt_public_key {
         Some(key) => identity.with_observation_receipt_public_key_bytes(key),
         None => identity.with_observation_receipt_public_key(Path::new(
             crate::runtime_identity::OBSERVATION_RECEIPT_PUBLIC_KEY_PATH,
         ))?,
     };
-    Ok(identity.mark_self_test_passed())
+    Ok(identity.mark_self_test_passed()?)
 }
 
 fn verify_no_helper_upgrade_pending(path: &Path) -> Result<(), SelfTestError> {

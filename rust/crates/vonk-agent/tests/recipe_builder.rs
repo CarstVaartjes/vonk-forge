@@ -450,7 +450,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
         },
         network: RecipeBuildNetwork {
             hosts: Vec::new(),
-            mode: "none".to_owned(),
+            mode: "none".parse().unwrap(),
         },
         options: RecipeBuildOptions {
             additional_contexts: vec![RecipeBuildAdditionalContext {
@@ -461,11 +461,13 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
                 name: "org.example.annotation".to_owned(),
                 value: "present".to_owned(),
             }],
-            environment: vec![RecipeBuildArgument {
-                name: "BUILD_MODE".to_owned(),
-                value: serde_json::json!("release"),
-            }],
-            format: "oci".to_owned(),
+            environment: vec![
+                vonk_agent_protocol::generated::RecipeBuildEnvironmentArgument {
+                    name: "BUILD_MODE".to_owned(),
+                    value: serde_json::json!("release"),
+                },
+            ],
+            format: "oci".parse().unwrap(),
             identity_label: true,
             ignorefile: Some(".containerignore".to_owned()),
             jobs: 2,
@@ -473,7 +475,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
                 name: "org.example.label".to_owned(),
                 value: "value".to_owned(),
             }],
-            layer_compression: "disabled".to_owned(),
+            layer_compression: "disabled".parse().unwrap(),
             layer_labels: vec![RecipeBuildMetadata {
                 name: "org.example.layer".to_owned(),
                 value: "value".to_owned(),
@@ -486,7 +488,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             os_version: Some("1.0".to_owned()),
             shm_bytes: 67_108_864,
             skip_unused_stages: true,
-            squash: "none".to_owned(),
+            squash: "none".parse().unwrap(),
             timestamp: Some(0),
             unset_environment: vec!["OLD_ENV".to_owned()],
             unset_labels: vec!["org.example.old".to_owned()],
@@ -495,7 +497,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
         recipe_content_sha256: "a".repeat(64),
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         schema_version: 1,
-        source_bundle_bytes: bundle_bytes as u64,
+        source_bundle_bytes: u32::try_from(bundle_bytes).unwrap(),
         source_bundle_sha256: digest,
         target: None,
     }
@@ -2005,7 +2007,7 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
-        mode: "public".to_owned(),
+        mode: "public".parse().unwrap(),
         hosts: vec!["pypi.org".to_owned()],
     };
 
@@ -2069,7 +2071,7 @@ fn build_rejects_recipe_proxy_argument_override_before_starting_the_boundary() {
     let runtime = tempdir().unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
-        mode: "public".to_owned(),
+        mode: "public".parse().unwrap(),
         hosts: vec!["pypi.org".to_owned()],
     };
     build_request.arguments[0].name = "HTTPS_PROXY".to_owned();
@@ -2109,7 +2111,7 @@ fn public_build_cancellation_stops_work_and_removes_the_egress_boundary() {
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
-        mode: "public".to_owned(),
+        mode: "public".parse().unwrap(),
         hosts: vec!["pypi.org".to_owned()],
     };
 

@@ -4380,8 +4380,6 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
             "agent_digest",
             "boot_id",
             "created_at",
-            "certificate_serial",
-            "certificate_fingerprint",
         }
         for item in first["enrollments"]
     )

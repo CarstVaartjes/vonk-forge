@@ -11,8 +11,12 @@ use vonk_agent_helper::operations::{
     CommandOutput, CommandRunner, ManagedRoots, OperationExecutor,
 };
 use vonk_agent_helper::protocol::{
-    ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation, ManagedArea,
+    ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
     PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
+};
+use vonk_agent_protocol::generated::{
+    ExecuteContainerRuntimeRequestOperation, InstallVonkDebOperation, RestartVonkUnitOperation,
+    ScheduleRebootOperation,
 };
 use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
 
@@ -157,28 +161,32 @@ fn runtime_image_archive() -> (Vec<u8>, String) {
 fn every_permitted_operation_has_an_exact_typed_shape() {
     let signer = signer(7);
     let operations = [
-        HostOperation::CreateManagedDirectory {
-            area: ManagedArea::Models,
-            relative_path: "sha256/aa".to_owned(),
-        },
-        HostOperation::InstallVonkDeb {
+        HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+            type_: "install-vonk-deb".into(),
             rollback: rollback_authority(),
             package_sha256: "c".repeat(64),
             package_signature: "d".repeat(128),
-        },
-        HostOperation::RestartVonkUnit {
+        }),
+        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
+            type_: "restart-vonk-unit".into(),
             unit: RestartUnit::Agent,
-        },
-        HostOperation::ScheduleReboot { delay_seconds: 120 },
-        HostOperation::ExecuteContainerRuntimeRequest {
-            action: ContainerRuntimeAction::Start,
-            job_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
-            operation_id: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
-            attempt: 2,
-            fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
-            request_sha256: "a".repeat(64),
-            observation_identity_sha256: None,
-        },
+        }),
+        HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
+            type_: "schedule-reboot".into(),
+            delay_seconds: 120,
+        }),
+        HostOperation::ExecuteContainerRuntimeRequestOperation(
+            ExecuteContainerRuntimeRequestOperation {
+                type_: "execute-container-runtime-request".into(),
+                action: ContainerRuntimeAction::Start,
+                job_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
+                operation_id: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
+                attempt: 2,
+                fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
+                request_sha256: "a".repeat(64),
+                observation_identity_sha256: None,
+            },
+        ),
     ];
 
     for operation in operations {
@@ -192,9 +200,10 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
 fn rejects_unknown_fields_and_untyped_process_control() {
     let signer = signer(7);
     let request = signed(
-        HostOperation::RestartVonkUnit {
+        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
+            type_: "restart-vonk-unit".into(),
             unit: RestartUnit::Agent,
-        },
+        }),
         &signer,
     );
     let raw = vonk_agent_protocol::canonical_json(&request).unwrap();
@@ -221,8 +230,13 @@ fn rejects_unknown_fields_and_untyped_process_control() {
 }
 
 #[test]
-fn protocol_rejects_removed_slot_and_supervisor_operations() {
+fn protocol_rejects_removed_host_operations() {
     for operation in [
+        serde_json::json!({
+            "type": "create-managed-directory",
+            "area": "models",
+            "relative_path": "sha256/aa",
+        }),
         serde_json::json!({
             "type": "activate-agent-slot",
             "slot": "a",
@@ -243,9 +257,10 @@ fn authority_rejects_expiry_bad_signature_and_users_outside_agent_group() {
     let signer = signer(7);
     let verifier = grant_verifier(&signer);
     let request = signed(
-        HostOperation::RestartVonkUnit {
+        HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation {
+            type_: "restart-vonk-unit".into(),
             unit: RestartUnit::Agent,
-        },
+        }),
         &signer,
     );
 
@@ -532,8 +547,6 @@ fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     let data = temp.path().join("data");
     let agent_data = temp.path().join("agent-data");
     let roots = ManagedRoots::under(&data).with_agent_data(&agent_data);
-    fs::create_dir_all(&roots.models).unwrap();
-    fs::create_dir_all(&roots.state).unwrap();
     fs::create_dir_all(&roots.incoming).unwrap();
     fs::create_dir_all(&roots.agent_data).unwrap();
     fs::create_dir_all(
@@ -565,22 +578,25 @@ fn write_runtime_request(roots: &ManagedRoots, request: &HostRuntimeRequest) -> 
 }
 
 fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperation {
-    HostOperation::ExecuteContainerRuntimeRequest {
-        action: match request.action {
-            HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
-            HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
-            HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
-            HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
-            HostRuntimeAction::Start => ContainerRuntimeAction::Start,
-            HostRuntimeAction::Stop => ContainerRuntimeAction::Stop,
+    HostOperation::ExecuteContainerRuntimeRequestOperation(
+        ExecuteContainerRuntimeRequestOperation {
+            type_: "execute-container-runtime-request".into(),
+            action: match request.action {
+                HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
+                HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
+                HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
+                HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
+                HostRuntimeAction::Start => ContainerRuntimeAction::Start,
+                HostRuntimeAction::Stop => ContainerRuntimeAction::Stop,
+            },
+            job_id: request.job_id,
+            operation_id: request.operation_id,
+            attempt: request.attempt,
+            fence: request.fence,
+            request_sha256: digest,
+            observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
         },
-        job_id: request.job_id,
-        operation_id: request.operation_id,
-        attempt: request.attempt,
-        fence: request.fence,
-        request_sha256: digest,
-        observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
-    }
+    )
 }
 
 fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRuntimeRequest {
@@ -1137,32 +1153,6 @@ fn runtime_rejects_privilege_and_unmanaged_mounts_before_docker() {
 }
 
 #[test]
-fn managed_directory_creation_rejects_traversal_and_symlink_escape() {
-    let (temp, roots, runner, release) = fixture();
-    let executor =
-        OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
-
-    assert!(
-        executor
-            .execute(&HostOperation::CreateManagedDirectory {
-                area: ManagedArea::Models,
-                relative_path: "../escape".to_owned(),
-            })
-            .is_err()
-    );
-    symlink(temp.path(), roots.models.join("link")).unwrap();
-    assert!(
-        executor
-            .execute(&HostOperation::CreateManagedDirectory {
-                area: ManagedArea::Models,
-                relative_path: "link/escape".to_owned(),
-            })
-            .is_err()
-    );
-    assert!(!temp.path().join("escape").exists());
-}
-
-#[test]
 fn artifacts_are_verified_before_package_mutation() {
     let (_temp, roots, runner, release) = fixture();
     let executor = OperationExecutor::new(
@@ -1180,11 +1170,12 @@ fn artifacts_are_verified_before_package_mutation() {
     assert!(
         executor
             .execute_for_node(
-                &HostOperation::InstallVonkDeb {
+                &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                    type_: "install-vonk-deb".into(),
                     rollback: rollback_authority(),
                     package_sha256: bad_package,
                     package_signature: "0".repeat(128),
-                },
+                }),
                 Some(NODE_ID)
             )
             .is_err()
@@ -1223,25 +1214,39 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
 
     executor
         .execute_for_node(
-            &HostOperation::InstallVonkDeb {
+            &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                type_: "install-vonk-deb".into(),
                 rollback: rollback_authority(),
                 package_sha256: digest.clone(),
                 package_signature: hex::encode(signature.as_ref()),
-            },
+            }),
             Some(NODE_ID),
         )
         .unwrap();
     executor
-        .execute(&HostOperation::RestartVonkUnit {
-            unit: RestartUnit::Agent,
-        })
+        .execute(&HostOperation::RestartVonkUnitOperation(
+            RestartVonkUnitOperation {
+                type_: "restart-vonk-unit".into(),
+                unit: RestartUnit::Agent,
+            },
+        ))
         .unwrap();
     executor
-        .execute(&HostOperation::ScheduleReboot { delay_seconds: 300 })
+        .execute(&HostOperation::ScheduleRebootOperation(
+            ScheduleRebootOperation {
+                type_: "schedule-reboot".into(),
+                delay_seconds: 300,
+            },
+        ))
         .unwrap();
     assert!(
         executor
-            .execute(&HostOperation::ScheduleReboot { delay_seconds: 5 })
+            .execute(&HostOperation::ScheduleRebootOperation(
+                ScheduleRebootOperation {
+                    type_: "schedule-reboot".into(),
+                    delay_seconds: 5
+                }
+            ))
             .is_err()
     );
 
@@ -1277,9 +1282,12 @@ fn helper_restart_transient_unit_collision_fails_closed_without_fallback() {
 
     assert!(
         executor
-            .execute(&HostOperation::RestartVonkUnit {
-                unit: RestartUnit::Helper,
-            })
+            .execute(&HostOperation::RestartVonkUnitOperation(
+                RestartVonkUnitOperation {
+                    type_: "restart-vonk-unit".into(),
+                    unit: RestartUnit::Helper,
+                }
+            ))
             .is_err()
     );
     assert_eq!(
@@ -1397,11 +1405,12 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
         assert!(
             executor
                 .execute_for_node(
-                    &HostOperation::InstallVonkDeb {
+                    &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                        type_: "install-vonk-deb".into(),
                         rollback: rollback_authority(),
                         package_sha256: digest,
                         package_signature: hex::encode(signature.as_ref()),
-                    },
+                    }),
                     Some(NODE_ID)
                 )
                 .is_err(),
@@ -1440,11 +1449,12 @@ fn root_custody_closes_the_agent_path_swap_race_and_compiles_exact_dpkg_argv() {
 
     executor
         .execute_for_node(
-            &HostOperation::InstallVonkDeb {
+            &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                type_: "install-vonk-deb".into(),
                 rollback: rollback_authority(),
                 package_sha256: digest.clone(),
                 package_signature: signature,
-            },
+            }),
             Some(NODE_ID),
         )
         .unwrap();
@@ -1537,11 +1547,12 @@ fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
     assert!(
         executor
             .execute_for_node(
-                &HostOperation::InstallVonkDeb {
+                &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                    type_: "install-vonk-deb".into(),
                     rollback: rollback_authority(),
                     package_sha256: digest,
                     package_signature: signature,
-                },
+                }),
                 Some(NODE_ID)
             )
             .is_err()

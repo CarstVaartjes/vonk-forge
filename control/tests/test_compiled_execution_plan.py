@@ -84,6 +84,7 @@ def _spec(
             "interface": "vonk.runtime.v1",
             "adapter": "vllm",
             "adapter_version": 1,
+            "telemetry": {"engine": "vllm", "engine_version": None, "metrics_format": "prometheus", "metrics_path": "/metrics"},
             "image": "registry.example/vonk/vllm@sha256:" + "0" * 64,
             "architecture": "linux/arm64",
             "entrypoint": ["/opt/vonk/bin/vllm", "serve"],

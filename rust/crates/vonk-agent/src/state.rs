@@ -36,7 +36,7 @@ pub enum StateError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BeginDecision {
     Execute,
-    Replay(AgentResult),
+    Replay(Box<AgentResult>),
 }
 
 pub struct StateStore {
@@ -174,7 +174,7 @@ impl StateStore {
                     return Err(StateError::Busy);
                 }
                 let bytes = stored.result.ok_or(StateError::ResultState)?;
-                BeginDecision::Replay(parse_strict(&bytes)?)
+                BeginDecision::Replay(Box::new(parse_strict(&bytes)?))
             }
             Some(_) => {
                 transaction.execute(
@@ -232,9 +232,9 @@ impl StateStore {
             job_id: claim.job_id,
             node_id: claim.node_id.clone(),
             operation_id: claim.operation_id,
-            result,
+            result: serde_json::from_value(result).map_err(|_| StateError::ResultState)?,
             schema_version: claim.schema_version,
-            state: state.to_owned(),
+            state: state.parse().map_err(|_| StateError::ResultState)?,
         };
         result.validate()?;
         let body = canonical_json(&result)?;
@@ -378,9 +378,14 @@ impl StateStore {
                 job_id: job_id.parse().map_err(|_| StateError::ResultState)?,
                 node_id,
                 operation_id: operation_id.parse().map_err(|_| StateError::ResultState)?,
-                result: json!({"reason": "agent restarted with an operation in progress"}),
+                result: serde_json::from_value(
+                    json!({"reason": "agent restarted with an operation in progress"}),
+                )
+                .map_err(|_| StateError::ResultState)?,
                 schema_version: 1,
-                state: "waiting-for-operator".to_owned(),
+                state: "waiting-for-operator"
+                    .parse()
+                    .map_err(|_| StateError::ResultState)?,
             };
             result.validate()?;
             transaction.execute(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from datetime import datetime
@@ -13,7 +14,6 @@ from pydantic import (
     Field,
     GetCoreSchemaHandler,
     field_validator,
-    model_serializer,
     model_validator,
 )
 from pydantic_core import CoreSchema, core_schema
@@ -78,9 +78,8 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
             raise KeyError(key) from None
 
     def __iter__(self) -> Iterator[str]:
-        # Mapping consumers in the Controller use this as the wire view.  Keep
-        # omitted defaults omitted, matching ``model_dump(exclude_unset=True)``
-        # used by canonical_message.
+        # Mapping iteration exposes explicitly supplied fields. Canonical wire
+        # serialization separately applies the model-aware default/null policy.
         declared = (
             name
             for name in self.__class__.model_fields
@@ -162,20 +161,6 @@ class OperationProgress(WireModel):
     checkpoint: OperationCheckpoint | None = None
     members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
 
-    @model_serializer(mode="wrap")
-    def serialize_compact(self, handler: Any):
-        document = handler(self)
-        for key in ("kind", "object_sha256", "total_bytes", "bytes_per_second", "eta_seconds", "checkpoint", "smoothed_bytes_per_second", "completed_items", "total_items", "elapsed_seconds", "observed_at", "last_progress_at", "activity"):
-            if document.get(key) is None:
-                document.pop(key, None)
-        if "completed_bytes" not in self.model_fields_set:
-            document.pop("completed_bytes", None)
-        if "total_bytes_known" not in self.model_fields_set:
-            document.pop("total_bytes_known", None)
-        if "members" not in self.model_fields_set or not self.members:
-            document.pop("members", None)
-        return document
-
     @field_validator("observed_at", "last_progress_at")
     @classmethod
     def timestamp_has_timezone(cls, value: str | None) -> str | None:
@@ -200,33 +185,11 @@ class OperationProgress(WireModel):
 
 
 def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and canonicalize progress while preserving phase-only wire data."""
+    """Validate progress and retain every meaningful declared default."""
 
-    parsed = OperationProgress.model_validate(value)
-    document = parsed.model_dump(mode="json", exclude_none=True)
-    if not document.get("members"):
-        document.pop("members", None)
-    if parsed.checkpoint is None:
-        document.pop("checkpoint", None)
-    if parsed.completed_bytes == 0 and "completed_bytes" not in value:
-        document.pop("completed_bytes", None)
-    extended = bool(
-        set(value)
-        & {
-            "completed_bytes",
-            "total_bytes",
-            "bytes_per_second",
-            "eta_seconds",
-            "checkpoint",
-            "members",
-        }
-    )
-    if parsed.total_bytes_known is False and "total_bytes_known" not in value:
-        if extended:
-            document["total_bytes_known"] = False
-        else:
-            document.pop("total_bytes_known", None)
-    return document
+    from .contracts import canonical_message
+
+    return json.loads(canonical_message(OperationProgress.model_validate(value)))
 
 
 __all__ = [

@@ -1,6 +1,9 @@
 //! Typed, bounded runtime preflight evidence. The request contains no commands.
+pub use crate::generated::{
+    RuntimePreflightFinding, RuntimePreflightFindingStatus as RuntimePreflightStatus,
+    RuntimePreflightRequest, RuntimePreflightResult,
+};
 use crate::{ProtocolError, canonical_json, hex_sha256};
-use serde::{Deserialize, Serialize};
 
 fn capability_name(value: &str) -> bool {
     !value.is_empty()
@@ -9,18 +12,6 @@ fn capability_name(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
         })
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimePreflightRequest {
-    pub schema_version: u8,
-    pub architecture: String,
-    pub source_build: bool,
-    pub minimum_free_bytes: u64,
-    pub fabric_connectivity: String,
-    pub fabric_minimum_mbps: u64,
-    pub mandatory_capabilities: Vec<String>,
 }
 
 impl RuntimePreflightRequest {
@@ -47,34 +38,6 @@ impl RuntimePreflightRequest {
     pub fn digest(&self) -> Result<String, ProtocolError> {
         Ok(hex_sha256(&canonical_json(self)?))
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimePreflightStatus {
-    Passed,
-    Failed,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimePreflightFinding {
-    pub capability: String,
-    pub status: RuntimePreflightStatus,
-    pub code: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimePreflightResult {
-    pub schema_version: u8,
-    pub fingerprint: String,
-    pub request_sha256: String,
-    pub observed_at: u64,
-    pub duration_ms: u64,
-    pub cached: bool,
-    pub findings: Vec<RuntimePreflightFinding>,
 }
 
 impl RuntimePreflightResult {

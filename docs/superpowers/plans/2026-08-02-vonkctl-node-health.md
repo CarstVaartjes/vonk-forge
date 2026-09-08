@@ -1,6 +1,9 @@
 # `vonkctl` Live Node Health Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+Historical plan, not current implementation instructions. Follow
+[current API contracts](../../api-contracts.md) for Pydantic/typify generation
+and optional-field serialization: omit unused optional-null fields, retain
+required nullable fields, and use shared canonical serialization.
 
 **Goal:** Add a fresh, concurrent, read-only health view for both Vonk Forge GPU nodes through `vonkctl nodes status`.
 

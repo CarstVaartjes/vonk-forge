@@ -216,7 +216,13 @@
         "path": "/outputs/cache/vllm",
         "persistent": true
       }
-    ]
+    ],
+    "telemetry": {
+      "engine": "vllm",
+      "engine_version": null,
+      "metrics_format": "prometheus",
+      "metrics_path": "/metrics"
+    }
   },
   "security": {
     "capabilities": [],

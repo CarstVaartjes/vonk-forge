@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1190,3 +1192,72 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(service
         assert attempt.progress["completed_bytes"] == 200
         assert attempt.progress["completed_items"] == 2
         assert attempt.progress["phase"] == "completed"
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_queue_stores_and_claims_the_canonical_payload_hash(service, explicit_null: bool) -> None:
+    from vonk_agent_protocol import canonical_message, canonical_payload
+
+    jobs, sessions, clock = service
+    vector = json.loads((Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json").read_text())
+    payload = vector["payload"]
+    job_input = payload["compiled_execution_plan"]["job"]["input"]
+    if explicit_null:
+        job_input["slots"] = None
+    else:
+        job_input.pop("slots", None)
+    expected = canonical_payload(vector["operation"], payload)
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, vector["operation"], COMMIT, payload)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored.payload == json.loads(expected)
+        assert stored.payload_digest == hashlib.sha256(expected).hexdigest()
+        assert "slots" not in stored.payload["compiled_execution_plan"]["job"]["input"]
+        assert stored.payload["compiled_execution_plan"]["endpoint"] is None
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    assert canonical_message(claim.payload) == expected
+    assert claim.payload_digest == hashlib.sha256(expected).hexdigest()
+    executable = os.environ.get("VONK_CANONICAL_WIRE_PROBE")
+    if executable:
+        parsed = subprocess.run([executable, "AgentClaim"], input=canonical_message(claim), capture_output=True, check=True)
+        assert parsed.stdout == canonical_message(claim)
+
+
+@pytest.mark.parametrize("include_null", [False, True])
+def test_lease_only_wire_heartbeat_retains_measured_progress(service, include_null: bool) -> None:
+    from vonk_agent_protocol import AgentProgress, canonical_message
+
+    jobs, sessions, clock = service
+    jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    jobs.heartbeat(claim, {
+        "phase": "transfer", "completed_bytes": 10, "total_bytes": 100,
+        "total_bytes_known": True,
+        "members": [{"member_id": NODE_A, "phase": "transfer", "completed_bytes": 10}],
+    }, 30)
+    with sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        previous = attempt.progress
+        previous_deadline = attempt.lease_deadline
+    document = {key: value for key, value in json.loads(canonical_message(claim)).items()
+                if key in AgentProgress.model_fields}
+    if include_null:
+        document["progress"] = None
+    incoming = AgentProgress.model_validate(document)
+    clock.now += timedelta(seconds=5)
+    directive = jobs.heartbeat(incoming, incoming.progress, 60)
+    assert directive.deadline > claim.deadline
+    with sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        assert attempt.progress == previous
+        assert attempt.lease_deadline > previous_deadline
+    # A measured snapshot explicitly clears members and declares its total unknown.
+    jobs.heartbeat(claim, {
+        "phase": "transfer", "completed_bytes": 10, "total_bytes_known": False, "members": [],
+    }, 60)
+    with sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        assert attempt.progress["members"] == []
+        assert attempt.progress["total_bytes_known"] is False
+        assert "total_bytes" not in attempt.progress

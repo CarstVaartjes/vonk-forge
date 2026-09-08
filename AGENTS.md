@@ -69,8 +69,26 @@ Published Model and Recipe structures are defined by the canonical Pydantic
 package in vonk-forge-recipes. Controller APIs and Controller/Spark messages
 use their authoritative nested Pydantic models. Validate persisted contract
 JSON on reads and writes; malformed data must not become empty/default state.
-Generate OpenAPI and Python/TypeScript clients from the current API. Rust Serde
-types must match the shared models and pass connected producer/consumer tests.
+Generate OpenAPI and Python/TypeScript clients from the current API. Generate
+Rust wire structures with typify from the Pydantic-derived JSON Schemas; do not
+maintain parallel handwritten payload fields. Keep handwritten semantic and
+security validation, and pass connected producer/consumer tests that preserve
+required-field presence, nullability and strict structure.
+
+Optional fields with a declared `None` default accept omission and explicit
+`null` as the same value. Omit those unused fields when sending documents.
+Normalize through the authoritative model before hashing or signing, and use
+the identical canonical representation when verifying in Python and Rust.
+Do not make an optional field required merely to repair a serialization
+mismatch. Required nullable fields remain required and retain their `null`.
+Preserve meaningful `false`, `0`, empty values, and engine-owned JSON values;
+never recursively strip every `null` from arbitrary dictionaries. Apply only
+declared defaults, never defaults that hide malformed required data. Preserve
+formatted string values as strings; a date-time format is not permission to
+rewrite a timestamp's spelling. Test actual producer-to-consumer round trips,
+including signatures/digests and both missing/null forms, not just acceptance
+by two parsers. See `docs/api-contracts.md` for the serialization policy.
+
 Allow engine-owned content through its declared extension fields; do not
 introduce an exhaustive engine-argument allowlist.
 

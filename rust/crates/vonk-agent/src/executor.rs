@@ -25,18 +25,20 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{CompiledExecutionPlan, Placement},
+    workloads::{
+        CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, same_installed_workload,
+    },
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
-    HostRuntimeAction, ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
+    ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeModelCleanupResult,
     RecipeOperationRequest, RecipeStartPhase, RecipeStartRequest, RecipeStopResult,
     RecipeUninstallResult, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const JOB_CANCEL_EXIT_CODE: i32 = 130;
+const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -44,34 +46,6 @@ pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionP
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
     plan.validate()?;
     Ok(plan)
-}
-
-fn same_installed_workload(
-    installed: &CompiledExecutionPlan,
-    requested: &CompiledExecutionPlan,
-) -> bool {
-    installed.identity == requested.identity
-        && installed.artifacts == requested.artifacts
-        && installed.runtime.executable == requested.runtime.executable
-        && installed.runtime.argv == requested.runtime.argv
-        && installed.runtime.env == requested.runtime.env
-        && installed.runtime.image_digest == requested.runtime.image_digest
-        && installed.runtime_image == requested.runtime_image
-        && installed.security.devices == requested.security.devices
-        && installed.security.capabilities == requested.security.capabilities
-        && installed.security.host_network == requested.security.host_network
-        && installed.security.privileged == requested.security.privileged
-        && installed.security.user == requested.security.user
-        && installed.security.mounts == requested.security.mounts
-        && installed.security.read_only_root == requested.security.read_only_root
-        && installed.security.no_new_privileges == requested.security.no_new_privileges
-        && installed.lifecycle == requested.lifecycle
-        && installed.endpoint == requested.endpoint
-        && installed.job == requested.job
-        && installed.topology.name == requested.topology.name
-        && installed.topology.mode == requested.topology.mode
-        && installed.topology.backend == requested.topology.backend
-        && installed.topology.node_count == requested.topology.node_count
 }
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
@@ -196,12 +170,14 @@ pub struct RecipeExecutor<'a, R> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecipeObservationError {
-    #[error("managed recipe run identity is invalid")]
+    #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection was not authorized")]
     Inspection(#[from] crate::host_runtime::HostRuntimeError),
-    #[error("exact recipe run observation could not be reported")]
+    #[error("exact recipe run observation could not be reported: {0}")]
     Report(#[from] ClientError),
+    #[error("exact recipe run snapshot expired before reporting")]
+    StaleSnapshot,
 }
 
 impl RecipeObservationError {
@@ -255,6 +231,46 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
+/// A collection or transport failure is unknown evidence, never proof that no
+/// managed runs exist. Only a successfully collected empty set reports absence.
+async fn report_complete_recipe_run_observations(
+    client: &AgentHttpClient,
+    results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
+) -> Result<usize, RecipeObservationError> {
+    let mut observations = Vec::with_capacity(results.len());
+    let mut failure = None;
+    for result in results {
+        match result {
+            Ok(observation) => observations.push(observation),
+            Err(error) => {
+                if failure
+                    .as_ref()
+                    .is_none_or(RecipeObservationError::not_ready)
+                {
+                    failure = Some(error);
+                }
+            }
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    // Bounded concurrent inspections can finish in different batches. Never
+    // submit an early receipt whose authorization expired while gathering the
+    // rest. The Controller still verifies receipt age and authorization.
+    let now = Utc::now().timestamp();
+    if observations
+        .iter()
+        .any(|observation| now > observation.grant.claims.expires_at)
+    {
+        return Err(RecipeObservationError::StaleSnapshot);
+    }
+    client
+        .report_exact_recipe_run_observations(&observations)
+        .await?;
+    Ok(observations.len())
+}
+
 impl<R> RecipeExecutor<'_, R> {
     async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
         self.client.set_progress_phase(claim.operation_id, phase);
@@ -266,23 +282,7 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let plans = match self.runtime.recipe_run_inspection_plans() {
-            Ok(plans) => plans,
-            Err(error) => {
-                // A missing/corrupt canonical lifecycle must fail every exact
-                // assignment on this node. Returning before the explicit empty
-                // v2 snapshot would let an omitted rank retain stale health.
-                let _ = self.client.report_exact_recipe_run_observations(&[]).await;
-                return Err(RecipeObservationError::Runtime(error));
-            }
-        };
-        if plans.is_empty() {
-            self.client
-                .report_exact_recipe_run_observations(&[])
-                .await?;
-            return Ok(0);
-        }
-        let observation_count = plans.len();
+        let plans = self.runtime.recipe_run_inspection_plans()?;
         let results = stream::iter(plans)
             .map(|plan| async move {
                 let request_root = self.runtime_root.join("runtime-requests");
@@ -310,11 +310,28 @@ impl<R> RecipeExecutor<'_, R> {
                             &plan.health_path,
                         )
                 });
-                let observation = ExactRecipeRunObservation {
+                Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     schema_version: 1,
                     node_id: self.client.node_id().to_owned(),
-                    observed_at,
-                    binding: plan.binding,
+                    observed_at: observed_at.into(),
+                    artifact_set_digest: plan.binding.artifact_set_digest,
+                    image_digest: plan.binding.image_digest,
+                    installation_id: plan.binding.installation_id,
+                    local_address: plan.binding.local_address,
+                    mapping_generation: plan.binding.mapping_generation,
+                    mapping_id: plan.binding.mapping_id,
+                    master_address: plan.binding.master_address,
+                    master_port: plan.binding.master_port,
+                    model_identity: plan.binding.model_identity,
+                    port: plan.binding.port,
+                    rank: plan.binding.rank,
+                    recipe_content_sha256: plan.binding.recipe_content_sha256,
+                    recipe_revision_id: plan.binding.recipe_revision_id,
+                    role: plan.binding.role,
+                    run_generation: plan.binding.run_generation,
+                    run_id: plan.binding.run_id,
+                    runtime_arguments_sha256: plan.binding.runtime_arguments_sha256,
+                    world_size: plan.binding.world_size,
                     endpoint_ready,
                     grant: outcome.grant,
                     observation_identity_sha256: outcome.observation_identity_sha256,
@@ -322,31 +339,12 @@ impl<R> RecipeExecutor<'_, R> {
                     observation_receipt_public_key: hex::encode(
                         self.observation_receipt_public_key,
                     ),
-                };
-                self.client
-                    .report_exact_recipe_run_observations(std::slice::from_ref(&observation))
-                    .await?;
-                Ok::<(), RecipeObservationError>(())
+                })
             })
             .buffer_unordered(8)
             .collect::<Vec<_>>()
             .await;
-        let errors = results
-            .into_iter()
-            .filter_map(Result::err)
-            .collect::<Vec<_>>();
-        if errors.iter().any(|error| !error.not_ready()) {
-            // An incomplete exact snapshot is never allowed to preserve a
-            // distributed route.  The explicit empty v2 report marks every
-            // assigned exact-observation rank failed, but reporting failure is
-            // still not allowed to terminate the claim lane.
-            let _ = self.client.report_exact_recipe_run_observations(&[]).await;
-            return Err(errors.into_iter().find(|error| !error.not_ready()).unwrap());
-        }
-        if let Some(error) = errors.into_iter().next() {
-            return Err(error);
-        }
-        Ok(observation_count)
+        report_complete_recipe_run_observations(self.client, results).await
     }
 
     async fn execute_host_runtime_outcome(
@@ -482,7 +480,7 @@ pub fn recipe_model_cleanup_success_body(
     removed_model_bytes: u64,
 ) -> Value {
     let result = RecipeModelCleanupResult {
-        uninstalled_installations: u16::try_from(uninstalled_installations)
+        uninstalled_installations: u32::try_from(uninstalled_installations)
             .expect("bounded model cleanup count"),
         removed_model_bytes,
     };
@@ -665,11 +663,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if claim.validate().is_err() {
                 return failed("artifact distribution claim is invalid");
             }
-            let request: ArtifactDistributionRequest =
-                match serde_json::from_value(claim.payload.clone()) {
-                    Ok(request) => request,
-                    Err(_) => return failed("artifact distribution request is invalid"),
-                };
+            let vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(
+                request,
+            ) = &claim.payload
+            else {
+                return failed("artifact distribution request is invalid");
+            };
             if request.validate().is_err() || request.plan_digest != claim.authority_revision {
                 return failed("artifact distribution plan identity is invalid");
             }
@@ -705,15 +704,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         job_id: progress_claim.job_id,
                         node_id: progress_claim.node_id.clone(),
                         operation_id: progress_claim.operation_id,
-                        progress: json!({
-                            "phase": item.phase,
-                            "completed_items": completed_items,
-                            "total_items": item.total_items,
-                            "object_sha256": item.object_sha256,
-                            "kind": item.kind,
-                            "completed_bytes": completed_bytes,
-                            "total_bytes": item.total_bytes,
-                            "total_bytes_known": item.total_bytes.is_some(),
+                        progress: Some(OperationProgress {
+                            completed_items: Some(completed_items),
+                            total_items: Some(item.total_items),
+                            object_sha256: Some(item.object_sha256),
+                            kind: Some(item.kind),
+                            completed_bytes,
+                            total_bytes: item.total_bytes,
+                            total_bytes_known: item.total_bytes.is_some(),
+                            ..phase_progress(item.phase)
                         }),
                         schema_version: 1,
                     };
@@ -896,7 +895,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 self.report_phase(claim, "downloading").await;
                 let archive = match self
                     .client
-                    .source_bundle(&request.source_bundle_sha256, request.source_bundle_bytes)
+                    .source_bundle(
+                        &request.source_bundle_sha256,
+                        u64::from(request.source_bundle_bytes),
+                    )
                     .await
                 {
                     Ok(archive) => archive,
@@ -1070,27 +1072,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
-                let Some(job) = spec.job.as_ref() else {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "installed recipe is not a one-shot job",
-                    );
+                let invocation = match prepare_job_invocation(&spec, &request) {
+                    Ok(plan) => plan,
+                    Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
                 };
-                if job.interface != request.interface
-                    || request.timeout_seconds == 0
-                    || request.timeout_seconds > job.timeout_seconds
-                    || spec.endpoint.is_some()
-                    || spec.runtime.image_digest != request.image_digest
-                {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "job request does not match the installed workload",
-                    );
-                }
                 if self
                     .runtime
                     .ensure_memory_available(
@@ -1130,7 +1115,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         self.client.download_recipe_job_input(
                             request.job_id,
                             &input.sha256,
-                            input.size_bytes,
+                            u64::from(input.size_bytes),
                             &destination,
                         ),
                         &mut cancellation,
@@ -1166,12 +1151,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .iter()
                     .map(|input| input.name.clone())
                     .collect::<Vec<_>>();
-                let input_manifest = json!({
-                    "schema_version": 1,
-                    "total_bytes": request.input_total_bytes,
-                    "files": request.inputs,
-                });
-                let input_manifest = match canonical_json(&input_manifest) {
+                let input_manifest = match recipe_job_input_manifest(&request) {
                     Ok(bytes) => bytes,
                     Err(_) => {
                         let _ = self.runtime.cleanup_job_scope(&job_scope);
@@ -1196,24 +1176,23 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job input staging is not same-run exact",
                     );
                 }
-                let placement = Placement {
-                    endpoint_address: None,
-                    rank: 0,
-                    role: request.role.clone(),
-                    world_size: 1,
-                    local_address: None,
-                    master_address: None,
-                    master_port: None,
-                    port: 1024,
-                    reserved_memory_bytes: request.reserved_memory_bytes,
+                let placement = match job_placement(&invocation, &request) {
+                    Ok(placement) => placement,
+                    Err(_) => {
+                        return failed_job(
+                            &request,
+                            1,
+                            started,
+                            "job placement does not match the installed workload",
+                        );
+                    }
                 };
                 let plan = match self.runtime.prepare_job_start(
                     &spec,
                     &installation_id,
                     &job_scope,
                     &placement,
-                    &request.parameters,
-                    request.timeout_seconds,
+                    &invocation,
                 ) {
                     Ok(plan) => plan,
                     Err(_) => {
@@ -1328,7 +1307,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(outcome) => match outcome.exit_code {
                         Some(0) => (0, None),
                         Some(124) => (124, Some("job adapter exceeded its deadline")),
-                        Some(code) => (code, Some("job adapter exited unsuccessfully")),
+                        Some(code) if (0..=255).contains(&code) => (
+                            u32::try_from(code).expect("nonnegative process exit status"),
+                            Some("job adapter exited unsuccessfully"),
+                        ),
+                        Some(_) => {
+                            return failed_job(
+                                &request,
+                                1,
+                                started,
+                                "job adapter reported an invalid exit status",
+                            );
+                        }
                         None => (1, Some("job adapter did not report an exit status")),
                     },
                     Err(_) => unreachable!("runtime errors return operator-waiting above"),
@@ -1368,7 +1358,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             &output.name,
                             &output.media_type,
                             &output.sha256,
-                            output.size_bytes,
+                            u64::from(output.size_bytes),
                             &path,
                         ),
                         &mut cancellation,
@@ -1431,11 +1421,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
             RecipeOperationRequest::Install(request) => {
                 self.report_phase(claim, "installing").await;
-                let inline_spec =
-                    match parse_compiled_execution_plan(&request.compiled_execution_plan) {
-                        Ok(spec) => spec,
-                        Err(_) => return failed("compiled execution plan is invalid"),
-                    };
+                let inline_spec = request.compiled_execution_plan.clone();
+                if inline_spec.validate().is_err() {
+                    return failed("compiled execution plan is invalid");
+                }
                 let spec = match self
                     .client
                     .recipe_spec(&request.installation_id.to_string())
@@ -1509,10 +1498,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             RecipeOperationRequest::Start(request) => {
                 self.report_phase(claim, "starting").await;
                 let installation_id = request.installation_id.to_string();
-                let spec = match parse_compiled_execution_plan(&request.compiled_execution_plan) {
-                    Ok(spec) => spec,
-                    Err(_) => return failed("compiled execution plan is invalid"),
+                let phase_deadline = match request
+                    .start_deadline
+                    .as_deref()
+                    .map(DateTime::parse_from_rfc3339)
+                    .transpose()
+                {
+                    Ok(deadline) => deadline,
+                    Err(_) => return failed("recipe start deadline is invalid"),
                 };
+                let spec = request.compiled_execution_plan.clone();
+                if spec.validate().is_err() {
+                    return failed("compiled execution plan is invalid");
+                }
                 if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
                     || spec.runtime.image_digest != request.image_digest
                     || spec.topology.rank != request.rank
@@ -1551,17 +1549,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
-                let placement = Placement {
-                    endpoint_address: Some(request.endpoint_address),
-                    rank: request.rank,
-                    role: request.role.clone(),
-                    world_size: request.world_size,
-                    local_address: request.local_address,
-                    master_address: request.master_address,
-                    master_port: request.master_port,
-                    port: request.port,
-                    reserved_memory_bytes: request.reserved_memory_bytes,
-                };
+                let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity =
                     request
@@ -1577,7 +1565,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
                 let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
                 if request.phase.is_some()
-                    && !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                    && !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                 {
                     return failed("distributed start deadline elapsed before execution");
                 }
@@ -1687,14 +1675,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .await;
                     let stable = if first_inspect.is_err()
                         || *cancellation.borrow()
-                        || !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                        || !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                     {
                         false
                     } else {
                         wait_for_launch_stability(
                             lease_deadline.clone(),
                             cancellation.clone(),
-                            request.start_deadline,
+                            phase_deadline,
                             Duration::from_secs(2),
                         )
                         .await
@@ -1706,10 +1694,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 )
                                 .await
                                 .is_ok()
-                            && before_phase_deadline(
-                                &lease_deadline,
-                                request.start_deadline.as_ref(),
-                            )
+                            && before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                     };
                     if !stable {
                         let _ = self
@@ -1780,7 +1765,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             request.port,
                             &endpoint.health_path,
                             lease_deadline,
-                            request.start_deadline,
+                            phase_deadline,
                         ),
                         runtime_guard,
                         cancellation.clone(),
@@ -2041,9 +2026,57 @@ where
     }
 }
 
+fn job_placement(
+    spec: &CompiledExecutionPlan,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<CompiledRuntimePlacement, WorkloadError> {
+    let placement = &spec.runtime.placement;
+    if placement.rank != u64::from(request.rank)
+        || placement.role != request.role
+        || placement.world_size != 1
+        || placement.port.is_some()
+        || placement.reserved_memory_bytes != request.reserved_memory_bytes
+    {
+        return Err(WorkloadError::Invalid("job placement"));
+    }
+    placement.validate_bound()?;
+    Ok(placement.clone())
+}
+
+pub fn recipe_job_input_manifest(
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<Vec<u8>, vonk_agent_protocol::ProtocolError> {
+    canonical_json(&vonk_agent_protocol::generated::RecipeJobInputManifest {
+        schema_version: 1,
+        total_bytes: request.input_total_bytes,
+        files: request.inputs.clone(),
+    })
+}
+
+pub fn prepare_job_invocation(
+    installed: &CompiledExecutionPlan,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<CompiledExecutionPlan, WorkloadError> {
+    let plan = request.compiled_execution_plan.clone();
+    plan.validate()?;
+    let Some(job) = plan.job.as_ref() else {
+        return Err(WorkloadError::Invalid("job interface"));
+    };
+    if job.interface.as_str() != request.interface.as_str()
+        || job.timeout_seconds != request.timeout_seconds
+        || plan.runtime.image_digest != request.image_digest
+        || plan.identity.recipe_revision_sha256 != request.recipe_content_sha256
+        || !crate::workloads::same_job_workload(installed, &plan)
+    {
+        return Err(WorkloadError::Invalid("job invocation authority"));
+    }
+    job_placement(&plan, request)?;
+    Ok(plan)
+}
+
 fn failed_job(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
-    exit_code: i32,
+    exit_code: u32,
     started: Instant,
     reason: &'static str,
 ) -> ExecutionResult {
@@ -2076,22 +2109,32 @@ fn cancelled_job(
     }
 }
 
-fn empty_job_output_manifest() -> RecipeJobOutputManifest {
-    let value = json!({"schema_version": 1, "total_bytes": 0, "files": []});
-    let manifest_sha256 = canonical_json(&value)
-        .map(|bytes| hex_sha256(&bytes))
-        .unwrap_or_default();
-    RecipeJobOutputManifest {
-        schema_version: 1,
+fn output_manifest_with_digest(
+    content: vonk_agent_protocol::generated::RecipeJobOutputManifestContent,
+) -> Result<RecipeJobOutputManifest, ProtocolError> {
+    let manifest_sha256 = hex_sha256(&canonical_json(&content)?);
+    Ok(RecipeJobOutputManifest {
+        schema_version: content.schema_version,
         manifest_sha256,
-        total_bytes: 0,
-        files: Vec::new(),
-    }
+        total_bytes: content.total_bytes,
+        files: content.files,
+    })
+}
+
+fn empty_job_output_manifest() -> RecipeJobOutputManifest {
+    output_manifest_with_digest(
+        vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
+            schema_version: 1,
+            total_bytes: 0,
+            files: Vec::new(),
+        },
+    )
+    .expect("canonical empty job manifest")
 }
 
 fn job_result_body(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
-    exit_code: i32,
+    exit_code: u32,
     started: Instant,
     output_manifest: RecipeJobOutputManifest,
     reason: Option<&str>,
@@ -2103,7 +2146,8 @@ fn job_result_body(
         exit_code,
         output_manifest,
         evidence: RecipeJobEvidence {
-            elapsed_milliseconds: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            elapsed_milliseconds: u32::try_from(started.elapsed().as_millis())
+                .expect("bounded job elapsed time"),
             // The helper does not expose a cgroup peak for transient containers yet. Null is
             // honest unavailable evidence; zero would falsely claim a measurement.
             peak_memory_bytes: None,
@@ -2126,7 +2170,7 @@ fn collect_job_outputs(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "job output directory is unavailable")?;
     entries.sort_by_key(fs::DirEntry::file_name);
-    if entries.len() > usize::from(limits.max_files) {
+    if entries.len() > usize::try_from(limits.max_files).expect("bounded job output count") {
         return Err("job output file count exceeded its bound");
     }
     let mut files = Vec::with_capacity(entries.len());
@@ -2141,12 +2185,12 @@ fn collect_job_outputs(
             return Err("job output is unsafe");
         }
         let metadata = entry.metadata().map_err(|_| "job output is unsafe")?;
-        if metadata.len() > limits.max_file_bytes {
+        if metadata.len() > u64::from(limits.max_file_bytes) {
             return Err("job output file size exceeded its bound");
         }
         total_bytes = total_bytes
             .checked_add(metadata.len())
-            .filter(|total| *total <= limits.max_total_bytes)
+            .filter(|total| *total <= u64::from(limits.max_total_bytes))
             .ok_or("job output total size exceeded its bound")?;
         let media_type = output_media_type(&name, mappings)
             .ok_or("job output media type is not declared by its signed slot mapping")?;
@@ -2177,22 +2221,20 @@ fn collect_job_outputs(
         files.push(RecipeJobFile {
             name,
             media_type: media_type.to_owned(),
-            size_bytes: observed,
+            size_bytes: u32::try_from(observed)
+                .map_err(|_| "job output file size exceeded its bound")?,
             sha256: hex::encode(hasher.finalize()),
         });
     }
-    let manifest = json!({"schema_version": 1, "total_bytes": total_bytes, "files": files});
-    let manifest_sha256 = canonical_json(&manifest)
-        .map(|bytes| hex_sha256(&bytes))
-        .map_err(|_| "job output manifest is invalid")?;
-    let files = serde_json::from_value(manifest["files"].clone())
-        .map_err(|_| "job output manifest is invalid")?;
-    Ok(RecipeJobOutputManifest {
-        schema_version: 1,
-        manifest_sha256,
-        total_bytes,
-        files,
-    })
+    output_manifest_with_digest(
+        vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
+            schema_version: 1,
+            total_bytes: u32::try_from(total_bytes)
+                .map_err(|_| "job output total size exceeded its bound")?,
+            files,
+        },
+    )
+    .map_err(|_| "job output manifest is invalid")
 }
 
 fn valid_job_output_name(value: &str) -> bool {
@@ -2360,7 +2402,7 @@ where
             heartbeat_result?;
             result
         }
-        Ok(BeginDecision::Replay(result)) => result,
+        Ok(BeginDecision::Replay(result)) => *result,
         Err(StateError::Busy) => return Ok(()),
         Err(error) => return Err(error.into()),
     };
@@ -2482,6 +2524,28 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
     )
 }
 
+fn phase_progress(phase: &str) -> OperationProgress {
+    OperationProgress {
+        phase: phase.to_owned(),
+        completed_bytes: 0,
+        total_bytes: None,
+        total_bytes_known: false,
+        completed_items: None,
+        total_items: None,
+        object_sha256: None,
+        kind: None,
+        activity: None,
+        observed_at: None,
+        last_progress_at: None,
+        bytes_per_second: None,
+        smoothed_bytes_per_second: None,
+        eta_seconds: None,
+        elapsed_seconds: None,
+        checkpoint: None,
+        members: Vec::new(),
+    }
+}
+
 async fn run_heartbeats<C: LoopClient>(
     client: C,
     mut state: StateStore,
@@ -2505,7 +2569,7 @@ async fn run_heartbeats<C: LoopClient>(
             job_id: claim.job_id,
             node_id: claim.node_id.clone(),
             operation_id: claim.operation_id,
-            progress: json!({"phase": "executing"}),
+            progress: None,
             schema_version: claim.schema_version,
         };
         let directive = match client.heartbeat(&progress).await {
@@ -2526,9 +2590,10 @@ async fn run_heartbeats<C: LoopClient>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor, RunOncePolicy,
-        distribution_success_evidence, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, run_interruptible_job,
+        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor,
+        RecipeObservationError, RunOncePolicy, distribution_success_evidence,
+        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
+        readiness_identity, report_complete_recipe_run_observations, run_interruptible_job,
         run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
         wait_ready_with_runtime_guard,
     };
@@ -2608,55 +2673,264 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn corrupt_exact_lifecycle_emits_an_explicit_empty_v2_report() {
-        let data = tempdir().unwrap();
-        let runtime = tempdir().unwrap();
-        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
-        let metadata = data.path().join("run-metadata").join(run_id);
-        fs::create_dir_all(&metadata).unwrap();
-        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-                    break index + 4;
-                }
+    #[test]
+    fn canonical_job_claim_prepares_without_a_serving_port() {
+        let claim: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let request: vonk_agent_protocol::RecipeJobRunRequest =
+            serde_json::from_value(claim["payload"].clone()).unwrap();
+        let spec = request.compiled_execution_plan.clone();
+        spec.validate().unwrap();
+        let placement = super::job_placement(&spec, &request).unwrap();
+        for field in ["rank", "role", "reserved_memory_bytes"] {
+            let mut altered = claim["payload"].clone();
+            altered[field] = match field {
+                "rank" => json!(1),
+                "role" => json!("worker"),
+                _ => json!(request.reserved_memory_bytes + 1024),
             };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
+            if matches!(field, "rank" | "role") {
+                assert!(
+                    serde_json::from_value::<vonk_agent_protocol::RecipeJobRunRequest>(altered)
+                        .is_err()
+                );
+            } else {
+                let altered = serde_json::from_value(altered).unwrap();
+                assert!(super::job_placement(&spec, &altered).is_err());
             }
-            write!(
-                stream,
-                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        }
+        let data = tempdir().unwrap();
+        let run_id = request.run_id.to_string();
+        fs::create_dir_all(data.path().join("runs").join(&run_id).join("inputs")).unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+            huggingface_curl_config: None,
+        };
+        let start = runtime
+            .prepare_job_start(
+                &spec,
+                &request.installation_id.to_string(),
+                &run_id,
+                &placement,
+                &spec,
             )
             .unwrap();
-            request
-        });
-        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
+        assert!(!start.main.iter().any(|argument| argument == "--publish"));
+        assert!(
+            start
+                .main
+                .windows(2)
+                .any(|pair| pair == ["--network", "none"])
+        );
+        let metadata = data.path().join("run-metadata").join(run_id);
+        for name in ["runtime.json", "lifecycle.json"] {
+            let persisted: Value =
+                serde_json::from_slice(&fs::read(metadata.join(name)).unwrap()).unwrap();
+            let port = if name == "runtime.json" {
+                &persisted["runtime"]["placement"]["port"]
+            } else {
+                &persisted["placement"]["port"]
+            };
+            assert!(port.is_null());
+        }
+        let mut serving_placement = placement;
+        serving_placement.port = Some(1024);
+        assert!(
+            runtime
+                .start_arguments(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &request.run_id.to_string(),
+                    &serving_placement
+                )
+                .is_err()
+        );
+    }
+
+    struct ObservationServer {
+        client: AgentHttpClient,
+        stop: Arc<AtomicBool>,
+        worker: thread::JoinHandle<Vec<Value>>,
+    }
+
+    impl ObservationServer {
+        fn new(status: Option<u16>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = stop.clone();
+            let worker = thread::spawn(move || {
+                let mut reports = Vec::new();
+                while !stopped.load(Ordering::SeqCst) {
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(connection) => connection,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(1));
+                            continue;
+                        }
+                        Err(error) => panic!("observation listener: {error}"),
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    let header_end = loop {
+                        let size = stream.read(&mut buffer).unwrap();
+                        assert_ne!(size, 0);
+                        request.extend_from_slice(&buffer[..size]);
+                        if let Some(index) =
+                            request.windows(4).position(|bytes| bytes == b"\r\n\r\n")
+                        {
+                            break index + 4;
+                        }
+                    };
+                    let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                    assert!(
+                        headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+                    );
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    while request.len() - header_end < content_length {
+                        let size = stream.read(&mut buffer).unwrap();
+                        assert_ne!(size, 0);
+                        request.extend_from_slice(&buffer[..size]);
+                    }
+                    reports.push(serde_json::from_slice(&request[header_end..]).unwrap());
+                    if let Some(status) = status {
+                        write!(stream, "HTTP/1.1 {status} Response\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                    }
+                }
+                reports
+            });
+            Self {
+                client: AgentHttpClient::for_http_test(
+                    &format!("http://{address}/"),
+                    "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ),
+                stop,
+                worker,
+            }
+        }
+
+        fn finish(self) -> Vec<Value> {
+            self.stop.store(true, Ordering::SeqCst);
+            self.worker.join().unwrap()
+        }
+    }
+
+    fn exact_observation(run_id: Uuid) -> crate::client::ExactRecipeRunObservation {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/fixtures/recipe-run-observation.json"
+        ))
+        .unwrap();
+        let now = Utc::now().timestamp();
+        value["run_id"] = json!(run_id);
+        value["grant"]["claims"]["operation"]["job_id"] = json!(run_id);
+        value["grant"]["claims"]["issued_at"] = json!(now - 1);
+        value["grant"]["claims"]["expires_at"] = json!(now + 10);
+        value["helper_receipt"]["claims"]["observed_at"] = json!(now);
+        value["observed_at"] = json!(DateTime::from_timestamp(now, 0).unwrap());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_reports_multiple_runs_together() {
+        let server = ObservationServer::new(Some(204));
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        let results = ids
+            .into_iter()
+            .map(|id| Ok(exact_observation(id)))
+            .collect();
+        assert_eq!(
+            report_complete_recipe_run_observations(&server.client, results)
+                .await
+                .unwrap(),
+            2
+        );
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["schema_version"], 2);
+        let runs = reports[0]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2);
+        for id in ids {
+            assert!(runs.iter().any(|run| run["run_id"] == id.to_string()));
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_report_failure_never_reports_empty() {
+        for status in [Some(503), Some(422), None] {
+            let server = ObservationServer::new(status);
+            let error = report_complete_recipe_run_observations(
+                &server.client,
+                vec![Ok(exact_observation(Uuid::new_v4()))],
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(error, RecipeObservationError::Report(_)));
+            let reports = server.finish();
+            assert_eq!(reports.len(), 1);
+            assert_eq!(reports[0]["runs"].as_array().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_inspection_failure_never_reports_partial_or_empty() {
+        for error in [
+            crate::host_runtime::HostRuntimeError::Protocol,
+            crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+        ] {
+            let server = ObservationServer::new(Some(204));
+            let result = report_complete_recipe_run_observations(
+                &server.client,
+                vec![
+                    Ok(exact_observation(Uuid::new_v4())),
+                    Err(RecipeObservationError::Inspection(error)),
+                ],
+            )
+            .await;
+            assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
+            assert!(server.finish().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_does_not_submit_receipts_expired_during_collection() {
+        let server = ObservationServer::new(Some(204));
+        let mut stale = exact_observation(Uuid::new_v4());
+        stale.grant.claims.issued_at = Utc::now().timestamp() - 20;
+        stale.grant.claims.expires_at = Utc::now().timestamp() - 10;
+        stale.helper_receipt.claims.observed_at = stale.grant.claims.issued_at;
+        stale.observed_at = DateTime::from_timestamp(stale.grant.claims.issued_at, 0)
+            .unwrap()
+            .into();
+        stale.validate().unwrap();
+        assert!(matches!(
+            report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
+            Err(RecipeObservationError::StaleSnapshot)
+        ));
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_reports_empty_only_when_no_managed_runs_exist() {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let server = ObservationServer::new(Some(204));
         let runner = NoProcess;
         let executor = RecipeExecutor {
-            client: &client,
+            client: &server.client,
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
@@ -2665,33 +2939,64 @@ mod tests {
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
         };
-
-        assert!(
+        assert_eq!(
             executor
                 .report_exact_recipe_run_observations()
                 .await
-                .is_err()
+                .unwrap(),
+            0
         );
-        let request = server.join().unwrap();
-        let (headers, body) = request
-            .windows(4)
-            .position(|bytes| bytes == b"\r\n\r\n")
-            .map(|index| (&request[..index], &request[index + 4..]))
-            .unwrap();
-        assert!(
-            std::str::from_utf8(headers)
-                .unwrap()
-                .starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["schema_version"], 2);
+        assert_eq!(reports[0]["runs"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn corrupt_exact_lifecycle_does_not_report_false_absence() {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
+        let metadata = data.path().join("run-metadata").join(run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
+        let server = ObservationServer::new(Some(204));
+        let runner = NoProcess;
+        let executor = RecipeExecutor {
+            client: &server.client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+        assert!(matches!(
+            executor.report_exact_recipe_run_observations().await,
+            Err(RecipeObservationError::Runtime(_))
+        ));
+        assert!(server.finish().is_empty());
+    }
+
+    #[test]
+    fn observation_report_diagnostic_preserves_only_the_safe_client_category() {
+        assert_eq!(
+            RecipeObservationError::Report(ClientError::Protocol).to_string(),
+            "exact recipe run observation could not be reported: controller protocol response is invalid"
         );
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["schema_version"], 2);
-        assert_eq!(body["runs"], serde_json::json!([]));
+        let error = ClientError::CredentialRead(std::io::Error::other("secret/path/token"));
+        assert_eq!(
+            RecipeObservationError::Report(error).to_string(),
+            "exact recipe run observation could not be reported: agent credential could not be read"
+        );
     }
 
     #[test]
     fn failed_recipe_build_preserves_only_safe_classified_evidence() {
         let mut build_claim = claim();
-        build_claim.operation = "recipe.build.v1".to_owned();
+        build_claim.operation = "recipe.build.v1".parse().unwrap();
         let result = normalize_execution_result(
             &build_claim,
             ExecutionResult {
@@ -2755,9 +3060,9 @@ mod tests {
             job_id: Uuid::new_v4(),
             node_id: NODE_ID.to_owned(),
             operation_id: Uuid::new_v4(),
-            result: body,
+            result: serde_json::from_value(body).unwrap(),
             schema_version: 1,
-            state: "succeeded".to_owned(),
+            state: "succeeded".parse().unwrap(),
         };
         result.validate().unwrap();
     }
@@ -2765,7 +3070,7 @@ mod tests {
     #[test]
     fn distribution_failure_uses_operation_specific_result_code() {
         let mut distribution_claim = claim();
-        distribution_claim.operation = "artifact.distribution.v1".to_owned();
+        distribution_claim.operation = "artifact.distribution.v1".parse().unwrap();
         let result = normalize_execution_result(
             &distribution_claim,
             ExecutionResult {
@@ -2821,10 +3126,10 @@ mod tests {
             fence: Uuid::new_v4(),
             job_id: Uuid::new_v4(),
             node_id: NODE_ID.to_owned(),
-            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation: "recipe.model-uninstall.v1".parse().unwrap(),
             operation_id: Uuid::new_v4(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload: serde_json::from_value(payload).unwrap(),
             schema_version: 1,
         };
         let client = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
@@ -2868,9 +3173,9 @@ mod tests {
             "plan_digest": "b".repeat(64),
         });
         let mut uninstall_claim = claim.clone();
-        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
         uninstall_claim.payload_digest = hex_sha256(&canonical_json(&uninstall_payload).unwrap());
-        uninstall_claim.payload = uninstall_payload;
+        uninstall_claim.payload = serde_json::from_value(uninstall_payload).unwrap();
         let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(uninstall_claim.deadline);
         let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
 
@@ -3070,7 +3375,7 @@ mod tests {
             *self.observed_deadline.lock().unwrap() = Some(*lease_deadline.borrow());
             ExecutionResult {
                 state: "succeeded",
-                body: json!({"status": "ok"}),
+                body: super::recipe_install_success_body(0),
             }
         }
     }
@@ -3098,15 +3403,18 @@ mod tests {
     impl Executor for CancellationExecutor {
         async fn execute(
             &self,
-            _claim: &AgentClaim,
+            claim: &AgentClaim,
             _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
             mut cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
+            let RecipeOperationRequest::JobRun(request) =
+                RecipeOperationRequest::parse(claim).unwrap()
+            else {
+                panic!("expected canonical job claim");
+            };
+            let started = std::time::Instant::now();
             super::wait_for_cancellation(&mut cancellation).await;
-            ExecutionResult {
-                state: "cancelled",
-                body: json!({"exit_code": 130, "reason": "controller cancellation requested"}),
-            }
+            super::cancelled_job(&request, started, "controller cancellation requested")
         }
     }
 
@@ -3125,7 +3433,7 @@ mod tests {
             self.events.lock().unwrap().push("execute");
             ExecutionResult {
                 state: "succeeded",
-                body: json!({"status": "ok"}),
+                body: super::recipe_install_success_body(0),
             }
         }
     }
@@ -3161,10 +3469,10 @@ mod tests {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: NODE_ID.to_owned(),
-            operation: "recipe.install".to_owned(),
+            operation: "recipe.install".parse().unwrap(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload: serde_json::from_value(payload).unwrap(),
             schema_version: 1,
         };
         RecipeOperationRequest::parse(&claim).unwrap();
@@ -3174,7 +3482,7 @@ mod tests {
     #[test]
     fn artifact_job_failure_keeps_current_result_and_typed_diagnostics() {
         let mut job_claim = claim();
-        job_claim.operation = "recipe.job.run.v1".to_owned();
+        job_claim.operation = "recipe.job.run.v1".parse().unwrap();
         let envelope: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
         ))
@@ -3268,6 +3576,11 @@ mod tests {
 
         let heartbeats = client.heartbeats.lock().unwrap();
         assert!(heartbeats.len() >= 2);
+        assert!(
+            heartbeats
+                .iter()
+                .all(|heartbeat| heartbeat.progress.is_none())
+        );
         drop(heartbeats);
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
@@ -3342,7 +3655,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            checked_failure_body(client.results.lock().unwrap()[0].result.clone()),
+            checked_failure_body(
+                serde_json::to_value(&client.results.lock().unwrap()[0].result).unwrap()
+            ),
             json!({
                 "error_code": "recipe_install_failed",
                 "reason": "rootless image build failed",
@@ -3354,7 +3669,7 @@ mod tests {
     #[test]
     fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
         let mut upgrade_claim = claim();
-        upgrade_claim.operation = "agent.upgrade.v1".to_owned();
+        upgrade_claim.operation = "agent.upgrade.v1".parse().unwrap();
         let result = normalize_execution_result(
             &upgrade_claim,
             ExecutionResult {
@@ -3397,7 +3712,7 @@ mod tests {
     #[test]
     fn image_import_failure_preserves_only_bounded_helper_diagnostics() {
         let mut import_claim = claim();
-        import_claim.operation = "recipe.image.import.v1".to_owned();
+        import_claim.operation = "recipe.image.import.v1".parse().unwrap();
         for code in [
             "runtime_helper_unavailable",
             "runtime_authority_unavailable",
@@ -3435,8 +3750,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled() {
         let directory = tempdir().unwrap();
-        let mut job_claim = claim();
-        job_claim.operation = "recipe.job.run.v1".to_owned();
+        let mut job_claim: AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        )).unwrap();
+        job_claim.deadline = (Utc::now() + ChronoDuration::seconds(20)).fixed_offset();
+        job_claim.node_id = NODE_ID.to_owned();
+        job_claim.validate().unwrap();
+        let RecipeOperationRequest::JobRun(request) =
+            RecipeOperationRequest::parse(&job_claim).unwrap()
+        else {
+            panic!("expected canonical job claim");
+        };
         let client = RecordingClient {
             cancel_requested: true,
             claim: Arc::new(Mutex::new(Some(job_claim))),
@@ -3463,11 +3787,21 @@ mod tests {
 
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].state, "cancelled");
-        assert_eq!(results[0].result["exit_code"], 130);
+        assert_eq!(results[0].state.as_str(), "cancelled");
+        let vonk_agent_protocol::generated::AgentResultResult::RecipeJobRunResult(result) =
+            &results[0].result
+        else {
+            panic!("expected canonical job result");
+        };
+        result.validate().unwrap();
+        assert_eq!(result.job_id, request.job_id);
+        assert_eq!(result.run_id, request.run_id);
+        assert!(result.output_manifest.files.is_empty());
+        assert_eq!(result.output_manifest.total_bytes, 0);
+        assert_eq!(result.exit_code, 130);
         assert_eq!(
-            results[0].result["reason"],
-            "controller cancellation requested"
+            result.reason.as_deref(),
+            Some("controller cancellation requested")
         );
     }
 }

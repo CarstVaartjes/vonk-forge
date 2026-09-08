@@ -38,6 +38,7 @@ from vonk_control.models import (
     RoutePublicationOwner,
 )
 from vonk_control.operation_api import (
+    AgentsResponse,
     JobProgress,
     OperationApiServices,
     OperationListPage,
@@ -46,6 +47,7 @@ from vonk_control.operation_api import (
     OperationQuery,
     durable_operation_services,
 )
+from vonk_control.strict_json import serialize_json_value
 
 COMMIT = "a" * 64
 DIGEST = "d" * 64
@@ -319,7 +321,7 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         }
     )
     assert projected is not None
-    assert projected.model_dump(mode="json") == {
+    assert serialize_json_value(projected) == {
         "phase": "download",
         "activity": "waiting",
         "kind": "oci-layer",
@@ -327,10 +329,15 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         "completed_bytes": 128,
         "total_bytes": 256,
         "total_bytes_known": True,
+        "members": [],
     }
-    assert operation_api._progress_projection({"phase": "verify"}).model_dump(
-        mode="json"
-    ) == {"phase": "verify", "activity": "waiting"}
+    assert serialize_json_value(operation_api._progress_projection({"phase": "verify"})) == {
+        "phase": "verify",
+        "activity": "waiting",
+        "completed_bytes": 0,
+        "total_bytes_known": False,
+        "members": [],
+    }
     for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
         with pytest.raises(ValueError):
             operation_api._progress_projection({"phase": "download", retired: 1})
@@ -558,7 +565,15 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert first.json()["next_cursor"] is not None
     assert detail.status_code == 200
     assert detail.json()["kind"] == "fleet-profile.apply"
-    assert detail.json()["progress"] == ({"phase": "start", "activity": "waiting"} if profile_state == "running" else {"phase": "start"})
+    expected_progress = {
+        "phase": "start",
+        "completed_bytes": 0,
+        "total_bytes_known": False,
+        "members": [],
+    }
+    if profile_state == "running":
+        expected_progress["activity"] = "waiting"
+    assert detail.json()["progress"] == expected_progress
     if profile_state != "running":
         failure = detail.json()["failure"]
         assert failure["error_code"] == "fleet_profile_application_failed"
@@ -621,8 +636,6 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
         "metadata": {
             "requested_start": "2026-08-15T11:00:00Z",
             "requested_end": "2026-08-15T12:00:00Z",
-            "actual_start": None,
-            "actual_end": None,
             "requested_resolution": "raw",
             "actual_resolution": "raw",
             "timezone": "UTC",
@@ -764,19 +777,15 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "agent_upgrade_diagnostics": None,
         "authority_revision": COMMIT,
         "current_attempt": 1,
         "id": "11111111-1111-4111-8111-111111111111",
         "kind": "reconcile",
         "operations": [],
-        "operation_next_cursor": None,
         "operation_total": 0,
-        "progress": {"operation": None, "completed": 0, "failed": 0, "running": 0, "total": 0},
+        "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
         "state": "queued",
-        "status_reason": None,
         "targets": [NODE_ID],
-        "target_next_cursor": None,
         "target_total": 1,
     }
     encoded = json.dumps(response.json(), sort_keys=True)
@@ -955,7 +964,9 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
         "/api/v1/agents", headers=projection_operator
     )
     assert agent_response.status_code == 200
-    assert agent_response.json() == {"agents": agents}
+    assert agent_response.json() == serialize_json_value(
+        AgentsResponse.model_validate({"agents": agents})
+    )
 
     (generation / "litellm.json").unlink()
     endpoint_client, operator, _reconciler, _audits = _client(operations=services)

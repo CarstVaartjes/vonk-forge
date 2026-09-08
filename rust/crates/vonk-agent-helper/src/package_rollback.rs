@@ -275,7 +275,7 @@ impl Store {
             candidate_version: tx.candidate_version.clone(),
             candidate_binary_sha256: tx.candidate_binary_sha256.clone(),
             attempt_nonce: tx.rollback.attempt_nonce.clone(),
-            phase: tx.phase.clone(),
+            phase: tx.phase,
             created_at: tx.created_at,
             updated_at: tx.updated_at,
             outcome: tx.outcome.clone(),
@@ -896,10 +896,10 @@ mod tests {
         let mut value = serde_json::to_value(transaction()).unwrap();
         value["command"] = serde_json::json!("sh -c arbitrary");
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
-        value.as_object_mut().unwrap().remove("command");
+        let mut value = serde_json::to_value(transaction()).unwrap();
         value["rollback"]["source"]["package_sha256"] = serde_json::json!("../../source.deb");
-        let parsed: Transaction = parse_strict(&serde_json::to_vec(&value).unwrap()).unwrap();
-        assert!(!parsed.rollback.valid());
+        assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut value = serde_json::to_value(transaction()).unwrap();
         value["schema_version"] = serde_json::json!(2.0);
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
     }

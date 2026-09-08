@@ -1,4 +1,5 @@
 import {act, fireEvent, render, screen} from "@testing-library/react";
+import {ApiError} from "../api/client";
 import type {ModelCacheOperationResponse} from "../api/types";
 import {librarySnapshot} from "../test-fixtures/library";
 import {LibraryCacheView, LibraryModelDownloadAction, aggregateCacheEntries} from "./library-cache-view";
@@ -54,6 +55,8 @@ test("retries a transient cache operation in place with retained progress", asyn
 
   await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
   expect((await screen.findAllByRole("button", {name: "Retry download"}))[0]).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("10 bytes of progress retained.");
+  expect(screen.getByRole("alert")).toHaveTextContent(failed.id);
   await act(async () => { fireEvent.click(screen.getAllByRole("button", {name: "Retry download"})[0]!); });
   expect(retryModelCacheOperation).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(previewModelCacheDownload).toHaveBeenCalledTimes(1);
@@ -85,4 +88,15 @@ test("checks Model access and resumes the retained exact operation", async () =>
   await act(async () => { fireEvent.click(await screen.findByRole("button", {name: "Check access and resume"})); });
   expect(checkModelCacheAccessAndResume).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), artifact_set_sha256: failed.artifact_set_sha256, plan_digest: failed.plan_digest});
   expect(screen.getByText("Downloading to NAS…")).toBeVisible();
+});
+
+test("renders failed download requests without inventing an availability operation", async () => {
+  const preview = vi.fn().mockRejectedValue(new ApiError(503, "Download request unavailable; token=private"));
+  render(<LibraryModelDownloadAction api={{previewModelCacheDownload: preview} as never} model={librarySnapshot.models[0]!}/>);
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
+  expect(screen.getByRole("alert")).toHaveTextContent("Download to NAS failed.");
+  expect(screen.getByRole("alert")).toHaveTextContent("token=<redacted>");
+  expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Retry download"})); });
+  expect(preview).toHaveBeenCalledTimes(2);
 });

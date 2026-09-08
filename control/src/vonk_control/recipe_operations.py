@@ -195,7 +195,7 @@ class RecipeRunStatus:
 
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
-_DISTRIBUTED_OBSERVATION_GRACE_SECONDS = 120
+_INITIAL_OBSERVATION_GRACE_SECONDS = 120
 _RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
 _RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
     {"waiting-for-operator"}
@@ -1999,15 +1999,7 @@ class RecipeOperationService:
                                 "collective readiness preceded rank launch"
                             )
                         started_node.state = "running"
-                        started_node.observed_run_generation = None
-                        started_node.observation_receipt_sha256 = None
-                        started_node.observation_endpoint_ready = None
                         started_node.updated_at = now
-                    run = session.get(RecipeRun, owner_id)
-                    assert run is not None
-                    run.observation_deadline_at = now + timedelta(
-                        seconds=_DISTRIBUTED_OBSERVATION_GRACE_SECONDS
-                    )
                     node.endpoint = {"url": endpoint}
                     node.evidence_digest = digest
                 node.updated_at = now
@@ -2026,6 +2018,19 @@ class RecipeOperationService:
                     node.endpoint = {"url": endpoint}
                     node.evidence_digest = digest
                 node.updated_at = now
+            if job.kind == "recipe.start" and succeeded and start_phase != "rank-launch":
+                run = session.get(RecipeRun, owner_id)
+                assert run is not None
+                if run.plan.get("observation_schema_version") == 2:
+                    run.observation_deadline_at = now + timedelta(
+                        seconds=_INITIAL_OBSERVATION_GRACE_SECONDS
+                    )
+                    for started_node in session.scalars(
+                        select(RunNode).where(RunNode.run_id == owner_id)
+                    ):
+                        started_node.observed_run_generation = None
+                        started_node.observation_receipt_sha256 = None
+                        started_node.observation_endpoint_ready = None
         elif job.kind == "recipe.uninstall":
             node = session.scalar(
                 select(InstallationNode).where(

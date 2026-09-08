@@ -1,5 +1,10 @@
 # `vonkctl` Live Node Health Design
 
+Historical design, not current implementation instructions. Follow
+[current API contracts](../../api-contracts.md) for Pydantic/typify generation
+and optional-field serialization: omit unused optional-null fields, retain
+required nullable fields, and use shared canonical serialization.
+
 Date: 2026-08-02
 
 ## Purpose

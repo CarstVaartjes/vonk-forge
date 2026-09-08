@@ -19,6 +19,7 @@ use tempfile::TempDir;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
+use vonk_agent_protocol::generated::EnrollmentBootstrapResponse;
 use wait_timeout::ChildExt;
 
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -2384,21 +2385,8 @@ fn required_origin(prompt: &mut dyn Prompt, label: &str) -> Result<Url, SetupErr
     }
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentBootstrap {
-    controller_endpoint: String,
-    enrollment_endpoint: String,
-    ca_fingerprint: String,
-    ca_pem: String,
-    #[serde(deserialize_with = "Option::deserialize")]
-    controller_address: Option<String>,
-    service_hostnames: Vec<String>,
-    host_helper_authority_public_key: String,
-}
-
 /// Parse the current Controller bootstrap document; omitted fields are invalid.
-pub fn parse_enrollment_bootstrap(bytes: &[u8]) -> Result<EnrollmentBootstrap, SetupError> {
+pub fn parse_enrollment_bootstrap(bytes: &[u8]) -> Result<EnrollmentBootstrapResponse, SetupError> {
     if bytes.is_empty() || bytes.len() > MAX_BOOTSTRAP_BYTES {
         return Err(SetupError::EnrollmentBootstrap);
     }
@@ -2493,7 +2481,7 @@ fn bootstrap_curl(
 }
 
 fn validate_enrollment_bootstrap(
-    bootstrap: EnrollmentBootstrap,
+    bootstrap: EnrollmentBootstrapResponse,
     expected_enrollment: &Url,
     expected_ca_sha256: &str,
     expected_controller_address: Option<Ipv4Addr>,
@@ -2953,6 +2941,41 @@ mod tests {
     use tempfile::tempdir;
 
     struct Values(VecDeque<String>);
+
+    fn enrollment_bootstrap_document() -> serde_json::Value {
+        serde_json::json!({
+            "controller_endpoint": "https://controller.example.test/",
+            "enrollment_endpoint": "https://enroll.example.test/",
+            "ca_fingerprint": "a".repeat(64),
+            "ca_pem": "-----BEGIN CERTIFICATE-----\nY2E=\n-----END CERTIFICATE-----\n",
+            "controller_address": null,
+            "service_hostnames": [],
+            "host_helper_authority_public_key": "b".repeat(64),
+        })
+    }
+
+    #[test]
+    fn enrollment_bootstrap_uses_the_exact_generated_wire_shape() {
+        let document = enrollment_bootstrap_document();
+        assert!(parse_enrollment_bootstrap(&serde_json::to_vec(&document).unwrap()).is_ok());
+
+        let mut missing_nullable = document.clone();
+        missing_nullable
+            .as_object_mut()
+            .unwrap()
+            .remove("controller_address");
+        assert!(
+            parse_enrollment_bootstrap(&serde_json::to_vec(&missing_nullable).unwrap()).is_err()
+        );
+
+        let mut wrong_type = document.clone();
+        wrong_type["service_hostnames"] = serde_json::json!("controller.example.test");
+        assert!(parse_enrollment_bootstrap(&serde_json::to_vec(&wrong_type).unwrap()).is_err());
+
+        let mut unknown = document;
+        unknown["legacy_controller"] = serde_json::json!("controller.example.test");
+        assert!(parse_enrollment_bootstrap(&serde_json::to_vec(&unknown).unwrap()).is_err());
+    }
 
     #[test]
     fn system_commands_fail_closed_and_reap_descendants_at_the_deadline() {

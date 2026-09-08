@@ -34,15 +34,18 @@ fn main() {
         )
         .unwrap();
 
-    let vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequest {
-        action: ContainerRuntimeAction::RunInspect,
-        job_id: _,
-        operation_id: _,
-        attempt: _,
-        fence: _,
-        request_sha256,
-        observation_identity_sha256: Some(observation_identity_sha256),
-    } = &grant.claims.operation
+    let vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+        vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+            action: ContainerRuntimeAction::RunInspect,
+            job_id: _,
+            operation_id: _,
+            attempt: _,
+            fence: _,
+            request_sha256,
+            observation_identity_sha256: Some(observation_identity_sha256),
+            ..
+        },
+    ) = &grant.claims.operation
     else {
         panic!("probe input is not an exact run inspection grant");
     };

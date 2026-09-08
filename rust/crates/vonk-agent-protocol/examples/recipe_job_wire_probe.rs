@@ -8,7 +8,7 @@ use std::io::{self, BufRead, Write};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use vonk_agent_protocol::{AgentClaim, AgentResult, RecipeJobRunResult, RecipeOperationRequest};
+use vonk_agent_protocol::{AgentClaim, AgentResult, RecipeOperationRequest};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,7 +25,11 @@ fn parse_line(line: &str) -> Result<Value, Box<dyn std::error::Error>> {
         return Err("claim did not contain recipe.job.run.v1".into());
     };
     input.result.validate()?;
-    let typed_result: RecipeJobRunResult = serde_json::from_value(input.result.result.clone())?;
+    let vonk_agent_protocol::generated::AgentResultResult::RecipeJobRunResult(typed_result) =
+        input.result.result
+    else {
+        return Err("result did not contain a recipe job result".into());
+    };
     typed_result.validate()?;
     Ok(json!({
         "request": request,
