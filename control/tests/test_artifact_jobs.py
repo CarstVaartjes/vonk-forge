@@ -407,6 +407,42 @@ def test_artifact_job_persisted_contract_is_validated_before_projection(
         service.get(created.id)
 
 
+def test_artifact_job_persisted_parameters_are_validated_before_compilation(
+    tmp_path,
+) -> None:
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000119")
+    created = service.create(**request)
+    content = b"png"
+    digest = hashlib.sha256(content).hexdigest()
+    service.put_input(
+        created.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=digest,
+        content=content,
+    )
+    service.finalize(created.id)
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        row.parameters = {"prompt": "fox", "seed": "0"}
+
+    with pytest.raises(ArtifactJobError, match="stored artifact job parameters"):
+        service.submit(
+            created.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000120",
+        )
+    with sessions() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        assert row.state == "ready"
+        assert row.operation_id is None
+
+
 def test_artifact_job_create_exact_concurrent_replay_has_one_identity(
     tmp_path,
 ) -> None:
