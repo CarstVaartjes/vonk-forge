@@ -45,7 +45,6 @@ def upgrade() -> None:
             "input_total_bytes", sa.BigInteger(), server_default="0", nullable=False
         ),
         sa.Column("output_manifest_sha256", sa.String(length=64), nullable=True),
-        sa.Column("output_manifest", sa.JSON(), nullable=True),
         sa.Column("result_evidence", sa.JSON(), nullable=True),
         sa.Column("timeout_seconds", sa.Integer(), nullable=False),
         sa.Column("actor", sa.String(length=200), nullable=False),

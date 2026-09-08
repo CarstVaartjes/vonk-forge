@@ -24,7 +24,6 @@ from vonk_agent_protocol import (
     RecipeJobRunRequest,
     RecipeJobRunResult,
     canonical_message,
-    recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
@@ -567,6 +566,36 @@ def _effective_parameters(
     return effective
 
 
+def _canonical_declared_parameters(
+    contract: CompiledArtifactContract, value: object
+) -> dict[str, object]:
+    """Load persisted parameters as canonical JSON and enforce the contract.
+
+    Parameter names and their scalar shapes come from the compiled recipe
+    contract.  The persisted JSON object is therefore validated by the same
+    declared-parameter path as a create request; this intentionally does not
+    maintain a separate engine-key allowlist.
+    """
+    try:
+        decoded = json.loads(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError(
+            "artifact job parameters must be a JSON object"
+        ) from error
+    if not isinstance(decoded, dict):
+        raise ArtifactJobError("artifact job parameters must be a JSON object")
+    effective = _effective_parameters(contract, decoded)
+    try:
+        canonical = json.loads(canonical_message(effective))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError(
+            "artifact job parameters are not canonical JSON"
+        ) from error
+    if not isinstance(canonical, dict):
+        raise ArtifactJobError("artifact job parameters must be a JSON object")
+    return canonical
+
+
 class ArtifactJobService:
     def __init__(
         self,
@@ -1019,13 +1048,22 @@ class ArtifactJobService:
             plans = installation.plan.get("compiled_execution_plans")
             if not isinstance(plans, Mapping) or node.node_id not in plans:
                 raise ArtifactJobError("installed job execution plan is unavailable")
+            contract = _canonical_contract(artifact_job.compiled_contract)
+            try:
+                parameters = _canonical_declared_parameters(
+                    contract, artifact_job.parameters
+                )
+            except (ArtifactJobError, TypeError, ValueError) as error:
+                raise ArtifactJobError(
+                    "stored artifact job parameters are invalid"
+                ) from error
             invocation = compile_job_invocation(
                 session,
                 recipe=recipe,
                 installed=plans[node.node_id],
                 build=(session.get(RecipeBuild, installation.recipe_build_id)
                        if installation.recipe_build_id is not None else None),
-                parameters=artifact_job.parameters,
+                parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
@@ -1468,10 +1506,6 @@ class ArtifactJobService:
             artifact_job.updated_at = now
             return
         artifact_job.output_manifest_sha256 = result.output_manifest_sha256
-        artifact_job.output_manifest = {
-            **recipe_job_manifest_document(result.outputs),
-            "manifest_sha256": result.output_manifest_sha256,
-        }
         artifact_job.result_evidence = _result_evidence({
             "elapsed_milliseconds": result.elapsed_milliseconds,
             "peak_memory_bytes": result.peak_memory_bytes,

@@ -2425,7 +2425,6 @@ class ArtifactJob(Base):
         BigInteger, nullable=False, default=0, server_default="0"
     )
     output_manifest_sha256: Mapped[str | None] = mapped_column(String(64))
-    output_manifest: Mapped[dict[str, object] | None] = mapped_column(JSON)
     result_evidence: Mapped[dict[str, object] | None] = mapped_column(JSON)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
