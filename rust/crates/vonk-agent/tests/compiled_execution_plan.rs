@@ -57,12 +57,7 @@ fn recipe_topology_vocabulary_and_engine_backends_survive_validation() {
     }
     let mut value = fixture();
     value["topology"]["backend"] = json!("");
-    assert!(
-        serde_json::from_value::<CompiledExecutionPlan>(value)
-            .unwrap()
-            .validate()
-            .is_err()
-    );
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
 }
 
 #[test]
@@ -77,9 +72,9 @@ fn endpoint_and_job_are_required_one_of_wire_keys() {
 
     let mut value = fixture();
     value["job"] = json!({
-        "interface": "batch",
+        "interface": "artifact-job",
         "input": null,
-        "output_path": "/outputs/result.json",
+        "output_path": "/outputs",
         "timeout_seconds": 30
     });
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
@@ -196,8 +191,7 @@ fn unsafe_model_path_and_publisher_values_remain_rejected() {
 
     let mut value = fixture();
     value["artifacts"][0]["model"]["publisher"] = json!("p".repeat(129));
-    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    assert!(plan.validate().is_err());
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
 }
 
 #[test]
