@@ -52,8 +52,7 @@ struct SerializeInput {
 fn persist_binding(
     input: PersistBindingInput,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let spec: CompiledExecutionPlan =
-        serde_json::from_value(input.request.compiled_execution_plan.clone())?;
+    let spec: CompiledExecutionPlan = input.request.compiled_execution_plan.clone();
     let placement = spec.runtime.placement.clone();
     let run_generation = input
         .request
