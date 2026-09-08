@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition
 
+from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
@@ -244,7 +245,7 @@ class InstallAdmissionService:
                         build=build,
                         mapping=mapping,
                         mapping_nodes=mapping_nodes,
-                        parameters=mapping.parameters,
+                        parameters=validate_mapping_parameters(mapping.parameters),
                         resolved_entities=resolved_entities,
                     )
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence

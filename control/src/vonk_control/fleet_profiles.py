@@ -132,6 +132,23 @@ def _persisted_profile_result(
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise FleetProfileConflict("Persisted Fleet profile result is invalid") from error
+
+
+def _persisted_profile_progress(
+    row: FleetProfileApplication,
+) -> FleetProfileApplicationProgress:
+    """Load progress through its canonical contract before worker mutation."""
+
+    try:
+        return FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(row.progress), strict=True
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise FleetProfileConflict(
+            "Persisted Fleet profile progress is invalid"
+        ) from error
+
+
 _INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
 _PROFILE_PHASE_BY_RUN_PHASE = {
     "transfer": "target-copy",
@@ -2070,6 +2087,7 @@ class FleetProfileService:
                 return False
             try:
                 plan = _persisted_profile_plan(row)
+                progress = _persisted_profile_progress(row)
             except FleetProfileConflict as error:
                 row.state = "failed"
                 row.status_reason = str(error)[:512]
@@ -2078,11 +2096,7 @@ class FleetProfileService:
             steps = [step.model_dump(mode="json") for step in plan.steps]
             if row.current_operation_id:
                 try:
-                    child_source = (
-                        row.progress.get("child_source")
-                        if isinstance(row.progress, Mapping)
-                        else None
-                    )
+                    child_source = progress.child_source
                     if child_source == "switch-adapter":
                         if self._switch_adapter is None:
                             raise KeyError(row.current_operation_id)
@@ -2097,14 +2111,15 @@ class FleetProfileService:
                     row.updated_at = now
                     return True
                 if isinstance(child, FleetProfileChildOperation):
-                    progress = dict(row.progress)
+                    progress_data = progress.model_dump(mode="json")
                     if child.progress is not None:
-                        progress["child_progress"] = child.progress.model_dump(
+                        progress_data["child_progress"] = child.progress.model_dump(
                             mode="json"
                         )
-                    row.progress = FleetProfileApplicationProgress.model_validate(
-                        progress
-                    ).model_dump(mode="json")
+                    progress = FleetProfileApplicationProgress.model_validate_json(
+                        canonical_message(progress_data), strict=True
+                    )
+                    row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
                     row.state = "running"
                     row.updated_at = now
@@ -2130,12 +2145,8 @@ class FleetProfileService:
                     row.status_reason = f"Profile step {row.current_step + 1} returned unsupported state {child.state}"
                     row.updated_at = now
                     return True
-                progress = dict(row.progress)
-                results = (
-                    dict(progress.get("step_results", {}))
-                    if isinstance(progress.get("step_results"), Mapping)
-                    else {}
-                )
+                progress_data = progress.model_dump(mode="json")
+                results = dict(progress_data.get("step_results", {}))
                 child_result = FleetProfileStepResult(
                     operation_id=child.id,
                     result=(
@@ -2149,20 +2160,27 @@ class FleetProfileService:
                         update={"owner_id": child.owner_id, "kind": child.kind}
                     )
                 results[str(row.current_step)] = child_result.model_dump(mode="json")
-                progress["step_results"] = results
-                row.progress = FleetProfileApplicationProgress.model_validate(
-                    progress
-                ).model_dump(mode="json")
+                progress_data["step_results"] = results
+                progress = FleetProfileApplicationProgress.model_validate_json(
+                    canonical_message(progress_data), strict=True
+                )
+                row.progress = progress.model_dump(mode="json")
                 row.current_operation_id = None
                 row.current_step += 1
             if row.current_step >= len(steps):
                 row.state = "succeeded"
                 row.status_reason = None
-                row.progress = FleetProfileApplicationProgress.model_validate({
-                    **dict(row.progress),
-                    "completed_steps": len(steps),
-                    "total_steps": len(steps),
-                }).model_dump(mode="json")
+                progress = FleetProfileApplicationProgress.model_validate_json(
+                    canonical_message(
+                        {
+                            **progress.model_dump(mode="json"),
+                            "completed_steps": len(steps),
+                            "total_steps": len(steps),
+                        }
+                    ),
+                    strict=True,
+                )
+                row.progress = progress.model_dump(mode="json")
                 row.result = {"changed": bool(steps), "completed_steps": len(steps)}
                 row.updated_at = now
                 return True
@@ -2173,12 +2191,18 @@ class FleetProfileService:
                 row.updated_at = now
                 return True
             row.state = "running"
-            row.progress = FleetProfileApplicationProgress.model_validate({
-                **dict(row.progress),
-                "completed_steps": row.current_step,
-                "total_steps": len(steps),
-                "current_label": raw_step.get("label", "Applying profile"),
-            }).model_dump(mode="json")
+            progress = FleetProfileApplicationProgress.model_validate_json(
+                canonical_message(
+                    {
+                        **progress.model_dump(mode="json"),
+                        "completed_steps": row.current_step,
+                        "total_steps": len(steps),
+                        "current_label": raw_step.get("label", "Applying profile"),
+                    }
+                ),
+                strict=True,
+            )
+            row.progress = progress.model_dump(mode="json")
             row.updated_at = now
             step = dict(raw_step)
             application_id = row.id
@@ -2214,28 +2238,30 @@ class FleetProfileService:
             )
             if current is None or current.state not in {"queued", "running"}:
                 return True
-            if synchronous:
-                current.current_step += 1
-                current.progress = FleetProfileApplicationProgress.model_validate({
-                    **dict(current.progress),
-                    "completed_steps": current.current_step,
-                }).model_dump(mode="json")
-            else:
-                current.current_operation_id = operation_id
-                current.progress = FleetProfileApplicationProgress.model_validate({
-                    **dict(current.progress),
-                    "child_source": (
+            try:
+                current_progress = _persisted_profile_progress(current)
+                progress_data = current_progress.model_dump(mode="json")
+                if synchronous:
+                    current.current_step += 1
+                    progress_data["completed_steps"] = current.current_step
+                else:
+                    current.current_operation_id = operation_id
+                    progress_data["child_source"] = (
                         "switch-adapter" if step.get("kind") == "switch" else "recipe"
-                    ),
-                    **(
-                        {
-                            "child_progress": child.progress.model_dump(mode="json")
-                        }
-                        if isinstance(child, FleetProfileChildOperation)
+                    )
+                    if (
+                        isinstance(child, FleetProfileChildOperation)
                         and child.progress is not None
-                        else {}
-                    ),
-                }).model_dump(mode="json")
+                    ):
+                        progress_data["child_progress"] = child.progress.model_dump(
+                            mode="json"
+                        )
+                current.progress = FleetProfileApplicationProgress.model_validate_json(
+                    canonical_message(progress_data), strict=True
+                ).model_dump(mode="json")
+            except FleetProfileConflict as error:
+                current.state = "failed"
+                current.status_reason = str(error)[:512]
             current.updated_at = _aware(self._clock())
         return True
 

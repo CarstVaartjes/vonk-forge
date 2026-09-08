@@ -169,6 +169,40 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
         assert failed.status_reason == "Persisted Fleet profile plan is invalid"
 
 
+def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+
+    class Operations:
+        def get(self, _operation_id):
+            return FleetProfileChildOperation(id=_uuid(704), state="running")
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, recipe_operations=Operations()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(705),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.current_operation_id = _uuid(706)
+        row.progress = "corrupt-json"
+
+    assert service.tick() is True
+    with sessions() as session:
+        failed = session.get(FleetProfileApplication, application.id)
+        assert failed is not None
+        assert failed.state == "failed"
+        assert failed.status_reason == "Persisted Fleet profile progress is invalid"
+
+
 def test_profile_application_read_requires_result_for_succeeded_state() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
