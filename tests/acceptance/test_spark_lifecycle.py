@@ -688,6 +688,17 @@ def _semantic_version(package_version: str) -> str:
     return package_version.split("~", 1)[0].split("+", 1)[0]
 
 
+def _canonical_recipe_matches(observed: object, expected: object) -> bool:
+    from vonk_forge_contracts import RecipeDefinition
+
+    try:
+        return RecipeDefinition.model_validate(observed) == RecipeDefinition.model_validate(
+            expected
+        )
+    except ValueError:
+        return False
+
+
 class LocalBrowserController:
     def __init__(
         self,
@@ -1994,7 +2005,7 @@ class SparkLifecycle:
                 selection.get("model") if isinstance(selection, dict) else None
             )
             if (
-                detail.get("definition") != fixture.recipe
+                not _canonical_recipe_matches(detail.get("definition"), fixture.recipe)
                 or not isinstance(selected_model, dict)
                 or selected_model.get("content_sha256")
                 != fixture.model_content_sha256
