@@ -11,6 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
