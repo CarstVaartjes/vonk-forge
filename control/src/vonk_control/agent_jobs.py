@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_payload
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
@@ -237,7 +238,8 @@ class AgentJobService:
         if node_id not in parent.targets:
             raise ValueError("agent operation node must be a parent target")
         reserved_fence = str(uuid.uuid4())
-        final_payload: Mapping[str, object] = payload
+        payload_bytes = canonical_payload(protocol_operation, payload)
+        final_payload = json.loads(payload_bytes)
         validated = AgentClaim(
             schema_version=1,
             job_id=parent_job_id,
@@ -247,7 +249,7 @@ class AgentJobService:
             node_id=node_id,
             operation=protocol_operation,
             authority_revision=authority_revision,
-            payload_digest=hashlib.sha256(canonical_message(final_payload)).hexdigest(),
+            payload_digest=hashlib.sha256(payload_bytes).hexdigest(),
             payload=final_payload,
             deadline=now,
         )
@@ -583,8 +585,9 @@ class AgentJobService:
                 # already enforced the full previous rollback safety fence.
                 document = payload.model_dump(mode="json")
                 document["rollback"].update(attempt_nonce=secrets.token_hex(32), activation_deadline=int(now.timestamp()) + 900)
-                operation.payload = AgentUpgradePayload.model_validate(document).model_dump(mode="json")
-                operation.payload_digest = hashlib.sha256(canonical_message(operation.payload)).hexdigest()
+                payload_bytes = canonical_payload(AgentOperation.AGENT_UPGRADE, document)
+                operation.payload = json.loads(payload_bytes)
+                operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             operation.current_attempt += 1
             operation.state = "running"
             operation.updated_at = now

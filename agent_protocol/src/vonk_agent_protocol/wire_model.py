@@ -13,7 +13,6 @@ from pydantic import (
     Field,
     GetCoreSchemaHandler,
     field_validator,
-    model_serializer,
     model_validator,
 )
 from pydantic_core import CoreSchema, core_schema
@@ -78,9 +77,8 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
             raise KeyError(key) from None
 
     def __iter__(self) -> Iterator[str]:
-        # Mapping consumers in the Controller use this as the wire view.  Keep
-        # omitted defaults omitted, matching ``model_dump(exclude_unset=True)``
-        # used by canonical_message.
+        # Mapping iteration exposes explicitly supplied fields. Canonical wire
+        # serialization separately applies the model-aware default/null policy.
         declared = (
             name
             for name in self.__class__.model_fields
@@ -161,20 +159,6 @@ class OperationProgress(WireModel):
     activity: Literal["active", "waiting", "possibly_stalled"] | None = None
     checkpoint: OperationCheckpoint | None = None
     members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
-
-    @model_serializer(mode="wrap")
-    def serialize_compact(self, handler: Any):
-        document = handler(self)
-        for key in ("kind", "object_sha256", "total_bytes", "bytes_per_second", "eta_seconds", "checkpoint", "smoothed_bytes_per_second", "completed_items", "total_items", "elapsed_seconds", "observed_at", "last_progress_at", "activity"):
-            if document.get(key) is None:
-                document.pop(key, None)
-        if "completed_bytes" not in self.model_fields_set:
-            document.pop("completed_bytes", None)
-        if "total_bytes_known" not in self.model_fields_set:
-            document.pop("total_bytes_known", None)
-        if "members" not in self.model_fields_set or not self.members:
-            document.pop("members", None)
-        return document
 
     @field_validator("observed_at", "last_progress_at")
     @classmethod
