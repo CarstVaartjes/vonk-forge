@@ -293,19 +293,32 @@ pub struct MountSpec {
     pub read_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct Placement {
-    #[serde(default)]
-    pub endpoint_address: Option<IpAddr>,
-    pub rank: u32,
-    pub role: String,
-    pub world_size: u32,
-    pub local_address: Option<IpAddr>,
-    pub master_address: Option<IpAddr>,
-    pub master_port: Option<u16>,
-    pub port: u16,
-    pub reserved_memory_bytes: u64,
+pub(crate) fn same_installed_workload(
+    installed: &CompiledExecutionPlan,
+    requested: &CompiledExecutionPlan,
+) -> bool {
+    installed.identity == requested.identity
+        && installed.artifacts == requested.artifacts
+        && installed.runtime.executable == requested.runtime.executable
+        && installed.runtime.argv == requested.runtime.argv
+        && installed.runtime.env == requested.runtime.env
+        && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime_image == requested.runtime_image
+        && installed.security.devices == requested.security.devices
+        && installed.security.capabilities == requested.security.capabilities
+        && installed.security.host_network == requested.security.host_network
+        && installed.security.privileged == requested.security.privileged
+        && installed.security.user == requested.security.user
+        && installed.security.mounts == requested.security.mounts
+        && installed.security.read_only_root == requested.security.read_only_root
+        && installed.security.no_new_privileges == requested.security.no_new_privileges
+        && installed.lifecycle == requested.lifecycle
+        && installed.endpoint == requested.endpoint
+        && installed.job == requested.job
+        && installed.topology.name == requested.topology.name
+        && installed.topology.mode == requested.topology.mode
+        && installed.topology.backend == requested.topology.backend
+        && installed.topology.node_count == requested.topology.node_count
 }
 
 impl CompiledExecutionPlan {
@@ -757,12 +770,13 @@ fn valid_mount_policy(mount: &MountSpec) -> bool {
     }
 }
 
-impl Placement {
-    pub fn validate(&self) -> Result<(), WorkloadError> {
+impl CompiledRuntimePlacement {
+    /// Validate placement after Controller assignment has resolved execution addresses.
+    pub fn validate_bound(&self) -> Result<(), WorkloadError> {
         if self.rank >= self.world_size
             || self.world_size == 0
             || !valid_role(&self.role)
-            || self.port < 1024
+            || self.port.is_some_and(|port| port < 1024)
             || self.reserved_memory_bytes == 0
             || if self.world_size == 1 {
                 self.local_address.is_some()

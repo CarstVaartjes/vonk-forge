@@ -25,7 +25,9 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{CompiledExecutionPlan, Placement},
+    workloads::{
+        CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, same_installed_workload,
+    },
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
@@ -44,34 +46,6 @@ pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionP
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
     plan.validate()?;
     Ok(plan)
-}
-
-fn same_installed_workload(
-    installed: &CompiledExecutionPlan,
-    requested: &CompiledExecutionPlan,
-) -> bool {
-    installed.identity == requested.identity
-        && installed.artifacts == requested.artifacts
-        && installed.runtime.executable == requested.runtime.executable
-        && installed.runtime.argv == requested.runtime.argv
-        && installed.runtime.env == requested.runtime.env
-        && installed.runtime.image_digest == requested.runtime.image_digest
-        && installed.runtime_image == requested.runtime_image
-        && installed.security.devices == requested.security.devices
-        && installed.security.capabilities == requested.security.capabilities
-        && installed.security.host_network == requested.security.host_network
-        && installed.security.privileged == requested.security.privileged
-        && installed.security.user == requested.security.user
-        && installed.security.mounts == requested.security.mounts
-        && installed.security.read_only_root == requested.security.read_only_root
-        && installed.security.no_new_privileges == requested.security.no_new_privileges
-        && installed.lifecycle == requested.lifecycle
-        && installed.endpoint == requested.endpoint
-        && installed.job == requested.job
-        && installed.topology.name == requested.topology.name
-        && installed.topology.mode == requested.topology.mode
-        && installed.topology.backend == requested.topology.backend
-        && installed.topology.node_count == requested.topology.node_count
 }
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
@@ -196,12 +170,14 @@ pub struct RecipeExecutor<'a, R> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecipeObservationError {
-    #[error("managed recipe run identity is invalid")]
+    #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection was not authorized")]
     Inspection(#[from] crate::host_runtime::HostRuntimeError),
-    #[error("exact recipe run observation could not be reported")]
+    #[error("exact recipe run observation could not be reported: {0}")]
     Report(#[from] ClientError),
+    #[error("exact recipe run snapshot expired before reporting")]
+    StaleSnapshot,
 }
 
 impl RecipeObservationError {
@@ -255,6 +231,46 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
+/// A collection or transport failure is unknown evidence, never proof that no
+/// managed runs exist. Only a successfully collected empty set reports absence.
+async fn report_complete_recipe_run_observations(
+    client: &AgentHttpClient,
+    results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
+) -> Result<usize, RecipeObservationError> {
+    let mut observations = Vec::with_capacity(results.len());
+    let mut failure = None;
+    for result in results {
+        match result {
+            Ok(observation) => observations.push(observation),
+            Err(error) => {
+                if failure
+                    .as_ref()
+                    .is_none_or(RecipeObservationError::not_ready)
+                {
+                    failure = Some(error);
+                }
+            }
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    // Bounded concurrent inspections can finish in different batches. Never
+    // submit an early receipt whose authorization expired while gathering the
+    // rest. The Controller still verifies receipt age and authorization.
+    let now = Utc::now().timestamp();
+    if observations
+        .iter()
+        .any(|observation| now > observation.grant.claims.expires_at)
+    {
+        return Err(RecipeObservationError::StaleSnapshot);
+    }
+    client
+        .report_exact_recipe_run_observations(&observations)
+        .await?;
+    Ok(observations.len())
+}
+
 impl<R> RecipeExecutor<'_, R> {
     async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
         self.client.set_progress_phase(claim.operation_id, phase);
@@ -266,23 +282,7 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let plans = match self.runtime.recipe_run_inspection_plans() {
-            Ok(plans) => plans,
-            Err(error) => {
-                // A missing/corrupt canonical lifecycle must fail every exact
-                // assignment on this node. Returning before the explicit empty
-                // v2 snapshot would let an omitted rank retain stale health.
-                let _ = self.client.report_exact_recipe_run_observations(&[]).await;
-                return Err(RecipeObservationError::Runtime(error));
-            }
-        };
-        if plans.is_empty() {
-            self.client
-                .report_exact_recipe_run_observations(&[])
-                .await?;
-            return Ok(0);
-        }
-        let observation_count = plans.len();
+        let plans = self.runtime.recipe_run_inspection_plans()?;
         let results = stream::iter(plans)
             .map(|plan| async move {
                 let request_root = self.runtime_root.join("runtime-requests");
@@ -310,7 +310,7 @@ impl<R> RecipeExecutor<'_, R> {
                             &plan.health_path,
                         )
                 });
-                let observation = ExactRecipeRunObservation {
+                Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     schema_version: 1,
                     node_id: self.client.node_id().to_owned(),
                     observed_at,
@@ -322,31 +322,12 @@ impl<R> RecipeExecutor<'_, R> {
                     observation_receipt_public_key: hex::encode(
                         self.observation_receipt_public_key,
                     ),
-                };
-                self.client
-                    .report_exact_recipe_run_observations(std::slice::from_ref(&observation))
-                    .await?;
-                Ok::<(), RecipeObservationError>(())
+                })
             })
             .buffer_unordered(8)
             .collect::<Vec<_>>()
             .await;
-        let errors = results
-            .into_iter()
-            .filter_map(Result::err)
-            .collect::<Vec<_>>();
-        if errors.iter().any(|error| !error.not_ready()) {
-            // An incomplete exact snapshot is never allowed to preserve a
-            // distributed route.  The explicit empty v2 report marks every
-            // assigned exact-observation rank failed, but reporting failure is
-            // still not allowed to terminate the claim lane.
-            let _ = self.client.report_exact_recipe_run_observations(&[]).await;
-            return Err(errors.into_iter().find(|error| !error.not_ready()).unwrap());
-        }
-        if let Some(error) = errors.into_iter().next() {
-            return Err(error);
-        }
-        Ok(observation_count)
+        report_complete_recipe_run_observations(self.client, results).await
     }
 
     async fn execute_host_runtime_outcome(
@@ -1196,16 +1177,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job input staging is not same-run exact",
                     );
                 }
-                let placement = Placement {
-                    endpoint_address: None,
-                    rank: 0,
-                    role: request.role.clone(),
-                    world_size: 1,
-                    local_address: None,
-                    master_address: None,
-                    master_port: None,
-                    port: 1024,
-                    reserved_memory_bytes: request.reserved_memory_bytes,
+                let placement = match job_placement(&spec, &request) {
+                    Ok(placement) => placement,
+                    Err(_) => {
+                        return failed_job(
+                            &request,
+                            1,
+                            started,
+                            "job placement does not match the installed workload",
+                        );
+                    }
                 };
                 let plan = match self.runtime.prepare_job_start(
                     &spec,
@@ -1551,17 +1532,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
-                let placement = Placement {
-                    endpoint_address: Some(request.endpoint_address),
-                    rank: request.rank,
-                    role: request.role.clone(),
-                    world_size: request.world_size,
-                    local_address: request.local_address,
-                    master_address: request.master_address,
-                    master_port: request.master_port,
-                    port: request.port,
-                    reserved_memory_bytes: request.reserved_memory_bytes,
-                };
+                let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity =
                     request
@@ -2039,6 +2010,23 @@ where
             InterruptibleJob::Cancelled { stopped }
         }
     }
+}
+
+fn job_placement(
+    spec: &CompiledExecutionPlan,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<CompiledRuntimePlacement, WorkloadError> {
+    let placement = &spec.runtime.placement;
+    if placement.rank != request.rank
+        || placement.role != request.role
+        || placement.world_size != 1
+        || placement.port.is_some()
+        || placement.reserved_memory_bytes != request.reserved_memory_bytes
+    {
+        return Err(WorkloadError::Invalid("job placement"));
+    }
+    placement.validate_bound()?;
+    Ok(placement.clone())
 }
 
 fn failed_job(
@@ -2526,9 +2514,10 @@ async fn run_heartbeats<C: LoopClient>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor, RunOncePolicy,
-        distribution_success_evidence, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, run_interruptible_job,
+        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor,
+        RecipeObservationError, RunOncePolicy, distribution_success_evidence,
+        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
+        readiness_identity, report_complete_recipe_run_observations, run_interruptible_job,
         run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
         wait_ready_with_runtime_guard,
     };
@@ -2608,55 +2597,275 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn corrupt_exact_lifecycle_emits_an_explicit_empty_v2_report() {
-        let data = tempdir().unwrap();
-        let runtime = tempdir().unwrap();
-        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
-        let metadata = data.path().join("run-metadata").join(run_id);
-        fs::create_dir_all(&metadata).unwrap();
-        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-                    break index + 4;
-                }
+    #[test]
+    fn canonical_job_claim_prepares_without_a_serving_port() {
+        let claim: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let request: vonk_agent_protocol::RecipeJobRunRequest =
+            serde_json::from_value(claim["payload"].clone()).unwrap();
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        value["endpoint"] = Value::Null;
+        value["runtime"]["placement"]["endpoint_address"] = Value::Null;
+        value["runtime"]["placement"]["port"] = Value::Null;
+        value["runtime"]["placement"]["reserved_memory_bytes"] =
+            json!(request.reserved_memory_bytes);
+        value["security"]["network_mode"] = json!("none");
+        value["security"]["mounts"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "source": "inputs", "target": "/inputs", "read_only": true
+            }));
+        value["job"] = json!({
+            "interface": request.interface, "input": null,
+            "output_path": "/outputs", "timeout_seconds": request.timeout_seconds
+        });
+        let spec = parse_compiled_execution_plan(&value).unwrap();
+        let placement = super::job_placement(&spec, &request).unwrap();
+        for field in ["rank", "role", "reserved_memory_bytes"] {
+            let mut altered = claim["payload"].clone();
+            altered[field] = match field {
+                "rank" => json!(1),
+                "role" => json!("worker"),
+                _ => json!(request.reserved_memory_bytes + 1024),
             };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            write!(
-                stream,
-                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            let altered = serde_json::from_value(altered).unwrap();
+            assert!(super::job_placement(&spec, &altered).is_err());
+        }
+        let data = tempdir().unwrap();
+        let run_id = request.run_id.to_string();
+        fs::create_dir_all(data.path().join("runs").join(&run_id).join("inputs")).unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+            huggingface_curl_config: None,
+        };
+        let start = runtime
+            .prepare_job_start(
+                &spec,
+                &request.installation_id.to_string(),
+                &run_id,
+                &placement,
+                &request.parameters,
+                request.timeout_seconds,
             )
             .unwrap();
-            request
-        });
-        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
+        assert!(!start.main.iter().any(|argument| argument == "--publish"));
+        assert!(
+            start
+                .main
+                .windows(2)
+                .any(|pair| pair == ["--network", "none"])
+        );
+        let metadata = data.path().join("run-metadata").join(run_id);
+        for name in ["runtime.json", "lifecycle.json"] {
+            let persisted: Value =
+                serde_json::from_slice(&fs::read(metadata.join(name)).unwrap()).unwrap();
+            let port = if name == "runtime.json" {
+                &persisted["runtime"]["placement"]["port"]
+            } else {
+                &persisted["placement"]["port"]
+            };
+            assert!(port.is_null());
+        }
+        let mut serving_placement = placement;
+        serving_placement.port = Some(1024);
+        assert!(
+            runtime
+                .start_arguments(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &request.run_id.to_string(),
+                    &serving_placement
+                )
+                .is_err()
+        );
+    }
+
+    struct ObservationServer {
+        client: AgentHttpClient,
+        stop: Arc<AtomicBool>,
+        worker: thread::JoinHandle<Vec<Value>>,
+    }
+
+    impl ObservationServer {
+        fn new(status: Option<u16>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = stop.clone();
+            let worker = thread::spawn(move || {
+                let mut reports = Vec::new();
+                while !stopped.load(Ordering::SeqCst) {
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(connection) => connection,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(1));
+                            continue;
+                        }
+                        Err(error) => panic!("observation listener: {error}"),
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    let header_end = loop {
+                        let size = stream.read(&mut buffer).unwrap();
+                        assert_ne!(size, 0);
+                        request.extend_from_slice(&buffer[..size]);
+                        if let Some(index) =
+                            request.windows(4).position(|bytes| bytes == b"\r\n\r\n")
+                        {
+                            break index + 4;
+                        }
+                    };
+                    let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                    assert!(
+                        headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+                    );
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    while request.len() - header_end < content_length {
+                        let size = stream.read(&mut buffer).unwrap();
+                        assert_ne!(size, 0);
+                        request.extend_from_slice(&buffer[..size]);
+                    }
+                    reports.push(serde_json::from_slice(&request[header_end..]).unwrap());
+                    if let Some(status) = status {
+                        write!(stream, "HTTP/1.1 {status} Response\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                    }
+                }
+                reports
+            });
+            Self {
+                client: AgentHttpClient::for_http_test(
+                    &format!("http://{address}/"),
+                    "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ),
+                stop,
+                worker,
+            }
+        }
+
+        fn finish(self) -> Vec<Value> {
+            self.stop.store(true, Ordering::SeqCst);
+            self.worker.join().unwrap()
+        }
+    }
+
+    fn exact_observation(run_id: Uuid) -> crate::client::ExactRecipeRunObservation {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/fixtures/recipe-run-observation.json"
+        ))
+        .unwrap();
+        let now = Utc::now().timestamp();
+        value["run_id"] = json!(run_id);
+        value["grant"]["claims"]["operation"]["job_id"] = json!(run_id);
+        value["grant"]["claims"]["issued_at"] = json!(now - 1);
+        value["grant"]["claims"]["expires_at"] = json!(now + 10);
+        value["helper_receipt"]["claims"]["observed_at"] = json!(now);
+        value["observed_at"] = json!(DateTime::from_timestamp(now, 0).unwrap());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_reports_multiple_runs_together() {
+        let server = ObservationServer::new(Some(204));
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        let results = ids
+            .into_iter()
+            .map(|id| Ok(exact_observation(id)))
+            .collect();
+        assert_eq!(
+            report_complete_recipe_run_observations(&server.client, results)
+                .await
+                .unwrap(),
+            2
+        );
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["schema_version"], 2);
+        let runs = reports[0]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2);
+        for id in ids {
+            assert!(runs.iter().any(|run| run["run_id"] == id.to_string()));
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_report_failure_never_reports_empty() {
+        for status in [Some(503), Some(422), None] {
+            let server = ObservationServer::new(status);
+            let error = report_complete_recipe_run_observations(
+                &server.client,
+                vec![Ok(exact_observation(Uuid::new_v4()))],
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(error, RecipeObservationError::Report(_)));
+            let reports = server.finish();
+            assert_eq!(reports.len(), 1);
+            assert_eq!(reports[0]["runs"].as_array().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_inspection_failure_never_reports_partial_or_empty() {
+        for error in [
+            crate::host_runtime::HostRuntimeError::Protocol,
+            crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+        ] {
+            let server = ObservationServer::new(Some(204));
+            let result = report_complete_recipe_run_observations(
+                &server.client,
+                vec![
+                    Ok(exact_observation(Uuid::new_v4())),
+                    Err(RecipeObservationError::Inspection(error)),
+                ],
+            )
+            .await;
+            assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
+            assert!(server.finish().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_does_not_submit_receipts_expired_during_collection() {
+        let server = ObservationServer::new(Some(204));
+        let mut stale = exact_observation(Uuid::new_v4());
+        stale.grant.claims.issued_at = Utc::now().timestamp() - 20;
+        stale.grant.claims.expires_at = Utc::now().timestamp() - 10;
+        stale.helper_receipt.claims.observed_at = stale.grant.claims.issued_at;
+        stale.observed_at = DateTime::from_timestamp(stale.grant.claims.issued_at, 0).unwrap();
+        stale.validate().unwrap();
+        assert!(matches!(
+            report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
+            Err(RecipeObservationError::StaleSnapshot)
+        ));
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_reports_empty_only_when_no_managed_runs_exist() {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let server = ObservationServer::new(Some(204));
         let runner = NoProcess;
         let executor = RecipeExecutor {
-            client: &client,
+            client: &server.client,
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
@@ -2665,27 +2874,58 @@ mod tests {
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
         };
-
-        assert!(
+        assert_eq!(
             executor
                 .report_exact_recipe_run_observations()
                 .await
-                .is_err()
+                .unwrap(),
+            0
         );
-        let request = server.join().unwrap();
-        let (headers, body) = request
-            .windows(4)
-            .position(|bytes| bytes == b"\r\n\r\n")
-            .map(|index| (&request[..index], &request[index + 4..]))
-            .unwrap();
-        assert!(
-            std::str::from_utf8(headers)
-                .unwrap()
-                .starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["schema_version"], 2);
+        assert_eq!(reports[0]["runs"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn corrupt_exact_lifecycle_does_not_report_false_absence() {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
+        let metadata = data.path().join("run-metadata").join(run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
+        let server = ObservationServer::new(Some(204));
+        let runner = NoProcess;
+        let executor = RecipeExecutor {
+            client: &server.client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+        assert!(matches!(
+            executor.report_exact_recipe_run_observations().await,
+            Err(RecipeObservationError::Runtime(_))
+        ));
+        assert!(server.finish().is_empty());
+    }
+
+    #[test]
+    fn observation_report_diagnostic_preserves_only_the_safe_client_category() {
+        assert_eq!(
+            RecipeObservationError::Report(ClientError::Protocol).to_string(),
+            "exact recipe run observation could not be reported: controller protocol response is invalid"
         );
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["schema_version"], 2);
-        assert_eq!(body["runs"], serde_json::json!([]));
+        let error = ClientError::CredentialRead(std::io::Error::other("secret/path/token"));
+        assert_eq!(
+            RecipeObservationError::Report(error).to_string(),
+            "exact recipe run observation could not be reported: agent credential could not be read"
+        );
     }
 
     #[test]

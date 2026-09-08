@@ -20,7 +20,6 @@ from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
-    CreateManagedDirectoryOperation,
     ExecuteContainerRuntimeRequestOperation,
     HostHelperGrantClaims,
     HostHelperSignature,
@@ -59,6 +58,10 @@ def _aware(value: datetime) -> datetime:
 
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
+
+
+class RecipeRunObservationReplayError(HostHelperAuthorityError):
+    """A valid observation repeats an already consumed current grant."""
 
 
 class HostHelperGrantIssuer:
@@ -119,7 +122,6 @@ class HostHelperGrantIssuer:
         if not isinstance(
             operation,
             (
-                CreateManagedDirectoryOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
     ConfirmPackageActivationOperation,
@@ -439,9 +441,10 @@ class HostRuntimeAuthorityService:
             pending is None
             or pending.request_id != grant.claims.request_id
             or pending.identity_sha256 != observation_identity
-            or pending.consumed is not False
         ):
             raise HostHelperAuthorityError("recipe run observation grant was replayed")
+        if pending.consumed is not False:
+            raise RecipeRunObservationReplayError("recipe run observation grant was replayed")
         pending.consumed = True
         receipt_digest = hashlib.sha256(
             canonical_message(receipt.to_mapping())

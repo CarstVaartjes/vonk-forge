@@ -291,8 +291,7 @@ if args[:1] == ['info']:
     engine.chmod(0o755)
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--recipe", str(_recipes(root)[0]), "--library-root", str(root),
-         "--platform-root", str(ROOT), "--level", "container", "--engine", str(engine),
-         "--artifact-root", str(tmp_path / "models")],
+         "--platform-root", str(ROOT), "--level", "container", "--engine", str(engine)],
         cwd=ROOT, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 3

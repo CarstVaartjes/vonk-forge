@@ -12,8 +12,8 @@ use vonk_agent_protocol::{
 pub use vonk_agent_protocol::{
     HostHelperContainerRuntimeAction as ContainerRuntimeAction,
     HostHelperGrantClaims as GrantClaims, HostHelperGrantSignature as GrantSignature,
-    HostHelperManagedArea as ManagedArea, HostHelperOperation as HostOperation,
-    HostHelperRestartUnit as RestartUnit, SignedHostHelperGrant as SignedGrant,
+    HostHelperOperation as HostOperation, HostHelperRestartUnit as RestartUnit,
+    SignedHostHelperGrant as SignedGrant,
 };
 
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
