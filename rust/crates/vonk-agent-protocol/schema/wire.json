@@ -8470,6 +8470,112 @@
       "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
+    "SourceBundleDigestManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes"
+      ],
+      "title": "SourceBundleDigestManifest",
+      "type": "object"
+    },
+    "SourceBundleFile": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            420,
+            493
+          ],
+          "title": "Mode",
+          "type": "integer"
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 33554432,
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "size",
+        "sha256"
+      ],
+      "title": "SourceBundleFile",
+      "type": "object"
+    },
+    "SourceBundleManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes",
+        "sha256"
+      ],
+      "title": "SourceBundleManifest",
+      "type": "object"
+    },
     "SupervisorAcknowledgement": {
       "additionalProperties": false,
       "description": "One live, ready child acknowledging an exact finite route activation.",
@@ -10281,6 +10387,9 @@
     "RecipeRunObservationWire": [
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
+    ],
+    "SourceBundleManifest": [
+      "SourceBundleDigestManifest"
     ]
   },
   "x-vonk-models": {
@@ -10419,6 +10528,9 @@
     "SignedPackageHelperGrant": "#/$defs/SignedPackageHelperGrant",
     "SignedPackageObjectReceipt": "#/$defs/SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
+    "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
+    "SourceBundleFile": "#/$defs/SourceBundleFile",
+    "SourceBundleManifest": "#/$defs/SourceBundleManifest",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryCapability": "#/$defs/TelemetryCapability",
     "TelemetryDetails": "#/$defs/TelemetryDetails",
