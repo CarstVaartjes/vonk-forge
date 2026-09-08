@@ -9,9 +9,12 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 use thiserror::Error;
+use vonk_agent_protocol::generated::AgentOperation;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
+
+const STATE_SCHEMA_VERSION: &str = "2";
 
 #[derive(Debug, Error)]
 pub enum StateError {
@@ -31,6 +34,10 @@ pub enum StateError {
     Busy,
     #[error("result state is invalid")]
     ResultState,
+    #[error(
+        "durable agent state schema is incompatible; stop the agent, verify no operation is active or pending, then remove only state.sqlite"
+    )]
+    IncompatibleSchema,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +55,7 @@ pub struct StateStore {
 struct StoredOperation {
     attempt: u32,
     fence: String,
+    operation: String,
     state: String,
     result: Option<Vec<u8>>,
 }
@@ -85,6 +93,7 @@ impl StateStore {
                node_id TEXT NOT NULL,
                attempt INTEGER NOT NULL CHECK (attempt > 0),
                fence TEXT NOT NULL,
+               operation TEXT NOT NULL,
                deadline TEXT NOT NULL,
                state TEXT NOT NULL CHECK (state IN ('running','completed')),
                result_json BLOB,
@@ -92,6 +101,34 @@ impl StateStore {
                CHECK ((state = 'running' AND result_json IS NULL) OR (state = 'completed' AND result_json IS NOT NULL))
              ) STRICT;",
         )?;
+        let operation_column = {
+            let mut statement = connection.prepare("PRAGMA table_info(operations)")?;
+            statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .any(|name| name == "operation")
+        };
+        if !operation_column {
+            return Err(StateError::IncompatibleSchema);
+        }
+        let state_schema: Option<String> = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match state_schema.as_deref() {
+            Some(STATE_SCHEMA_VERSION) => {}
+            None => {
+                connection.execute(
+                    "INSERT INTO metadata(key, value) VALUES ('schema_version', ?1)",
+                    [STATE_SCHEMA_VERSION],
+                )?;
+            }
+            Some(_) => return Err(StateError::IncompatibleSchema),
+        }
         let stored: Option<String> = connection
             .query_row(
                 "SELECT value FROM metadata WHERE key='node_id'",
@@ -137,14 +174,15 @@ impl StateStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing = transaction
             .query_row(
-                "SELECT attempt, fence, state, result_json FROM operations WHERE operation_id=?1",
+                "SELECT attempt, fence, operation, state, result_json FROM operations WHERE operation_id=?1",
                 [claim.operation_id.to_string()],
                 |row| {
                     Ok(StoredOperation {
                         attempt: row.get(0)?,
                         fence: row.get(1)?,
-                        state: row.get(2)?,
-                        result: row.get(3)?,
+                        operation: row.get(2)?,
+                        state: row.get(3)?,
+                        result: row.get(4)?,
                     })
                 },
             )
@@ -152,18 +190,22 @@ impl StateStore {
         let decision = match existing {
             None => {
                 transaction.execute(
-                    "INSERT INTO operations(operation_id,job_id,node_id,attempt,fence,deadline,state)
-                     VALUES (?1,?2,?3,?4,?5,?6,'running')",
+                    "INSERT INTO operations(operation_id,job_id,node_id,attempt,fence,operation,deadline,state)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,'running')",
                     params![
                         claim.operation_id.to_string(),
                         claim.job_id.to_string(),
                         claim.node_id,
                         claim.attempt,
                         claim.fence.to_string(),
+                        claim.operation.to_string(),
                         claim.deadline.to_rfc3339(),
                     ],
                 )?;
                 BeginDecision::Execute
+            }
+            Some(stored) if stored.operation != claim.operation.as_str() => {
+                return Err(StateError::Identity);
             }
             Some(stored) if claim.attempt < stored.attempt => return Err(StateError::Stale),
             Some(stored) if claim.attempt == stored.attempt => {
@@ -174,11 +216,13 @@ impl StateStore {
                     return Err(StateError::Busy);
                 }
                 let bytes = stored.result.ok_or(StateError::ResultState)?;
-                BeginDecision::Replay(Box::new(parse_strict(&bytes)?))
+                let result: AgentResult = parse_strict(&bytes)?;
+                result.validate_for_operation(&claim.operation)?;
+                BeginDecision::Replay(Box::new(result))
             }
             Some(_) => {
                 transaction.execute(
-                    "UPDATE operations SET job_id=?2,node_id=?3,attempt=?4,fence=?5,deadline=?6,
+                    "UPDATE operations SET job_id=?2,node_id=?3,attempt=?4,fence=?5,operation=?6,deadline=?7,
                      state='running',result_json=NULL,result_acknowledged=0 WHERE operation_id=?1",
                     params![
                         claim.operation_id.to_string(),
@@ -186,6 +230,7 @@ impl StateStore {
                         claim.node_id,
                         claim.attempt,
                         claim.fence.to_string(),
+                        claim.operation.to_string(),
                         claim.deadline.to_rfc3339(),
                     ],
                 )?;
@@ -211,19 +256,22 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let deadline: String = transaction
+        let (operation, deadline): (String, String) = transaction
             .query_row(
-                "SELECT deadline FROM operations
+                "SELECT operation, deadline FROM operations
                  WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='running'",
                 params![
                     claim.operation_id.to_string(),
                     claim.attempt,
                     claim.fence.to_string()
                 ],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or(StateError::Stale)?;
+        if operation != claim.operation.as_str() {
+            return Err(StateError::Identity);
+        }
         let result = AgentResult {
             attempt: claim.attempt,
             deadline: DateTime::parse_from_rfc3339(&deadline)
@@ -236,7 +284,7 @@ impl StateStore {
             schema_version: claim.schema_version,
             state: state.parse().map_err(|_| StateError::ResultState)?,
         };
-        result.validate()?;
+        result.validate_for_operation(&claim.operation)?;
         let body = canonical_json(&result)?;
         let changed = transaction.execute(
             "UPDATE operations SET state='completed',result_json=?4,result_acknowledged=0
@@ -317,17 +365,24 @@ impl StateStore {
         Ok(())
     }
 
-    pub fn pending_results(&self) -> Result<Vec<AgentResult>, StateError> {
+    pub fn pending_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
         let mut statement = self.connection.prepare(
-            "SELECT result_json FROM operations
+            "SELECT operation,result_json FROM operations
              WHERE state='completed' AND result_acknowledged=0 ORDER BY rowid",
         )?;
         let values = statement
-            .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         values
             .into_iter()
-            .map(|value| parse_strict(&value).map_err(StateError::from))
+            .map(|(operation, value)| {
+                let operation = operation.parse().map_err(|_| StateError::ResultState)?;
+                let result: AgentResult = parse_strict(&value)?;
+                result.validate_for_operation(&operation)?;
+                Ok((operation, result))
+            })
             .collect()
     }
 
@@ -351,7 +406,7 @@ impl StateStore {
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
         let claims = {
             let mut statement = self.connection.prepare(
-                "SELECT job_id,operation_id,attempt,fence,node_id,deadline FROM operations WHERE state='running'",
+                "SELECT job_id,operation_id,attempt,fence,node_id,operation,deadline FROM operations WHERE state='running'",
             )?;
             statement
                 .query_map([], |row| {
@@ -362,6 +417,7 @@ impl StateStore {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?
@@ -369,7 +425,9 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (job_id, operation_id, attempt, fence, node_id, deadline) in claims {
+        for (job_id, operation_id, attempt, fence, node_id, operation, deadline) in claims {
+            let operation: AgentOperation =
+                operation.parse().map_err(|_| StateError::ResultState)?;
             let result = AgentResult {
                 attempt,
                 deadline: DateTime::parse_from_rfc3339(&deadline)
@@ -387,7 +445,7 @@ impl StateStore {
                     .parse()
                     .map_err(|_| StateError::ResultState)?,
             };
-            result.validate()?;
+            result.validate_for_operation(&operation)?;
             transaction.execute(
                 "UPDATE operations SET state='completed',result_json=?2,result_acknowledged=0
                  WHERE operation_id=?1 AND state='running'",
