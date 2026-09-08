@@ -963,7 +963,7 @@ test("Library uses the schema 2 one-click Run path when the Controller exposes r
   const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
   await expect(progress).toContainText("Copying model to Spark node");
   await expect(progress).toContainText("Total bytes unavailable");
-  await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
+  await expect(progress.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
 });
 
 test("Library retries a transient Run through the durable retry route", async ({page}) => {
@@ -1009,7 +1009,7 @@ test("Library keeps partial Run progress visible for each Spark", async ({page})
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("In progress");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
-  await expect(progress.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
+  await expect(progress.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
 });
 
 test("Profiles keep the saved view primary and show durable per-Spark switch progress", async ({page}, testInfo) => {

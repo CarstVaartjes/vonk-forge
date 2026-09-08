@@ -96,7 +96,7 @@ def _drain(
     raise AssertionError(
         f"background operation did not settle: state={observed.state}, "
         f"completed={observed.progress.get('completed_artifacts')}/"
-        f"{observed.progress.get('total_artifacts')}"
+        f"{observed.progress.get('total_artifacts')}; failure={observed.failure}"
     )
 
 

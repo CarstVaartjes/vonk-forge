@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import {expect, test} from "@playwright/test";
 
 for (const width of [1440, 390]) {
-  test(`operation progress preserves independent Spark phases at ${width}px`, async ({page}) => {
+  test(`operation progress preserves independent Spark phases at ${width}px`, async ({page}, testInfo) => {
     await page.setViewportSize({width, height: 1000});
     const now = new Date().toISOString();
     const node = (index: number) => `spk_${String(index).repeat(32)}`;
@@ -26,6 +26,6 @@ for (const width of [1440, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const result = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(result.violations).toEqual([]);
-    await page.screenshot({path: `/private/tmp/vonk-issues-20260908/issue-594-progress-${width}.png`, fullPage: true});
+    await page.screenshot({path: testInfo.outputPath(`issue-594-progress-${width}.png`), fullPage: true});
   });
 }

@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import {expect, test} from "@playwright/test";
 
 for (const width of [1440, 390]) {
-  test(`Fleet shows measured lifecycle phase at ${width}px`, async ({page}) => {
+  test(`Fleet shows measured lifecycle phase at ${width}px`, async ({page}, testInfo) => {
     await page.setViewportSize({width, height: 1000});
     const now = new Date().toISOString();
     const id = "11111111-1111-4111-8111-111111111111";
@@ -22,6 +22,6 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("progressbar", {name: "Copying transfer"})).toHaveAttribute("aria-valuenow", "42000000");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect((await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
-    await page.screenshot({path: `/private/tmp/vonk-issues-20260908/issue-597-fleet-${width}.png`, fullPage: true});
+    await page.screenshot({path: testInfo.outputPath(`issue-597-fleet-${width}.png`), fullPage: true});
   });
 }

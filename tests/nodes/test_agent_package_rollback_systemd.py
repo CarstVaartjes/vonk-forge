@@ -184,8 +184,11 @@ def main() -> None:
     ):
         Path(directory).mkdir(parents=True, exist_ok=True)
     STATE.parent.chmod(0o755)
+    os.chown(STATE.parent, 0, 0)
     incoming = STATE.parent / "incoming"
     incoming.mkdir(mode=0o700, exist_ok=True)
+    os.chown(incoming, 0, 0)
+    incoming.chmod(0o700)
     for file in ("/etc/subuid", "/etc/subgid"):
         Path(file).touch(exist_ok=True)
     write(

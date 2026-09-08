@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -297,6 +298,7 @@ def protocol_wheel(root: Path) -> bytes:
             check=True,
             capture_output=True,
             text=True,
+            env={**os.environ, "SOURCE_DATE_EPOCH": "0"},
         )
         wheels = sorted(output.glob("vonk_agent_protocol-*.whl"))
         if len(wheels) != 1:
