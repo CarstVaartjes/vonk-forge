@@ -2681,27 +2681,8 @@ mod tests {
         .unwrap();
         let request: vonk_agent_protocol::RecipeJobRunRequest =
             serde_json::from_value(claim["payload"].clone()).unwrap();
-        let mut value: Value = serde_json::from_str(include_str!(
-            "../../../../control/tests/fixtures/compiled_workload_v2.json"
-        ))
-        .unwrap();
-        value["endpoint"] = Value::Null;
-        value["runtime"]["placement"]["endpoint_address"] = Value::Null;
-        value["runtime"]["placement"]["port"] = Value::Null;
-        value["runtime"]["placement"]["reserved_memory_bytes"] =
-            json!(request.reserved_memory_bytes);
-        value["security"]["network_mode"] = json!("none");
-        value["security"]["mounts"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({
-                "source": "inputs", "target": "/inputs", "read_only": true
-            }));
-        value["job"] = json!({
-            "interface": request.interface, "input": null,
-            "output_path": "/outputs", "timeout_seconds": request.timeout_seconds
-        });
-        let spec = parse_compiled_execution_plan(&value).unwrap();
+        let spec = request.compiled_execution_plan.clone();
+        spec.validate().unwrap();
         let placement = super::job_placement(&spec, &request).unwrap();
         for field in ["rank", "role", "reserved_memory_bytes"] {
             let mut altered = claim["payload"].clone();
@@ -2710,8 +2691,15 @@ mod tests {
                 "role" => json!("worker"),
                 _ => json!(request.reserved_memory_bytes + 1024),
             };
-            let altered = serde_json::from_value(altered).unwrap();
-            assert!(super::job_placement(&spec, &altered).is_err());
+            if matches!(field, "rank" | "role") {
+                assert!(
+                    serde_json::from_value::<vonk_agent_protocol::RecipeJobRunRequest>(altered)
+                        .is_err()
+                );
+            } else {
+                let altered = serde_json::from_value(altered).unwrap();
+                assert!(super::job_placement(&spec, &altered).is_err());
+            }
         }
         let data = tempdir().unwrap();
         let run_id = request.run_id.to_string();
@@ -3415,15 +3403,18 @@ mod tests {
     impl Executor for CancellationExecutor {
         async fn execute(
             &self,
-            _claim: &AgentClaim,
+            claim: &AgentClaim,
             _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
             mut cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
+            let RecipeOperationRequest::JobRun(request) =
+                RecipeOperationRequest::parse(claim).unwrap()
+            else {
+                panic!("expected canonical job claim");
+            };
+            let started = std::time::Instant::now();
             super::wait_for_cancellation(&mut cancellation).await;
-            ExecutionResult {
-                state: "cancelled",
-                body: json!({"exit_code": 130, "reason": "controller cancellation requested"}),
-            }
+            super::cancelled_job(&request, started, "controller cancellation requested")
         }
     }
 
@@ -3759,8 +3750,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled() {
         let directory = tempdir().unwrap();
-        let mut job_claim = claim();
-        job_claim.operation = "recipe.job.run.v1".parse().unwrap();
+        let mut job_claim: AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        )).unwrap();
+        job_claim.deadline = (Utc::now() + ChronoDuration::seconds(20)).fixed_offset();
+        job_claim.node_id = NODE_ID.to_owned();
+        job_claim.validate().unwrap();
+        let RecipeOperationRequest::JobRun(request) =
+            RecipeOperationRequest::parse(&job_claim).unwrap()
+        else {
+            panic!("expected canonical job claim");
+        };
         let client = RecordingClient {
             cancel_requested: true,
             claim: Arc::new(Mutex::new(Some(job_claim))),
@@ -3793,6 +3793,11 @@ mod tests {
         else {
             panic!("expected canonical job result");
         };
+        result.validate().unwrap();
+        assert_eq!(result.job_id, request.job_id);
+        assert_eq!(result.run_id, request.run_id);
+        assert!(result.output_manifest.files.is_empty());
+        assert_eq!(result.output_manifest.total_bytes, 0);
         assert_eq!(result.exit_code, 130);
         assert_eq!(
             result.reason.as_deref(),
