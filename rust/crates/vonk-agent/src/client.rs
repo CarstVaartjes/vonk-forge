@@ -102,11 +102,11 @@ pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
 /// Validate and construct the one current snapshot envelope used by both the
 /// production executor and the Linux wire probe.
-pub fn build_exact_recipe_run_observations<'a>(
+pub fn build_exact_recipe_run_observations(
     node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
-    observations: &'a [ExactRecipeRunObservation],
-) -> Result<RecipeRunObservationsWire<'a>, ClientError> {
+    observations: &[ExactRecipeRunObservation],
+) -> Result<RecipeRunObservationsWire, ClientError> {
     if observations.len() > MAX_MANAGED_RECIPE_RUNS {
         return Err(ClientError::Protocol);
     }
@@ -116,7 +116,7 @@ pub fn build_exact_recipe_run_observations<'a>(
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
         observation.validate().map_err(|_| ClientError::Protocol)?;
-        if observation.node_id != node_id || !run_ids.insert(observation.binding.run_id) {
+        if observation.node_id != node_id || !run_ids.insert(observation.run_id) {
             return Err(ClientError::Protocol);
         }
         let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
@@ -140,11 +140,11 @@ pub fn build_exact_recipe_run_observations<'a>(
                 .filter(|key| key.len() == 32)
                 .map(|key| hex_sha256(&key))
                 != Some(observation.helper_receipt.signature.key_id.clone())
-            || *grant_job_id != observation.binding.run_id
+            || *grant_job_id != observation.run_id
             || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
             || observation.grant.claims.request_id.to_string() != receipt_request_id
             || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
-            || (observation.binding.local_address == observation.binding.master_address)
+            || (observation.local_address == observation.master_address)
                 != observation.endpoint_ready.is_some()
         {
             return Err(ClientError::Protocol);
@@ -152,8 +152,8 @@ pub fn build_exact_recipe_run_observations<'a>(
     }
     Ok(RecipeRunObservationsWire {
         schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-        observed_at,
-        runs: observations,
+        observed_at: observed_at.into(),
+        runs: observations.to_vec(),
     })
 }
 
@@ -1203,10 +1203,12 @@ impl AgentHttpClient {
     ) -> Result<(), ClientError> {
         let envelope =
             build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
+        let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&envelope)
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1581,6 +1583,7 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
+    use vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation;
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
         HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
@@ -2838,8 +2841,26 @@ mod tests {
             schema_version: 1,
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
-                .unwrap(),
-            binding: binding.clone(),
+                .unwrap()
+                .into(),
+            artifact_set_digest: binding.artifact_set_digest.clone(),
+            image_digest: binding.image_digest.clone(),
+            installation_id: binding.installation_id,
+            local_address: binding.local_address,
+            mapping_generation: binding.mapping_generation,
+            mapping_id: binding.mapping_id,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            model_identity: binding.model_identity.clone(),
+            port: binding.port,
+            rank: binding.rank,
+            recipe_content_sha256: binding.recipe_content_sha256.clone(),
+            recipe_revision_id: binding.recipe_revision_id,
+            role: binding.role.clone(),
+            run_generation: u32::try_from(binding.run_generation).unwrap(),
+            run_id: binding.run_id,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
+            world_size: binding.world_size,
             endpoint_ready: None,
             grant: SignedHostHelperGrant {
                 schema_version: 1,
@@ -2850,15 +2871,18 @@ mod tests {
                     node_id: helper_receipt.claims.node_id.clone(),
                     issued_at: helper_receipt.claims.observed_at - 1,
                     expires_at: helper_receipt.claims.observed_at + 60,
-                    operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
-                        action: HostHelperContainerRuntimeAction::RunInspect,
-                        job_id: binding.run_id,
-                        operation_id: Uuid::new_v4(),
-                        attempt: binding.run_generation as u32,
-                        fence: Uuid::new_v4(),
-                        request_sha256: helper_receipt.claims.request_sha256.clone(),
-                        observation_identity_sha256: Some("e".repeat(64)),
-                    },
+                    operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                        ExecuteContainerRuntimeRequestOperation {
+                            action: HostHelperContainerRuntimeAction::RunInspect,
+                            type_: "execute-container-runtime-request".to_owned(),
+                            job_id: binding.run_id,
+                            operation_id: Uuid::new_v4(),
+                            attempt: binding.run_generation as u32,
+                            fence: Uuid::new_v4(),
+                            request_sha256: helper_receipt.claims.request_sha256.clone(),
+                            observation_identity_sha256: Some("e".repeat(64)),
+                        },
+                    ),
                 },
                 signature: HostHelperGrantSignature {
                     algorithm: "ed25519".to_owned(),
