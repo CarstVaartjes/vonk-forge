@@ -1,6 +1,6 @@
 //! Pydantic owns structure; typify owns Rust declarations. The adapter only
 //! chooses scalar representations and installs exact schema validation.
-use quote::{format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, env, fs};
 use syn::{Item, parse_quote};
@@ -390,6 +390,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = args.next().ok_or("output path is required")?;
     let check = args.next().as_deref() == Some("--check");
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;
+    let bases = schema
+        .get("x-vonk-model-bases")
+        .cloned()
+        .unwrap_or(json!({}));
     prepare(&mut schema);
     let defs = schema.get_mut("$defs").ok_or("missing $defs")?.take();
     let defs_text = serde_json::to_string(&defs)?.replace("#/$defs/", "#/definitions/");
@@ -465,6 +469,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(implementation) = deserialize_impl(item, schema_name) {
                 validation.push(implementation);
             }
+        }
+    }
+    // Pydantic inheritance defines identity projections. Generate their field
+    // selection from typify declarations, rather than hand-copying wire fields.
+    for (derived, base_names) in bases.as_object().unwrap() {
+        let derived_ident = format_ident!("{derived}");
+        for base in base_names.as_array().unwrap() {
+            let base = base.as_str().unwrap();
+            let base_ident = format_ident!("{base}");
+            let fields = syntax
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Struct(item) if item.ident == base => Some(
+                        item.fields
+                            .iter()
+                            .map(|field| field.ident.clone().unwrap())
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+                .ok_or("inherited base is not a generated struct")?;
+            let derived_fields = syntax
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Struct(item) if item.ident == derived => Some(&item.fields),
+                    _ => None,
+                })
+                .ok_or("inherited model is not a generated struct")?;
+            let base_fields = syntax
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Struct(item) if item.ident == base => Some(&item.fields),
+                    _ => None,
+                })
+                .unwrap();
+            // Pydantic subclasses may deliberately narrow fields. A projection
+            // is infallible only when typify represents every inherited field
+            // identically; narrowed models retain their own semantic behavior.
+            if !base_fields.iter().all(|base_field| {
+                derived_fields.iter().any(|field| {
+                    field.ident == base_field.ident
+                        && field.ty.to_token_stream().to_string()
+                            == base_field.ty.to_token_stream().to_string()
+                })
+            }) {
+                continue;
+            }
+            validation.push(parse_quote! {
+                impl From<&#derived_ident> for #base_ident {
+                    fn from(value: &#derived_ident) -> Self {
+                        Self { #(#fields: value.#fields.clone()),* }
+                    }
+                }
+            });
         }
     }
     syntax.items.extend(validation);

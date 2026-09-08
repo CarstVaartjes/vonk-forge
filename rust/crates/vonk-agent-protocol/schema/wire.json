@@ -10028,6 +10028,22 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Vonk Agent Wire",
+  "x-vonk-model-bases": {
+    "CompiledDistributionObject": [
+      "DistributionObject"
+    ],
+    "RecipeRunObservationGrantRequest": [
+      "RecipeRunObservationIdentity",
+      "RecipeRunInspectionBinding"
+    ],
+    "RecipeRunObservationIdentity": [
+      "RecipeRunInspectionBinding"
+    ],
+    "RecipeRunObservationWire": [
+      "RecipeRunObservationIdentity",
+      "RecipeRunInspectionBinding"
+    ]
+  },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
     "ActivationMarker": "#/$defs/ActivationMarker",
