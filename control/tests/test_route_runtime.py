@@ -249,3 +249,93 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
     )
     with pytest.raises(RouteRuntimeError, match="timed out"):
         mismatched(marker)
+
+
+@pytest.mark.parametrize("ack_after", [90, 150])
+def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
+    tmp_path, monkeypatch, ack_after
+):
+    from types import SimpleNamespace
+
+    from vonk_agent_protocol.route_activation import recipe_route_lease_expiry
+
+    marker = _publish(_publisher(tmp_path), expires_at=recipe_route_lease_expiry(NOW))
+    supervisor = _supervisor(monkeypatch, tmp_path / "runtime")
+    supervisor.ACK = tmp_path / "supervisor/ack.json"
+    request = supervisor._active_request(now=NOW)
+    child = SimpleNamespace(pid=123, poll=lambda: None)
+    elapsed = [0.0]
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+        if elapsed[0] >= ack_after:
+            supervisor._write_ack(
+                request, child, now=NOW + timedelta(seconds=elapsed[0])
+            )
+
+    FileSupervisorAcknowledger(
+        supervisor.ACK,
+        clock=lambda: NOW + timedelta(seconds=elapsed[0]),
+        monotonic=lambda: elapsed[0],
+        sleep=sleep,
+        poll_seconds=1,
+    )(marker)
+    assert elapsed[0] == ack_after
+
+
+@pytest.mark.parametrize("failure", ["expired", "generation", "stale", "unknown"])
+def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
+    from vonk_agent_protocol.route_activation import SupervisorAcknowledgement
+
+    marker = _publish(_publisher(tmp_path), expires_at=NOW + timedelta(seconds=180))
+    path = tmp_path / "ack.json"
+    elapsed = [0.0]
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+        if elapsed[0] < 90:
+            return
+        ack = SupervisorAcknowledgement(
+            schema_version=1,
+            acknowledged_at=NOW.isoformat(),
+            activation_sha256=marker.digest,
+            child_pid=123,
+            expires_at=marker.expires_at,
+            generation=marker.generation,
+            litellm_sha256=marker.litellm_sha256,
+            state=marker.state,
+        ).model_dump()
+        if failure != "stale":
+            ack["acknowledged_at"] = (NOW + timedelta(seconds=elapsed[0])).isoformat()
+        if failure == "generation":
+            ack["generation"] += 1
+        if failure == "unknown":
+            ack["unexpected"] = None
+        path.write_bytes(_encoded(ack))
+
+    if failure == "expired":
+        marker = marker.model_copy(
+            update={"expires_at": (NOW + timedelta(seconds=80)).isoformat()}
+        )
+    with pytest.raises(
+        RouteRuntimeError, match="expired" if failure == "expired" else "timed out"
+    ):
+        FileSupervisorAcknowledger(
+            path,
+            clock=lambda: NOW + timedelta(seconds=elapsed[0]),
+            monotonic=lambda: elapsed[0],
+            sleep=sleep,
+            poll_seconds=1,
+        )(marker)
+
+
+def test_activation_lease_covers_startup_but_rejects_old_evidence():
+    from vonk_agent_protocol.route_activation import recipe_route_lease_expiry
+
+    oldest = NOW - timedelta(seconds=120)
+    assert recipe_route_lease_expiry(NOW, oldest) == NOW + timedelta(seconds=180)
+    assert recipe_route_lease_expiry(NOW, oldest) == oldest + timedelta(seconds=300)
+    with pytest.raises(ValueError, match="freshness"):
+        recipe_route_lease_expiry(NOW, NOW - timedelta(seconds=121))
+    with pytest.raises(ValueError, match="freshness"):
+        recipe_route_lease_expiry(NOW, NOW + timedelta(seconds=1))

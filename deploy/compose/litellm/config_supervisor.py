@@ -24,7 +24,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 sys.path.insert(0, "/opt/vonk-litellm")
-from route_activation import ActivationMarker
+from route_activation import (
+    ROUTE_KILL_REAP_SECONDS,
+    ROUTE_MAXIMUM_LEASE_SECONDS,
+    ROUTE_SHUTDOWN_SECONDS,
+    ROUTE_STARTUP_SECONDS,
+    ActivationMarker,
+    SupervisorAcknowledgement,
+)
 
 ROOT = Path("/routes")
 ACTIVATION = ROOT / "activation.json"
@@ -35,12 +42,12 @@ BOOTSTRAP = Path(
 ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2
-TERMINATE_SECONDS = 30
-STARTUP_SECONDS = 120
+TERMINATE_SECONDS = ROUTE_SHUTDOWN_SECONDS
+STARTUP_SECONDS = ROUTE_STARTUP_SECONDS
 STARTUP_ATTEMPTS = 10
 STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
-MAXIMUM_LEASE = timedelta(seconds=300)
+MAXIMUM_LEASE = timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
 _PRISMA_CACHE_ROOT = Path("/opt/vonk-litellm/prisma")
 _PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -58,8 +65,10 @@ class ActiveRequest:
         self.activation_sha256 = activation_sha256
 
 
-def _prepare_query_engine() -> None:
+def _prepare_query_engine(*, deadline: float | None = None) -> None:
     """Populate and validate the non-root executable Prisma cache."""
+    if deadline is None:
+        deadline = time.monotonic() + STARTUP_SECONDS
     configured = os.environ.get(_PRISMA_QUERY_ENGINE_ENV)
     if configured is None:
         return
@@ -72,6 +81,9 @@ def _prepare_query_engine() -> None:
     if not path.exists():
         environment = os.environ.copy()
         environment.pop(_PRISMA_QUERY_ENGINE_ENV, None)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("LiteLLM startup budget exhausted during preparation")
         subprocess.run(
             ["prisma", "-v"],
             check=True,
@@ -79,7 +91,7 @@ def _prepare_query_engine() -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=environment,
-            timeout=120,
+            timeout=remaining,
         )
 
     # prisma -v populates the native engine name. On AMD64 that currently
@@ -535,17 +547,17 @@ def _write_ack(
         except OSError:
             pass
         raise RuntimeError("LiteLLM serving lease expired before acknowledgement")
-    acknowledgement = {
-        "acknowledged_at": now.astimezone(UTC).isoformat(),
-        "activation_sha256": request.activation_sha256,
-        "child_pid": child.pid,
-        "expires_at": marker["expires_at"],
-        "generation": marker["generation"],
-        "litellm_sha256": marker["litellm_sha256"],
-        "schema_version": 1,
-        "state": marker["state"],
-    }
-    _atomic_write(ACK, _encoded(acknowledgement))
+    acknowledgement = SupervisorAcknowledgement(
+        acknowledged_at=now.astimezone(UTC).isoformat(),
+        activation_sha256=request.activation_sha256,
+        child_pid=child.pid,
+        expires_at=marker["expires_at"],
+        generation=marker["generation"],
+        litellm_sha256=marker["litellm_sha256"],
+        schema_version=1,
+        state=marker["state"],
+    )
+    _atomic_write(ACK, acknowledgement.canonical_bytes())
 
 
 def _clear_ack() -> None:
@@ -562,15 +574,34 @@ def _clear_ack() -> None:
         os.close(directory)
 
 
-def _stop(child: subprocess.Popen[bytes]) -> None:
+def _stop(child: subprocess.Popen[bytes], *, deadline: float | None = None) -> None:
     if child.poll() is not None:
         return
+    if deadline is None:
+        deadline = time.monotonic() + TERMINATE_SECONDS
     child.terminate()
-    try:
-        child.wait(timeout=TERMINATE_SECONDS)
-    except subprocess.TimeoutExpired:
-        child.kill()
-        child.wait()
+    if child.poll() is not None:
+        return
+    remaining = deadline - time.monotonic()
+    terminate_wait = max(0, remaining - ROUTE_KILL_REAP_SECONDS)
+    if terminate_wait > 0:
+        try:
+            child.wait(timeout=terminate_wait)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+    child.kill()
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        try:
+            child.wait(timeout=remaining)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+    if child.poll() is None:
+        raise RuntimeError(
+            "LiteLLM child exit was not confirmed within shutdown budget"
+        )
 
 
 def _healthy(child: subprocess.Popen[bytes]) -> bool:
@@ -586,19 +617,24 @@ def _healthy(child: subprocess.Popen[bytes]) -> bool:
         return False
 
 
-def _await_healthy(child: subprocess.Popen[bytes]) -> bool:
-    deadline = time.monotonic() + STARTUP_SECONDS
+def _await_healthy(child: subprocess.Popen[bytes], *, deadline: float) -> bool:
     while child.poll() is None and time.monotonic() < deadline:
-        if _healthy(child):
+        if _healthy(child) and time.monotonic() < deadline:
             return True
-        time.sleep(POLL_SECONDS)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(POLL_SECONDS, remaining))
     return False
 
 
-def _supervise(authority: _RouteLeaseAuthority) -> int:
+def _supervise(
+    authority: _RouteLeaseAuthority, *, startup_deadline: float | None = None
+) -> int:
     stopping = False
     child: subprocess.Popen[bytes] | None = None
     startup_attempts = 0
+    if startup_deadline is None:
+        startup_deadline = time.monotonic() + STARTUP_SECONDS
 
     def request_stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
@@ -613,6 +649,9 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
     selected = request.config if request is not None else _selected()
     while not stopping:
         authority.deny()
+        if time.monotonic() >= startup_deadline:
+            _clear_ack()
+            return 1
         startup_attempts += 1
         active_digest = _digest(selected)
         child = subprocess.Popen(
@@ -629,19 +668,31 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
         )
         serving_lease = _ServingLeaseGuard(request, child, authority=authority)
         serving_lease.start()
-        if not _await_healthy(child):
+        if not _await_healthy(child, deadline=startup_deadline):
             exited_before_health = child.poll() is not None
             authority.deny()
             serving_lease.cancel()
             _clear_ack()
-            _stop(child)
+            _stop(child, deadline=startup_deadline)
             if serving_lease.expired:
+                next_request = _active_request(now=datetime.now(UTC))
+                if next_request is not None and (
+                    request is None
+                    or next_request.marker["generation"] <= request.marker["generation"]
+                ):
+                    return 1
+                # Only a newer activation or denied maintenance/bootstrap state
+                # may begin another bounded startup after authority expires.
                 startup_attempts = 0
-                request = _active_request(now=datetime.now(UTC))
+                request = next_request
                 selected = request.config if request is not None else _selected()
+                startup_deadline = time.monotonic() + STARTUP_SECONDS
                 continue
             if exited_before_health and startup_attempts < STARTUP_ATTEMPTS:
-                time.sleep(STARTUP_RETRY_SECONDS)
+                remaining = startup_deadline - time.monotonic()
+                if remaining <= 0:
+                    return 1
+                time.sleep(min(STARTUP_RETRY_SECONDS, remaining))
                 request = _active_request(now=datetime.now(UTC))
                 selected = request.config if request is not None else _selected()
                 continue
@@ -673,6 +724,7 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
                 _stop(child)
                 selected = candidate
                 request = candidate_request
+                startup_deadline = time.monotonic() + STARTUP_SECONDS
                 break
             if not _healthy(child):
                 authority.deny()
@@ -712,11 +764,12 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
 
 
 def main() -> int:
-    _prepare_query_engine()
+    startup_deadline = time.monotonic() + STARTUP_SECONDS
+    _prepare_query_engine(deadline=startup_deadline)
     authority = _RouteLeaseAuthority()
     server = _start_route_lease_server(authority)
     try:
-        return _supervise(authority)
+        return _supervise(authority, startup_deadline=startup_deadline)
     finally:
         authority.deny()
         server.shutdown()
