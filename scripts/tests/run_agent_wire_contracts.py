@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 PROBES = {
+    "VONK_INSTALLER_RELEASE_WIRE_PROBE": ("vonk-spark-setup", "installer_release_wire_probe"),
+    "VONK_SOURCE_BUNDLE_WIRE_PROBE": ("vonk-agent", "source_bundle_wire_probe"),
     "VONK_JOB_INVOCATION_WIRE_PROBE": ("vonk-agent", "job_invocation_wire_probe"),
     "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
     "VONK_HEARTBEAT_WIRE_PROBE": ("vonk-agent", "heartbeat_wire_probe"),
@@ -79,6 +81,7 @@ def main() -> int:
             "-m",
             "pytest",
             "agent_protocol/tests",
+            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
             *[str(path.relative_to(repository)) for path in bridges],
             *pytest_args,
         ],

@@ -88,3 +88,36 @@ def test_store_rejects_expected_digest_mismatch(tmp_path) -> None:
         store.put("f" * 64, io.BytesIO(archive([("Dockerfile", b"FROM scratch\n")])))
 
     assert error.value.code == "bundle.digest_mismatch"
+
+
+def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_engine):
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.source_bundles import SourceBundleManifest
+    from vonk_control.models import Base, RecipeSourceBundle
+    from vonk_control.source_bundles import (
+        DatabaseSourceBundleStore,
+        generate_source_bundle,
+    )
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n", "empty": b""})
+    store = DatabaseSourceBundleStore(sessions)
+    first = store.put(bundle.sha256, io.BytesIO(bundle.archive))
+    assert store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == first.manifest
+    assert store.get(bundle.sha256).manifest == first.manifest
+    with sessions() as session:
+        stored = session.get(RecipeSourceBundle, bundle.sha256)
+        parsed = SourceBundleManifest.model_validate_json(canonical_message(stored.manifest))
+        assert parsed == bundle.manifest
+    with sessions.begin() as session:
+        stored = session.get(RecipeSourceBundle, bundle.sha256)
+        stored.manifest = {**stored.manifest, "total_bytes": None}
+    for action in (
+        lambda: store.get(bundle.sha256),
+        lambda: store.put(bundle.sha256, io.BytesIO(bundle.archive)),
+    ):
+        with pytest.raises(SourceBundleError) as error:
+            action()
+        assert error.value.code == "bundle.manifest_invalid"
