@@ -1685,3 +1685,73 @@ def test_expired_activation_cannot_reset_startup_for_the_same_generation(
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     assert module._supervise(module._RouteLeaseAuthority()) == 1
     assert attempts == [True]
+
+
+@pytest.mark.parametrize("bootstrap", [True, False])
+def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
+    tmp_path, monkeypatch, bootstrap
+):
+    module = _module()
+    config = tmp_path / "config.json"
+    config.write_text('{"model_list":[]}\n')
+    module.ACK = tmp_path / "ack.json"
+    old = (
+        None if bootstrap else module.ActiveRequest(config, {"generation": 1}, "a" * 64)
+    )
+    generation = 1 if bootstrap else 2
+    new = module.ActiveRequest(config, {"generation": generation}, "b" * 64)
+    current = [old]
+    elapsed = [0.0]
+    children = []
+    spawns = []
+    acknowledgements = []
+
+    def spawn(*_args, **_kwargs):
+        assert not children or children[-1].returncode == 0
+        child = types.SimpleNamespace(pid=100 + len(children), returncode=None)
+        child.poll = lambda: child.returncode
+
+        def terminate():
+            elapsed[0] += 2
+            child.returncode = 0
+
+        child.terminate = terminate
+        children.append(child)
+        spawns.append(elapsed[0])
+        return child
+
+    def healthy(child):
+        elapsed[0] += 90
+        if child is children[0]:
+            current[0] = new
+            return False
+        return True
+
+    def guard(_request, child, **_kwargs):
+        def publish_ack(request, **_kwargs):
+            acknowledgements.append((request.marker["generation"], elapsed[0]))
+            child.returncode = 23
+
+        return types.SimpleNamespace(
+            start=lambda: None,
+            cancel=lambda: None,
+            expired=False,
+            publish_ack=publish_ack,
+        )
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: current[0])
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: config)
+    monkeypatch.setattr(module, "_healthy", healthy)
+    monkeypatch.setattr(module, "_ServingLeaseGuard", guard)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    authority = types.SimpleNamespace(deny=lambda: None, activate=lambda _request: None)
+    assert module._supervise(authority) == 23
+    assert spawns == [0, 94]
+    assert acknowledgements == [(generation, 184)]
