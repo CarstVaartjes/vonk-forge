@@ -494,8 +494,6 @@ def compile_binaries(
             str(ARCHITECTURES[architecture]["target"]),
             "--package",
             "vonk-build-egress",
-            "--package",
-            "vonk-runtime-probe",
         ],
         env=static_environment,
     )

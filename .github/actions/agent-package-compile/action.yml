@@ -157,7 +157,7 @@ runs:
           --package vonk-agent --package vonk-agent-helper
         RUSTFLAGS='-C target-feature=+crt-static' \
           cargo build --release --locked --target "$TARGET" \
-            --package vonk-build-egress --package vonk-runtime-probe
+            --package vonk-build-egress
         install -d -m 0755 "compiled/$BINARY_SET"
         install -m 0555 \
           "target/$TARGET/release/vonk-agent" \
