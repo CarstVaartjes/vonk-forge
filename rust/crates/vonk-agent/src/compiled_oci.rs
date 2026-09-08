@@ -375,7 +375,7 @@ fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciErro
         || !plan.security.capabilities.is_empty()
         || !plan.security.read_only_root
         || !plan.security.no_new_privileges
-        || plan.security.network_mode != expected_network_mode
+        || plan.security.network_mode.as_str() != expected_network_mode
         || plan.security.devices.len() > 1
         || plan
             .security

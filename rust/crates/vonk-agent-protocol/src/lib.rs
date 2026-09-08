@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 #[rustfmt::skip]
+pub mod compiled_execution_plan;
 pub mod generated;
 pub mod runtime_preflight;
 mod wire_schema;

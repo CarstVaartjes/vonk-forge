@@ -753,7 +753,9 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             };
             let metadata = &plan.runtime.telemetry;
             let adapter = metadata.engine.clone();
-            let rank = plan.runtime.placement.rank;
+            let Ok(rank) = u32::try_from(plan.runtime.placement.rank) else {
+                continue;
+            };
             let endpoint = plan.endpoint.as_ref().and_then(|_| {
                 let address = plan.runtime.placement.endpoint_address?;
                 let port = plan.runtime.placement.port?;
@@ -839,7 +841,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 recipe_revision: None,
                 context_limit_tokens: None,
                 serving_node_ids: Vec::new(),
-                ranks: vec![u64::from(rank)],
+                ranks: vec![rank],
                 readiness: if runtime_ok { "running" } else { "unknown" }
                     .parse()
                     .expect("internal readiness"),
@@ -3039,7 +3041,7 @@ fn build_metrics(
             process.memory_bytes as f64,
             series_context("bytes", "measured", "last", observed_at),
         );
-        item.process_id = Some(u64::from(process.pid));
+        item.process_id = Some(process.pid);
         item.process_name = Some(process.name.clone());
         series.push(item);
     }

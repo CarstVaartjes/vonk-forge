@@ -16,9 +16,8 @@ use std::{
 use vonk_agent::{
     compiled_oci::CompiledOciPaths,
     executor::{
-        parse_compiled_execution_plan, recipe_install_success_body,
-        recipe_model_cleanup_success_body, recipe_start_success_body, recipe_stop_success_body,
-        recipe_uninstall_success_body, runtime_arguments_for_plan,
+        recipe_install_success_body, recipe_model_cleanup_success_body, recipe_start_success_body,
+        recipe_stop_success_body, recipe_uninstall_success_body, runtime_arguments_for_plan,
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
 };
@@ -86,13 +85,13 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
     let result = match request {
         RecipeOperationRequest::Install(request) => {
-            let _spec = parse_compiled_execution_plan(&request.compiled_execution_plan)
+            request.compiled_execution_plan.validate()
                 .map_err(|_| "compiled execution plan is invalid".to_owned())?;
             recipe_install_success_body(request.expected_bytes)
         }
         RecipeOperationRequest::Start(request) => {
-            let spec = parse_compiled_execution_plan(&request.compiled_execution_plan)
-                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
+            let spec = request.compiled_execution_plan.clone();
+            spec.validate().map_err(|_| "compiled execution plan is invalid".to_owned())?;
             let plan = runtime_plan(&request, &spec)?;
             let runtime_arguments = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success_body(
@@ -122,9 +121,10 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        result,
+        result: serde_json::from_value(result)
+            .map_err(|_| "canonical agent result is invalid".to_owned())?,
         schema_version: 1,
-        state: "succeeded".to_owned(),
+        state: vonk_agent_protocol::generated::AgentResultState::Succeeded,
     };
     message
         .validate()
