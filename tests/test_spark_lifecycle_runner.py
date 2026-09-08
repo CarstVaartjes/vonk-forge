@@ -734,8 +734,11 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
             "caddy",
         ],
         [
-            "sudo", "journalctl", "--no-pager", "--lines=60",
+            "sudo", "journalctl", "--no-pager", "--lines=40",
             "--unit=vonk-forge-agent.service",
+        ],
+        [
+            "sudo", "journalctl", "--no-pager", "--lines=40",
             "--unit=vonk-forge-package-helper.service",
         ],
     ]
@@ -791,6 +794,44 @@ def test_canary_failure_keeps_phase_evidence_and_redacts_provider_secret(
     assert "container-build" in message
     assert "build rejected <redacted>" in message
     assert secret not in message
+
+
+def test_verbose_canary_transfer_history_cannot_erase_failure_or_service_journals(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = object()
+    run.bundle = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    operation = {
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "state": "failed", "failed_phase": "start", "completed_phases": [],
+        "status_reason": "run-switch phase operation failed",
+        "progress": {"phase": "start", "members": [{"receipt": "x" * 20_000}]},
+        "result": {
+            "failure": {"detail": "container runtime could not start the workload"},
+            "phase_results": [{"phase": "transfer", "receipt": "x" * 20_000}],
+        },
+    }
+    def diagnostics(command):
+        if "--unit=vonk-forge-package-helper.service" in command:
+            message = "model ACL: Read-only file system"
+        elif "--unit=vonk-forge-agent.service" in command:
+            message = "start job rejected"
+        else:
+            message = "worker start operation failed"
+        return subprocess.CompletedProcess(command, 0, stdout="x" * 20_000 + message, stderr="")
+
+    run._diagnostic_command = diagnostics
+    with pytest.raises(lifecycle.LifecycleError) as failure:
+        run._await_canary_run_switch(operation, expected_phases=["start"], label="canary")
+    rendered = str(run._installation_failure("synthetic canary", failure.value))
+    assert len(rendered) < 8_000
+    assert "container runtime could not start the workload" in rendered
+    assert "model ACL: Read-only file system" in rendered
+    assert "start job rejected" in rendered
+    assert "worker start operation failed" in rendered
 
 
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (
