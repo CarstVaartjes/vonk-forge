@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult
 from vonk_agent_protocol.contracts import AgentFailureResult
@@ -15,7 +14,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_api import register_model_cache_operation_provider
 from vonk_control.models import (
     AgentCertificate,
@@ -205,7 +204,7 @@ def test_cache_failure_is_identical_in_persistence_family_api_and_activity(
         with sessions.begin() as session:
             row = session.get(ModelCacheOperation, operation.id)
             row.payload = dict(row.payload, failure=invalid)
-        with pytest.raises(ValidationError):
+        with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
             cache.get_operation(operation.id)
         assert (
             client.get(
