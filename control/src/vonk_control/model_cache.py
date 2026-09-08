@@ -3480,7 +3480,8 @@ class ModelCacheService:
                     raise ModelCacheStorageError(
                         "model_cache.payload_invalid", "cache retry state is missing"
                     )
-                if respect_backoff:
+                if respect_backoff and operation.kind in {"download", "repair"}:
+                    assert retry is not None
                     retry_at = retry.get("next_retry_at")
                     if isinstance(retry_at, str):
                         try:
