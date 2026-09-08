@@ -970,6 +970,12 @@ class SparkLifecycle:
             if value:
                 redacted = redacted.replace(value, "<redacted>")
         redacted = re.sub(r"\x1b\[[0-9;]*m", "", redacted)
+        # step-ca includes its short-lived enrollment JWT in request logs.
+        redacted = re.sub(
+            r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+            "<redacted-jwt>",
+            redacted,
+        )
         return redacted[-limit:]
 
     def _diagnostic_command(
