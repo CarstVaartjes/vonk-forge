@@ -493,7 +493,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if placement.rank != spec.runtime.placement.rank
             || placement.role != spec.runtime.placement.role
             || placement.world_size != spec.runtime.placement.world_size
-            || Some(placement.port) != spec.runtime.placement.port
+            || placement.port != spec.runtime.placement.port
             || placement.reserved_memory_bytes != spec.runtime.placement.reserved_memory_bytes
         {
             return Err(OciError::Runtime);
@@ -645,7 +645,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                             )
                         })
                         .ok_or(OciError::Artifact)?,
-                    port: placement.port,
+                    port: placement.port.ok_or(OciError::Artifact)?,
                     rank: placement.rank,
                     recipe_content_sha256: identity.recipe_content_sha256.clone(),
                     recipe_revision_id: identity.recipe_revision_id,
@@ -907,7 +907,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     } else {
                         placement.master_port
                     }
-                || binding.port != placement.port
+                || Some(binding.port) != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
                 || binding.image_digest != spec.runtime_image.image_digest[7..]
@@ -956,9 +956,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             plans.push(RecipeRunInspectionPlan {
                 binding,
                 arguments,
-                endpoint_address: endpoint_owner
-                    .then_some(placement.endpoint_address.ok_or(OciError::Artifact)?),
-                endpoint_port: placement.port,
+                endpoint_address: if endpoint_owner {
+                    Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
+                } else {
+                    None
+                },
+                endpoint_port: placement.port.ok_or(OciError::Artifact)?,
                 health_path,
             });
         }
@@ -1032,9 +1035,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             || placement.local_address != record.placement.local_address
             || placement.master_address != record.placement.master_address
             || placement.master_port != record.placement.master_port
-            || placement
-                .port
-                .is_some_and(|port| port != record.placement.port)
+            || placement.port != record.placement.port
             || placement.reserved_memory_bytes != record.placement.reserved_memory_bytes
         {
             return Err(OciError::Artifact);

@@ -304,7 +304,8 @@ pub struct Placement {
     pub local_address: Option<IpAddr>,
     pub master_address: Option<IpAddr>,
     pub master_port: Option<u16>,
-    pub port: u16,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub port: Option<u16>,
     pub reserved_memory_bytes: u64,
 }
 
@@ -790,7 +791,7 @@ impl Placement {
         if self.rank >= self.world_size
             || self.world_size == 0
             || !valid_role(&self.role)
-            || self.port < 1024
+            || self.port.is_some_and(|port| port < 1024)
             || self.reserved_memory_bytes == 0
             || if self.world_size == 1 {
                 self.local_address.is_some()

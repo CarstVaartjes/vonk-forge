@@ -665,6 +665,16 @@ def test_controller_startup_diagnostics_are_bounded_and_redact_secrets(
     assert "tailscale-gateway=restarting/none/exit-1" in diagnostics
 
 
+def test_diagnostics_redact_enrollment_jwt_from_ca_logs() -> None:
+    lifecycle = _module()
+    token = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.fixtureSignature"
+    output = lifecycle.SparkLifecycle._redact_diagnostics(
+        json.dumps({"ott": token, "status": 201})
+    )
+    assert token not in output
+    assert json.loads(output) == {"ott": "<redacted-jwt>", "status": 201}
+
+
 def test_installer_failure_diagnostics_are_bounded_and_redact_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

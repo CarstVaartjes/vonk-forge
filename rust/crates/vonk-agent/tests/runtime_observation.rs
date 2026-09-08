@@ -24,7 +24,7 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
     ))
     .unwrap();
     value["runtime"]["placement"] = json!({
-        "endpoint_address": "192.168.1.212", "rank": 1, "role": "worker", "world_size": 2,
+        "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
         "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64
     });
@@ -186,6 +186,13 @@ fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp(
         .unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
+    assert_eq!(inspections[0].endpoint_address, None);
+    assert!(
+        !inspections[0]
+            .arguments
+            .iter()
+            .any(|value| value == "--publish")
+    );
     assert_eq!(
         &inspections[0].arguments[..4],
         &[
@@ -237,4 +244,58 @@ fn observation_errors_preserve_safe_category_without_storage_details() {
         error.to_string(),
         "managed recipe run observation failed (storage)"
     );
+}
+
+#[test]
+fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
+    let root = tempdir().unwrap();
+    let mut installed = schema2_dual_plan();
+    installed.endpoint = None;
+    installed.runtime.placement.port = None;
+    installed.security.mounts.push(
+        serde_json::from_value(json!({
+            "source": "inputs", "target": "/inputs", "read_only": true
+        }))
+        .unwrap(),
+    );
+    installed.job = Some(
+        serde_json::from_value(json!({
+            "interface": "artifact-job", "input": null,
+            "output_path": "/outputs", "timeout_seconds": 90
+        }))
+        .unwrap(),
+    );
+    installed.validate().unwrap();
+    let lifecycle_placement = placement(&installed);
+    persist_plan(root.path(), &installed);
+    let metadata = root.path().join("run-metadata").join(RUN);
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(
+        metadata.join("lifecycle.json"),
+        serde_json::to_vec(&json!({
+            "installation_id": INSTALLATION, "placement": lifecycle_placement,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    let mut retained = installed;
+    retained.job.as_mut().unwrap().timeout_seconds = 30;
+    fs::write(
+        metadata.join("runtime.json"),
+        serde_json::to_vec(&retained).unwrap(),
+    )
+    .unwrap();
+    assert!(runtime.prepare_stop(RUN).is_ok());
+    retained.job.as_mut().unwrap().timeout_seconds = 91;
+    fs::write(
+        metadata.join("runtime.json"),
+        serde_json::to_vec(&retained).unwrap(),
+    )
+    .unwrap();
+    assert!(runtime.prepare_stop(RUN).is_err());
 }

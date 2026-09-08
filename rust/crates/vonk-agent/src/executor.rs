@@ -1168,17 +1168,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job input staging is not same-run exact",
                     );
                 }
-                let placement = Placement {
-                    endpoint_address: None,
-                    rank: 0,
-                    role: request.role.clone(),
-                    world_size: 1,
-                    local_address: None,
-                    master_address: None,
-                    master_port: None,
-                    port: 1024,
-                    reserved_memory_bytes: request.reserved_memory_bytes,
-                };
+                let placement = job_placement(&request);
                 let plan = match self.runtime.prepare_job_start(
                     &spec,
                     &installation_id,
@@ -1524,14 +1514,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("installed recipe is not a persistent service");
                 };
                 let placement = Placement {
-                    endpoint_address: Some(request.endpoint_address),
+                    endpoint_address: spec.runtime.placement.endpoint_address,
                     rank: request.rank,
                     role: request.role.clone(),
                     world_size: request.world_size,
                     local_address: request.local_address,
                     master_address: request.master_address,
                     master_port: request.master_port,
-                    port: request.port,
+                    port: Some(request.port),
                     reserved_memory_bytes: request.reserved_memory_bytes,
                 };
                 let run_id = request.run_id.to_string();
@@ -2010,6 +2000,20 @@ where
             }
             InterruptibleJob::Cancelled { stopped }
         }
+    }
+}
+
+fn job_placement(request: &vonk_agent_protocol::RecipeJobRunRequest) -> Placement {
+    Placement {
+        endpoint_address: None,
+        rank: 0,
+        role: request.role.clone(),
+        world_size: 1,
+        local_address: None,
+        master_address: None,
+        master_port: None,
+        port: None,
+        reserved_memory_bytes: request.reserved_memory_bytes,
     }
 }
 
@@ -2578,6 +2582,83 @@ mod tests {
         ) -> Result<ProcessOutput, ProcessError> {
             panic!("corrupt lifecycle enumeration must not execute a process")
         }
+    }
+
+    #[test]
+    fn canonical_job_claim_prepares_without_a_serving_port() {
+        let claim: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let request: vonk_agent_protocol::RecipeJobRunRequest =
+            serde_json::from_value(claim["payload"].clone()).unwrap();
+        let placement = super::job_placement(&request);
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        value["endpoint"] = Value::Null;
+        value["runtime"]["placement"] = serde_json::to_value(&placement).unwrap();
+        value["security"]["network_mode"] = json!("none");
+        value["security"]["mounts"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "source": "inputs", "target": "/inputs", "read_only": true
+            }));
+        value["job"] = json!({
+            "interface": request.interface, "input": null,
+            "output_path": "/outputs", "timeout_seconds": request.timeout_seconds
+        });
+        let spec = parse_compiled_execution_plan(&value).unwrap();
+        let data = tempdir().unwrap();
+        let run_id = request.run_id.to_string();
+        fs::create_dir_all(data.path().join("runs").join(&run_id).join("inputs")).unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+            huggingface_curl_config: None,
+        };
+        let start = runtime
+            .prepare_job_start(
+                &spec,
+                &request.installation_id.to_string(),
+                &run_id,
+                &placement,
+                &request.parameters,
+                request.timeout_seconds,
+            )
+            .unwrap();
+        assert!(!start.main.iter().any(|argument| argument == "--publish"));
+        assert!(
+            start
+                .main
+                .windows(2)
+                .any(|pair| pair == ["--network", "none"])
+        );
+        let metadata = data.path().join("run-metadata").join(run_id);
+        for name in ["runtime.json", "lifecycle.json"] {
+            let persisted: Value =
+                serde_json::from_slice(&fs::read(metadata.join(name)).unwrap()).unwrap();
+            let port = if name == "runtime.json" {
+                &persisted["runtime"]["placement"]["port"]
+            } else {
+                &persisted["placement"]["port"]
+            };
+            assert!(port.is_null());
+        }
+        let mut serving_placement = placement;
+        serving_placement.port = Some(1024);
+        assert!(
+            runtime
+                .start_arguments(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &request.run_id.to_string(),
+                    &serving_placement
+                )
+                .is_err()
+        );
     }
 
     #[tokio::test]

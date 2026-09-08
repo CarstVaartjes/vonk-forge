@@ -61,6 +61,7 @@ on:
       - tests/acceptance/test_fresh_nas_install.py
       - tests/acceptance/recipe-library-revision.txt
       - tests/acceptance/test_spark_lifecycle.py
+      - tests/acceptance/systemd_sandbox.py
 
 permissions:
   contents: read

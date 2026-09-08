@@ -36,14 +36,6 @@ const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum HostHelperManagedArea {
-    Models,
-    State,
-    Workloads,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
 pub enum HostHelperRestartUnit {
     Agent,
     Helper,
@@ -63,10 +55,6 @@ pub enum HostHelperContainerRuntimeAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum HostHelperOperation {
-    CreateManagedDirectory {
-        area: HostHelperManagedArea,
-        relative_path: String,
-    },
     InstallVonkDeb {
         package_sha256: String,
         package_signature: String,
@@ -97,9 +85,6 @@ pub enum HostHelperOperation {
 impl HostHelperOperation {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         let valid = match self {
-            Self::CreateManagedDirectory { relative_path, .. } => {
-                valid_host_helper_relative_path(relative_path)
-            }
             Self::InstallVonkDeb {
                 package_sha256,
                 package_signature,
@@ -2331,20 +2316,6 @@ fn valid_node_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-fn valid_host_helper_relative_path(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value.split('/').all(|component| {
-            !component.is_empty()
-                && component != "."
-                && component != ".."
-                && component.len() <= 128
-                && component
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
-}
-
 fn validate_attempt_identity(
     schema_version: u8,
     attempt: u32,
@@ -2941,9 +2912,8 @@ mod recipe_run_inspection_tests {
         };
         observation.validate().unwrap();
         let mut wrong_operation = observation.clone();
-        wrong_operation.grant.claims.operation = HostHelperOperation::CreateManagedDirectory {
-            area: HostHelperManagedArea::Models,
-            relative_path: "observation".to_owned(),
+        wrong_operation.grant.claims.operation = HostHelperOperation::RestartVonkUnit {
+            unit: HostHelperRestartUnit::Agent,
         };
         assert!(wrong_operation.validate().is_err());
 

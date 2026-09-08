@@ -55,14 +55,14 @@ fn persist_binding(
     let spec: CompiledExecutionPlan =
         serde_json::from_value(input.request.compiled_execution_plan.clone())?;
     let placement = Placement {
-        endpoint_address: Some(input.request.endpoint_address),
+        endpoint_address: spec.runtime.placement.endpoint_address,
         rank: input.request.rank,
         role: input.request.role.clone(),
         world_size: input.request.world_size,
         local_address: input.request.local_address,
         master_address: input.request.master_address,
         master_port: input.request.master_port,
-        port: input.request.port,
+        port: Some(input.request.port),
         reserved_memory_bytes: input.request.reserved_memory_bytes,
     };
     let run_generation = input
