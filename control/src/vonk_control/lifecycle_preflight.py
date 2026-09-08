@@ -182,7 +182,7 @@ class LifecyclePreflight:
                     digest = request_digest(request)
                     payload = request.model_dump(mode="json")
                     child = Job(
-                        id=key,
+                        id=str(uuid.uuid4()),
                         request_id=key,
                         kind="runtime.preflight.v1",
                         state="running",
@@ -203,7 +203,7 @@ class LifecyclePreflight:
                         "runtime.preflight.v1",
                         digest,
                         payload,
-                        operation_id=str(uuid.uuid5(uuid.UUID(key), "probe")),
+                        operation_id=str(uuid.uuid4()),
                     )
                 checkpoint.pending_job_id = child.id
                 checkpoint.pending_node_id = node_id

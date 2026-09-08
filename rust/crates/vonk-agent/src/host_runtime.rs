@@ -33,6 +33,23 @@ pub enum HostRuntimeError {
     HelperRejected { code: String },
 }
 
+impl HostRuntimeError {
+    /// Bounded, non-sensitive evidence for the admission receipt.
+    pub fn preflight_code(&self) -> String {
+        match self {
+            Self::Io(_) => "helper_io_failed".to_owned(),
+            Self::Controller(ClientError::Protocol) => "helper_grant_invalid".to_owned(),
+            Self::Controller(ClientError::Authentication) => "helper_grant_unauthorized".to_owned(),
+            Self::Controller(_) => "helper_grant_unavailable".to_owned(),
+            Self::Protocol => "helper_protocol_invalid".to_owned(),
+            Self::HelperRejected { code } if stable_runtime_error_code(code) => {
+                format!("helper_{code}")
+            }
+            Self::HelperRejected { .. } => "helper_protocol_invalid".to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HelperResponse {
@@ -449,6 +466,46 @@ mod tests {
                 ),
             },
             claims,
+        }
+    }
+
+    #[test]
+    fn preflight_reports_the_failed_boundary_without_exposing_error_details() {
+        use super::HostRuntimeError;
+        use crate::client::ClientError;
+        let cases = [
+            (
+                HostRuntimeError::Controller(ClientError::Protocol),
+                "helper_grant_invalid",
+            ),
+            (
+                HostRuntimeError::Controller(ClientError::Authentication),
+                "helper_grant_unauthorized",
+            ),
+            (
+                HostRuntimeError::Controller(ClientError::Retryable),
+                "helper_grant_unavailable",
+            ),
+            (
+                HostRuntimeError::Io(std::io::Error::other("private path or transport detail")),
+                "helper_io_failed",
+            ),
+            (HostRuntimeError::Protocol, "helper_protocol_invalid"),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "operation_unsafe_path".to_owned(),
+                },
+                "helper_operation_unsafe_path",
+            ),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "untrusted response detail".to_owned(),
+                },
+                "helper_protocol_invalid",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.preflight_code(), expected);
         }
     }
 
