@@ -1735,7 +1735,12 @@ def install_agent_routes(
                         raise ValueError("recipe run observation generation is stale")
                     if authority is None:
                         authority = host_runtime_service()
-                    if _now(node.updated_at).astimezone(UTC) >= evidence_observed_at:
+                    # Helper receipts sign whole Unix seconds. A fresh grant
+                    # may inspect a start completed within that same second;
+                    # nonce consumption below remains the replay authority.
+                    if int(_now(node.updated_at).timestamp()) > int(
+                        evidence_observed_at.timestamp()
+                    ):
                         raise ValueError("recipe run observation was replayed")
                     try:
                         (
@@ -1759,7 +1764,9 @@ def install_agent_routes(
                         node.observed_run_generation = None
                         node.observation_receipt_sha256 = None
                         node.observation_endpoint_ready = None
-                        node.updated_at = evidence_observed_at
+                        node.updated_at = max(
+                            _now(node.updated_at).astimezone(UTC), evidence_observed_at
+                        )
                         continue
                     mapping = session.get(ClusterMapping, run.mapping_id)
                     owner = (
@@ -1784,7 +1791,9 @@ def install_agent_routes(
                     node.observation_endpoint_ready = (
                         evidence.endpoint_ready if owner else None
                     )
-                    node.updated_at = evidence_observed_at
+                    node.updated_at = max(
+                        _now(node.updated_at).astimezone(UTC), evidence_observed_at
+                    )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
