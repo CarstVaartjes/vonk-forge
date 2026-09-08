@@ -642,7 +642,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                         })
                         .ok_or(OciError::Artifact)?,
                     port: placement.port.ok_or(OciError::Artifact)?,
-                    rank: placement.rank,
+                    rank: u32::try_from(placement.rank).map_err(|_| OciError::Artifact)?,
                     recipe_content_sha256: identity.recipe_content_sha256.clone(),
                     recipe_revision_id: identity.recipe_revision_id,
                     role: placement.role.clone(),
@@ -651,7 +651,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     runtime_arguments_sha256: protocol_sha256(
                         &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
                     ),
-                    world_size: placement.world_size,
+                    world_size: u32::try_from(placement.world_size)
+                        .map_err(|_| OciError::Artifact)?,
                 };
                 binding.validate().map_err(|_| OciError::Artifact)?;
                 Ok(binding)
@@ -865,9 +866,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             binding.validate().map_err(|_| OciError::Artifact)?;
             if binding.run_id.to_string() != run_id
                 || binding.installation_id.to_string() != installation_id
-                || binding.rank != placement.rank
+                || u64::from(binding.rank) != placement.rank
                 || binding.role != placement.role
-                || binding.world_size != placement.world_size
+                || u64::from(binding.world_size) != placement.world_size
                 || binding.local_address
                     != if placement.world_size == 1 {
                         None
@@ -1728,7 +1729,7 @@ fn materialize_compiled_models(
             artifact.distribution_object.name.clone(),
             artifact.distribution_object.sha256.clone(),
             artifact.distribution_object.bytes,
-            artifact.distribution_object.kind.clone(),
+            artifact.distribution_object.kind.as_str().to_owned(),
         );
         if let Some((_, previous)) = physical_by_path.get(&physical_key) {
             if previous != &physical {

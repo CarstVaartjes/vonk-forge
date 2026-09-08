@@ -187,7 +187,16 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
     }
     assert any("dst=/inputs,readonly" in argument for argument in arguments)
     assert "VONK_JOB_TIMEOUT_SECONDS=600" in arguments
-    for change in ("image", "mount", "environment", "executable", "timeout", "memory"):
+    for change in (
+        "image",
+        "mount",
+        "environment",
+        "executable",
+        "timeout",
+        "memory",
+        "missing_nullable_endpoint",
+        "missing_nullable_engine_version",
+    ):
         invalid = copy.deepcopy(probe_input)
         plan = invalid["claim"]["payload"]["compiled_execution_plan"]
         if change == "image":
@@ -201,8 +210,12 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
         elif change == "timeout":
             plan["job"]["timeout_seconds"] = 3601
             invalid["claim"]["payload"]["timeout_seconds"] = 3601
-        else:
+        elif change == "memory":
             plan["runtime"]["placement"]["reserved_memory_bytes"] += 1
+        elif change == "missing_nullable_endpoint":
+            del plan["runtime"]["placement"]["endpoint_address"]
+        else:
+            del plan["runtime"]["telemetry"]["engine_version"]
         invalid["claim"]["payload_digest"] = hashlib.sha256(
             canonical_message(invalid["claim"]["payload"])
         ).hexdigest()
