@@ -113,6 +113,10 @@ impl ::std::convert::TryFrom<::std::string::String> for ActivationMarkerState {
 pub struct AgentClaim {
     pub attempt: u32,
     pub authority_revision: ::std::string::String,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
     pub job_id: ::uuid::Uuid,
@@ -200,6 +204,10 @@ impl ::std::convert::From<RecipeModelCleanupPayload> for AgentClaimPayload {
 pub struct AgentDirective {
     pub attempt: u32,
     pub cancel_requested: bool,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
     pub job_id: ::uuid::Uuid,
@@ -361,6 +369,10 @@ pub struct AgentPackageSource {
 #[serde(deny_unknown_fields)]
 pub struct AgentProgress {
     pub attempt: u32,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
     pub job_id: ::uuid::Uuid,
@@ -374,6 +386,10 @@ pub struct AgentProgress {
 #[derive(Eq)]
 pub struct AgentResult {
     pub attempt: u32,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
     pub job_id: ::uuid::Uuid,
@@ -1499,6 +1515,10 @@ pub struct ConfirmPackageActivationOperation {
 #[derive(Eq)]
 pub struct DistributionAssignment {
     pub assignment_id: ::uuid::Uuid,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub expires_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub generation: u64,
     pub model_artifact_set_sha256: ::std::string::String,
@@ -2169,6 +2189,10 @@ pub struct InventoryRequest {
     pub host_memory_free_bytes: u64,
     pub host_memory_total_bytes: u64,
     pub nvidia_driver_version: ::std::string::String,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub schema_version: u8,
 }
@@ -3679,6 +3703,10 @@ pub struct RecipeRunObservationWire {
     pub node_id: ::std::string::String,
     pub observation_identity_sha256: ::std::string::String,
     pub observation_receipt_public_key: ::std::string::String,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub port: u16,
     pub rank: u32,
@@ -3695,6 +3723,10 @@ pub struct RecipeRunObservationWire {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeRunObservationsWire {
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub runs: ::std::vec::Vec<RecipeRunObservationWire>,
     pub schema_version: u8,
@@ -4747,6 +4779,10 @@ pub struct TelemetryProvenance {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub host_uptime_seconds: ::std::option::Option<u64>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize_optional",
+        deserialize_with = "crate::wire_datetime::deserialize_optional"
+    )]
     pub source_observed_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -4882,6 +4918,10 @@ pub struct TelemetrySample {
     pub metrics: TelemetryMetrics,
     pub network_receive_bytes_per_second: ::std::option::Option<f64>,
     pub network_transmit_bytes_per_second: ::std::option::Option<f64>,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub power_watts: ::std::option::Option<f64>,
     pub sequence: u64,
@@ -4901,6 +4941,10 @@ pub struct TelemetrySeries {
     pub measurement_kind: TelemetrySeriesMeasurementKind,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub node_id: ::std::option::Option<::std::string::String>,
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize",
+        deserialize_with = "crate::wire_datetime::deserialize"
+    )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub process_id: ::std::option::Option<u32>,
@@ -4909,6 +4953,10 @@ pub struct TelemetrySeries {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub reason: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize_optional",
+        deserialize_with = "crate::wire_datetime::deserialize_optional"
+    )]
     pub received_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -5202,10 +5250,18 @@ impl ::std::convert::TryFrom<::std::string::String> for TelemetrySeriesSupportSt
 #[serde(deny_unknown_fields)]
 pub struct TelemetryWorkload {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize_optional",
+        deserialize_with = "crate::wire_datetime::deserialize_optional"
+    )]
     pub created_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub elapsed_seconds: ::std::option::Option<f64>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize_optional",
+        deserialize_with = "crate::wire_datetime::deserialize_optional"
+    )]
     pub ended_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
     pub engine_id: ::std::string::String,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -5231,6 +5287,10 @@ pub struct TelemetryWorkload {
     pub request_id: ::std::option::Option<::std::string::String>,
     pub run_id: ::std::string::String,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(
+        serialize_with = "crate::wire_datetime::serialize_optional",
+        deserialize_with = "crate::wire_datetime::deserialize_optional"
+    )]
     pub started_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
     pub state: TelemetryWorkloadState,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -5437,6 +5497,10 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
         struct Raw {
             pub attempt: u32,
             pub authority_revision: ::std::string::String,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
             pub job_id: ::uuid::Uuid,
@@ -5474,6 +5538,10 @@ impl<'de> ::serde::Deserialize<'de> for AgentDirective {
         struct Raw {
             pub attempt: u32,
             pub cancel_requested: bool,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
             pub job_id: ::uuid::Uuid,
@@ -5691,6 +5759,10 @@ impl<'de> ::serde::Deserialize<'de> for AgentProgress {
         #[serde(deny_unknown_fields)]
         struct Raw {
             pub attempt: u32,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
             pub job_id: ::uuid::Uuid,
@@ -5722,6 +5794,10 @@ impl<'de> ::serde::Deserialize<'de> for AgentResult {
         #[derive(Eq)]
         struct Raw {
             pub attempt: u32,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
             pub job_id: ::uuid::Uuid,
@@ -6852,6 +6928,10 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
         #[derive(Eq)]
         struct Raw {
             pub assignment_id: ::uuid::Uuid,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub expires_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub generation: u64,
             pub model_artifact_set_sha256: ::std::string::String,
@@ -7543,6 +7623,10 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             pub host_memory_free_bytes: u64,
             pub host_memory_total_bytes: u64,
             pub nvidia_driver_version: ::std::string::String,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub schema_version: u8,
         }
@@ -9602,6 +9686,10 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
             pub node_id: ::std::string::String,
             pub observation_identity_sha256: ::std::string::String,
             pub observation_receipt_public_key: ::std::string::String,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub port: u16,
             pub rank: u32,
@@ -9654,6 +9742,10 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationsWire {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub runs: ::std::vec::Vec<RecipeRunObservationWire>,
             pub schema_version: u8,
@@ -10757,6 +10849,10 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryProvenance {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub host_uptime_seconds: ::std::option::Option<u64>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize_optional",
+                deserialize_with = "crate::wire_datetime::deserialize_optional"
+            )]
             pub source_observed_at:
                 ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
         }
@@ -10897,6 +10993,10 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             pub metrics: TelemetryMetrics,
             pub network_receive_bytes_per_second: ::std::option::Option<f64>,
             pub network_transmit_bytes_per_second: ::std::option::Option<f64>,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub power_watts: ::std::option::Option<f64>,
             pub sequence: u64,
@@ -10945,6 +11045,10 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySeries {
             pub measurement_kind: TelemetrySeriesMeasurementKind,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub node_id: ::std::option::Option<::std::string::String>,
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize",
+                deserialize_with = "crate::wire_datetime::deserialize"
+            )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub process_id: ::std::option::Option<u32>,
@@ -10953,6 +11057,10 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySeries {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub reason: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize_optional",
+                deserialize_with = "crate::wire_datetime::deserialize_optional"
+            )]
             pub received_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub run_id: ::std::option::Option<::std::string::String>,
@@ -11103,10 +11211,18 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryWorkload {
         #[serde(deny_unknown_fields)]
         struct Raw {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize_optional",
+                deserialize_with = "crate::wire_datetime::deserialize_optional"
+            )]
             pub created_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub elapsed_seconds: ::std::option::Option<f64>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize_optional",
+                deserialize_with = "crate::wire_datetime::deserialize_optional"
+            )]
             pub ended_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
             pub engine_id: ::std::string::String,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -11132,6 +11248,10 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryWorkload {
             pub request_id: ::std::option::Option<::std::string::String>,
             pub run_id: ::std::string::String,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(
+                serialize_with = "crate::wire_datetime::serialize_optional",
+                deserialize_with = "crate::wire_datetime::deserialize_optional"
+            )]
             pub started_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
             pub state: TelemetryWorkloadState,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
