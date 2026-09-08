@@ -3468,6 +3468,9 @@ class ModelCacheService:
                         ModelCacheOperation.state.in_(["queued", "running", "partial"]),
                     )
                     .with_for_update(skip_locked=True)
+                    # The cooldown scan may have cached this row before another
+                    # worker committed a claim; inspect the locked database value.
+                    .execution_options(populate_existing=True)
                 )
                 if operation is None:
                     continue

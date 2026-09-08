@@ -6,12 +6,13 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
@@ -313,7 +314,7 @@ def test_eviction_claim_ignores_download_backoff_and_hf_cooldown(
 
 
 def test_postgres_concurrent_claims_are_distinct(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -329,15 +330,33 @@ def test_postgres_concurrent_claims_are_distinct(
         [_artifact("pg-b", b"b")],
         "00000000-0000-4000-8000-000000000312",
     )
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        claims = list(
-            executor.map(
-                lambda service: service._claim_operations(
-                    limit=1, respect_backoff=True
-                ),
-                (first, second),
-            )
-        )
+    # The cooldown scan has already loaded both rows into the second
+    # session's identity map when the first worker commits its claim.
+    # A later locking SELECT must refresh that cached claim state.
+    second_loaded = threading.Event()
+    first_committed = threading.Event()
+    original_session = second._session
+
+    @contextmanager
+    def pause_before_lock(*, write=False):
+        with original_session(write=write) as session:
+            def before_lock(state):
+                if state.statement._for_update_arg is not None and not second_loaded.is_set():
+                    second_loaded.set()
+                    assert first_committed.wait(timeout=10)
+
+            event.listen(session, "do_orm_execute", before_lock)
+            yield session
+
+    monkeypatch.setattr(second, "_session", pause_before_lock)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(second._claim_operations, limit=1, respect_backoff=True)
+        try:
+            assert second_loaded.wait(timeout=10)
+            first_claim = first._claim_operations(limit=1, respect_backoff=True)
+        finally:
+            first_committed.set()
+        claims = [first_claim, pending.result(timeout=10)]
     claimed = {claim[0][0] for claim in claims}
     assert claimed == {operation_a.id, operation_b.id}
     first.close()
