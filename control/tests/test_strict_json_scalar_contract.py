@@ -6,9 +6,9 @@ from typing import Literal
 from uuid import UUID
 
 import pytest
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI, Response
 from fastapi.testclient import TestClient
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, RootModel, ValidationError
 from vonk_agent_protocol import RecipeRunObservationsWire
 from vonk_control.agent_api import GrantRequest, HostHelperGrantResponse
 from vonk_control.library_contract import (
@@ -53,6 +53,14 @@ class _PresenceResponseProbe(StrictJSONModel):
     retries: int = 0
     labels: list[str] = Field(default_factory=list)
     engine: dict[str, object] | None = None
+
+
+class _PresenceMapProbe(StrictJSONModel):
+    items: dict[str, _PresenceNestedProbe]
+
+
+class _PresenceRootProbe(RootModel[list[_PresenceNestedProbe]]):
+    pass
 
 
 def test_numeric_literal_check_preserves_union_semantics() -> None:
@@ -109,6 +117,17 @@ def test_model_dump_omits_only_optional_none_values_recursively() -> None:
     }
 
 
+def test_presence_policy_traverses_typed_maps_and_root_models() -> None:
+    nested = _PresenceNestedProbe(required_nullable=None)
+
+    assert serialize_json_value(_PresenceMapProbe(items={"nested": nested})) == {
+        "items": {"nested": {"required_nullable": None, "enabled": False}}
+    }
+    assert serialize_json_value(_PresenceRootProbe([nested])) == [
+        {"required_nullable": None, "enabled": False}
+    ]
+
+
 def test_fastapi_response_uses_presence_policy_for_nested_contracts() -> None:
     app = FastAPI()
     app.router.route_class = ControllerAPIRoute
@@ -133,6 +152,34 @@ def test_fastapi_response_uses_presence_policy_for_nested_contracts() -> None:
         "labels": [],
         "engine": {"future_option": None},
     }
+
+
+def test_fastapi_presence_policy_preserves_injected_response_metadata() -> None:
+    completed: list[str] = []
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+
+    @app.get("/presence", response_model=_PresenceResponseProbe, status_code=202)
+    def presence(
+        response: Response, background_tasks: BackgroundTasks
+    ) -> _PresenceResponseProbe:
+        response.status_code = 207
+        response.headers["x-presence"] = "retained"
+        response.set_cookie("presence", "retained")
+        background_tasks.add_task(completed.append, "done")
+        return _PresenceResponseProbe(
+            nested=_PresenceNestedProbe(required_nullable=None),
+            required_nullable=None,
+            engine={"future_option": None},
+        )
+
+    with TestClient(app) as client:
+        response = client.get("/presence")
+
+    assert response.status_code == 207
+    assert response.headers["x-presence"] == "retained"
+    assert response.cookies["presence"] == "retained"
+    assert completed == ["done"]
 
 
 def test_library_snapshot_json_roundtrip_preserves_datetime_and_strict_tags() -> None:

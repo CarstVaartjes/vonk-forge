@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import copy
 from typing import Any
 
@@ -11,7 +11,7 @@ from fastapi import Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 
@@ -21,16 +21,34 @@ def _serialized_field_name(field_name: str, field: Any, *, by_alias: bool) -> st
     return field_name
 
 
+def _apply_nested_value(value: object, document: object, *, by_alias: bool) -> None:
+    if isinstance(value, BaseModel):
+        apply_optional_none_policy(value, document, by_alias=by_alias)
+    elif isinstance(value, Mapping) and isinstance(document, dict):
+        for key, nested_value in value.items():
+            if key in document:
+                _apply_nested_value(nested_value, document[key], by_alias=by_alias)
+    elif (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes, bytearray))
+        and isinstance(document, list)
+    ):
+        for item, encoded in zip(value, document, strict=False):
+            _apply_nested_value(item, encoded, by_alias=by_alias)
+
+
 def apply_optional_none_policy(
     model: BaseModel, document: object, *, by_alias: bool = True
 ) -> object:
     """Omit optional ``None`` fields while retaining required nullable fields.
 
-    Recurse through actual nested Pydantic models only. Mapping values are
-    extension content (for example engine arguments), so their nulls retain
-    their declared meaning.
+    Recurse through actual nested Pydantic models and typed containers. Mapping
+    values without nested models (for example engine arguments) retain nulls.
     """
 
+    if isinstance(model, RootModel):
+        _apply_nested_value(model.root, document, by_alias=by_alias)
+        return document
     if not isinstance(document, dict):
         return document
     fields = type(model).model_fields
@@ -44,16 +62,7 @@ def apply_optional_none_policy(
             if not field.is_required():
                 document.pop(output_name)
             continue
-        if isinstance(value, BaseModel):
-            apply_optional_none_policy(value, serialized, by_alias=by_alias)
-        elif (
-            isinstance(value, Sequence)
-            and not isinstance(value, (str, bytes, bytearray))
-            and isinstance(serialized, list)
-        ):
-            for item, encoded in zip(value, serialized, strict=False):
-                if isinstance(item, BaseModel):
-                    apply_optional_none_policy(item, encoded, by_alias=by_alias)
+        _apply_nested_value(value, serialized, by_alias=by_alias)
     return document
 
 
@@ -102,10 +111,17 @@ class ControllerAPIRoute(APIRoute):
             value, errors = response_field.validate(result, {}, loc=("response",))
             if errors:
                 return result
-            return response_class(
+            injected_response = values.get("response")
+            status_code = self.status_code or 200
+            if isinstance(injected_response, Response) and injected_response.status_code:
+                status_code = injected_response.status_code
+            response = response_class(
                 content=serialize_json_value(value, by_alias=by_alias),
-                status_code=self.status_code or 200,
+                status_code=status_code,
             )
+            if isinstance(injected_response, Response):
+                response.headers.raw.extend(injected_response.headers.raw)
+            return response
 
         dependant = copy(original_dependant)
         dependant.call = policy_endpoint
