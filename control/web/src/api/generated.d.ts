@@ -6736,7 +6736,10 @@ export interface components {
              */
             severity: "blocker" | "warning" | "info";
         };
-        /** ProposalChangeRequest */
+        /**
+         * ProposalChangeRequest
+         * @description Canonical persisted and API proposal change envelope.
+         */
         ProposalChangeRequest: {
             /** Document */
             document: {

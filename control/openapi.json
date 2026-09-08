@@ -15351,6 +15351,7 @@
       },
       "ProposalChangeRequest": {
         "additionalProperties": false,
+        "description": "Canonical persisted and API proposal change envelope.",
         "properties": {
           "document": {
             "additionalProperties": true,
