@@ -83,9 +83,8 @@ UUID = re.compile(
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # Exercise the production-supported lower bound.  The agent renews at two thirds
-# of a certificate lifetime and checks renewal on its 60-second inventory tick,
-# so 90 seconds preserves a real scheduled rotation while avoiding three idle
-# inventory intervals in every ARM64 publication gate.
+# of a certificate lifetime and its independent rotation lane polls on a bounded
+# interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
 CERTIFICATE_LIFETIME_SECONDS = 90
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
