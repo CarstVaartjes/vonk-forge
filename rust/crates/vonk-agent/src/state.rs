@@ -36,7 +36,7 @@ pub enum StateError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BeginDecision {
     Execute,
-    Replay(AgentResult),
+    Replay(Box<AgentResult>),
 }
 
 pub struct StateStore {
@@ -174,7 +174,7 @@ impl StateStore {
                     return Err(StateError::Busy);
                 }
                 let bytes = stored.result.ok_or(StateError::ResultState)?;
-                BeginDecision::Replay(parse_strict(&bytes)?)
+                BeginDecision::Replay(Box::new(parse_strict(&bytes)?))
             }
             Some(_) => {
                 transaction.execute(

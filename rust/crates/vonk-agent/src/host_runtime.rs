@@ -84,8 +84,7 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
     ) -> Result<RecipeRunInspectionOutcome, HostRuntimeError> {
         binding.validate().map_err(|_| HostRuntimeError::Protocol)?;
-        let attempt =
-            u32::try_from(binding.run_generation).map_err(|_| HostRuntimeError::Protocol)?;
+        let attempt = binding.run_generation;
         let request = HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::RunInspect,

@@ -275,7 +275,7 @@ impl Store {
             candidate_version: tx.candidate_version.clone(),
             candidate_binary_sha256: tx.candidate_binary_sha256.clone(),
             attempt_nonce: tx.rollback.attempt_nonce.clone(),
-            phase: tx.phase.clone(),
+            phase: tx.phase,
             created_at: tx.created_at,
             updated_at: tx.updated_at,
             outcome: tx.outcome.clone(),

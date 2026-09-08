@@ -31,7 +31,7 @@ fn main() {
                 schema_version: 1,
             }
         };
-        let operation = claim.operation.clone();
+        let operation = claim.operation;
         let payload = claim.payload.clone();
         let parsed = RecipeOperationRequest::parse(&claim).expect("valid operation");
         let evidence = match parsed {

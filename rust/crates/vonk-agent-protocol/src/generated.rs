@@ -129,6 +129,7 @@ pub struct AgentClaim {
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum AgentClaimPayload {
     RuntimePreflightRequest(RuntimePreflightRequest),
@@ -217,7 +218,7 @@ pub struct AgentDirective {
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-#[derive(Eq)]
+#[derive(Default, Eq)]
 pub struct AgentFailureResult {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub diagnostic: ::std::option::Option<::std::string::String>,
@@ -245,25 +246,6 @@ pub struct AgentFailureResult {
     pub summary: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub uncertain: ::std::option::Option<bool>,
-}
-impl ::std::default::Default for AgentFailureResult {
-    fn default() -> Self {
-        Self {
-            diagnostic: Default::default(),
-            diagnostics: Default::default(),
-            error_code: Default::default(),
-            helper_error_code: Default::default(),
-            helper_exit_code: Default::default(),
-            operation: Default::default(),
-            package_activation: Default::default(),
-            reason: Default::default(),
-            recovery: Default::default(),
-            stage: Default::default(),
-            status: Default::default(),
-            summary: Default::default(),
-            uncertain: Default::default(),
-        }
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -402,6 +384,7 @@ pub struct AgentResult {
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum AgentResultResult {
     RuntimePreflightResult(RuntimePreflightResult),
@@ -1445,6 +1428,7 @@ pub struct ComponentDescriptor {
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum ComponentDescriptorMaterialization {
     SimpleMaterialization(SimpleMaterialization),
@@ -1462,6 +1446,7 @@ impl ::std::convert::From<OciBundleMaterialization> for ComponentDescriptorMater
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum ComponentDescriptorSourcesItem {
     HttpsSource(HttpsSource),
@@ -1967,6 +1952,7 @@ pub struct HostHelperSignature {
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum HostOperation {
     InstallVonkDebOperation(InstallVonkDebOperation),
@@ -2897,6 +2883,7 @@ pub struct PackageReleaseLock {
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum PackageReleaseLockUpstreamIdentity {
     GitSource(GitSource),
@@ -3589,6 +3576,7 @@ pub struct RecipeOperationRequest {
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum RecipeOperationRequestPayload {
     InstallPayload(RecipeInstallPayload),
@@ -3978,7 +3966,7 @@ pub struct RecipeStartResult {
     pub evidence: RecipeStartResultEvidence,
     pub evidence_digest: ::std::string::String,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Default, Eq)]
 pub struct RecipeStartResultEvidence {
     #[serde(
         flatten,
@@ -4004,16 +3992,6 @@ pub struct RecipeStartResultEvidence {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub subtype_3: ::std::option::Option<TensorParallelStartEvidence>,
-}
-impl ::std::default::Default for RecipeStartResultEvidence {
-    fn default() -> Self {
-        Self {
-            subtype_0: Default::default(),
-            subtype_1: Default::default(),
-            subtype_2: Default::default(),
-            subtype_3: Default::default(),
-        }
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -5665,7 +5643,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
         #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
+        #[derive(Default, Eq)]
         struct Raw {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub diagnostic: ::std::option::Option<::std::string::String>,
@@ -7507,6 +7485,7 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
         #[serde(untagged)]
+        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
         #[derive(Eq)]
         enum Raw {
             InstallVonkDebOperation(InstallVonkDebOperation),
@@ -11545,8 +11524,8 @@ impl From<&RecipeJobOutputManifest> for RecipeJobOutputManifestContent {
     fn from(value: &RecipeJobOutputManifest) -> Self {
         Self {
             files: value.files.clone(),
-            schema_version: value.schema_version.clone(),
-            total_bytes: value.total_bytes.clone(),
+            schema_version: value.schema_version,
+            total_bytes: value.total_bytes,
         }
     }
 }
@@ -11555,24 +11534,24 @@ impl From<&RecipeRunObservationGrantRequest> for RecipeRunObservationIdentity {
         Self {
             artifact_set_digest: value.artifact_set_digest.clone(),
             image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id.clone(),
-            local_address: value.local_address.clone(),
-            mapping_generation: value.mapping_generation.clone(),
-            mapping_id: value.mapping_id.clone(),
-            master_address: value.master_address.clone(),
-            master_port: value.master_port.clone(),
+            installation_id: value.installation_id,
+            local_address: value.local_address,
+            mapping_generation: value.mapping_generation,
+            mapping_id: value.mapping_id,
+            master_address: value.master_address,
+            master_port: value.master_port,
             model_identity: value.model_identity.clone(),
             node_id: value.node_id.clone(),
-            port: value.port.clone(),
-            rank: value.rank.clone(),
+            port: value.port,
+            rank: value.rank,
             recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id.clone(),
+            recipe_revision_id: value.recipe_revision_id,
             role: value.role.clone(),
-            run_generation: value.run_generation.clone(),
-            run_id: value.run_id.clone(),
+            run_generation: value.run_generation,
+            run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            schema_version: value.schema_version.clone(),
-            world_size: value.world_size.clone(),
+            schema_version: value.schema_version,
+            world_size: value.world_size,
         }
     }
 }
@@ -11581,22 +11560,22 @@ impl From<&RecipeRunObservationGrantRequest> for RecipeRunInspectionBinding {
         Self {
             artifact_set_digest: value.artifact_set_digest.clone(),
             image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id.clone(),
-            local_address: value.local_address.clone(),
-            mapping_generation: value.mapping_generation.clone(),
-            mapping_id: value.mapping_id.clone(),
-            master_address: value.master_address.clone(),
-            master_port: value.master_port.clone(),
+            installation_id: value.installation_id,
+            local_address: value.local_address,
+            mapping_generation: value.mapping_generation,
+            mapping_id: value.mapping_id,
+            master_address: value.master_address,
+            master_port: value.master_port,
             model_identity: value.model_identity.clone(),
-            port: value.port.clone(),
-            rank: value.rank.clone(),
+            port: value.port,
+            rank: value.rank,
             recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id.clone(),
+            recipe_revision_id: value.recipe_revision_id,
             role: value.role.clone(),
-            run_generation: value.run_generation.clone(),
-            run_id: value.run_id.clone(),
+            run_generation: value.run_generation,
+            run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size.clone(),
+            world_size: value.world_size,
         }
     }
 }
@@ -11605,22 +11584,22 @@ impl From<&RecipeRunObservationIdentity> for RecipeRunInspectionBinding {
         Self {
             artifact_set_digest: value.artifact_set_digest.clone(),
             image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id.clone(),
-            local_address: value.local_address.clone(),
-            mapping_generation: value.mapping_generation.clone(),
-            mapping_id: value.mapping_id.clone(),
-            master_address: value.master_address.clone(),
-            master_port: value.master_port.clone(),
+            installation_id: value.installation_id,
+            local_address: value.local_address,
+            mapping_generation: value.mapping_generation,
+            mapping_id: value.mapping_id,
+            master_address: value.master_address,
+            master_port: value.master_port,
             model_identity: value.model_identity.clone(),
-            port: value.port.clone(),
-            rank: value.rank.clone(),
+            port: value.port,
+            rank: value.rank,
             recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id.clone(),
+            recipe_revision_id: value.recipe_revision_id,
             role: value.role.clone(),
-            run_generation: value.run_generation.clone(),
-            run_id: value.run_id.clone(),
+            run_generation: value.run_generation,
+            run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size.clone(),
+            world_size: value.world_size,
         }
     }
 }
@@ -11629,24 +11608,24 @@ impl From<&RecipeRunObservationWire> for RecipeRunObservationIdentity {
         Self {
             artifact_set_digest: value.artifact_set_digest.clone(),
             image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id.clone(),
-            local_address: value.local_address.clone(),
-            mapping_generation: value.mapping_generation.clone(),
-            mapping_id: value.mapping_id.clone(),
-            master_address: value.master_address.clone(),
-            master_port: value.master_port.clone(),
+            installation_id: value.installation_id,
+            local_address: value.local_address,
+            mapping_generation: value.mapping_generation,
+            mapping_id: value.mapping_id,
+            master_address: value.master_address,
+            master_port: value.master_port,
             model_identity: value.model_identity.clone(),
             node_id: value.node_id.clone(),
-            port: value.port.clone(),
-            rank: value.rank.clone(),
+            port: value.port,
+            rank: value.rank,
             recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id.clone(),
+            recipe_revision_id: value.recipe_revision_id,
             role: value.role.clone(),
-            run_generation: value.run_generation.clone(),
-            run_id: value.run_id.clone(),
+            run_generation: value.run_generation,
+            run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            schema_version: value.schema_version.clone(),
-            world_size: value.world_size.clone(),
+            schema_version: value.schema_version,
+            world_size: value.world_size,
         }
     }
 }
@@ -11655,22 +11634,22 @@ impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
         Self {
             artifact_set_digest: value.artifact_set_digest.clone(),
             image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id.clone(),
-            local_address: value.local_address.clone(),
-            mapping_generation: value.mapping_generation.clone(),
-            mapping_id: value.mapping_id.clone(),
-            master_address: value.master_address.clone(),
-            master_port: value.master_port.clone(),
+            installation_id: value.installation_id,
+            local_address: value.local_address,
+            mapping_generation: value.mapping_generation,
+            mapping_id: value.mapping_id,
+            master_address: value.master_address,
+            master_port: value.master_port,
             model_identity: value.model_identity.clone(),
-            port: value.port.clone(),
-            rank: value.rank.clone(),
+            port: value.port,
+            rank: value.rank,
             recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id.clone(),
+            recipe_revision_id: value.recipe_revision_id,
             role: value.role.clone(),
-            run_generation: value.run_generation.clone(),
-            run_id: value.run_id.clone(),
+            run_generation: value.run_generation,
+            run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size.clone(),
+            world_size: value.world_size,
         }
     }
 }

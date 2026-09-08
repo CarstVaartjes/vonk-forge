@@ -156,7 +156,7 @@ impl HostRuntimeRequest {
             (HostRuntimeAction::RunInspect, Some(binding)) => {
                 binding.validate()?;
                 if self.job_id != binding.run_id
-                    || u32::try_from(binding.run_generation).ok() != Some(self.attempt)
+                    || binding.run_generation != self.attempt
                     || hex_sha256(&canonical_json(&self.arguments)?)
                         != binding.runtime_arguments_sha256
                 {
@@ -267,7 +267,7 @@ impl RecipeRunObservationWire {
                 HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
                     operation.action != HostHelperContainerRuntimeAction::RunInspect
                         || operation.job_id != self.run_id
-                        || u32::try_from(self.run_generation).ok() != Some(operation.attempt)
+                        || self.run_generation != operation.attempt
                         || operation.request_sha256 != self.helper_receipt.claims.request_sha256
                         || operation.observation_identity_sha256.as_deref()
                             != Some(self.observation_identity_sha256.as_str())
@@ -2037,7 +2037,7 @@ mod recipe_run_inspection_tests {
             action: HostRuntimeAction::RunInspect,
             job_id: binding.run_id,
             operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation as u32,
+            attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
@@ -2133,7 +2133,7 @@ mod recipe_run_inspection_tests {
                         action: HostHelperContainerRuntimeAction::RunInspect,
                         job_id: binding.run_id,
                         operation_id: Uuid::new_v4(),
-                        attempt: binding.run_generation as u32,
+                        attempt: binding.run_generation,
                         fence: Uuid::new_v4(),
                         request_sha256: "b".repeat(64),
                         observation_identity_sha256: Some(identity_sha256.clone()),
