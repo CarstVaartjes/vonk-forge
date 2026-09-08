@@ -169,7 +169,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 
 async fn run_control_lane(
     config: &AgentConfig,
-    runtime_identity: AgentRuntimeIdentity,
+    mut runtime_identity: AgentRuntimeIdentity,
     mut client: AgentHttpClient,
     mut state: StateStore,
     client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
@@ -215,6 +215,10 @@ async fn run_control_lane(
                 }
                 Err(error) => return Err(error.into()),
             }
+        }
+        match vonk_agent::package_activation::acknowledge(&client, &runtime_identity).await {
+            Ok(receipt) => runtime_identity.package_activation = receipt,
+            Err(error) => eprintln!("vonk-agent: package activation not acknowledged: {error}"),
         }
         let executor = ControlExecutor {
             recipes: RecipeExecutor {

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from .package_upgrade import PackageActivationReceipt
 from .wire_model import Digest, WireModel
 
 
@@ -18,6 +19,7 @@ class AgentRuntimeIdentity(WireModel):
     binary_digest: Digest
     self_test_passed: Literal[True]
     observation_receipt_public_key: Digest
+    package_activation: PackageActivationReceipt | None = None
 
 
 class ClaimRequest(WireModel):

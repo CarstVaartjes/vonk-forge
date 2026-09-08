@@ -141,9 +141,15 @@ class ArtifactDistributionPayload(WireModel):
         return self
 
 
+from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority
+
+
 class AgentUpgradePayload(WireModel):
     """Signed package authority for the current agent upgrade operation."""
 
+    rollback: PackageRollbackAuthority
+    source_package_url: str = Field(pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$")
+    source_package_bytes: int = Field(strict=True, ge=1, le=1024**3)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(strict=True, ge=1, le=1024**3)
     package_sha256: DigestText
@@ -176,6 +182,7 @@ class AgentUpgradeResult(WireModel):
     ]
     self_test_passed: Literal[True]
     status: Literal["upgraded"]
+    activation_receipt: PackageActivationReceipt
 
 
 class _RecipeStartEvidenceCommon(WireModel):
@@ -270,6 +277,7 @@ class ArtifactDistributionResult(WireModel):
 
 class AgentFailureResult(WireModel):
     diagnostics: FailureDiagnostics | None = None
+    package_activation: PackageActivationReceipt | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)
     error_code: str | None = Field(default=None, min_length=1, max_length=128)
     summary: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -452,7 +460,7 @@ def _validate_safe_keys(
             )
             or (
                 operation is AgentOperation.AGENT_UPGRADE
-                and path == ("package_url",)
+                and path in {("package_url",), ("source_package_url",)}
                 and AGENT_PACKAGE_URL.fullmatch(value) is not None
             )
             or (

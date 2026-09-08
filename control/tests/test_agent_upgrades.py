@@ -80,6 +80,34 @@ NEW_IDENTITY = {
 }
 
 
+SOURCE = {
+    "schema_version": 2, "architecture": "linux-arm64",
+    "build_digest": OLD_IDENTITY["build_digest"],
+    "package_bytes": 1000,
+    "package_url": "https://install.vonkforge.ai/artifacts/agent-packages/" + "7" * 64 + "/vonk-forge-agent.deb",
+    "package": {"package_sha256": "7" * 64, "package_signature": "8" * 128,
+        "package_version": "0.1.0", "binary_sha256": OLD_IDENTITY["binary_digest"], "helper_sha256": "6" * 64},
+}
+ACTIVATION_RECEIPT = {
+    "schema_version": 2, "node_id": NODE_A, "attempt_nonce": "9" * 64,
+    "source_package_sha256": SOURCE["package"]["package_sha256"],
+    "source_version": "0.1.0", "source_binary_sha256": OLD_IDENTITY["binary_digest"],
+    "candidate_package_sha256": PACKAGE["package_sha256"],
+    "candidate_version": PACKAGE["package_version"],
+    "candidate_binary_sha256": PACKAGE["target_binary_digest"],
+    "phase": "acknowledged", "created_at": 1787788800, "updated_at": 1787788800,
+    "outcome": "controller_acknowledged",
+}
+NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
+
+
+@pytest.fixture(autouse=True)
+def published_source(monkeypatch):
+    from vonk_agent_protocol.package_source import AgentPackageSource
+    monkeypatch.setattr("vonk_control.agent_upgrades.load_package_source", lambda *_: AgentPackageSource.model_validate(SOURCE))
+    monkeypatch.setattr("vonk_control.agent_upgrades.secrets.token_hex", lambda _: "9" * 64)
+
+
 class Clock:
     def __init__(self) -> None:
         self.value = datetime(2026, 8, 27, tzinfo=UTC)
@@ -91,7 +119,7 @@ class Clock:
         self.value += timedelta(seconds=seconds)
 
 
-def test_repair_plan_binds_manifest_but_dispatches_only_legacy_package_payload(
+def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_payload(
     tmp_path,
 ) -> None:
     now = datetime(2026, 8, 29, tzinfo=UTC)
@@ -143,8 +171,8 @@ def test_repair_plan_binds_manifest_but_dispatches_only_legacy_package_payload(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
         assert operation is not None
-        assert operation.payload == REPAIR_PACKAGE
-        assert set(operation.payload) == set(PACKAGE)
+        assert {key: operation.payload[key] for key in REPAIR_PACKAGE} == REPAIR_PACKAGE
+        assert set(operation.payload) == set(PACKAGE) | {"rollback", "source_package_bytes", "source_package_url"}
 
 
 @pytest.mark.parametrize(
@@ -260,7 +288,7 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
                     serial=serial,
                     node_id=node_id,
                     not_before=now - timedelta(minutes=1),
-                    not_after=now + timedelta(hours=1),
+                    not_after=now + timedelta(hours=8),
                     fingerprint=f"fingerprint-{serial}",
                 )
             )
@@ -324,7 +352,7 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
         deadline = attempt.lease_deadline
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
-        assert deadline == clock() + timedelta(seconds=240)
+        assert deadline == clock() + timedelta(seconds=960)
         assert stored is not None and stored.state == "waiting-for-operator"
         assert stored.status_reason is not None
         assert "after 1 install attempt" in stored.status_reason
@@ -343,7 +371,7 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
         )
         is None
     )
-    clock.advance(seconds=239)
+    clock.advance(seconds=959)
     assert (
         operations.claim(
             NODE_A,
@@ -406,7 +434,7 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
         second_deadline = attempts[1].lease_deadline
         if second_deadline.tzinfo is None:
             second_deadline = second_deadline.replace(tzinfo=UTC)
-        assert second_deadline == clock() + timedelta(seconds=240)
+        assert second_deadline == clock() + timedelta(seconds=960)
         assert [attempt.result for attempt in attempts] == [
             {
                 "error_code": "operation_failed",
@@ -500,7 +528,7 @@ def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
     # This is a controller safety contract, independent of how the package
     # helper durably recovers apt/dpkg state. The not-before value and sole
     # automatic retry are persisted on the operation attempt.
-    assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=240)
+    assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=960)
     with sessions() as session:
         operation = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
@@ -539,7 +567,7 @@ def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
         )
         is None
     )
-    clock.advance(seconds=239)
+    clock.advance(seconds=959)
     assert (
         restarted_operations.claim(
             NODE_A,
@@ -555,7 +583,7 @@ def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
     assert second.attempt == 2
 
     restarted_operations.fail(second, "agent upgrade helper is unavailable")
-    clock.advance(seconds=240)
+    clock.advance(seconds=960)
     assert (
         restarted_operations.claim(
             NODE_A,
@@ -574,25 +602,13 @@ def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
         assert operation.retry_disposition_attempt is None
 
 
-def test_same_binary_packaging_only_release_can_use_bridge_retry(tmp_path) -> None:
-    clock = Clock()
-    sessions, operations, _upgrades, job = _rollout(
-        tmp_path, "same-binary-retry", clock=clock
-    )
-    packaging_only_identity = {
-        **OLD_IDENTITY,
-        "binary_digest": PACKAGE["target_binary_digest"],
-    }
-    first = _claim_upgrade(operations, NODE_A, "serial-a", packaging_only_identity)
-    operations.fail(first, "agent upgrade request is invalid")
-
+def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "source-drift")
+    changed = {**OLD_IDENTITY, "binary_digest": PACKAGE["target_binary_digest"]}
+    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=changed) is None
     with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
-        )
-        assert operation is not None
-        assert operation.retry_disposition == "retry"
-        assert operation.retry_disposition_attempt == 1
+        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        assert operation.current_attempt == 0
 
 
 def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audit(
@@ -604,7 +620,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
     )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
-    clock.advance(seconds=240)
+    clock.advance(seconds=960)
     second = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(second, "agent upgrade helper is unavailable")
     # Resume happens after the failed attempt's original fence has expired.
@@ -674,7 +690,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         resumed_deadline = resumed_attempt.lease_deadline
         if resumed_deadline.tzinfo is None:
             resumed_deadline = resumed_deadline.replace(tzinfo=UTC)
-        assert resumed_deadline == clock() + timedelta(seconds=240)
+        assert resumed_deadline == clock() + timedelta(seconds=960)
         assert (
             list(
                 session.execute(
@@ -702,7 +718,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         )
         is None
     )
-    clock.advance(seconds=239)
+    clock.advance(seconds=959)
     assert (
         operations.claim(
             NODE_A,
@@ -767,7 +783,7 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
         deadline = attempt.lease_deadline
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
-        assert deadline == clock() + timedelta(seconds=240)
+        assert deadline == clock() + timedelta(seconds=960)
 
     assert (
         operations.claim(
@@ -779,7 +795,7 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
         )
         is None
     )
-    clock.advance(seconds=239)
+    clock.advance(seconds=959)
     assert (
         operations.claim(
             NODE_A,
@@ -795,15 +811,15 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
     assert retry.attempt == 2
 
 
-def test_resume_recovers_legacy_worker_failure_by_exact_identity_without_reinstall(
+def test_resume_recovers_delayed_worker_failure_by_exact_identity_without_reinstall(
     tmp_path,
 ) -> None:
     clock = Clock()
     sessions, operations, upgrades, job = _rollout(
-        tmp_path, "legacy-worker-exact", clock=clock
+        tmp_path, "delayed-worker-exact", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+    _record_delayed_worker_dispatch_failure(sessions, job.id, clock())
 
     upgrades.resume(job.id)
     assert (
@@ -848,10 +864,10 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
 ) -> None:
     clock = Clock()
     sessions, operations, upgrades, job = _rollout(
-        tmp_path, "legacy-worker-stale", clock=clock
+        tmp_path, "delayed-worker-stale", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+    _record_delayed_worker_dispatch_failure(sessions, job.id, clock())
 
     upgrades.resume(job.id)
     clock.advance(seconds=31)
@@ -891,10 +907,10 @@ def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
 ) -> None:
     clock = Clock()
     sessions, operations, upgrades, job = _rollout(
-        tmp_path, "legacy-worker-not-stale", clock=clock
+        tmp_path, "delayed-worker-not-stale", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    _record_legacy_worker_running(sessions, job.id, clock())
+    _record_delayed_worker_running(sessions, job.id, clock())
 
     with pytest.raises(ValueError, match="dispatch is still active"):
         upgrades.resume(job.id)
@@ -919,10 +935,10 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
 ) -> None:
     clock = Clock()
     sessions, operations, upgrades, job = _rollout(
-        tmp_path, "legacy-worker-expired", clock=clock
+        tmp_path, "delayed-worker-expired", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    _record_legacy_worker_running(sessions, job.id, clock())
+    _record_delayed_worker_running(sessions, job.id, clock())
     clock.advance(seconds=31)
 
     upgrades.resume(job.id)
@@ -970,13 +986,13 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
         assert operation.state == "waiting-for-operator"
 
 
-def test_waiting_upgrade_resume_rejects_live_legacy_worker_fence(tmp_path) -> None:
+def test_waiting_upgrade_resume_rejects_live_delayed_worker_fence(tmp_path) -> None:
     clock = Clock()
     sessions, operations, upgrades, job = _rollout(
         tmp_path, "waiting-live-worker", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    worker_fence = _record_legacy_worker_running(sessions, job.id, clock())
+    worker_fence = _record_delayed_worker_running(sessions, job.id, clock())
     operations.fail(child, "agent upgrade helper is unavailable")
 
     with pytest.raises(ValueError, match="dispatch is still active"):
@@ -1004,7 +1020,7 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         tmp_path, "waiting-expired-worker", clock=clock
     )
     child = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    worker_fence = _record_legacy_worker_running(sessions, job.id, clock())
+    worker_fence = _record_delayed_worker_running(sessions, job.id, clock())
     operations.fail(child, "agent upgrade helper is unavailable")
     clock.advance(seconds=31)
 
@@ -1024,7 +1040,7 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         )
         is None
     )
-    clock.advance(seconds=239)
+    clock.advance(seconds=959)
     assert (
         operations.claim(
             NODE_A,
@@ -1116,7 +1132,7 @@ def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
     )
     _upgrade_node(operations, NODE_A, "serial-a")
     _upgrade_node(operations, NODE_B, "serial-b")
-    _record_legacy_worker_dispatch_failure(
+    _record_delayed_worker_dispatch_failure(
         sessions, job.id, datetime(2026, 8, 27, tzinfo=UTC)
     )
 
@@ -1167,7 +1183,7 @@ def test_resume_continues_succeeded_sequential_prefix_after_late_worker_failure(
         assert node_b is not None
         node_b.capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
         node_b.last_seen_at = clock()
-    _record_legacy_worker_dispatch_failure(sessions, job.id, clock())
+    _record_delayed_worker_dispatch_failure(sessions, job.id, clock())
 
     upgrades.resume(job.id)
 
@@ -1255,14 +1271,14 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
         assert stored is not None and stored.state == "queued"
 
 
-def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) -> None:
+def test_exact_identity_after_current_retry_continues_to_second_target(tmp_path) -> None:
     clock = Clock()
     sessions, operations, _upgrades, job = _rollout(
         tmp_path, "retry-continuation", clock=clock
     )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
-    clock.advance(seconds=120)
+    clock.advance(seconds=480)
     assert (
         operations.claim(
             NODE_B,
@@ -1273,7 +1289,7 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
         )
         is None
     )
-    clock.advance(seconds=120)
+    clock.advance(seconds=480)
     second = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     assert second.attempt == 2
     operations.fail(second, "agent upgrade helper is unavailable")
@@ -1287,6 +1303,8 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
         )
         is None
     )
+
+    operations.claim(NODE_B, "serial-b", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=OLD_IDENTITY)
 
     # A second helper failure is not claimable a third time, but the restarted
     # agent's exact authenticated identity can still reconcile it and make the
@@ -1329,47 +1347,14 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
     assert next_claim.attempt == 1
 
 
-def test_queued_exact_target_contact_skips_reinstall_and_completes_rollout(
-    tmp_path,
-) -> None:
+def test_queued_exact_target_contact_cannot_invent_an_install_attempt(tmp_path) -> None:
     sessions, operations, _upgrades, job = _rollout(tmp_path, "queued-exact-target")
-    _upgrade_node(operations, NODE_A, "serial-a")
-
-    # B reached the published target out of band after preview but before its
-    # queued operation was claimed. Its authenticated identity is sufficient;
-    # the installer operation must never be dispatched.
-    assert (
-        operations.claim(
-            NODE_B,
-            "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=NEW_IDENTITY,
-        )
-        is None
-    )
-
+    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=NEW_IDENTITY) is None
     with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == job.id,
-                AgentOperation.node_id == NODE_B,
-            )
-        )
-        stored = session.get(Job, job.id)
-        assert operation is not None
-        assert operation.state == "succeeded"
-        assert operation.current_attempt == 1
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == 1,
-            )
-        )
-        assert attempt is not None and attempt.state == "succeeded"
-        assert attempt.result is not None
-        assert attempt.result["status"] == "upgraded"
-        assert stored is not None and stored.state == "succeeded"
+        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        assert operation.current_attempt == 0
+        assert operation.state == "queued"
+    assert _operation_nodes(sessions, job.id) == [NODE_A]
 
 
 @pytest.mark.parametrize(
@@ -1500,7 +1485,7 @@ def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
         assert stored is not None and stored.state == "waiting-for-operator"
         assert attempts == [1, 1]
 
-    clock.advance(seconds=240)
+    clock.advance(seconds=960)
     second_a = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     second_b = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     assert second_a.attempt == second_b.attempt == 2
@@ -1534,7 +1519,7 @@ def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
             "serial-b",
             30,
             capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=NEW_IDENTITY,
+            runtime_identity={**NEW_IDENTITY, "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B}},
         )
         is None
     )
@@ -1663,7 +1648,7 @@ def _operation_nodes(sessions, job_id: str) -> list[str]:
         )
 
 
-def _record_legacy_worker_dispatch_failure(
+def _record_delayed_worker_dispatch_failure(
     sessions,
     job_id: str,
     now: datetime,
@@ -1680,14 +1665,14 @@ def _record_legacy_worker_dispatch_failure(
                 job_id=job_id,
                 attempt=1,
                 fence=str(uuid.uuid4()),
-                worker_id="legacy-worker",
+                worker_id="delayed-worker",
                 lease_deadline=now + timedelta(seconds=30),
                 state="failed",
             )
         )
 
 
-def _record_legacy_worker_running(
+def _record_delayed_worker_running(
     sessions,
     job_id: str,
     now: datetime,
@@ -1706,7 +1691,7 @@ def _record_legacy_worker_running(
                 job_id=job_id,
                 attempt=1,
                 fence=fence,
-                worker_id="legacy-worker",
+                worker_id="delayed-worker",
                 lease_deadline=deadline,
                 state="running",
             )
@@ -1715,7 +1700,7 @@ def _record_legacy_worker_running(
             job_id=job_id,
             attempt=1,
             fence=fence,
-            worker_id="legacy-worker",
+            worker_id="delayed-worker",
             lease_deadline=deadline,
             kind=parent.kind,
             payload=dict(parent.payload),
@@ -1756,7 +1741,7 @@ def _rollout(
                     serial=serial,
                     node_id=node_id,
                     not_before=now - timedelta(minutes=1),
-                    not_after=now + timedelta(hours=1),
+                    not_after=now + timedelta(hours=8),
                     fingerprint=f"fingerprint-{serial}",
                 )
             )
@@ -1806,6 +1791,7 @@ def _target_evidence() -> dict[str, object]:
         "package_version": PACKAGE["package_version"],
         "self_test_passed": True,
         "status": "upgraded",
+        "activation_receipt": ACTIVATION_RECEIPT,
     }
 
 
@@ -1826,7 +1812,32 @@ def _upgrade_node(
             certificate_serial,
             30,
             capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=NEW_IDENTITY,
+            runtime_identity={**NEW_IDENTITY, "package_activation": {**ACTIVATION_RECEIPT, "node_id": node_id}},
         )
         is None
     )
+
+
+@pytest.mark.parametrize("receipt", [None, {**ACTIVATION_RECEIPT, "phase": "armed"}, {**ACTIVATION_RECEIPT, "attempt_nonce": "0" * 64}, {**ACTIVATION_RECEIPT, "source_package_sha256": "0" * 64}])
+def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(tmp_path, receipt):
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "missing-ack")
+    _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**NEW_IDENTITY, "package_activation": receipt}) is None
+    assert _operation_nodes(sessions, job.id) == [NODE_A]
+    with sessions() as session:
+        assert session.get(Job, job.id).state != "succeeded"
+
+
+def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path):
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "rollback-result")
+    _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    receipt = {**ACTIVATION_RECEIPT, "phase": "rolled_back", "outcome": "source_restored_and_restarted"}
+    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**OLD_IDENTITY, "package_activation": receipt}) is None
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent.state == "waiting-for-operator"
+        assert "rolled_back" in parent.status_reason
+        attempt = session.scalar(select(AgentOperationAttempt))
+        assert attempt.result["package_activation"] == receipt
+        assert attempt.state == "failed"
+    assert _operation_nodes(sessions, job.id) == [NODE_A]

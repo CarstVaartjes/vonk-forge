@@ -548,6 +548,15 @@ impl AgentHttpClient {
         })
     }
 
+    pub async fn package_activation_grant(&self, receipt: &vonk_agent_protocol::PackageActivationReceipt, runtime_identity: &AgentRuntimeIdentity) -> Result<SignedHostHelperGrant, ClientError> {
+        let body = canonical_json(&serde_json::json!({"node_id": self.node_id, "receipt": receipt, "runtime_identity": runtime_identity})).map_err(|_| ClientError::Protocol)?;
+        let response = self.client.post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?).header("content-type", "application/json").body(body).send().await?;
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let response: HostRuntimeGrantResponse = parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        Ok(response.grant)
+    }
+
     pub async fn agent_upgrade_grant(
         &self,
         claim: &AgentClaim,

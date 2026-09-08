@@ -449,6 +449,16 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+
+
+class PackageActivationGrantRequest(StrictJSONModel):
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    receipt: PackageActivationReceipt
+    runtime_identity: AgentRuntimeIdentity
+
+
 class AgentUpgradeGrantRequest(AgentGrantRequest):
     package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
@@ -2153,6 +2163,19 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
+
+    @agent.post("/agent-upgrade/activation-grant", response_model=HostHelperGrantResponse)
+    def package_activation_grant(body: PackageActivationGrantRequest, request: Request) -> Response:
+        identity = workload_helper_identity(request)
+        if identity.node_id != body.node_id:
+            raise HTTPException(status_code=403, detail="activation node mismatch")
+        try:
+            grant = host_runtime_service().issue_package_activation_grant(
+                node_id=body.node_id, receipt=body.receipt, runtime_identity=body.runtime_identity,
+                certificate_serial=identity.certificate_serial)
+            return _json_response(_host_grant_response(grant))
+        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
+            raise HTTPException(status_code=409, detail="package activation authority rejected request") from None
 
     @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
     def agent_upgrade_grant(
