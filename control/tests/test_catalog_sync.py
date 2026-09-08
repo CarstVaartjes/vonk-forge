@@ -378,3 +378,29 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(tmp_path: Pat
         assert run.state == "failed"
         assert run.active_slot is None
         assert run.error_code == "recipe_library.unavailable"
+
+
+@pytest.mark.parametrize("damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"])
+def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
+    sessions, service, reader, _item = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    result = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    assert sync.get(result.id) == result
+    with sessions.begin() as session:
+        row = session.get(RecipeLibrarySyncRun, result.id)
+        damaged = dict(row.result)
+        if damage == "missing-problems":
+            del damaged["problems"]
+        elif damage == "string-count":
+            damaged["withdrawn_count"] = "7"
+        elif damage == "null":
+            damaged = None
+        elif damage == "invalid-problem":
+            damaged["problems"] = [{"detail": "missing code"}]
+        else:
+            damaged["undeclared"] = None
+        row.result = damaged
+    with pytest.raises(CatalogSyncError, match="stored catalog sync result is invalid"):
+        sync.get(result.id)
+    with pytest.raises(CatalogSyncError, match="stored catalog sync result is invalid"):
+        sync.automatic()

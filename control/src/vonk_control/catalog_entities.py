@@ -15,6 +15,11 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .auth import CursorCodec
+from .catalog_revision_contract import (
+    read_catalog_document,
+    read_catalog_projection,
+    write_catalog_projection,
+)
 from .models import (
     CatalogDocument,
     CatalogDocumentHead,
@@ -143,7 +148,11 @@ class CatalogEntityService:
             if candidate is not None:
                 candidate.state = "failed"
                 if reason:
-                    candidate.projected = {**candidate.projected, "failure_reason": reason[:240]}
+                    projected = read_catalog_projection(candidate).model_dump(
+                        mode="json", exclude_none=False
+                    )
+                    projected["failure_reason"] = reason[:240]
+                    candidate.projected = write_catalog_projection(projected, kind=candidate.kind)
             head.candidate_revision_id = None
 
     def get_entity(self, entity_id: str) -> CatalogDocumentRevision:
@@ -172,7 +181,9 @@ class CatalogEntityService:
             return revision
 
     def _bind_recipe_models(self, session: Session, revision: CatalogDocumentRevision) -> None:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_catalog_document(revision)
+        if not isinstance(recipe, RecipeDefinition):
+            raise CatalogValidationError("catalog.recipe_invalid", "recipe revision is not a recipe document")
         models, bindings = [], []
         artifact_inputs = []
         for selection in recipe.models:
@@ -180,7 +191,9 @@ class CatalogEntityService:
             model_revision = session.scalar(select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "model", CatalogDocumentRevision.publisher == ref.publisher, CatalogDocumentRevision.slug == ref.slug, CatalogDocumentRevision.content_digest == ref.content_sha256, CatalogDocumentRevision.state == "active").limit(1))
             if model_revision is None:
                 raise CatalogValidationError("catalog.model_reference_missing", f"model reference is missing: {ref.publisher}/{ref.slug}")
-            model = ModelDefinition.model_validate(model_revision.document)
+            model = read_catalog_document(model_revision)
+            if not isinstance(model, ModelDefinition):
+                raise CatalogValidationError("catalog.model_reference_invalid", "referenced revision is not a model document")
             models.append(model)
             if model_revision.artifact_key is None:
                 raise CatalogValidationError("catalog.model_artifact_missing", f"model artifact projection is missing: {ref.publisher}/{ref.slug}")
@@ -192,7 +205,11 @@ class CatalogEntityService:
             raise CatalogValidationError("catalog.model_reference_invalid", str(error)) from error
         revision.artifact_key = _digest({"models": artifact_inputs})
         revision.execution_key = _digest({"execution": _execution_projection(recipe), "artifact_key": revision.artifact_key})
-        revision.projected = {**revision.projected, "artifact_inputs": artifact_inputs}
+        projected = read_catalog_projection(revision).model_dump(
+            mode="json", exclude_none=False
+        )
+        projected["artifact_inputs"] = artifact_inputs
+        revision.projected = write_catalog_projection(projected, kind=revision.kind)
         session.add_all(bindings)
 
 
@@ -217,7 +234,7 @@ def _revision(root: CatalogDocument, parsed: ModelDefinition | RecipeDefinition,
     else:
         projected = {"title": parsed.metadata.title, "description": parsed.metadata.description, "tags": parsed.metadata.tags, "runtime_engine": parsed.runtime.engine, "topology": parsed.topology.model_dump(mode="json")}
         projected.update(_build_projection(parsed))
-    return CatalogDocumentRevision(document_id=root.id, kind=str(parsed.kind), publisher=parsed.identity.publisher, slug=parsed.identity.slug, revision_number=number, schema_version=2, state="candidate", document=copy.deepcopy(clean), content_digest=content_sha256(parsed), artifact_key=artifact_key, execution_key=_digest(_execution_projection(parsed)), download_bytes=download, installed_bytes=installed, projected=projected, created_by=actor, created_at=now)
+    return CatalogDocumentRevision(document_id=root.id, kind=str(parsed.kind), publisher=parsed.identity.publisher, slug=parsed.identity.slug, revision_number=number, schema_version=2, state="candidate", document=copy.deepcopy(clean), content_digest=content_sha256(parsed), artifact_key=artifact_key, execution_key=_digest(_execution_projection(parsed)), download_bytes=download, installed_bytes=installed, projected=write_catalog_projection(projected, kind=str(parsed.kind)), created_by=actor, created_at=now)
 
 
 def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:

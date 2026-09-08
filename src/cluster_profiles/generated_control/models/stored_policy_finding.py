@@ -13,12 +13,12 @@ from typing import cast, Union
 
 
 
-T = TypeVar("T", bound="SourcePolicyFindingResponse")
+T = TypeVar("T", bound="StoredPolicyFinding")
 
 
 
 @_attrs_define
-class SourcePolicyFindingResponse:
+class StoredPolicyFinding:
     """
         Attributes:
             code (str):
@@ -77,11 +77,11 @@ class SourcePolicyFindingResponse:
 
         path = d.pop("path")
 
-        source_policy_finding_response = cls(
+        stored_policy_finding = cls(
             code=code,
             detail=detail,
             line=line,
             path=path,
         )
 
-        return source_policy_finding_response
+        return stored_policy_finding

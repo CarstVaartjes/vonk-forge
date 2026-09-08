@@ -353,17 +353,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('node_id')
     )
-    op.create_table('agent_profiles',
-    sa.Column('node_id', sa.String(length=36), nullable=False),
-    sa.Column('display_name', sa.String(length=200), nullable=False),
-    sa.Column('hostname', sa.String(length=255), nullable=False),
-    sa.Column('lifecycle', sa.String(length=16), nullable=False),
-    sa.Column('labels', sa.JSON(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('node_id')
-    )
-
     op.create_table('jobs',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('request_id', sa.String(length=36), nullable=False),
@@ -978,7 +967,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_jobs_reconciliation_id'), table_name='jobs')
     op.drop_index(op.f('ix_jobs_created_at'), table_name='jobs')
     op.drop_table('jobs')
-    op.drop_table('agent_profiles')
     op.drop_table('agent_node_profiles')
     op.drop_index(op.f('ix_agent_enrollments_state'), table_name='agent_enrollments')
     op.drop_index(op.f('ix_agent_enrollments_node_id'), table_name='agent_enrollments')

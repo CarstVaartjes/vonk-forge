@@ -55,6 +55,10 @@ from .models import (
 )
 from .models import AgentOperation as StoredAgentOperation
 from .package_activation import matches_receipt
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
 from .workload_helper_authority import _load_private_key
 
 
@@ -490,6 +494,14 @@ class HostRuntimeAuthorityService:
         )
         node = session.get(AgentNode, node_id)
         certificate = session.get(AgentCertificate, certificate_serial)
+        try:
+            exact_observations = (
+                parse_stored_run_plan(run.plan).observation_schema_version == 2
+                if run is not None
+                else False
+            )
+        except RecipeExecutionContractError:
+            exact_observations = False
         if (
             run is None
             or installation is None
@@ -500,7 +512,7 @@ class HostRuntimeAuthorityService:
             or certificate is None
             or run.state != "running"
             or run_node.state != "running"
-            or run.plan.get("observation_schema_version") != 2
+            or not exact_observations
             or installation.state != "installed"
             or revision.kind != "recipe"
             or revision.schema_version != 2

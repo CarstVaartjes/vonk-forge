@@ -2495,7 +2495,10 @@ where
     E: Executor,
     F: FnOnce() -> Result<(), LoopError>,
 {
-    for result in state.pending_results()? {
+    for (operation, result) in state.pending_results()? {
+        result
+            .validate_for_operation(&operation)
+            .map_err(StateError::from)?;
         client.submit_result(&result).await?;
         state.acknowledge(&result)?;
     }
@@ -2553,6 +2556,9 @@ where
         Err(StateError::Busy) => return Ok(()),
         Err(error) => return Err(error.into()),
     };
+    result
+        .validate_for_operation(&claim.operation)
+        .map_err(StateError::from)?;
     client.submit_result(&result).await?;
     state.acknowledge(&result)?;
     Ok(())

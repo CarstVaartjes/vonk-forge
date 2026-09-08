@@ -1,10 +1,14 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::BTreeMap, io::Cursor};
+use std::io::Cursor;
 
 use tempfile::tempdir;
 use vonk_agent::build_source::{BuildSourceError, materialize_source_bundle};
-use vonk_agent_protocol::{canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    canonical_json,
+    generated::{SourceBundleDigestManifest, SourceBundleFile},
+    hex_sha256,
+};
 
 fn tar(files: &[(&str, &[u8])]) -> Vec<u8> {
     let mut payload = Vec::new();
@@ -30,19 +34,16 @@ fn tar(files: &[(&str, &[u8])]) -> Vec<u8> {
 fn canonical_bundle_digest_is_verified_before_materialization() {
     let payload = tar(&[("Dockerfile", b"FROM scratch\nUSER 10001\n")]);
     let file_sha = hex_sha256(b"FROM scratch\nUSER 10001\n");
-    let manifest = BTreeMap::from([
-        (
-            "files",
-            serde_json::json!([{
-                "mode": 420,
-                "path": "Dockerfile",
-                "sha256": file_sha,
-                "size": 24
-            }]),
-        ),
-        ("schema_version", serde_json::json!(1)),
-        ("total_bytes", serde_json::json!(24)),
-    ]);
+    let manifest = SourceBundleDigestManifest {
+        schema_version: 1,
+        files: vec![SourceBundleFile {
+            mode: 420_i64.try_into().unwrap(),
+            path: "Dockerfile".into(),
+            sha256: file_sha,
+            size: 24,
+        }],
+        total_bytes: 24,
+    };
     let expected = hex_sha256(&canonical_json(&manifest).unwrap());
     let root = tempdir().unwrap();
 

@@ -32,6 +32,7 @@ from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
     ClusterMappingService,
+    validate_mapping_parameters,
 )
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .model_cache import ModelCacheService
@@ -65,6 +66,12 @@ from .preparation_contract import (
     TargetAssetState,
 )
 from .recipe_builds import RecipeBuildPlan
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    parse_stored_build_plan,
+    run_plan_document,
+)
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .resource_planning import (
@@ -929,7 +936,12 @@ class RecipeLifecyclePhaseExecutor:
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
             source_bundle_sha256 = build.source_bundle_sha256
-            stored_plan = build.plan
+            try:
+                stored_plan = build_plan_document(build.plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                ) from error
             if (
                 expected_build_input is not None
                 and expected_build_input != build_input_sha256
@@ -951,16 +963,21 @@ class RecipeLifecyclePhaseExecutor:
         # it queues the child.
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, revision_id)
+            try:
+                parsed_plan = parse_stored_build_plan(stored_plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                ) from error
             if (
-                not isinstance(stored_plan, Mapping)
-                or stored_plan.get("build_id") != build_id
-                or stored_plan.get("recipe_revision_id") != revision_id
-                or stored_plan.get("source_bundle_sha256") != source_bundle_sha256
-                or stored_plan.get("build_input_sha256") != build_input_sha256
+                parsed_plan.build_id != build_id
+                or parsed_plan.recipe_revision_id != revision_id
+                or parsed_plan.source_bundle_sha256 != source_bundle_sha256
+                or parsed_plan.build_input_sha256 != build_input_sha256
                 or revision is None
                 or revision.kind != "recipe"
                 or revision.state != "active"
-                or stored_plan.get("recipe_content_sha256") != revision.content_digest
+                or parsed_plan.recipe_content_sha256 != revision.content_digest
             ):
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-plan-invalid"
@@ -1368,9 +1385,15 @@ class RunSwitchOperationService:
             run = session.get(RecipeRun, run_id)
             if run is None:
                 raise KeyError(run_id)
+            try:
+                stored_run_plan = run_plan_document(run.plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.run-plan-invalid"
+                ) from error
             installation = session.get(RecipeInstallation, run.installation_id)
             revision = _active_recipe_revision(
-                session, run.plan.get("recipe_revision_id")
+                session, stored_run_plan.get("recipe_revision_id")
             )
             mapping = session.get(ClusterMapping, run.mapping_id)
             mapping_nodes = tuple(
@@ -1394,7 +1417,7 @@ class RunSwitchOperationService:
             model_digest = (
                 installation.model_content_sha256
                 if installation is not None
-                else _string_or_none(run.plan.get("model_content_sha256"))
+                else _string_or_none(stored_run_plan.get("model_content_sha256"))
             )
             recipe_digest = revision.content_digest if revision is not None else None
             _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
@@ -2682,12 +2705,22 @@ class RunSwitchOperationService:
             ),
         )
         observed_architecture: str | None = None
+        candidate_plan_valid = True
         if candidate is not None:
-            candidate_plan = candidate.plan if isinstance(candidate.plan, Mapping) else {}
-            raw_observed = candidate_plan.get("platform")
-            if isinstance(raw_observed, str) and raw_observed:
-                observed_architecture = raw_observed
-            if observed_architecture is None:
+            try:
+                candidate_plan = parse_stored_build_plan(candidate.plan)
+            except RecipeExecutionContractError:
+                candidate_plan_valid = False
+                blockers.append(
+                    _as_reason(
+                        "run-switch.container-build-plan-invalid",
+                        "The persisted source-build plan is invalid.",
+                        scope="operation",
+                    )
+                )
+            else:
+                observed_architecture = candidate_plan.platform
+            if candidate_plan_valid and observed_architecture is None:
                 builder = session.get(AgentNode, candidate.builder_node_id)
                 if builder is not None and isinstance(builder.architecture, str):
                     observed_architecture = _normalise_architecture(builder.architecture)
@@ -3845,7 +3878,7 @@ class RunSwitchOperationService:
             mapping_id=mapping.id,
             mapping_generation=mapping.generation,
             topology_name=mapping.topology_name,
-            parameters=dict(mapping.parameters),
+            parameters=validate_mapping_parameters(mapping.parameters),
             placement_digest=mapping.placement_digest,
             action="reuse",
             nodes=[

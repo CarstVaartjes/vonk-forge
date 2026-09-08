@@ -11,8 +11,8 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import ModelDefinition
 
+from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
@@ -30,6 +30,10 @@ from .models import (
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
+)
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    installation_plan_document,
 )
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -240,7 +244,7 @@ class InstallAdmissionService:
                         build=build,
                         mapping=mapping,
                         mapping_nodes=mapping_nodes,
-                        parameters=mapping.parameters,
+                        parameters=validate_mapping_parameters(mapping.parameters),
                         resolved_entities=resolved_entities,
                     )
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence
@@ -634,35 +638,38 @@ class InstallAdmissionService:
         ):
             raise InstallPlanConflict("install.plan_stale")
         try:
-            resolved_entities = resolve_recipe_entities(session, revision.document)
-            model_content_digests = _resolved_model_content_digests(
-                session, resolved_entities["models"]
-            )
+            resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
             raise InstallPlanConflict("install.dependencies_stale") from error
         except (TypeError, ValueError) as error:
             raise InstallPlanConflict("install.dependencies_stale") from error
+        try:
+            persisted_plan = installation_plan_document(
+                {
+                    "schema_version": 1,
+                    "mapping_id": plan.mapping_id,
+                    "mapping_generation": plan.mapping_generation,
+                    "recipe_build_id": plan.recipe_build_id,
+                    "image_digest": plan.image_digest,
+                    "recipe_revision_id": plan.recipe_revision_id,
+                    "recipe_content_sha256": plan.recipe_content_sha256,
+                    "allowed": plan.allowed,
+                    "plan_digest": plan.plan_digest,
+                    "compiled_execution_plans": plan.compiled_plan_by_node,
+                    "nodes": [_node_document(item) for item in plan.nodes],
+                }
+            )
+        except RecipeExecutionContractError as error:
+            raise InstallPlanConflict("install.plan_invalid") from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             model_content_sha256=_primary_model_sha256(revision.document),
-            model_content_digests=sorted(model_content_digests),
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
             recipe_build_id=plan.recipe_build_id,
             image_digest=plan.image_digest,
             plan_digest=plan.plan_digest,
-            plan={
-                "schema_version": 1,
-                "mapping_id": plan.mapping_id,
-                "mapping_generation": plan.mapping_generation,
-                "recipe_build_id": plan.recipe_build_id,
-                "image_digest": plan.image_digest,
-                "recipe_revision_id": plan.recipe_revision_id,
-                "recipe_content_sha256": plan.recipe_content_sha256,
-                "plan_digest": plan.plan_digest,
-                "compiled_execution_plans": plan.compiled_plan_by_node,
-                "nodes": [_node_document(item) for item in plan.nodes],
-            },
+            plan=persisted_plan,
             state="planned",
             actor=actor,
             created_at=now,
@@ -749,32 +756,6 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
     ):
         raise InstallPlanConflict("install.model_identity_unavailable")
     return digest
-
-
-def _resolved_model_content_digests(
-    session: Session, models: Sequence[CatalogDocumentRevision]
-) -> set[str]:
-    """Return every canonical model content identity used by an installation."""
-
-    pending = [model.content_digest for model in models]
-    resolved: dict[str, CatalogDocumentRevision] = {}
-    while pending:
-        digest = pending.pop()
-        if digest in resolved:
-            continue
-        revision = session.scalar(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.content_digest == digest,
-                CatalogDocumentRevision.state == "active",
-            )
-        )
-        if revision is None:
-            raise InstallPlanConflict("install.model_dependency_unavailable")
-        definition = ModelDefinition.model_validate(revision.document)
-        resolved[digest] = revision
-        pending.extend(dependency.content_sha256 for dependency in definition.dependencies)
-    return set(resolved)
 
 
 def _is_source_build(document: Mapping[str, object]) -> bool:

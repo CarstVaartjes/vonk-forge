@@ -27,6 +27,10 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    run_plan_document,
+)
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
@@ -580,6 +584,24 @@ class RunAdmissionService:
         # topology.  Singleton runs retain a durable generation while their
         # rendezvous fields remain explicitly nullable.
         observation_schema_version = 2
+        try:
+            persisted_plan = run_plan_document(
+                {
+                    "schema_version": 1,
+                    "observation_schema_version": observation_schema_version,
+                    "run_generation": 1,
+                    "installation_id": plan.installation_id,
+                    "alias": plan.alias,
+                    "mapping_id": plan.mapping_id,
+                    "mapping_generation": plan.mapping_generation,
+                    "recipe_revision_id": plan.recipe_revision_id,
+                    "plan_digest": plan.plan_digest,
+                    "nodes": [_node_document(item) for item in plan.nodes],
+                    "execution_mode": "one-shot-jobs" if logical_job else None,
+                }
+            )
+        except RecipeExecutionContractError as error:
+            raise RunPlanConflict("run.plan_invalid") from error
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,
@@ -587,18 +609,7 @@ class RunAdmissionService:
             run_generation=1,
             alias=plan.alias,
             plan_digest=plan.plan_digest,
-            plan={
-                "schema_version": 1,
-                "observation_schema_version": observation_schema_version,
-                "run_generation": 1,
-                "installation_id": plan.installation_id,
-                "alias": plan.alias,
-                "mapping_id": plan.mapping_id,
-                "mapping_generation": plan.mapping_generation,
-                "recipe_revision_id": plan.recipe_revision_id,
-                "plan_digest": plan.plan_digest,
-                "nodes": [_node_document(item) for item in plan.nodes],
-            },
+            plan=persisted_plan,
             state="planned",
             route_state="withdrawn",
             actor=actor,

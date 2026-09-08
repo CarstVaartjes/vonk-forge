@@ -22,7 +22,22 @@ pub enum RotationError {
     Issued(#[from] PairingError),
 }
 
-pub async fn rotate_if_due(config: &AgentConfig) -> Result<bool, RotationError> {
+impl RotationError {
+    pub fn retryable(&self) -> bool {
+        matches!(self, Self::Client(error) if error.retryable())
+    }
+}
+
+pub fn active_identity_is_valid(config: &AgentConfig) -> Result<bool, RotationError> {
+    let root = config.data_dir.join("credentials");
+    let paths = active_identity_paths(&root)?;
+    Ok(!identity_expired(&paths, Utc::now())?)
+}
+
+pub async fn rotate_if_due(
+    config: &AgentConfig,
+    client: &AgentHttpClient,
+) -> Result<bool, RotationError> {
     let root = config.data_dir.join("credentials");
     let now = Utc::now();
     if let Some((generation, paths)) = staged_identity_paths(&root)? {
@@ -33,6 +48,7 @@ pub async fn rotate_if_due(config: &AgentConfig) -> Result<bool, RotationError> 
                 .activate(generation)
                 .await?;
             publish_staged(&root, generation)?;
+            client.replace_identity(config, &paths)?;
             return Ok(true);
         }
     }
@@ -74,5 +90,6 @@ pub async fn rotate_if_due(config: &AgentConfig) -> Result<bool, RotationError> 
     if active != paths {
         return Err(IdentityError::Node.into());
     }
+    client.replace_identity(config, &paths)?;
     Ok(true)
 }

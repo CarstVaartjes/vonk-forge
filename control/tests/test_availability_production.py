@@ -14,15 +14,17 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import availability_production
+from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import (
     RecipeImageAvailabilityScheduler,
     build_recipe_image_availability,
 )
+from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
     Base,
-    CatalogDocument,
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
@@ -123,43 +125,12 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     sessions = sessionmaker(engine)
     now = datetime.now(UTC)
     with sessions.begin() as session:
-        session.add(
-            CatalogDocumentRevision(
-                id="model-revision",
-                document_id="model-document",
-                kind="model",
-                publisher=model["identity"]["publisher"],
-                slug=model["identity"]["slug"],
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=model,
-                content_digest=content_sha256(ModelDefinition.model_validate(model)),
-                artifact_key="b" * 64,
-                projected={},
-                created_by="test",
-                created_at=now,
-            )
-        )
-        session.add(
-            CatalogDocumentRevision(
-                id="recipe-revision",
-                document_id="recipe-document",
-                kind="recipe",
-                publisher=recipe.identity.publisher,
-                slug=recipe.identity.slug,
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
-                artifact_key="c" * 64,
-                execution_key="a" * 64,
-                projected={},
-                created_by="test",
-                created_at=now,
-            )
-        )
+        catalog = CatalogEntityService(session, clock=lambda: now)
+        model_revision = catalog.create_draft(model, actor="test")
+        catalog.resolve(model_revision.id, actor="test")
+        recipe_revision = catalog.create_draft(recipe.model_dump(mode="json"), actor="test")
+        catalog.resolve(recipe_revision.id, actor="test")
+        recipe_revision_id = recipe_revision.id
 
     class Transport:
         def pull_and_export(self, reference, destination, **_kwargs):
@@ -190,7 +161,7 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
         clock=lambda: now,
     )
     queued = production.service.start(
-        "recipe-revision", actor="operator", request_id="r" * 36
+        recipe_revision_id, actor="operator", request_id="r" * 36
     )
     claim = production.service.claim_pending(owner_id="worker-a")[0]
     production.service.run_claim(claim)
@@ -198,7 +169,7 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     with sessions() as session:
         receipt = session.scalar(select(RuntimeImageReceipt))
         assert receipt is not None
-        assert receipt.recipe_revision_id == "recipe-revision"
+        assert receipt.recipe_revision_id == recipe_revision_id
         assert receipt.state == "verified"
     production.close()
 
@@ -546,68 +517,20 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     now = datetime.now(UTC)
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        session.add_all(
-            [
-                CatalogDocument(
-                    id="connected-model-document",
-                    kind="model",
-                    publisher=model.identity.publisher,
-                    slug=model.identity.slug,
-                    title=model.metadata.description[:40],
-                    created_by="test",
-                    created_at=now,
-                    updated_at=now,
-                ),
-                CatalogDocument(
-                    id="connected-recipe-document",
-                    kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                    title=recipe.metadata.title,
-                    created_by="test",
-                    created_at=now,
-                    updated_at=now,
-                ),
-            ]
-        )
-        session.add_all(
-            [
-                CatalogDocumentRevision(
-                    id="connected-model-revision",
-                    document_id="connected-model-document",
-                    kind="model",
-                    publisher=model.identity.publisher,
-                    slug=model.identity.slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=model.model_dump(mode="json"),
-                    content_digest=model_digest,
-                    artifact_key="b" * 64,
-                    projected={},
-                    created_by="test",
-                    created_at=now,
-                ),
-                CatalogDocumentRevision(
-                    id="connected-recipe-revision",
-                    document_id="connected-recipe-document",
-                    kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=recipe.model_dump(mode="json"),
-                    content_digest=recipe_digest,
-                    artifact_key="c" * 64,
-                    execution_key="a" * 64,
-                    projected={},
-                    created_by="test",
-                    created_at=now,
-                ),
-            ]
-        )
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
+    )
+    connected_recipe_revision_id = catalog.import_recipe_library(
+        "test",
+        library_commit="0" * 40,
+        source_path="recipes/synthetic-tiny.json",
+        document=recipe.model_dump(mode="json"),
+        expected_content_sha256=recipe_digest,
+        dependency_documents=[model.model_dump(mode="json")],
+        source_bundle_sha256="c" * 64,
+    ).id
 
     def model_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, request=request, content=model_bytes)
@@ -653,7 +576,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 session.add(
                     RecipeBuild(
                         id=build_id,
-                        recipe_revision_id="connected-recipe-revision",
+                        recipe_revision_id=connected_recipe_revision_id,
                         builder_node_id=plan.builder_node_id,
                         source_bundle_sha256="c" * 64,
                         build_input_sha256=final_input,
@@ -710,7 +633,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         clock=lambda: now,
     )
     parent = production.service.start(
-        "connected-recipe-revision",
+        connected_recipe_revision_id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000722",
     )

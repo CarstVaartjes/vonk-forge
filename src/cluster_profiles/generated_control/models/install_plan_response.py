@@ -12,8 +12,8 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.stored_install_node_plan import StoredInstallNodePlan
   from ..models.install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
-  from ..models.install_node_plan_response import InstallNodePlanResponse
 
 
 
@@ -31,7 +31,7 @@ class InstallPlanResponse:
             image_digest (str):
             mapping_generation (int):
             mapping_id (str):
-            nodes (list['InstallNodePlanResponse']):
+            nodes (list['StoredInstallNodePlan']):
             plan_digest (str):
             recipe_build_id (Union[None, str]):
             recipe_content_sha256 (str):
@@ -43,7 +43,7 @@ class InstallPlanResponse:
     image_digest: str
     mapping_generation: int
     mapping_id: str
-    nodes: list['InstallNodePlanResponse']
+    nodes: list['StoredInstallNodePlan']
     plan_digest: str
     recipe_build_id: Union[None, str]
     recipe_content_sha256: str
@@ -55,8 +55,8 @@ class InstallPlanResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.stored_install_node_plan import StoredInstallNodePlan
         from ..models.install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
-        from ..models.install_node_plan_response import InstallNodePlanResponse
         allowed = self.allowed
 
         image_digest = self.image_digest
@@ -108,8 +108,8 @@ class InstallPlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.stored_install_node_plan import StoredInstallNodePlan
         from ..models.install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
-        from ..models.install_node_plan_response import InstallNodePlanResponse
         d = dict(src_dict)
         allowed = d.pop("allowed")
 
@@ -122,7 +122,7 @@ class InstallPlanResponse:
         nodes = []
         _nodes = d.pop("nodes")
         for nodes_item_data in (_nodes):
-            nodes_item = InstallNodePlanResponse.from_dict(nodes_item_data)
+            nodes_item = StoredInstallNodePlan.from_dict(nodes_item_data)
 
 
 

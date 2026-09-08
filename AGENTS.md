@@ -75,6 +75,13 @@ maintain parallel handwritten payload fields. Keep handwritten semantic and
 security validation, and pass connected producer/consumer tests that preserve
 required-field presence, nullability and strict structure.
 
+Every application API route must appear in the full OpenAPI schema. Do not use
+`include_in_schema=False` in production routes. Declare byte uploads, downloads,
+and streams explicitly too. Derive narrower client schemas from the complete
+schema; never hide the underlying route to limit a client audience. Keep the
+discovered-route completeness gate in CI, including its deliberate hidden-route
+rejection test.
+
 Consume wire and persisted JSON with the canonical model's JSON validation
 semantics, including JSON already decoded by the database driver. Do not treat
 JSON arrays as malformed Python tuples or disable strict validation to conceal

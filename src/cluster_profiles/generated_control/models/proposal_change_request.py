@@ -21,7 +21,8 @@ T = TypeVar("T", bound="ProposalChangeRequest")
 
 @_attrs_define
 class ProposalChangeRequest:
-    """
+    """ Canonical persisted and API proposal change envelope.
+
         Attributes:
             document (ProposalChangeRequestDocument):
             path (str):

@@ -666,6 +666,12 @@ pub struct ArtifactDistributionResult {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct BoundedErrorResponse {
+    pub detail: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct ClaimRequest {
     pub capabilities: ::std::vec::Vec<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -2269,6 +2275,313 @@ pub struct InstallVonkDebOperation {
     pub rollback: PackageRollbackAuthority,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerAcceptanceBaselineRelease {
+    pub acceptance_only: bool,
+    pub artifacts: InstallerBaselineArtifacts,
+    pub bootstraps: InstallerBaselineBootstraps,
+    pub channel: InstallerAcceptanceBaselineReleaseChannel,
+    pub generation: ::std::string::String,
+    pub images: InstallerReleaseImages,
+    pub schema_version: u8,
+    pub source_sha: ::std::string::String,
+    pub version: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum InstallerAcceptanceBaselineReleaseChannel {
+    #[serde(rename = "dev")]
+    Dev,
+    #[serde(rename = "stable")]
+    Stable,
+}
+impl ::std::fmt::Display for InstallerAcceptanceBaselineReleaseChannel {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Dev => f.write_str("dev"),
+            Self::Stable => f.write_str("stable"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallerAcceptanceBaselineReleaseChannel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "stable" => Ok(Self::Stable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallerAcceptanceBaselineReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for InstallerAcceptanceBaselineReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallerAcceptanceBaselineReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerBaselineArtifacts {
+    #[serde(rename = "agent-package-linux-arm64")]
+    pub agent_package_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "spark-setup-linux-arm64")]
+    pub spark_setup_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "spark-setup-signature-linux-arm64")]
+    pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerBaselineBootstraps {
+    pub spark: InstallerReleaseObject,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerCandidateArtifacts {
+    #[serde(rename = "agent-package-linux-arm64")]
+    pub agent_package_linux_arm64: InstallerPackageArtifact,
+    #[serde(rename = "agent-package-signature-linux-arm64")]
+    pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "nas-payload")]
+    pub nas_payload: InstallerReleaseObject,
+    #[serde(rename = "nas-setup-darwin-amd64")]
+    pub nas_setup_darwin_amd64: InstallerReleaseObject,
+    #[serde(rename = "nas-setup-darwin-arm64")]
+    pub nas_setup_darwin_arm64: InstallerReleaseObject,
+    #[serde(rename = "nas-setup-linux-amd64")]
+    pub nas_setup_linux_amd64: InstallerReleaseObject,
+    #[serde(rename = "nas-setup-linux-arm64")]
+    pub nas_setup_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "spark-setup-linux-arm64")]
+    pub spark_setup_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "spark-setup-signature-linux-arm64")]
+    pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerCandidateBootstraps {
+    pub nas: InstallerReleaseObject,
+    pub spark: InstallerReleaseObject,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerCandidateRelease {
+    pub artifacts: InstallerCandidateArtifacts,
+    pub bootstraps: InstallerCandidateBootstraps,
+    pub channel: InstallerCandidateReleaseChannel,
+    pub generation: ::std::string::String,
+    pub images: InstallerReleaseImages,
+    pub schema_version: u8,
+    pub source_sha: ::std::string::String,
+    pub version: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum InstallerCandidateReleaseChannel {
+    #[serde(rename = "dev")]
+    Dev,
+    #[serde(rename = "stable")]
+    Stable,
+}
+impl ::std::fmt::Display for InstallerCandidateReleaseChannel {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Dev => f.write_str("dev"),
+            Self::Stable => f.write_str("stable"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallerCandidateReleaseChannel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "stable" => Ok(Self::Stable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallerCandidateReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for InstallerCandidateReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallerCandidateReleaseChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerPackageArtifact {
+    pub architecture: ::std::string::String,
+    pub host_signature: ::std::string::String,
+    pub package_version: ::std::string::String,
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
+    pub target_binary_digest: ::std::string::String,
+    pub target_build_digest: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerReleaseIdentity {
+    pub channel: InstallerReleaseIdentityChannel,
+    pub generation: ::std::string::String,
+    pub images: InstallerReleaseImages,
+    pub schema_version: u8,
+    pub source_sha: ::std::string::String,
+    pub version: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum InstallerReleaseIdentityChannel {
+    #[serde(rename = "dev")]
+    Dev,
+    #[serde(rename = "stable")]
+    Stable,
+}
+impl ::std::fmt::Display for InstallerReleaseIdentityChannel {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Dev => f.write_str("dev"),
+            Self::Stable => f.write_str("stable"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallerReleaseIdentityChannel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "stable" => Ok(Self::Stable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallerReleaseIdentityChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for InstallerReleaseIdentityChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallerReleaseIdentityChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerReleaseImages {
+    pub api: ::std::string::String,
+    pub hermes: ::std::string::String,
+    pub litellm: ::std::string::String,
+    pub worker: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum InstallerReleaseManifest {
+    CandidateRelease(InstallerCandidateRelease),
+    AcceptanceBaselineRelease(InstallerAcceptanceBaselineRelease),
+}
+impl ::std::convert::From<InstallerCandidateRelease> for InstallerReleaseManifest {
+    fn from(value: InstallerCandidateRelease) -> Self {
+        Self::CandidateRelease(value)
+    }
+}
+impl ::std::convert::From<InstallerAcceptanceBaselineRelease> for InstallerReleaseManifest {
+    fn from(value: InstallerAcceptanceBaselineRelease) -> Self {
+        Self::AcceptanceBaselineRelease(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallerReleaseObject {
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -4074,6 +4387,22 @@ pub struct RenewRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RequestValidationIssue {
+    pub loc: ::std::vec::Vec<::serde_json::Value>,
+    pub msg: ::std::string::String,
+    #[serde(rename = "type")]
+    pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RequestValidationProblem {
+    pub detail: ::std::string::String,
+    pub issues: ::std::vec::Vec<RequestValidationIssue>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct Resolver {
     pub name: ::std::string::String,
     pub version: u32,
@@ -4667,6 +4996,66 @@ impl ::std::convert::TryFrom<::std::string::String> for SimpleMaterializationMet
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SourceBundleDigestManifest {
+    pub files: ::std::vec::Vec<SourceBundleFile>,
+    pub schema_version: u8,
+    pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SourceBundleFile {
+    pub mode: SourceBundleFileMode,
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+#[derive(Eq)]
+pub struct SourceBundleFileMode(i64);
+impl ::std::ops::Deref for SourceBundleFileMode {
+    type Target = i64;
+    fn deref(&self) -> &i64 {
+        &self.0
+    }
+}
+impl ::std::convert::From<SourceBundleFileMode> for i64 {
+    fn from(value: SourceBundleFileMode) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::TryFrom<i64> for SourceBundleFileMode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: i64) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if ![420_i64, 493_i64].contains(&value) {
+            Err("invalid value".into())
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleFileMode {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        Self::try_from(<i64>::deserialize(deserializer)?)
+            .map_err(|e| <D::Error as ::serde::de::Error>::custom(e.to_string()))
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SourceBundleManifest {
+    pub files: ::std::vec::Vec<SourceBundleFile>,
+    pub schema_version: u8,
+    pub sha256: ::std::string::String,
+    pub total_bytes: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -6220,6 +6609,21 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
             verified_image_digest: raw.verified_image_digest,
             verified_oci_layout_sha256: raw.verified_oci_layout_sha256,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("BoundedErrorResponse", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub detail: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self { detail: raw.detail })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
@@ -7834,6 +8238,367 @@ impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
             package_signature: raw.package_signature,
             rollback: raw.rollback,
             type_: raw.type_,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerAcceptanceBaselineRelease {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize(
+            "InstallerAcceptanceBaselineRelease",
+            &mut value,
+        )
+        .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub acceptance_only: bool,
+            pub artifacts: InstallerBaselineArtifacts,
+            pub bootstraps: InstallerBaselineBootstraps,
+            pub channel: InstallerAcceptanceBaselineReleaseChannel,
+            pub generation: ::std::string::String,
+            pub images: InstallerReleaseImages,
+            pub schema_version: u8,
+            pub source_sha: ::std::string::String,
+            pub version: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            acceptance_only: raw.acceptance_only,
+            artifacts: raw.artifacts,
+            bootstraps: raw.bootstraps,
+            channel: raw.channel,
+            generation: raw.generation,
+            images: raw.images,
+            schema_version: raw.schema_version,
+            source_sha: raw.source_sha,
+            version: raw.version,
+        })
+    }
+}
+impl InstallerAcceptanceBaselineReleaseChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Stable => "stable",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallerAcceptanceBaselineReleaseChannel {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallerAcceptanceBaselineReleaseChannel {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallerAcceptanceBaselineReleaseChannel {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerBaselineArtifacts {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerBaselineArtifacts", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(rename = "agent-package-linux-arm64")]
+            pub agent_package_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "spark-setup-linux-arm64")]
+            pub spark_setup_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "spark-setup-signature-linux-arm64")]
+            pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            agent_package_linux_arm64: raw.agent_package_linux_arm64,
+            spark_setup_linux_arm64: raw.spark_setup_linux_arm64,
+            spark_setup_signature_linux_arm64: raw.spark_setup_signature_linux_arm64,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerBaselineBootstraps {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerBaselineBootstraps", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub spark: InstallerReleaseObject,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self { spark: raw.spark })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerCandidateArtifacts", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(rename = "agent-package-linux-arm64")]
+            pub agent_package_linux_arm64: InstallerPackageArtifact,
+            #[serde(rename = "agent-package-signature-linux-arm64")]
+            pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "nas-payload")]
+            pub nas_payload: InstallerReleaseObject,
+            #[serde(rename = "nas-setup-darwin-amd64")]
+            pub nas_setup_darwin_amd64: InstallerReleaseObject,
+            #[serde(rename = "nas-setup-darwin-arm64")]
+            pub nas_setup_darwin_arm64: InstallerReleaseObject,
+            #[serde(rename = "nas-setup-linux-amd64")]
+            pub nas_setup_linux_amd64: InstallerReleaseObject,
+            #[serde(rename = "nas-setup-linux-arm64")]
+            pub nas_setup_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "spark-setup-linux-arm64")]
+            pub spark_setup_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "spark-setup-signature-linux-arm64")]
+            pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            agent_package_linux_arm64: raw.agent_package_linux_arm64,
+            agent_package_signature_linux_arm64: raw.agent_package_signature_linux_arm64,
+            nas_payload: raw.nas_payload,
+            nas_setup_darwin_amd64: raw.nas_setup_darwin_amd64,
+            nas_setup_darwin_arm64: raw.nas_setup_darwin_arm64,
+            nas_setup_linux_amd64: raw.nas_setup_linux_amd64,
+            nas_setup_linux_arm64: raw.nas_setup_linux_arm64,
+            spark_setup_linux_arm64: raw.spark_setup_linux_arm64,
+            spark_setup_signature_linux_arm64: raw.spark_setup_signature_linux_arm64,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerCandidateBootstraps {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerCandidateBootstraps", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub nas: InstallerReleaseObject,
+            pub spark: InstallerReleaseObject,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            nas: raw.nas,
+            spark: raw.spark,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerCandidateRelease {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerCandidateRelease", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub artifacts: InstallerCandidateArtifacts,
+            pub bootstraps: InstallerCandidateBootstraps,
+            pub channel: InstallerCandidateReleaseChannel,
+            pub generation: ::std::string::String,
+            pub images: InstallerReleaseImages,
+            pub schema_version: u8,
+            pub source_sha: ::std::string::String,
+            pub version: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            artifacts: raw.artifacts,
+            bootstraps: raw.bootstraps,
+            channel: raw.channel,
+            generation: raw.generation,
+            images: raw.images,
+            schema_version: raw.schema_version,
+            source_sha: raw.source_sha,
+            version: raw.version,
+        })
+    }
+}
+impl InstallerCandidateReleaseChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Stable => "stable",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallerCandidateReleaseChannel {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallerCandidateReleaseChannel {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallerCandidateReleaseChannel {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerPackageArtifact {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerPackageArtifact", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub architecture: ::std::string::String,
+            pub host_signature: ::std::string::String,
+            pub package_version: ::std::string::String,
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+            pub target_binary_digest: ::std::string::String,
+            pub target_build_digest: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            architecture: raw.architecture,
+            host_signature: raw.host_signature,
+            package_version: raw.package_version,
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
+            target_binary_digest: raw.target_binary_digest,
+            target_build_digest: raw.target_build_digest,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerReleaseIdentity {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerReleaseIdentity", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub channel: InstallerReleaseIdentityChannel,
+            pub generation: ::std::string::String,
+            pub images: InstallerReleaseImages,
+            pub schema_version: u8,
+            pub source_sha: ::std::string::String,
+            pub version: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            channel: raw.channel,
+            generation: raw.generation,
+            images: raw.images,
+            schema_version: raw.schema_version,
+            source_sha: raw.source_sha,
+            version: raw.version,
+        })
+    }
+}
+impl InstallerReleaseIdentityChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Stable => "stable",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallerReleaseIdentityChannel {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallerReleaseIdentityChannel {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallerReleaseIdentityChannel {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerReleaseImages", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub api: ::std::string::String,
+            pub hermes: ::std::string::String,
+            pub litellm: ::std::string::String,
+            pub worker: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            api: raw.api,
+            hermes: raw.hermes,
+            litellm: raw.litellm,
+            worker: raw.worker,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerReleaseManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerReleaseManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(untagged)]
+        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+        #[derive(Eq)]
+        enum Raw {
+            CandidateRelease(InstallerCandidateRelease),
+            AcceptanceBaselineRelease(InstallerAcceptanceBaselineRelease),
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CandidateRelease(value0) => Self::CandidateRelease(value0),
+            Raw::AcceptanceBaselineRelease(value0) => Self::AcceptanceBaselineRelease(value0),
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallerReleaseObject", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
         })
     }
 }
@@ -10370,6 +11135,47 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RequestValidationIssue", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub loc: ::std::vec::Vec<::serde_json::Value>,
+            pub msg: ::std::string::String,
+            #[serde(rename = "type")]
+            pub type_: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            loc: raw.loc,
+            msg: raw.msg,
+            type_: raw.type_,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RequestValidationProblem", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub detail: ::std::string::String,
+            pub issues: ::std::vec::Vec<RequestValidationIssue>,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            detail: raw.detail,
+            issues: raw.issues,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for Resolver {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10920,6 +11726,73 @@ impl ::std::cmp::PartialEq<str> for SimpleMaterializationMethod {
 impl ::std::cmp::PartialEq<&str> for SimpleMaterializationMethod {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleDigestManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub files: ::std::vec::Vec<SourceBundleFile>,
+            pub schema_version: u8,
+            pub total_bytes: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            files: raw.files,
+            schema_version: raw.schema_version,
+            total_bytes: raw.total_bytes,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleFile {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleFile", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub mode: SourceBundleFileMode,
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            mode: raw.mode,
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub files: ::std::vec::Vec<SourceBundleFile>,
+            pub schema_version: u8,
+            pub sha256: ::std::string::String,
+            pub total_bytes: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            files: raw.files,
+            schema_version: raw.schema_version,
+            sha256: raw.sha256,
+            total_bytes: raw.total_bytes,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
@@ -11676,6 +12549,22 @@ impl<'de> ::serde::Deserialize<'de> for ValidationRecord {
         })
     }
 }
+impl From<&InstallerCandidateBootstraps> for InstallerBaselineBootstraps {
+    fn from(value: &InstallerCandidateBootstraps) -> Self {
+        Self {
+            spark: value.spark.clone(),
+        }
+    }
+}
+impl From<&InstallerPackageArtifact> for InstallerReleaseObject {
+    fn from(value: &InstallerPackageArtifact) -> Self {
+        Self {
+            path: value.path.clone(),
+            sha256: value.sha256.clone(),
+            size: value.size,
+        }
+    }
+}
 impl From<&RecipeJobOutputManifest> for RecipeJobOutputManifestContent {
     fn from(value: &RecipeJobOutputManifest) -> Self {
         Self {
@@ -11806,6 +12695,22 @@ impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
             run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
             world_size: value.world_size,
+        }
+    }
+}
+impl From<&RequestValidationProblem> for BoundedErrorResponse {
+    fn from(value: &RequestValidationProblem) -> Self {
+        Self {
+            detail: value.detail.clone(),
+        }
+    }
+}
+impl From<&SourceBundleManifest> for SourceBundleDigestManifest {
+    fn from(value: &SourceBundleManifest) -> Self {
+        Self {
+            files: value.files.clone(),
+            schema_version: value.schema_version,
+            total_bytes: value.total_bytes,
         }
     }
 }

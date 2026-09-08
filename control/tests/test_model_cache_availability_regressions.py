@@ -6,12 +6,13 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
@@ -273,8 +274,47 @@ def test_two_services_claim_distinct_operations_and_expired_lease_is_recovered(
     fresh.close()
 
 
+def test_eviction_claim_ignores_download_backoff_and_hf_cooldown(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    now = [NOW]
+    data = b"eviction payload"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, content=data)
+
+    service, client = _service(
+        tmp_path, sessions, clock=lambda: now[0], maximum=1, handler=handler
+    )
+    download = _start(
+        service,
+        [_artifact("eviction", data)],
+        "00000000-0000-4000-8000-000000000307",
+    )
+    _drain(service, download.id)
+    assert service.get_operation(download.id).state == "succeeded"
+
+    preview = service.eviction_preview(target_bytes=len(data))
+    assert preview["blockers"] == []
+    eviction = service.evict(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000308",
+        plan_digest=str(preview["plan_digest"]),
+        target_bytes=len(data),
+    )
+    service._hf_cooldown_until = NOW + timedelta(minutes=1)
+
+    assert service._claim_operations(limit=1, respect_backoff=True) == [
+        (eviction.id, "evict")
+    ]
+    service.close()
+    assert client is not None
+    client.close()
+
+
 def test_postgres_concurrent_claims_are_distinct(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -290,15 +330,33 @@ def test_postgres_concurrent_claims_are_distinct(
         [_artifact("pg-b", b"b")],
         "00000000-0000-4000-8000-000000000312",
     )
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        claims = list(
-            executor.map(
-                lambda service: service._claim_operations(
-                    limit=1, respect_backoff=True
-                ),
-                (first, second),
-            )
-        )
+    # The cooldown scan has already loaded both rows into the second
+    # session's identity map when the first worker commits its claim.
+    # A later locking SELECT must refresh that cached claim state.
+    second_loaded = threading.Event()
+    first_committed = threading.Event()
+    original_session = second._session
+
+    @contextmanager
+    def pause_before_lock(*, write=False):
+        with original_session(write=write) as session:
+            def before_lock(state):
+                if state.statement._for_update_arg is not None and not second_loaded.is_set():
+                    second_loaded.set()
+                    assert first_committed.wait(timeout=10)
+
+            event.listen(session, "do_orm_execute", before_lock)
+            yield session
+
+    monkeypatch.setattr(second, "_session", pause_before_lock)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(second._claim_operations, limit=1, respect_backoff=True)
+        try:
+            assert second_loaded.wait(timeout=10)
+            first_claim = first._claim_operations(limit=1, respect_backoff=True)
+        finally:
+            first_committed.set()
+        claims = [first_claim, pending.result(timeout=10)]
     claimed = {claim[0][0] for claim in claims}
     assert claimed == {operation_a.id, operation_b.id}
     first.close()
@@ -654,8 +712,8 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         assert persisted.state == failed.state
         assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
         assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"]["next_retry_at"] is None
-        assert persisted.payload["retry"]["retry_after_seconds"] is None
+        assert persisted.payload["retry"].get("next_retry_at") is None
+        assert persisted.payload["retry"].get("retry_after_seconds") is None
     assert service._hf_cooldown_until is None
 
     # Terminal auth failures do not re-enter the automatic scheduler.
@@ -677,8 +735,8 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         assert persisted is not None
         assert persisted.state == denied.state
         assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"]["next_retry_at"] is None
-        assert persisted.payload["retry"]["retry_after_seconds"] is None
+        assert persisted.payload["retry"].get("next_retry_at") is None
+        assert persisted.payload["retry"].get("retry_after_seconds") is None
     assert service._hf_cooldown_until is None
     assert len(requests) == 3
     denied_repeat = service.check_access_and_resume(

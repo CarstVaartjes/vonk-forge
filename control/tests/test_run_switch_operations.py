@@ -13,7 +13,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
-from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -364,12 +364,24 @@ class StopOnlyLifecycle:
 class PendingBuilds:
     """Small build planner double that preserves the real build contract."""
 
-    def __init__(self, sessions, *, build_id: str, builder_node_id: str, revision_id: str, source_digest: str):
+    def __init__(
+        self,
+        sessions,
+        *,
+        build_id: str,
+        builder_node_id: str,
+        revision_id: str,
+        source_digest: str,
+        template_plan: dict[str, object],
+        template_policy_report: dict[str, object],
+    ):
         self.sessions = sessions
         self.build_id = build_id
         self.builder_node_id = builder_node_id
         self.revision_id = revision_id
         self.source_digest = source_digest
+        self.template_plan = template_plan
+        self.template_policy_report = template_policy_report
         self.calls: list[str] = []
 
     def plan(self, recipe_revision_id: str, builder_node_id: str, *, now):
@@ -385,13 +397,13 @@ class PendingBuilds:
                     source_bundle_sha256=self.source_digest,
                     build_input_sha256="d" * 64,
                     state="planned",
-                    policy_report={"passed": True},
+                    policy_report=self.template_policy_report,
                     plan={
+                        **self.template_plan,
                         "build_id": self.build_id,
                         "recipe_revision_id": self.revision_id,
                         "source_bundle_sha256": self.source_digest,
                         "build_input_sha256": "d" * 64,
-                        "platform": "linux/arm64",
                     },
                     created_at=NOW,
                     updated_at=NOW,
@@ -624,6 +636,72 @@ def _service(
         phase_executor=phase_executor,
         memory_floor_bytes=50,
     )
+
+
+def test_mapping_selection_reads_typed_parameters_from_persisted_mapping(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, _build_id, _nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = {
+            "engine_extension": {"enabled": False, "nullable": None},
+        }
+
+    with sessions() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .order_by(ClusterMappingNode.rank)
+            )
+        )
+        selection = _service(
+            sessions,
+            lifecycle._clock(),
+            lifecycle,
+            RecordingArtifactExecutor(),
+        )._mapping_selection(mapping, mapping_nodes)
+
+    assert selection is not None
+    assert selection.parameters == {
+        "engine_extension": {"enabled": False, "nullable": None}
+    }
+
+
+def test_mapping_selection_rejects_malformed_persisted_parameters(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, _build_id, _nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = ["malformed"]
+
+    with sessions() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .order_by(ClusterMappingNode.rank)
+            )
+        )
+        with pytest.raises(ClusterMappingError, match="persisted mapping parameters"):
+            _service(
+                sessions,
+                lifecycle._clock(),
+                lifecycle,
+                RecordingArtifactExecutor(),
+            )._mapping_selection(mapping, mapping_nodes)
 
 
 def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_path: Path) -> None:
@@ -1122,14 +1200,9 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         build.image_bytes = None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_digest,
-            "source_bundle_sha256": build.source_bundle_sha256,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        # Keep the complete persisted build envelope.  A restart consumes the
+        # durable executable plan; an identity-only fixture is malformed DB
+        # state and must fail closed.
         session.add(
             RecipeSourceBundle(
                 sha256=build.source_bundle_sha256,
@@ -1297,6 +1370,8 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
+        template_plan = dict(build.plan)
+        template_policy_report = dict(build.policy_report)
         session.delete(build)
         session.add(
             RecipeSourceBundle(
@@ -1348,6 +1423,8 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             builder_node_id=builder_id,
             revision_id=revision.id,
             source_digest=source_digest,
+            template_plan=template_plan,
+            template_policy_report=template_policy_report,
         )
     lifecycle._builds = fake_builds
     service = _service(
@@ -1401,14 +1478,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": build.recipe_revision_id,
-            "recipe_content_sha256": revision.content_digest,
-            "source_bundle_sha256": source_digest,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        build.plan = {**build.plan, "source_bundle_sha256": source_digest}
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
@@ -1435,7 +1505,10 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         row = session.get(RecipeBuild, build_id)
         assert row is not None
         row.build_input_sha256 = build_plan.build_input_sha256
-        row.plan["build_input_sha256"] = build_plan.build_input_sha256
+        row.plan = {
+            **row.plan,
+            "build_input_sha256": build_plan.build_input_sha256,
+        }
 
     def start_build(*_args, **_kwargs):
         with sessions.begin() as session:

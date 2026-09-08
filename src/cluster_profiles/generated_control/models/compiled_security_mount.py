@@ -6,28 +6,30 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.compiled_security_mount_source import check_compiled_security_mount_source
+from ..models.compiled_security_mount_source import CompiledSecurityMountSource
+from typing import cast
 
 
 
 
 
 
-T = TypeVar("T", bound="ExecutionMount")
+T = TypeVar("T", bound="CompiledSecurityMount")
 
 
 
 @_attrs_define
-class ExecutionMount:
-    """ The platform-owned mount used by one selected model file.
-
+class CompiledSecurityMount:
+    """
         Attributes:
             read_only (bool):
-            source (str):
+            source (CompiledSecurityMountSource):
             target (str):
      """
 
     read_only: bool
-    source: str
+    source: CompiledSecurityMountSource
     target: str
 
 
@@ -37,7 +39,7 @@ class ExecutionMount:
     def to_dict(self) -> dict[str, Any]:
         read_only = self.read_only
 
-        source = self.source
+        source: str = self.source
 
         target = self.target
 
@@ -59,14 +61,17 @@ class ExecutionMount:
         d = dict(src_dict)
         read_only = d.pop("read_only")
 
-        source = d.pop("source")
+        source = check_compiled_security_mount_source(d.pop("source"))
+
+
+
 
         target = d.pop("target")
 
-        execution_mount = cls(
+        compiled_security_mount = cls(
             read_only=read_only,
             source=source,
             target=target,
         )
 
-        return execution_mount
+        return compiled_security_mount

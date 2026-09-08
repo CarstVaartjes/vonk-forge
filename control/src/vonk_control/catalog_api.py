@@ -18,6 +18,12 @@ from .catalog_service import (
     CatalogService,
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
+from .catalog_sync_contract import (
+    ManagedCatalogStaleRecipe,
+    ManagedCatalogSyncProblem,
+    ManagedCatalogWithdrawnRecipe,
+)
+from .download_contract import upload_request_body
 from .library_contract import Digest, UuidId
 from .recipe_library_types import RecipeLibraryError
 from .strict_json import StrictJSONModel
@@ -89,25 +95,6 @@ class CatalogProblem(StrictModel):
 class ManagedCatalogSyncRequest(StrictModel):
     request_key: UuidId = Field(default_factory=lambda: str(uuid.uuid4()))
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
-
-
-class ManagedCatalogSyncProblem(StrictModel):
-    recipe_uri: str | None = Field(default=None, max_length=256)
-    code: str = Field(min_length=1, max_length=128)
-    detail: str = Field(min_length=1, max_length=256)
-
-
-class ManagedCatalogWithdrawnRecipe(StrictModel):
-    recipe_id: UuidId
-    recipe_uri: str | None = Field(default=None, max_length=256)
-    release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
-
-
-class ManagedCatalogStaleRecipe(StrictModel):
-    recipe_id: UuidId
-    current_revision_id: UuidId
-    stale_installation_count: int = Field(ge=0)
-    stale_run_count: int = Field(ge=0)
 
 
 class ManagedCatalogSyncResponse(StrictModel):
@@ -285,6 +272,7 @@ def install_catalog_routes(
             422: {"model": CatalogProblem},
         },
         operation_id="uploadRecipeSourceBundle",
+        openapi_extra=upload_request_body("application/octet-stream"),
     )
     async def upload_source_bundle(
         request: Request,

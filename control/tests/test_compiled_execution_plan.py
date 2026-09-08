@@ -53,6 +53,7 @@ from vonk_control.models import (
     RuntimeImageReceipt,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
@@ -833,7 +834,38 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                 recipe_build_id=None,
                 image_digest=payload["runtime_image"]["image_digest"],
                 plan_digest="a" * 64,
-                plan={"compiled_execution_plans": {node_id: payload}},
+                plan=installation_plan_document(
+                    {
+                        "schema_version": 1,
+                        "mapping_id": mapping_id,
+                        "mapping_generation": 1,
+                        "recipe_build_id": None,
+                        "image_digest": payload["runtime_image"]["image_digest"],
+                        "recipe_revision_id": revision_id,
+                        "recipe_content_sha256": current_digest,
+                        "allowed": True,
+                        "plan_digest": "a" * 64,
+                        "nodes": [
+                            {
+                                "node_id": node_id,
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "allowed": True,
+                                "inventory_observed_at": None,
+                                "free_bytes": 1,
+                                "active_reserved_bytes": 0,
+                                "reused_bytes": 0,
+                                "required_download_bytes": 0,
+                                "required_bytes": 1,
+                                "disk_floor_bytes": 0,
+                                "free_after_bytes": 0,
+                                "blockers": [],
+                                "warnings": [],
+                            }
+                        ],
+                        "compiled_execution_plans": {node_id: payload},
+                    }
+                ),
                 state="installed",
                 actor="test",
                 created_at=now,

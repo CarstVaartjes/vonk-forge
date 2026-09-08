@@ -25,6 +25,8 @@ from spark_lifecycle_contract import ContractError as SparkContractError
 from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+
 NAS_PLATFORMS = (
     "linux-amd64",
     "linux-arm64",
@@ -508,6 +510,11 @@ def _install_object(objects: Path, key: str, content: bytes, mode: int = 0o644) 
 
 
 def assemble(arguments: argparse.Namespace) -> str:
+    from vonk_agent_protocol.installer_release import (
+        InstallerAcceptanceBaselineRelease,
+        InstallerCandidateRelease,
+    )
+
     channel = arguments.channel
     version = arguments.version
     source_sha = arguments.source_sha
@@ -669,24 +676,40 @@ def assemble(arguments: argparse.Namespace) -> str:
 
         from agent_package_source_publication import package_source
 
-        source_entries = [
-            (path, version) for path in packages.values()
-        ] + [(path, baseline_version) for path in baseline_packages.values()]
+        source_entries = [(path, version) for path in packages.values()] + [
+            (path, baseline_version) for path in baseline_packages.values()
+        ]
         published_sources: dict[str, bytes] = {}
         for source_path, source_version in source_entries:
             try:
                 source = package_source(source_path, version=source_version)
-            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-                raise PublicationError("signed package source closure is invalid") from error
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                subprocess.SubprocessError,
+            ) as error:
+                raise PublicationError(
+                    "signed package source closure is invalid"
+                ) from error
             source_key = source.object_key(channel)
             source_raw = _canonical(source.model_dump(mode="json"))
-            if source_key in published_sources and published_sources[source_key] != source_raw:
+            if (
+                source_key in published_sources
+                and published_sources[source_key] != source_raw
+            ):
                 raise PublicationError("package source build identity is ambiguous")
             if source_key not in published_sources:
                 add_immutable(source_key, source_raw)
-                package_object_key = source.package_url.removeprefix("https://install.vonkforge.ai/")
+                package_object_key = source.package_url.removeprefix(
+                    "https://install.vonkforge.ai/"
+                )
                 add_immutable(package_object_key, source_path.read_bytes())
-                add_immutable(f"{package_object_key}.host.sig", (source.package.package_signature + "\n").encode())
+                add_immutable(
+                    f"{package_object_key}.host.sig",
+                    (source.package.package_signature + "\n").encode(),
+                )
                 published_sources[source_key] = source_raw
 
         for platform in NAS_PLATFORMS:
@@ -777,22 +800,24 @@ def assemble(arguments: argparse.Namespace) -> str:
         )
         baseline_bootstrap_key = f"{baseline_prefix}/bootstraps/spark"
         add_immutable(baseline_bootstrap_key, baseline_bootstrap, 0o755)
-        baseline_release = {
-            "acceptance_only": True,
-            "artifacts": baseline_artifacts,
-            "bootstraps": {
-                "spark": {
-                    "path": baseline_bootstrap_key,
-                    **_record(baseline_bootstrap),
-                }
-            },
-            "channel": channel,
-            "generation": generation,
-            "images": images,
-            "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
-            "source_sha": source_sha,
-            "version": baseline_version,
-        }
+        baseline_release = InstallerAcceptanceBaselineRelease.model_validate(
+            {
+                "acceptance_only": True,
+                "artifacts": baseline_artifacts,
+                "bootstraps": {
+                    "spark": {
+                        "path": baseline_bootstrap_key,
+                        **_record(baseline_bootstrap),
+                    }
+                },
+                "channel": channel,
+                "generation": generation,
+                "images": images,
+                "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
+                "source_sha": source_sha,
+                "version": baseline_version,
+            }
+        ).model_dump(mode="json", by_alias=True)
         baseline_release_raw = _canonical(baseline_release)
         baseline_release_key = f"{baseline_prefix}/release.json"
         add_immutable(baseline_release_key, baseline_release_raw)
@@ -811,19 +836,21 @@ def assemble(arguments: argparse.Namespace) -> str:
         immutable_spark = f"{immutable_prefix}/bootstraps/spark"
         add_immutable(immutable_nas, nas_bootstrap, 0o755)
         add_immutable(immutable_spark, spark_bootstrap, 0o755)
-        release = {
-            "artifacts": release_artifacts,
-            "bootstraps": {
-                "nas": {"path": immutable_nas, **_record(nas_bootstrap)},
-                "spark": {"path": immutable_spark, **_record(spark_bootstrap)},
-            },
-            "channel": channel,
-            "generation": generation,
-            "images": images,
-            "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
-            "source_sha": source_sha,
-            "version": version,
-        }
+        release = InstallerCandidateRelease.model_validate(
+            {
+                "artifacts": release_artifacts,
+                "bootstraps": {
+                    "nas": {"path": immutable_nas, **_record(nas_bootstrap)},
+                    "spark": {"path": immutable_spark, **_record(spark_bootstrap)},
+                },
+                "channel": channel,
+                "generation": generation,
+                "images": images,
+                "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
+                "source_sha": source_sha,
+                "version": version,
+            }
+        ).model_dump(mode="json", by_alias=True)
         release_raw = _canonical(release)
         release_key = f"{immutable_prefix}/release.json"
         add_immutable(release_key, release_raw)
@@ -1861,9 +1888,13 @@ def refresh(arguments: argparse.Namespace) -> None:
         release_signature,
         "release object",
     )
+    from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+
     try:
-        release = json.loads(verified["release_path"])
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        release = InstallerCandidateRelease.model_validate_json(
+            verified["release_path"]
+        ).model_dump(mode="json", by_alias=True)
+    except (UnicodeDecodeError, ValueError) as error:
         raise PublicationError("release object is invalid") from error
     if (
         not isinstance(release, dict)
@@ -2006,7 +2037,7 @@ def main(argv: list[str] | None = None) -> int:
             quarantine_dev_pointer(arguments)
         else:
             refresh(arguments)
-    except (OSError, PublicationError) as error:
+    except (OSError, PublicationError, ValueError) as error:
         print(f"install-release-publication: {error}", file=sys.stderr)
         return 2
     return 0

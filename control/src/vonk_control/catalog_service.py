@@ -6,7 +6,7 @@ import copy
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import BinaryIO
 
@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
@@ -24,13 +25,22 @@ from .catalog_entities import (
     CatalogError,
     CatalogValidationError,
 )
+from .catalog_revision_contract import (
+    read_catalog_document,
+    read_catalog_projection,
+    write_catalog_projection,
+)
 from .models import (
     CatalogDocument,
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
 from .schema_resources import read_runtime_schema
-from .source_bundles import SourceBundleError, SourceBundleStore
+from .source_bundles import (
+    SourceBundleError,
+    SourceBundleStore,
+    parse_source_bundle_manifest,
+)
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
@@ -118,12 +128,7 @@ class CatalogService:
             total_bytes=manifest.total_bytes,
             file_count=len(manifest.files),
             storage_key=f"{manifest.sha256[:2]}/{manifest.sha256}.tar",
-            manifest={
-                "schema_version": 1,
-                "files": [asdict(item) for item in manifest.files],
-                "total_bytes": manifest.total_bytes,
-                "sha256": manifest.sha256,
-            },
+            manifest=json.loads(canonical_message(manifest)),
             verified_at=self._clock(),
         )
         try:
@@ -132,9 +137,13 @@ class CatalogService:
                 if existing is None:
                     session.add(row)
                 else:
+                    if parse_source_bundle_manifest(existing.manifest) != manifest:
+                        raise CatalogValidationError("bundle.metadata_mismatch", "stored source manifest differs from verified bundle")
                     row = existing
         except IntegrityError as error:
             raise CatalogConflict("bundle.storage_conflict", "source bundle metadata conflicts") from error
+        except SourceBundleError as error:
+            raise CatalogValidationError(error.code, error.detail) from error
         return SourceBundleView(
             sha256=row.sha256,
             archive_bytes=row.archive_bytes,
@@ -151,12 +160,16 @@ class CatalogService:
             if row is None:
                 raise KeyError(sha256)
             expected = (row.archive_bytes, row.total_bytes, row.file_count)
+            try:
+                manifest = parse_source_bundle_manifest(row.manifest)
+            except SourceBundleError as error:
+                raise CatalogValidationError(error.code, error.detail) from error
         try:
             stored = self._source_bundles.get(sha256)
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
         observed = (len(stored.archive), stored.manifest.total_bytes, len(stored.manifest.files))
-        if observed != expected:
+        if observed != expected or stored.manifest != manifest:
             raise CatalogValidationError("bundle.metadata_mismatch", "source bundle storage does not match its database metadata")
         return stored.archive
 
@@ -276,7 +289,9 @@ class CatalogService:
             for model in models:
                 self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
             revision = self._upsert_canonical_document(session, recipe.model_dump(mode="json"), actor=actor)
-            projected = dict(revision.projected or {})
+            projected = read_catalog_projection(revision).model_dump(
+                mode="json", exclude_none=False
+            )
             projected.update(
                 {
                     "publication_commit": library_commit,
@@ -291,7 +306,7 @@ class CatalogService:
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision.id)
-                .values(projected=projected)
+                .values(projected=write_catalog_projection(projected, kind=revision.kind))
             )
             session.expire(revision, ["projected"])
             return _view(revision)
@@ -361,9 +376,11 @@ class CatalogService:
                 raise KeyError(recipe_id)
             if clean.get("recipe_sha256") != revision.content_digest:
                 raise CatalogValidationError("catalog.test_report_recipe_mismatch", "test report does not match this recipe revision")
-            projected = dict(revision.projected or {})
+            projected = read_catalog_projection(revision).model_dump(
+                mode="json", exclude_none=False
+            )
             projected["test_report"] = clean
-            revision.projected = projected
+            revision.projected = write_catalog_projection(projected, kind=revision.kind)
             session.flush()
         return clean
 
@@ -374,10 +391,13 @@ class CatalogService:
             revision = _get_active_recipe(session, recipe_id)
             if revision is None:
                 raise KeyError(recipe_id)
-            report = (revision.projected or {}).get("test_report")
-            if not isinstance(report, dict):
+            report = read_catalog_projection(revision).test_report
+            if report is None:
                 raise CatalogConflict("catalog.test_report_required", "attach a passing local test report before publication export")
-            recipe = copy.deepcopy(revision.document)
+            recipe_document = read_catalog_document(revision)
+            if not isinstance(recipe_document, RecipeDefinition):
+                raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
+            recipe = recipe_document.model_dump(mode="json", exclude_none=False, exclude_unset=False)
         identity = recipe["identity"]
         if isinstance(identity, dict):
             identity["publisher"] = target_publisher
@@ -401,19 +421,20 @@ def _resolve_recipe(session: Session, recipe: RecipeDefinition, *, actor: str) -
 
 
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
-    metadata = revision.document.get("metadata", {})
-    metadata = metadata if isinstance(metadata, Mapping) else {}
+    recipe = read_catalog_document(revision)
+    if not isinstance(recipe, RecipeDefinition):
+        raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
     return RecipeRevisionView(
         id=revision.id,
         recipe_id=revision.document_id,
         slug=revision.slug,
-        title=str(metadata.get("title", revision.slug)),
-        description=str(metadata.get("description", "")),
+        title=recipe.metadata.title,
+        description=recipe.metadata.description,
         source_kind="recipe_library",
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,
         schema_version=revision.schema_version,
-        document=copy.deepcopy(revision.document),
+        document=recipe.model_dump(mode="json", exclude_none=False, exclude_unset=False),
         content_sha256=revision.content_digest,
         created_by=revision.created_by,
         created_at=revision.created_at,

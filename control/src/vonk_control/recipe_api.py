@@ -10,13 +10,25 @@ from typing import Any, Protocol
 from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, model_validator
 from starlette.responses import JSONResponse
+from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_forge_contracts import RecipeDefinition
 
 from .audit import AuditRecord
 from .auth import Actor
-from .compiled_execution_plan import CompiledExecutionPlan
 from .library_contract import Digest, ImageDigest, NodeId, Scalar, Text64, UuidId
 from .recipe_action_plans import SharedCachePolicy
+from .recipe_execution_contract import (
+    StoredAdmissionReason as PlanReason,
+)
+from .recipe_execution_contract import (
+    StoredInstallNodePlan as InstallNodePlanResponse,
+)
+from .recipe_execution_contract import (
+    StoredPolicyFinding as SourcePolicyFindingResponse,
+)
+from .recipe_execution_contract import (
+    StoredRunNodePlan as RunNodePlanResponse,
+)
 from .recipe_lifecycle_contract import (
     RecipeLifecycleResult,
     RecipeOperationConflictResponse,
@@ -85,11 +97,6 @@ class StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-class PlanReason(StrictModel):
-    code: str = Field(min_length=1, max_length=80)
-    detail: str = Field(min_length=1, max_length=512)
-
-
 class MappingNodePlanResponse(StrictModel):
     node_id: NodeId
     rank: int
@@ -131,35 +138,11 @@ class ImageDistributionPlanResponse(StrictModel):
     plan_digest: Digest
 
 
-class SourcePolicyFindingResponse(StrictModel):
-    code: str
-    path: str
-    line: int | None
-    detail: str
-
-
 class SourcePolicyResponse(StrictModel):
     passed: bool
     source_bundle_sha256: Digest
     dockerfile: str
     findings: list[SourcePolicyFindingResponse]
-
-
-class InstallNodePlanResponse(StrictModel):
-    node_id: NodeId
-    rank: int
-    role: Text64
-    allowed: bool
-    inventory_observed_at: datetime | None
-    free_bytes: int | None
-    active_reserved_bytes: int
-    reused_bytes: int
-    required_download_bytes: int
-    required_bytes: int
-    disk_floor_bytes: int
-    free_after_bytes: int | None
-    blockers: list[PlanReason]
-    warnings: list[PlanReason]
 
 
 class InstallPlanResponse(StrictModel):
@@ -175,27 +158,6 @@ class InstallPlanResponse(StrictModel):
     compiled_execution_plans: dict[NodeId, CompiledExecutionPlan] = Field(
         default_factory=dict
     )
-
-
-class RunNodePlanResponse(StrictModel):
-    node_id: NodeId
-    rank: int
-    role: Text64
-    endpoint_owner: bool
-    port: int
-    allowed: bool
-    inventory_observed_at: datetime | None
-    memory_kind: str
-    required_memory_bytes: int
-    available_memory_bytes: int | None
-    active_reserved_bytes: int
-    free_after_bytes: int | None
-    memory_floor_bytes: int
-    fabric_address: str | None
-    fabric_bandwidth_mbps: int | None
-    rendezvous_port: int | None
-    blockers: list[PlanReason]
-    warnings: list[PlanReason]
 
 
 class RunPlanResponse(StrictModel):
@@ -477,6 +439,21 @@ def _response(model: type[StrictModel], value: object) -> StrictModel:
     return model.model_validate(_normalize_json(value))
 
 
+def _plan_response_document(value: object) -> dict[str, object]:
+    """Convert internal plan observations to their persisted string contract."""
+
+    document = asdict(value)
+    nodes = document.get("nodes")
+    if isinstance(nodes, (list, tuple)):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            observed_at = node.get("inventory_observed_at")
+            if isinstance(observed_at, datetime):
+                node["inventory_observed_at"] = observed_at.isoformat()
+    return document
+
+
 def install_recipe_operation_routes(
     app: FastAPI,
     *,
@@ -723,7 +700,7 @@ def install_recipe_operation_routes(
             plan = recipes().preview_install(body.mapping_id, body.recipe_build_id)
         except (KeyError, ValueError) as error:
             return conflict(request, error)
-        value = asdict(plan)
+        value = _plan_response_document(plan)
         value["compiled_execution_plans"] = plan.compiled_plan_by_node
         return _response(InstallPlanResponse, value)
 
@@ -765,7 +742,7 @@ def install_recipe_operation_routes(
         administrator(actor)
         return _response(
             RunPlanResponse,
-            asdict(recipes().preview_run(body.installation_id, body.alias)),
+            _plan_response_document(recipes().preview_run(body.installation_id, body.alias)),
         )
 
     @app.post(

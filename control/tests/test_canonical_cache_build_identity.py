@@ -9,6 +9,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds import (
@@ -16,12 +18,16 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     derive_build_input_identity,
 )
-from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
 def _digest(value: object) -> str:
+    if isinstance(value, dict) and value.get("kind") == "model":
+        return content_sha256(ModelDefinition.model_validate(value))
+    if isinstance(value, dict) and value.get("kind") == "recipe":
+        return content_sha256(RecipeDefinition.model_validate(value))
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -38,19 +44,19 @@ def _sessions():
 
 
 def _model_document(
-    *, path: str, file_digest: str, roles: list[str]
+    *, path: str, file_digest: str, roles: list[str], publisher: str = "owner", slug: str = "model"
 ) -> dict[str, object]:
     document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
         .read_text(encoding="utf-8")
     )
-    document["identity"]["publisher"] = "owner"
-    document["identity"]["slug"] = "model"
-    document["identity"]["model"]["publisher"] = "owner"
-    document["identity"]["model"]["slug"] = "model"
+    document["identity"]["publisher"] = publisher
+    document["identity"]["slug"] = slug
+    document["identity"]["model"]["publisher"] = publisher
+    document["identity"]["model"]["slug"] = slug
     document["source"] = {
-        "repository": "https://huggingface.co/owner/model",
+        "repository": f"https://huggingface.co/{publisher}/{slug}",
         "revision": "a" * 40,
     }
     document["files"] = [
@@ -65,16 +71,22 @@ def _model_document(
     return ModelDefinition.model_validate(document).model_dump(mode="json")
 
 
-def _recipe_document(model_digest: str) -> dict[str, object]:
+def _recipe_document(
+    model_digest: str,
+    *,
+    publisher: str = "owner",
+    slug: str = "recipe",
+    model_slug: str = "model",
+) -> dict[str, object]:
     document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
-    document["identity"]["publisher"] = "owner"
-    document["identity"]["slug"] = "recipe"
-    document["models"][0]["model"]["publisher"] = "owner"
-    document["models"][0]["model"]["slug"] = "model"
+    document["identity"]["publisher"] = publisher
+    document["identity"]["slug"] = slug
+    document["models"][0]["model"]["publisher"] = publisher
+    document["models"][0]["model"]["slug"] = model_slug
     document["models"][0]["model"]["content_sha256"] = model_digest
     document["models"][0]["files"][0]["file_id"] = "weights"
     return document
@@ -91,6 +103,25 @@ def _add_active(
     document: dict[str, object],
     revision_number: int = 1,
 ) -> CatalogDocumentRevision:
+    if kind == "model":
+        parsed = ModelDefinition.model_validate(document)
+        projected: dict[str, object] = {
+            "identity": parsed.identity.model_dump(mode="json"),
+            "modalities": parsed.modalities,
+            "artifact_count": len(parsed.files),
+            "download_bytes": parsed.download_bytes,
+            "installed_bytes": parsed.installed_bytes,
+        }
+    else:
+        parsed = RecipeDefinition.model_validate(document)
+        projected = {
+            "title": parsed.metadata.title,
+            "description": parsed.metadata.description,
+            "tags": list(parsed.metadata.tags),
+            "runtime_engine": parsed.runtime.engine,
+            "topology": parsed.topology.model_dump(mode="json"),
+        }
+        projected.update(_build_projection(parsed))
     root = CatalogDocument(
         id=root_id,
         kind=kind,
@@ -111,9 +142,9 @@ def _add_active(
         schema_version=2,
         state="active",
         document=document,
-        content_digest=_digest(document),
+        content_digest=content_sha256(parsed),
         artifact_key=("a" * 64 if kind == "model" else None),
-        projected={},
+        projected=write_catalog_projection(projected, kind=kind),
         created_by="test",
         created_at=NOW,
     )
@@ -178,10 +209,15 @@ def test_canonical_recipe_resolution_uses_selected_file_identity_and_provenance(
     assert second.digest == first.digest
 
     changed_document = _model_document(
-        path="weights/other.safetensors", file_digest=file_digest, roles=["weights"]
+        path="weights/other.safetensors",
+        file_digest=file_digest,
+        roles=["weights"],
+        slug="changed-model",
     )
     changed_digest = _digest(changed_document)
-    changed_recipe = _recipe_document(changed_digest)
+    changed_recipe = _recipe_document(
+        changed_digest, slug="changed-recipe", model_slug="changed-model"
+    )
     with sessions.begin() as session:
         _add_active(
             session,
