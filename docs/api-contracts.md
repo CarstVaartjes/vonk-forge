@@ -64,6 +64,15 @@ models. A JSON contract document loaded from a database must still be parsed
 with its canonical model before use. A database row is not proof that the
 document satisfies the contract.
 
+Use JSON validation semantics for wire documents and persisted JSON, even when
+the database driver has already decoded them into dictionaries and lists.
+Pydantic's strict Python-object validation has different rules for tuples,
+UUIDs and datetimes; applying it to decoded JSON can reject the model's own
+serialized output. Pass the JSON representation to `model_validate_json`
+instead of relaxing types with `strict=False`. Connected persistence tests
+must serialize the producer, store and load the document, then run the real
+consumer.
+
 Persisted progress is a contract too. Validate the complete stored document
 before interpreting a missing child or adapter state. Only a declared optional
 field may be omitted; nullability independently controls whether `null` is

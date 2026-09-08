@@ -75,6 +75,11 @@ maintain parallel handwritten payload fields. Keep handwritten semantic and
 security validation, and pass connected producer/consumer tests that preserve
 required-field presence, nullability and strict structure.
 
+Consume wire and persisted JSON with the canonical model's JSON validation
+semantics, including JSON already decoded by the database driver. Do not treat
+JSON arrays as malformed Python tuples or disable strict validation to conceal
+that mode mismatch. Test the actual serialize/store/load/consume path.
+
 Optional fields with a declared `None` default accept omission and explicit
 `null` as the same value. Omit those unused fields when sending documents.
 Normalize through the authoritative model before hashing or signing, and use
