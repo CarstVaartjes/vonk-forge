@@ -135,7 +135,7 @@ class DistributedRecoveryCoordinator:
                     continue
                 try:
                     run_plan = run_plan_document(run.plan)
-                except RecipeExecutionContractError as error:
+                except RecipeExecutionContractError:
                     run.state = "failed"
                     run.route_state = "withdrawn"
                     run.route_error = "stored run plan is invalid"

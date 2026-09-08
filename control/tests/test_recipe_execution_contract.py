@@ -4,6 +4,7 @@ import pytest
 
 from vonk_control.recipe_execution_contract import (
     RecipeExecutionContractError,
+    StoredRunNodePlan,
     build_plan_document,
     parse_stored_build_policy,
     parse_stored_installation_plan,
@@ -146,3 +147,16 @@ def test_build_plan_optional_target_is_omitted_in_canonical_document() -> None:
     }
     document = build_plan_document(value)
     assert "target" not in document
+
+
+def test_inventory_timestamp_schema_remains_a_formatted_string() -> None:
+    timestamp = StoredRunNodePlan.model_json_schema()["properties"][
+        "inventory_observed_at"
+    ]
+    assert timestamp == {
+        "anyOf": [
+            {"format": "date-time", "type": "string"},
+            {"type": "null"},
+        ],
+        "title": "Inventory Observed At",
+    }

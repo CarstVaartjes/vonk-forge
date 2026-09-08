@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Literal, TypeVar
+from typing import Annotated, Literal, TypeVar
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol import (
@@ -22,6 +22,13 @@ from vonk_agent_protocol import (
 
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
+
+
+DateTimeString = Annotated[
+    str,
+    Field(json_schema_extra={"format": "date-time"}),
+]
+
 
 class RecipeExecutionContractError(ValueError):
     """A persisted recipe execution document is not the current contract."""
@@ -43,7 +50,7 @@ class StoredInstallNodePlan(_PersistedModel):
     allowed: bool
     # These nullable fields are required: their null is an observation, not
     # an omitted optional default.
-    inventory_observed_at: str | datetime | None
+    inventory_observed_at: DateTimeString | None
     free_bytes: int | None = Field(ge=0)
     active_reserved_bytes: int = Field(ge=0)
     reused_bytes: int = Field(ge=0)
@@ -54,13 +61,9 @@ class StoredInstallNodePlan(_PersistedModel):
     blockers: list[StoredAdmissionReason]
     warnings: list[StoredAdmissionReason]
 
-    @field_validator("inventory_observed_at", mode="before")
+    @field_validator("inventory_observed_at")
     @classmethod
-    def observation_timestamp_is_aware(
-        cls, value: str | datetime | None
-    ) -> str | None:
-        if isinstance(value, datetime):
-            value = value.isoformat()
+    def observation_timestamp_is_aware(cls, value: str | None) -> str | None:
         if value is not None and datetime.fromisoformat(value).tzinfo is None:
             raise ValueError("observation timestamp must include a timezone")
         return value
@@ -96,7 +99,7 @@ class StoredRunNodePlan(_PersistedModel):
     endpoint_owner: bool
     port: int = Field(ge=1, le=65535)
     allowed: bool
-    inventory_observed_at: str | datetime | None
+    inventory_observed_at: DateTimeString | None
     memory_kind: Literal["unified", "host", "accelerator"]
     required_memory_bytes: int = Field(ge=0)
     available_memory_bytes: int | None
@@ -109,13 +112,9 @@ class StoredRunNodePlan(_PersistedModel):
     blockers: list[StoredAdmissionReason]
     warnings: list[StoredAdmissionReason]
 
-    @field_validator("inventory_observed_at", mode="before")
+    @field_validator("inventory_observed_at")
     @classmethod
-    def observation_timestamp_is_aware(
-        cls, value: str | datetime | None
-    ) -> str | None:
-        if isinstance(value, datetime):
-            value = value.isoformat()
+    def observation_timestamp_is_aware(cls, value: str | None) -> str | None:
         if value is not None and datetime.fromisoformat(value).tzinfo is None:
             raise ValueError("observation timestamp must include a timezone")
         return value

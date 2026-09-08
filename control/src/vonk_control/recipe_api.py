@@ -433,6 +433,21 @@ def _response(model: type[StrictModel], value: object) -> StrictModel:
     return model.model_validate(_normalize_json(value))
 
 
+def _plan_response_document(value: object) -> dict[str, object]:
+    """Convert internal plan observations to their persisted string contract."""
+
+    document = asdict(value)
+    nodes = document.get("nodes")
+    if isinstance(nodes, (list, tuple)):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            observed_at = node.get("inventory_observed_at")
+            if isinstance(observed_at, datetime):
+                node["inventory_observed_at"] = observed_at.isoformat()
+    return document
+
+
 def install_recipe_operation_routes(
     app: FastAPI,
     *,
@@ -679,7 +694,7 @@ def install_recipe_operation_routes(
             plan = recipes().preview_install(body.mapping_id, body.recipe_build_id)
         except (KeyError, ValueError) as error:
             return conflict(request, error)
-        value = asdict(plan)
+        value = _plan_response_document(plan)
         value["compiled_execution_plans"] = plan.compiled_plan_by_node
         return _response(InstallPlanResponse, value)
 
@@ -721,7 +736,7 @@ def install_recipe_operation_routes(
         administrator(actor)
         return _response(
             RunPlanResponse,
-            asdict(recipes().preview_run(body.installation_id, body.alias)),
+            _plan_response_document(recipes().preview_run(body.installation_id, body.alias)),
         )
 
     @app.post(
