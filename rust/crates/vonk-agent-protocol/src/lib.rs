@@ -20,6 +20,17 @@ pub use generated::{
     RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
     RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
 };
+pub use generated::{
+    ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
+    HostHelperGrantClaims, HostHelperSignature as HostHelperGrantSignature,
+    HostHelperSignature as RecipeRunObservationReceiptSignature,
+    HostOperation as HostHelperOperation, HostRuntimeRequest,
+    HostRuntimeRequestAction as HostRuntimeAction, RecipeRunInspectionBinding,
+    RecipeRunObservationReceiptClaims,
+    RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
+    RestartVonkUnitOperationUnit as HostHelperRestartUnit, SignedHostHelperGrant,
+    SignedRecipeRunObservationReceipt as RecipeRunObservationReceipt,
+};
 
 pub mod operation_progress;
 pub use operation_progress::{
@@ -37,10 +48,11 @@ pub use package_upgrade::{
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as DeError};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+#[cfg(test)]
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
@@ -54,91 +66,28 @@ const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATI
 pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
 const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostHelperRestartUnit {
-    Agent,
-    Helper,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostHelperContainerRuntimeAction {
-    RuntimePreflight,
-    ImageImport,
-    ImageInspect,
-    RunInspect,
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum HostHelperOperation {
-    InstallVonkDeb {
-        package_sha256: String,
-        package_signature: String,
-        rollback: PackageRollbackAuthority,
-    },
-    ConfirmPackageActivation {
-        package_sha256: String,
-        attempt_nonce: String,
-    },
-    RestartVonkUnit {
-        unit: HostHelperRestartUnit,
-    },
-    ScheduleReboot {
-        delay_seconds: u16,
-    },
-    ExecuteContainerRuntimeRequest {
-        action: HostHelperContainerRuntimeAction,
-        job_id: Uuid,
-        operation_id: Uuid,
-        attempt: u32,
-        fence: Uuid,
-        request_sha256: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        observation_identity_sha256: Option<String>,
-    },
-}
-
 impl HostHelperOperation {
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        canonical_generated_json(self)?;
         let valid = match self {
-            Self::InstallVonkDeb {
-                package_sha256,
-                package_signature,
-                rollback,
-            } => {
-                lower_hex(package_sha256, 64)
-                    && lower_hex(package_signature, 128)
-                    && rollback.valid()
-                    && rollback.source.package_sha256 != *package_sha256
+            Self::InstallVonkDebOperation(operation) => {
+                operation.rollback.valid()
+                    && operation.rollback.source.package_sha256 != operation.package_sha256
             }
-            Self::ConfirmPackageActivation {
-                package_sha256,
-                attempt_nonce,
-            } => lower_hex(package_sha256, 64) && lower_hex(attempt_nonce, 64),
-            Self::RestartVonkUnit { .. } => true,
-            Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
-            Self::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256,
-                observation_identity_sha256,
-            } => {
-                job_id.get_version() == Some(uuid::Version::Random)
-                    && operation_id.get_version() == Some(uuid::Version::Random)
-                    && *attempt > 0
-                    && fence.get_version() == Some(uuid::Version::Random)
-                    && lower_hex(request_sha256, 64)
-                    && observation_identity_sha256.as_ref().is_none_or(|digest| {
-                        *action == HostHelperContainerRuntimeAction::RunInspect
-                            && lower_hex(digest, 64)
-                    })
+            Self::ConfirmPackageActivationOperation(_)
+            | Self::RestartVonkUnitOperation(_)
+            | Self::ScheduleRebootOperation(_) => true,
+            Self::ExecuteContainerRuntimeRequestOperation(operation) => {
+                operation.job_id.get_version() == Some(uuid::Version::Random)
+                    && operation.operation_id.get_version() == Some(uuid::Version::Random)
+                    && operation.fence.get_version() == Some(uuid::Version::Random)
+                    && operation
+                        .observation_identity_sha256
+                        .as_ref()
+                        .is_none_or(|digest| {
+                            operation.action == HostHelperContainerRuntimeAction::RunInspect
+                                && lower_hex(digest, 64)
+                        })
             }
         };
         if valid {
@@ -147,18 +96,6 @@ impl HostHelperOperation {
             Err(ProtocolError::Identity("host helper operation"))
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostHelperGrantClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub request_id: Uuid,
-    pub node_id: String,
-    pub issued_at: i64,
-    pub expires_at: i64,
-    pub operation: HostHelperOperation,
 }
 
 impl HostHelperGrantClaims {
@@ -174,22 +111,6 @@ impl HostHelperGrantClaims {
         }
         self.operation.validate()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostHelperGrantSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct SignedHostHelperGrant {
-    pub schema_version: u8,
-    pub claims: HostHelperGrantClaims,
-    pub signature: HostHelperGrantSignature,
 }
 
 impl SignedHostHelperGrant {
@@ -221,31 +142,6 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer)
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum HostRuntimeAction {
-    RuntimePreflight,
-    ImageImport,
-    ImageInspect,
-    RunInspect,
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HostRuntimeRequest {
-    pub schema_version: u8,
-    pub action: HostRuntimeAction,
-    pub job_id: Uuid,
-    pub operation_id: Uuid,
-    pub attempt: u32,
-    pub fence: Uuid,
-    pub arguments: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observation: Option<RecipeRunInspectionBinding>,
 }
 
 impl HostRuntimeRequest {
@@ -285,32 +181,6 @@ impl HostRuntimeRequest {
 /// inspection request.  Because the host-helper grant signs the canonical
 /// request digest, these fields are bound to the exact RunInspect arguments and
 /// cannot be replayed for another generation or installed recipe.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunInspectionBinding {
-    pub artifact_set_digest: String,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    #[serde(deserialize_with = "required_optional")]
-    pub local_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "required_optional")]
-    pub master_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "required_optional")]
-    pub master_port: Option<u16>,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    pub model_identity: String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub role: String,
-    pub run_id: Uuid,
-    pub run_generation: u64,
-    pub runtime_arguments_sha256: String,
-    pub world_size: u32,
-}
-
 impl RecipeRunInspectionBinding {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.mapping_generation == 0
@@ -350,26 +220,6 @@ impl RecipeRunInspectionBinding {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RecipeRunObservationOutcome {
-    Running,
-    NotRunning,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceiptClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub node_id: String,
-    pub request_id: Uuid,
-    pub request_sha256: String,
-    pub observation_identity_sha256: String,
-    pub outcome: RecipeRunObservationOutcome,
-    pub observed_at: i64,
-}
-
 impl RecipeRunObservationReceiptClaims {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
@@ -386,22 +236,6 @@ impl RecipeRunObservationReceiptClaims {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceiptSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationReceipt {
-    pub schema_version: u8,
-    pub claims: RecipeRunObservationReceiptClaims,
-    pub signature: RecipeRunObservationReceiptSignature,
 }
 
 impl RecipeRunObservationReceipt {
@@ -453,19 +287,13 @@ impl RecipeRunObservationWire {
             || self.helper_receipt.claims.observation_identity_sha256
                 != self.observation_identity_sha256
             || match &self.grant.claims.operation {
-                HostHelperOperation::ExecuteContainerRuntimeRequest {
-                    action,
-                    job_id,
-                    attempt,
-                    request_sha256,
-                    observation_identity_sha256,
-                    ..
-                } => {
-                    *action != HostHelperContainerRuntimeAction::RunInspect
-                        || *job_id != self.binding.run_id
-                        || u32::try_from(self.binding.run_generation).ok() != Some(*attempt)
-                        || request_sha256 != &self.helper_receipt.claims.request_sha256
-                        || observation_identity_sha256.as_deref()
+                HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
+                    operation.action != HostHelperContainerRuntimeAction::RunInspect
+                        || operation.job_id != self.binding.run_id
+                        || u32::try_from(self.binding.run_generation).ok()
+                            != Some(operation.attempt)
+                        || operation.request_sha256 != self.helper_receipt.claims.request_sha256
+                        || operation.observation_identity_sha256.as_deref()
                             != Some(self.observation_identity_sha256.as_str())
                 }
                 _ => true,
