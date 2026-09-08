@@ -541,10 +541,11 @@ mod tests {
             } else {
                 "linux-amd64"
             }
-            .into(),
+            .parse()
+            .unwrap(),
             source_build: true,
             minimum_free_bytes: 0,
-            fabric_connectivity: "none".into(),
+            fabric_connectivity: "none".parse().unwrap(),
             fabric_minimum_mbps: 0,
             mandatory_capabilities: vec![],
         }
@@ -697,7 +698,7 @@ mod tests {
             .join("runtime-root-with-a-deliberately-long-path-for-podman");
         let runner = Runner::default();
         let mut req = request();
-        req.fabric_connectivity = "full_mesh".into();
+        req.fabric_connectivity = "full_mesh".parse().unwrap();
         req.fabric_minimum_mbps = 100000;
         let result = RuntimePreflight {
             runner: &runner,

@@ -17,7 +17,7 @@ fn progress() -> AgentProgress {
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
         node_id: NODE_ID.to_owned(),
         operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-        progress: json!({"phase": "executing"}),
+        progress: serde_json::from_value(json!({"phase": "executing"})).unwrap(),
         schema_version: 1,
     }
 }
@@ -65,8 +65,11 @@ fn nested_progress_rejects_invalid_totals_scalars_and_unknown_fields() {
         json!({"phase":"copying", "observed_at":"2026-09-08T00:00:00"}),
         json!({"phase":"copying", "members":[{"member_id":"a","phase":"copying"},{"member_id":"a","phase":"copying"}]}),
     ] {
-        let mut message = progress();
-        message.progress = document;
-        assert!(message.validate().is_err());
+        let mut message = serde_json::to_value(progress()).unwrap();
+        message["progress"] = document;
+        assert!(
+            serde_json::from_value::<AgentProgress>(message)
+                .map_or(true, |message| message.validate().is_err())
+        );
     }
 }

@@ -62,11 +62,11 @@ and reuse the canonical model-cache and runtime-image receipt types.
 
 ## Rust and generated clients
 
-Rust uses `serde` structs and enums, with explicit semantic validation where
-types alone are insufficient. The current Rust protocol definitions are
-handwritten; they are not generated from Pydantic. Job envelopes and signed
-observations use the shared model graph and connected wire checks. The retired
-operation graph removal is tracked in the launch progress document.
+Rust wire structs and enums are generated from the authoritative Pydantic
+models by `scripts/generate-agent-wire`, using pinned typify 0.7.0. The exporter
+checks in the exact validation schema; typify generates the declarations used
+by production protocol and HTTP consumers. Handwritten code retains semantic,
+execution, and signature validation rather than defining competing wire fields.
 Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
@@ -95,10 +95,26 @@ when its Python validator remains strict. `test_api_contract_graph.py` permits
 open objects only at explicitly documented engine-value and authority-document
 extension points; it rejects opaque fixed nested documents.
 
-Future Rust type generation should consume schemas exported from this same
-Pydantic graph. It must preserve field presence, nullability and tagged unions,
-and retain explicit semantic validation and the connected wire tests. Rust
-type generation is not currently enabled.
+Every generated model validates its input against the exact exported schema
+before Serde constructs the value, including direct nested deserialization.
+The deterministic adapter preserves required nullable fields, rejects unknown
+fields and incorrect integer tokens, materializes declared defaults, and checks
+bounded scalars. Primitive extension unions retain JSON values so integers do
+not silently pass through floating-point alternatives. Formatted Pydantic
+strings retain their bytes; a date-time validation format does not normalize a
+digest-bound string. Pydantic inheritance also generates identity projections.
+
+Canonical output omits only optional fields whose value is `None`/`null`.
+Required nullable fields remain explicit, and declared nonnull defaults are
+materialized, including zero, false, and empty collections. Incoming missing
+and null values are equivalent for optional nullable fields. This policy is
+model-aware: engine-owned JSON nulls are preserved. Producers and verifiers
+apply the same policy before hashing or signing.
+
+Outgoing directly constructed models use `canonical_generated_json` at HTTP
+boundaries. The generation check runs in the required Controller/Spark wire CI
+lane; stale schema or Rust output fails that check. Connected producer/consumer
+checks additionally verify semantic validation and signed or hashed bytes.
 
 ## Required launch checks
 

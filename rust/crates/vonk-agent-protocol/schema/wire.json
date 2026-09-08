@@ -3880,6 +3880,7 @@
           "title": "Last Progress At"
         },
         "members": {
+          "default": [],
           "items": {
             "$ref": "#/$defs/OperationMemberProgress"
           },
@@ -7312,7 +7313,8 @@
           ],
           "default": null,
           "format": "date-time",
-          "title": "Start Deadline"
+          "title": "Start Deadline",
+          "x-vonk-source-type": "string"
         },
         "world_size": {
           "minimum": 1,
