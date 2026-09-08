@@ -15,6 +15,7 @@ on:
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
       - rust/crates/vonk-build-egress/**
+      - rust/crates/vonk-runtime-probe/**
       - rust/crates/vonk-repair-helper-probe/**
       - scripts/agent-package-metadata
       - scripts/build-agent-deb
