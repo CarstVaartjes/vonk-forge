@@ -273,6 +273,45 @@ def test_two_services_claim_distinct_operations_and_expired_lease_is_recovered(
     fresh.close()
 
 
+def test_eviction_claim_ignores_download_backoff_and_hf_cooldown(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    now = [NOW]
+    data = b"eviction payload"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, content=data)
+
+    service, client = _service(
+        tmp_path, sessions, clock=lambda: now[0], maximum=1, handler=handler
+    )
+    download = _start(
+        service,
+        [_artifact("eviction", data)],
+        "00000000-0000-4000-8000-000000000307",
+    )
+    _drain(service, download.id)
+    assert service.get_operation(download.id).state == "succeeded"
+
+    preview = service.eviction_preview(target_bytes=len(data))
+    assert preview["blockers"] == []
+    eviction = service.evict(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000308",
+        plan_digest=str(preview["plan_digest"]),
+        target_bytes=len(data),
+    )
+    service._hf_cooldown_until = NOW + timedelta(minutes=1)
+
+    assert service._claim_operations(limit=1, respect_backoff=True) == [
+        (eviction.id, "evict")
+    ]
+    service.close()
+    assert client is not None
+    client.close()
+
+
 def test_postgres_concurrent_claims_are_distinct(
     tmp_path: Path, postgres_engine
 ) -> None:
