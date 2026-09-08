@@ -21,6 +21,7 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
+    ClusterMapping,
     ClusterMappingNode,
     NodeArtifact,
     RecipeBuild,
@@ -393,9 +394,12 @@ def _service(sessions, *, preflight=True, **kwargs):
             datetime(2026, 8, 7, 12, tzinfo=UTC),
             floor=kwargs.get("disk_floor_bytes", 10_000_000_000),
         )
+    compiled_plan_provider = kwargs.pop(
+        "compiled_plan_provider", _compiled_plan_provider
+    )
     return InstallAdmissionService(
         sessions,
-        compiled_plan_provider=_compiled_plan_provider,
+        compiled_plan_provider=compiled_plan_provider,
         **kwargs,
     )
 
@@ -515,6 +519,69 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     blocked = service.plan_install(mapping, None, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
+
+
+def test_install_admission_reads_mapping_parameters_through_typed_boundary(
+    tmp_path,
+) -> None:
+    sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
+    captured: dict[str, object] = {}
+
+    def provider(**kwargs: object) -> dict[str, dict[str, object]]:
+        captured["parameters"] = kwargs["parameters"]
+        return _compiled_plan_provider(**kwargs)
+
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = {
+            **mapping.parameters,
+            "engine_extension": {
+                "enabled": False,
+                "nullable": None,
+                "values": [0, "preserved"],
+            },
+        }
+
+    service = _service(
+        sessions,
+        compiled_plan_provider=provider,
+        inventory_max_age=300,
+        disk_floor_bytes=10,
+    )
+    plan = service.plan_install(mapping_id, None, now=now)
+
+    assert plan.allowed is True
+    assert captured["parameters"] == {
+        "concurrency": 1,
+        "context_tokens": 1024,
+        "engine_extension": {
+            "enabled": False,
+            "nullable": None,
+            "values": [0, "preserved"],
+        },
+        "max_model_len": 32768,
+    }
+
+
+def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None:
+    sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = ["malformed"]
+
+    plan = _service(
+        sessions, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping_id, None, now=now)
+
+    assert plan.allowed is False
+    assert any(
+        blocker.code == "install.compiled_plan_unavailable"
+        and "persisted mapping parameters are invalid" in blocker.detail
+        for node in plan.nodes
+        for blocker in node.blockers
+    )
 
 
 @pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])

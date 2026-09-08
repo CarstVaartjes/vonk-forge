@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -28,6 +29,24 @@ class ClusterMappingError(ValueError):
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
         super().__init__(detail)
+
+
+_MAPPING_PARAMETERS = TypeAdapter(
+    dict[str, object], config=ConfigDict(strict=True, allow_inf_nan=False)
+)
+
+
+def validate_mapping_parameters(value: object) -> dict[str, object]:
+    """Validate decoded mapping parameters without constraining engine keys."""
+
+    try:
+        encoded = json.dumps(value, allow_nan=False, separators=(",", ":"))
+        parsed = _MAPPING_PARAMETERS.validate_json(encoded, strict=True)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ClusterMappingError(
+            "mapping.parameters_invalid", "persisted mapping parameters are invalid"
+        ) from error
+    return copy.deepcopy(parsed)
 
 
 def _active_recipe_revision(
@@ -230,7 +249,7 @@ class ClusterMappingService:
                 generation=plan.generation,
                 node_count=len(plan.nodes),
                 state="ready",
-                parameters=copy.deepcopy(plan.parameters),
+                parameters=validate_mapping_parameters(plan.parameters),
                 placement_digest=plan.placement_digest,
                 endpoint_owner_node_id=endpoint[0],
                 created_by=actor,

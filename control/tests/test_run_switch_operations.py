@@ -13,7 +13,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
-from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -624,6 +624,72 @@ def _service(
         phase_executor=phase_executor,
         memory_floor_bytes=50,
     )
+
+
+def test_mapping_selection_reads_typed_parameters_from_persisted_mapping(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, _build_id, _nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = {
+            "engine_extension": {"enabled": False, "nullable": None},
+        }
+
+    with sessions() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .order_by(ClusterMappingNode.rank)
+            )
+        )
+        selection = _service(
+            sessions,
+            lifecycle._clock(),
+            lifecycle,
+            RecordingArtifactExecutor(),
+        )._mapping_selection(mapping, mapping_nodes)
+
+    assert selection is not None
+    assert selection.parameters == {
+        "engine_extension": {"enabled": False, "nullable": None}
+    }
+
+
+def test_mapping_selection_rejects_malformed_persisted_parameters(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, _build_id, _nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping.parameters = ["malformed"]
+
+    with sessions() as session:
+        mapping = session.get(ClusterMapping, mapping_id)
+        assert mapping is not None
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .order_by(ClusterMappingNode.rank)
+            )
+        )
+        with pytest.raises(ClusterMappingError, match="persisted mapping parameters"):
+            _service(
+                sessions,
+                lifecycle._clock(),
+                lifecycle,
+                RecordingArtifactExecutor(),
+            )._mapping_selection(mapping, mapping_nodes)
 
 
 def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_path: Path) -> None:
