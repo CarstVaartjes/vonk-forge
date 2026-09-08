@@ -84,8 +84,5 @@ fn cli_version_and_self_test_share_the_compiled_semantic_identity() {
         }
     );
     assert!(identity.self_test_passed);
-    assert_eq!(
-        identity.observation_receipt_public_key,
-        Some("09".repeat(32))
-    );
+    assert_eq!(identity.observation_receipt_public_key, "09".repeat(32));
 }
