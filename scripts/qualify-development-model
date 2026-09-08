@@ -28,7 +28,6 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--library-root", type=Path, default=DEFAULT_LIBRARY_ROOT)
     parser.add_argument("--level", choices=("structural", "container"), default="container")
     parser.add_argument("--engine", default="docker")
-    parser.add_argument("--artifact-root", type=Path, default=Path("/var/lib/vonk/models"))
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
@@ -121,8 +120,6 @@ def main() -> int:
         args.level,
         "--engine",
         args.engine,
-        "--artifact-root",
-        str(args.artifact_root),
         "--timeout-seconds",
         str(args.timeout_seconds),
     ]

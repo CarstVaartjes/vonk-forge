@@ -11,7 +11,7 @@ use vonk_agent_helper::operations::{
     CommandOutput, CommandRunner, ManagedRoots, OperationExecutor,
 };
 use vonk_agent_helper::protocol::{
-    ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation, ManagedArea,
+    ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
     PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
 };
 use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
@@ -157,10 +157,6 @@ fn runtime_image_archive() -> (Vec<u8>, String) {
 fn every_permitted_operation_has_an_exact_typed_shape() {
     let signer = signer(7);
     let operations = [
-        HostOperation::CreateManagedDirectory {
-            area: ManagedArea::Models,
-            relative_path: "sha256/aa".to_owned(),
-        },
         HostOperation::InstallVonkDeb {
             rollback: rollback_authority(),
             package_sha256: "c".repeat(64),
@@ -221,8 +217,13 @@ fn rejects_unknown_fields_and_untyped_process_control() {
 }
 
 #[test]
-fn protocol_rejects_removed_slot_and_supervisor_operations() {
+fn protocol_rejects_removed_host_operations() {
     for operation in [
+        serde_json::json!({
+            "type": "create-managed-directory",
+            "area": "models",
+            "relative_path": "sha256/aa",
+        }),
         serde_json::json!({
             "type": "activate-agent-slot",
             "slot": "a",
@@ -532,8 +533,6 @@ fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     let data = temp.path().join("data");
     let agent_data = temp.path().join("agent-data");
     let roots = ManagedRoots::under(&data).with_agent_data(&agent_data);
-    fs::create_dir_all(&roots.models).unwrap();
-    fs::create_dir_all(&roots.state).unwrap();
     fs::create_dir_all(&roots.incoming).unwrap();
     fs::create_dir_all(&roots.agent_data).unwrap();
     fs::create_dir_all(
@@ -1134,32 +1133,6 @@ fn runtime_rejects_privilege_and_unmanaged_mounts_before_docker() {
         );
     }
     assert!(runner.calls.lock().unwrap().is_empty());
-}
-
-#[test]
-fn managed_directory_creation_rejects_traversal_and_symlink_escape() {
-    let (temp, roots, runner, release) = fixture();
-    let executor =
-        OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
-
-    assert!(
-        executor
-            .execute(&HostOperation::CreateManagedDirectory {
-                area: ManagedArea::Models,
-                relative_path: "../escape".to_owned(),
-            })
-            .is_err()
-    );
-    symlink(temp.path(), roots.models.join("link")).unwrap();
-    assert!(
-        executor
-            .execute(&HostOperation::CreateManagedDirectory {
-                area: ManagedArea::Models,
-                relative_path: "link/escape".to_owned(),
-            })
-            .is_err()
-    );
-    assert!(!temp.path().join("escape").exists());
 }
 
 #[test]

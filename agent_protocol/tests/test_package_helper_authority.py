@@ -159,7 +159,7 @@ def test_host_helper_grant_has_a_distinct_narrow_authority_domain() -> None:
         {
             "type": "create-managed-directory",
             "area": "models",
-            "relative_path": "../etc",
+            "relative_path": "sha256/aa",
         },
         {"type": "restart-vonk-unit", "unit": "sshd"},
         {
