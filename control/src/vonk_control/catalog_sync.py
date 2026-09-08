@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -12,8 +13,10 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .catalog_service import CatalogError, CatalogService
+from .catalog_sync_contract import ManagedCatalogSyncResult
 from .models import RecipeLibrarySyncRun
 from .recipe_library_types import (
     RecipeLibraryError,
@@ -174,8 +177,7 @@ class ManagedRecipeCatalogSyncService:
             # fetched again.
             if (
                 current is not None
-                and isinstance(current.result, Mapping)
-                and current.result.get("state") == "current"
+                and _result(current.result).state == "current"
             ):
                 return _view(current)
         return self.sync(request_key=str(uuid.uuid4()), trigger="automatic", actor="system:recipe-library-sync", expected_commit=snapshot.commit)
@@ -245,12 +247,13 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 raise CatalogSyncError("catalog.sync_state_invalid", "managed catalog sync state changed")
+            parsed = _result(result)
             run.processed_count += 1
-            run.imported_count = int(result["imported_count"])
-            run.updated_count = int(result["updated_count"])
-            run.current_count = int(result["unchanged_count"])
-            run.conflict_count = int(result["skipped_count"])
-            run.result = dict(result)
+            run.imported_count = parsed.imported_count
+            run.updated_count = parsed.updated_count
+            run.current_count = parsed.unchanged_count
+            run.conflict_count = parsed.skipped_count
+            run.result = json.loads(canonical_message(parsed))
 
     def _finish(self, run_id: str, result: Mapping[str, object]) -> None:
         with self._sessions.begin() as session:
@@ -259,7 +262,7 @@ class ManagedRecipeCatalogSyncService:
                 raise CatalogSyncError("catalog.sync_state_invalid", "managed catalog sync state changed")
             run.state = "succeeded"
             run.active_slot = None
-            run.result = dict(result)
+            run.result = json.loads(canonical_message(_result(result)))
             run.missing_count = 0
             run.completed_at = self._clock()
 
@@ -268,15 +271,15 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 return
-            failed = dict(run.result)
-            problems = list(failed.get("problems", []))
+            failed = json.loads(canonical_message(_result(run.result)))
+            problems = list(failed["problems"])
             if len(problems) < _MAX_RESULT_ITEMS:
                 problems.append({"recipe_uri": None, "code": code[:128], "detail": detail[:256]})
             failed["state"] = "failed"
             failed["problems"] = problems
             run.state = "failed"
             run.active_slot = None
-            run.result = failed
+            run.result = json.loads(canonical_message(_result(failed)))
             run.error_code = code[:128]
             run.error_detail = detail[:256]
             run.completed_at = self._clock()
@@ -303,19 +306,30 @@ class ManagedRecipeCatalogSyncService:
         if expected_commit is not None and (len(expected_commit) != 40 or any(char not in "0123456789abcdef" for char in expected_commit)):
             raise CatalogSyncError("catalog.sync_commit_invalid", "expected commit must be lowercase Git SHA-1")
 
+def _result(value: object) -> ManagedCatalogSyncResult:
+    try:
+        return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise CatalogSyncError("catalog.sync_result_invalid", "stored catalog sync result is invalid") from error
+
+
 def _empty_result() -> dict[str, object]:
-    return {"schema_version": 1, "state": "current", "imported_count": 0, "updated_count": 0, "unchanged_count": 0, "skipped_count": 0, "withdrawn_count": 0, "withdrawn_recipes": [], "stale_recipes": [], "problems": []}
+    return json.loads(canonical_message(ManagedCatalogSyncResult(
+        schema_version=1, state="current", imported_count=0, updated_count=0,
+        unchanged_count=0, skipped_count=0, withdrawn_count=0,
+        withdrawn_recipes=[], stale_recipes=[], problems=[],
+    )))
 
 
 def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
     if row is None:
         raise KeyError("sync run")
-    result = row.result or {}
+    result = _result(row.result)
     return CatalogSyncView(
         id=row.id,
         request_key=row.request_key,
         trigger=row.trigger,
-        state="syncing" if row.state == "running" else str(result.get("state", row.state)),
+        state="syncing" if row.state == "running" else result.state,
         repository=row.repository,
         expected_commit=row.expected_commit,
         commit=row.observed_commit,
@@ -325,10 +339,10 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         updated_count=row.updated_count,
         unchanged_count=row.current_count,
         skipped_count=row.conflict_count,
-        withdrawn_count=int(result.get("withdrawn_count", 0)),
-        withdrawn_recipes=tuple(result.get("withdrawn_recipes", [])),
-        stale_recipes=tuple(result.get("stale_recipes", [])),
-        problems=tuple(result.get("problems", [])),
+        withdrawn_count=result.withdrawn_count,
+        withdrawn_recipes=tuple(json.loads(canonical_message(item)) for item in result.withdrawn_recipes),
+        stale_recipes=tuple(json.loads(canonical_message(item)) for item in result.stale_recipes),
+        problems=tuple(json.loads(canonical_message(item)) for item in result.problems),
         created_at=row.created_at,
         completed_at=row.completed_at,
     )

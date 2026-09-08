@@ -98,8 +98,11 @@ class FleetProfileAssignmentInput(_StrictModel):
         return self
 
 
-class FleetProfileAssignment(FleetProfileAssignmentInput):
+class StoredFleetProfileAssignment(FleetProfileAssignmentInput):
     id: UuidId
+
+
+class FleetProfileAssignment(StoredFleetProfileAssignment):
     recipe_id: UuidId
     recipe_title: Name
     model_title: (
