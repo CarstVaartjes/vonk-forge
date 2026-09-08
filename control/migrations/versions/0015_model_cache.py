@@ -91,7 +91,6 @@ def upgrade() -> None:
     op.create_table(
         "model_cache_artifacts",
         sa.Column("sha256", sa.String(length=64), nullable=False),
-        sa.Column("identity", sa.JSON(), nullable=False),
         sa.Column("storage_key", sa.String(length=255), nullable=False),
         sa.Column("expected_bytes", sa.BigInteger(), nullable=False),
         sa.Column("actual_bytes", sa.BigInteger(), nullable=False, server_default="0"),
@@ -109,10 +108,6 @@ def upgrade() -> None:
             "state IN ('partial','verified','missing','corrupt')",
             name="ck_model_cache_artifacts_state",
         ),
-        sa.CheckConstraint(
-            "length(CAST(identity AS TEXT)) BETWEEN 2 AND 65536",
-            name="ck_model_cache_artifacts_identity_size",
-        ),
         sa.PrimaryKeyConstraint("sha256"),
         sa.UniqueConstraint("storage_key"),
     )
@@ -127,7 +122,6 @@ def upgrade() -> None:
         sa.Column("artifact_key", sa.String(length=256), nullable=False),
         sa.Column("artifact_sha256", sa.String(length=64), nullable=False),
         sa.Column("path", sa.String(length=512), nullable=False),
-        sa.Column("roles", sa.JSON(), nullable=False),
         sa.CheckConstraint(
             "length(artifact_key) BETWEEN 1 AND 256",
             name="ck_model_cache_set_artifacts_key",

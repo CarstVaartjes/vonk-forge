@@ -1661,7 +1661,6 @@ class ModelCacheService:
             if artifact is None:
                 artifact = ModelCacheArtifact(
                     sha256=spec.sha256,
-                    identity=spec.identity(),
                     storage_key=self._object_key(spec.sha256),
                     expected_bytes=spec.expected_bytes,
                     actual_bytes=0,
@@ -1687,7 +1686,6 @@ class ModelCacheService:
                         artifact_key=spec.key,
                         artifact_sha256=spec.sha256,
                         path=spec.path,
-                        roles=list(spec.roles),
                     )
                 )
         return row

@@ -111,7 +111,6 @@ def test_postgres_persists_verified_zero_byte_model_artifact(postgres_engine) ->
             session.add(
                 ModelCacheArtifact(
                     sha256=empty_digest,
-                    identity={"path": "empty-support-file"},
                     storage_key="objects/empty-support-file",
                     expected_bytes=0,
                     actual_bytes=0,
@@ -123,7 +122,6 @@ def test_postgres_persists_verified_zero_byte_model_artifact(postgres_engine) ->
             session.add(
                 ModelCacheArtifact(
                     sha256="f" * 64,
-                    identity={"path": "invalid-empty-support-file"},
                     storage_key="objects/invalid-empty-support-file",
                     expected_bytes=0,
                     actual_bytes=0,

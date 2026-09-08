@@ -1117,13 +1117,8 @@ class ModelCacheArtifact(Base):
             "state IN ('partial','verified','missing','corrupt')",
             name="ck_model_cache_artifacts_state",
         ),
-        CheckConstraint(
-            "length(CAST(identity AS TEXT)) BETWEEN 2 AND 65536",
-            name="ck_model_cache_artifacts_identity_size",
-        ),
     )
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
-    identity: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     actual_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -1164,7 +1159,6 @@ class ModelCacheSetArtifact(Base):
         index=True,
     )
     path: Mapped[str] = mapped_column(String(512), nullable=False)
-    roles: Mapped[list[str]] = mapped_column(JSON, nullable=False)
 
 
 class ModelCacheOperation(Base):
