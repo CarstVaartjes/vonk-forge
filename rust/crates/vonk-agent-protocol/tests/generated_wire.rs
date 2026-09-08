@@ -159,3 +159,25 @@ fn optional_nulls_normalize_without_erasing_required_nulls_or_empty_defaults() {
         Value::Null
     );
 }
+
+#[test]
+fn helper_response_uses_required_nulls_and_strict_optional_diagnostics() {
+    use vonk_agent_protocol::{canonical_generated_json, generated::HostHelperResponse};
+    let value =
+        json!({"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null});
+    let response: HostHelperResponse = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&canonical_generated_json(&response).unwrap()).unwrap(),
+        value
+    );
+    for field in ["request_id", "evidence_sha256"] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<HostHelperResponse>(missing).is_err());
+    }
+    for invalid in [json!(true), json!(-1), json!(256), json!(1.0)] {
+        let mut invalid_response = value.clone();
+        invalid_response["exit_code"] = invalid;
+        assert!(serde_json::from_value::<HostHelperResponse>(invalid_response).is_err());
+    }
+}

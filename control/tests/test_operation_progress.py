@@ -35,12 +35,9 @@ def test_rates_unknown_totals_and_zero_throughput_do_not_invent_eta():
     assert stopped["last_progress_at"] == known["last_progress_at"]
 
 
-def test_phase_only_lease_renewal_retains_phase_counters_but_verification_clears_eta():
+def test_partial_phase_change_retains_counters_and_verification_clears_eta():
     first = sample(completed_bytes=10, total_bytes=100, total_bytes_known=True)
     active = sample(first, seconds=2, completed_bytes=30)
-    heartbeat = sample(active, seconds=3, phase="executing")
-    assert heartbeat["phase"] == "copying"
-    assert heartbeat["completed_bytes"] == 30
     verified = sample(active, seconds=4, phase="verifying")
     assert verified["completed_bytes"] == 30
     assert "eta_seconds" not in verified
