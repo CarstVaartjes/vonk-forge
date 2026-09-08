@@ -2903,7 +2903,10 @@ export interface components {
              * Format: uuid
              */
             assignment_id: string;
-            /** Expires At */
+            /**
+             * Expires At
+             * Format: date-time
+             */
             expires_at: string;
             /** Generation */
             generation: number;
