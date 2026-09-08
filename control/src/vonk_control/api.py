@@ -1592,6 +1592,7 @@ def production_app() -> FastAPI:
         persist_runtime_image_receipt,
         prepare_runtime_image,
         resolve_persisted_runtime_image_receipt,
+        runtime_image_expectations,
     )
     from .settings import Settings
     from .telemetry import TelemetryRepository
@@ -1741,16 +1742,11 @@ def production_app() -> FastAPI:
             raise TypeError(
                 "runtime image preparation is required: runtime projection is unavailable"
             )
-        architecture = runtime.get("architecture")
-        interface = runtime.get("interface", runtime.get("runtime_interface"))
-        if not isinstance(architecture, str) or not isinstance(interface, str):
-            raise TypeError(
-                "runtime image preparation is required: platform identity is unavailable"
-            )
+        expectations = runtime_image_expectations(runtime)
         receipt = runtime_image_storage.find_verified(
             image_digest,
-            expected_architecture=architecture,
-            expected_runtime_interface=interface,
+            expected_architecture=expectations["architecture"],
+            expected_runtime_interface=expectations["interface"],
         )
         if receipt is None:
             raise ValueError(

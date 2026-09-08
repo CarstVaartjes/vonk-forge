@@ -45,6 +45,15 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
     wheel = next(tmp_path.glob("*.whl"))
 
     with zipfile.ZipFile(wheel) as archive:
+        packaged_names = set(archive.namelist())
+        assert {
+            "cluster_profiles/schemas/control-openapi.json",
+            "cluster_profiles/schemas/qualification-manifest-v2.schema.json",
+        } <= packaged_names
+        assert not {
+            "cluster_profiles/schemas/workload.schema.json",
+            "cluster_profiles/schemas/cluster-profile.schema.json",
+        } & packaged_names
         for schema in sorted(CANONICAL.glob("*.json")):
             assert (
                 archive.read(f"cluster_profiles/schemas/{schema.name}")
