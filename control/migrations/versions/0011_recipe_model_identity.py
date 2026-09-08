@@ -1,4 +1,4 @@
-"""Persist exact model-content ownership for recipe installations.
+"""Persist the primary model-content identity for recipe installations.
 
 Revision ID: 0011_recipe_model_identity
 Revises: 0010_managed_recipe_catalog_sync
@@ -35,28 +35,11 @@ def upgrade() -> None:
             batch.add_column(
                 sa.Column("model_content_sha256", sa.String(length=64), nullable=True)
             )
-            batch.add_column(
-                sa.Column(
-                    "model_content_digests",
-                    sa.JSON(),
-                    nullable=False,
-                    server_default="[]",
-                )
-            )
             batch.create_check_constraint(_CONSTRAINT, _EXPRESSION)
     else:
         op.add_column(
             _TABLE,
             sa.Column("model_content_sha256", sa.String(length=64), nullable=True),
-        )
-        op.add_column(
-            _TABLE,
-            sa.Column(
-                "model_content_digests",
-                sa.JSON(),
-                nullable=False,
-                server_default="[]",
-            ),
         )
         op.create_check_constraint(_CONSTRAINT, _TABLE, _EXPRESSION)
     op.create_index(
@@ -76,9 +59,7 @@ def downgrade() -> None:
     if connection.dialect.name == "sqlite":
         with op.batch_alter_table(_TABLE, recreate="always") as batch:
             batch.drop_constraint(_CONSTRAINT, type_="check")
-            batch.drop_column("model_content_digests")
             batch.drop_column("model_content_sha256")
         return
     op.drop_constraint(_CONSTRAINT, _TABLE, type_="check")
-    op.drop_column(_TABLE, "model_content_digests")
     op.drop_column(_TABLE, "model_content_sha256")

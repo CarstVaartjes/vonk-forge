@@ -388,24 +388,6 @@ class LoginSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class AgentProfile(Base):
-    __tablename__ = "agent_profiles"
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
-    )
-    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    lifecycle: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="managed"
-    )
-    labels: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
     __table_args__ = (
@@ -1135,13 +1117,8 @@ class ModelCacheArtifact(Base):
             "state IN ('partial','verified','missing','corrupt')",
             name="ck_model_cache_artifacts_state",
         ),
-        CheckConstraint(
-            "length(CAST(identity AS TEXT)) BETWEEN 2 AND 65536",
-            name="ck_model_cache_artifacts_identity_size",
-        ),
     )
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
-    identity: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     actual_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -1182,7 +1159,6 @@ class ModelCacheSetArtifact(Base):
         index=True,
     )
     path: Mapped[str] = mapped_column(String(512), nullable=False)
-    roles: Mapped[list[str]] = mapped_column(JSON, nullable=False)
 
 
 class ModelCacheOperation(Base):
@@ -2156,9 +2132,6 @@ class RecipeInstallation(Base):
     # without attempting to infer it from mutable catalog display metadata.
     model_content_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
-    )
-    model_content_digests: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list
     )
     mapping_id: Mapped[str] = mapped_column(
         ForeignKey("cluster_mappings.id", ondelete="RESTRICT"),
