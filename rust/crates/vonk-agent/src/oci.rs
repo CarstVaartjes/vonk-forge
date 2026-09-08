@@ -647,7 +647,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     recipe_revision_id: identity.recipe_revision_id,
                     role: placement.role.clone(),
                     run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
-                    run_generation: identity.run_generation,
+                    run_generation: u32::try_from(identity.run_generation)
+                        .map_err(|_| OciError::Artifact)?,
                     runtime_arguments_sha256: protocol_sha256(
                         &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
                     ),
@@ -741,7 +742,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             || binding.mapping_generation != identity.mapping_generation
             || binding.recipe_revision_id != identity.recipe_revision_id
             || binding.recipe_content_sha256 != identity.recipe_content_sha256
-            || binding.run_generation != identity.run_generation
+            || u64::from(binding.run_generation) != identity.run_generation
         {
             return Err(OciError::Runtime);
         }
