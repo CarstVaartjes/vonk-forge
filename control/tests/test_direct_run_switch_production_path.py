@@ -64,6 +64,7 @@ from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .canonical_recipe_fixtures import canonical_example
+from .preflight_fixtures import record_passing_preflight
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 REGISTRY_DIGEST = "sha256:" + "d" * 64
@@ -381,6 +382,7 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     mapping_service = ClusterMappingService(sessions)
     mapping_plan = mapping_service.preview(revision_id, (NODE_ID,), {}, "test")
     mapping_id = mapping_service.materialize(mapping_plan, actor="test", now=NOW)
+    record_passing_preflight(sessions, NOW, floor=10)
     return sessions, revision_id, recipe_digest, mapping_id
 
 
