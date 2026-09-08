@@ -3387,7 +3387,7 @@ mod tests {
             *self.observed_deadline.lock().unwrap() = Some(*lease_deadline.borrow());
             ExecutionResult {
                 state: "succeeded",
-                body: json!({"status": "ok"}),
+                body: super::recipe_install_success_body(0),
             }
         }
     }
@@ -3442,7 +3442,7 @@ mod tests {
             self.events.lock().unwrap().push("execute");
             ExecutionResult {
                 state: "succeeded",
-                body: json!({"status": "ok"}),
+                body: super::recipe_install_success_body(0),
             }
         }
     }
