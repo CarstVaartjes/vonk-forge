@@ -1625,6 +1625,8 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     pub action: ExecuteContainerRuntimeRequestOperationAction,
     pub attempt: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
@@ -1658,6 +1660,8 @@ pub enum ExecuteContainerRuntimeRequestOperationAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -1668,6 +1672,7 @@ impl ::std::fmt::Display for ExecuteContainerRuntimeRequestOperationAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -1681,6 +1686,7 @@ impl ::std::str::FromStr for ExecuteContainerRuntimeRequestOperationAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -1994,6 +2000,8 @@ pub struct HostRuntimeGrantRequest {
     pub attempt: u32,
     pub expires_in_seconds: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     pub node_id: ::std::string::String,
     pub operation_id: ::uuid::Uuid,
@@ -2024,6 +2032,8 @@ pub enum HostRuntimeGrantRequestAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -2034,6 +2044,7 @@ impl ::std::fmt::Display for HostRuntimeGrantRequestAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -2047,6 +2058,7 @@ impl ::std::str::FromStr for HostRuntimeGrantRequestAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -2081,6 +2093,8 @@ pub struct HostRuntimeRequest {
     pub arguments: ::std::vec::Vec<::std::string::String>,
     pub attempt: u32,
     pub fence: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
@@ -2112,6 +2126,8 @@ pub enum HostRuntimeRequestAction {
     Start,
     #[serde(rename = "stop")]
     Stop,
+    #[serde(rename = "installation-cleanup")]
+    InstallationCleanup,
 }
 impl ::std::fmt::Display for HostRuntimeRequestAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -2122,6 +2138,7 @@ impl ::std::fmt::Display for HostRuntimeRequestAction {
             Self::RunInspect => f.write_str("run-inspect"),
             Self::Start => f.write_str("start"),
             Self::Stop => f.write_str("stop"),
+            Self::InstallationCleanup => f.write_str("installation-cleanup"),
         }
     }
 }
@@ -2135,6 +2152,7 @@ impl ::std::str::FromStr for HostRuntimeRequestAction {
             "run-inspect" => Ok(Self::RunInspect),
             "start" => Ok(Self::Start),
             "stop" => Ok(Self::Stop),
+            "installation-cleanup" => Ok(Self::InstallationCleanup),
             _ => Err("invalid value".into()),
         }
     }
@@ -4643,6 +4661,77 @@ impl ::std::convert::TryFrom<&::std::string::String> for SimpleMaterializationMe
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for SimpleMaterializationMethod {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SupervisorAcknowledgement {
+    pub acknowledged_at: ::std::string::String,
+    pub activation_sha256: ::std::string::String,
+    pub child_pid: u64,
+    pub expires_at: ::std::string::String,
+    pub generation: u64,
+    pub litellm_sha256: ::std::string::String,
+    pub schema_version: u8,
+    pub state: SupervisorAcknowledgementState,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum SupervisorAcknowledgementState {
+    #[serde(rename = "maintenance")]
+    Maintenance,
+    #[serde(rename = "published")]
+    Published,
+}
+impl ::std::fmt::Display for SupervisorAcknowledgementState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Maintenance => f.write_str("maintenance"),
+            Self::Published => f.write_str("published"),
+        }
+    }
+}
+impl ::std::str::FromStr for SupervisorAcknowledgementState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "maintenance" => Ok(Self::Maintenance),
+            "published" => Ok(Self::Published),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SupervisorAcknowledgementState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for SupervisorAcknowledgementState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SupervisorAcknowledgementState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -7174,6 +7263,8 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             pub action: ExecuteContainerRuntimeRequestOperationAction,
             pub attempt: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
@@ -7187,6 +7278,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             action: raw.action,
             attempt: raw.attempt,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             observation_identity_sha256: raw.observation_identity_sha256,
             operation_id: raw.operation_id,
@@ -7204,6 +7296,7 @@ impl ExecuteContainerRuntimeRequestOperationAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }
@@ -7521,6 +7614,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub attempt: u32,
             pub expires_in_seconds: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             pub node_id: ::std::string::String,
             pub operation_id: ::uuid::Uuid,
@@ -7532,6 +7627,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             attempt: raw.attempt,
             expires_in_seconds: raw.expires_in_seconds,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             node_id: raw.node_id,
             operation_id: raw.operation_id,
@@ -7548,6 +7644,7 @@ impl HostRuntimeGrantRequestAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }
@@ -7580,6 +7677,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             pub arguments: ::std::vec::Vec<::std::string::String>,
             pub attempt: u32,
             pub fence: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
@@ -7592,6 +7691,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             arguments: raw.arguments,
             attempt: raw.attempt,
             fence: raw.fence,
+            installation_id: raw.installation_id,
             job_id: raw.job_id,
             observation: raw.observation,
             operation_id: raw.operation_id,
@@ -7608,6 +7708,7 @@ impl HostRuntimeRequestAction {
             Self::RunInspect => "run-inspect",
             Self::Start => "start",
             Self::Stop => "stop",
+            Self::InstallationCleanup => "installation-cleanup",
         }
     }
 }
@@ -10817,6 +10918,61 @@ impl ::std::cmp::PartialEq<str> for SimpleMaterializationMethod {
     }
 }
 impl ::std::cmp::PartialEq<&str> for SimpleMaterializationMethod {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SupervisorAcknowledgement", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub acknowledged_at: ::std::string::String,
+            pub activation_sha256: ::std::string::String,
+            pub child_pid: u64,
+            pub expires_at: ::std::string::String,
+            pub generation: u64,
+            pub litellm_sha256: ::std::string::String,
+            pub schema_version: u8,
+            pub state: SupervisorAcknowledgementState,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            acknowledged_at: raw.acknowledged_at,
+            activation_sha256: raw.activation_sha256,
+            child_pid: raw.child_pid,
+            expires_at: raw.expires_at,
+            generation: raw.generation,
+            litellm_sha256: raw.litellm_sha256,
+            schema_version: raw.schema_version,
+            state: raw.state,
+        })
+    }
+}
+impl SupervisorAcknowledgementState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Maintenance => "maintenance",
+            Self::Published => "published",
+        }
+    }
+}
+impl ::std::ops::Deref for SupervisorAcknowledgementState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SupervisorAcknowledgementState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SupervisorAcknowledgementState {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }

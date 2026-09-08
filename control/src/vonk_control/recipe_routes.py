@@ -16,6 +16,10 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.route_activation import (
+    ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+    recipe_route_lease_expiry,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .distributed_lifecycle import DistributedLifecycleError
@@ -307,9 +311,9 @@ class RecipeRouteService:
         publisher: object,
         management_policy: ManagementAddressPolicy,
         clock: Callable[[], datetime],
-        maximum_age_seconds: int = 300,
+        maximum_age_seconds: int = ROUTE_EVIDENCE_MAX_AGE_SECONDS,
     ) -> None:
-        if not 1 <= maximum_age_seconds <= 300:
+        if not 1 <= maximum_age_seconds <= ROUTE_EVIDENCE_MAX_AGE_SECONDS:
             raise ValueError("recipe route evidence age is invalid")
         self.sessions = sessions
         self._publisher = publisher
@@ -719,7 +723,7 @@ class RecipeRouteService:
         publish_empty = self._publisher.publish_empty
         if isinstance(self._publisher, AtomicRecipeRoutePublisher):
             return publish_empty(
-                route_digest, expires_at=_aware(self._clock()) + self._maximum_age
+                route_digest, expires_at=recipe_route_lease_expiry(_aware(self._clock()))
             )
         return publish_empty(route_digest)
 
@@ -996,10 +1000,8 @@ class RecipeRouteService:
                 for alias in aliases
             }
         )
-        expires_at = (
-            min(observed + self._maximum_age for observed in evidence_times)
-            if evidence_times
-            else _aware(now) + self._maximum_age
+        expires_at = recipe_route_lease_expiry(
+            _aware(now), min(evidence_times) if evidence_times else None
         )
         return _RecipeCandidate(
             state,

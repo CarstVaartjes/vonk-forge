@@ -8,7 +8,7 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use tempfile::TempDir;
 use uuid::Uuid;
 use vonk_agent_helper::operations::{
-    CommandOutput, CommandRunner, ManagedRoots, OperationExecutor,
+    CommandOutput, CommandRunner, ManagedRoots, OperationError, OperationExecutor,
 };
 use vonk_agent_helper::protocol::{
     ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
@@ -185,6 +185,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
+                installation_id: None,
             },
         ),
     ];
@@ -588,6 +589,9 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
                 HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
                 HostRuntimeAction::Start => ContainerRuntimeAction::Start,
                 HostRuntimeAction::Stop => ContainerRuntimeAction::Stop,
+                HostRuntimeAction::InstallationCleanup => {
+                    ContainerRuntimeAction::InstallationCleanup
+                }
             },
             job_id: request.job_id,
             operation_id: request.operation_id,
@@ -595,6 +599,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             fence: request.fence,
             request_sha256: digest,
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
+            installation_id: request.installation_id,
         },
     )
 }
@@ -609,6 +614,7 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
         observation: None,
+        installation_id: None,
     }
 }
 
@@ -691,6 +697,32 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
                     "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002",
                 ]
     }));
+}
+
+#[test]
+fn installation_cleanup_is_bound_to_the_signed_request_identity() {
+    let (_temp, roots, runner, release) = fixture();
+    let installation_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+    let mut request = runtime_request(HostRuntimeAction::InstallationCleanup, vec![]);
+    request.installation_id = Some(installation_id);
+    request.validate().unwrap();
+    let request_digest = write_runtime_request(&roots, &request);
+    let operation = runtime_operation(&request, request_digest.clone());
+    let executor =
+        OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
+
+    executor.execute(&operation).unwrap();
+    let mut mismatched = runtime_operation(&request, request_digest);
+    let HostOperation::ExecuteContainerRuntimeRequestOperation(operation) = &mut mismatched else {
+        unreachable!();
+    };
+    operation.installation_id =
+        Some(Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap());
+
+    assert!(matches!(
+        executor.execute(&mismatched),
+        Err(OperationError::InvalidOperation)
+    ));
 }
 
 fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_source: Option<&str>) {

@@ -998,7 +998,7 @@ def bind_route_publications(
         publisher=publisher,
         management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
         clock=lambda: NOW,
-        maximum_age_seconds=300,
+        maximum_age_seconds=120,
     )
     bound = RecipeOperationService(
         sessions,

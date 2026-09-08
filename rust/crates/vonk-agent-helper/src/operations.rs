@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
+use std::ffi::{CStr, CString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::mem::MaybeUninit;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -321,6 +323,7 @@ struct RuntimeRequestGrantBinding<'a> {
     operation_id: &'a uuid::Uuid,
     attempt: u32,
     fence: &'a uuid::Uuid,
+    installation_id: Option<&'a uuid::Uuid>,
 }
 
 #[derive(Default)]
@@ -612,6 +615,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     fence,
                     request_sha256,
                     observation_identity_sha256,
+                    installation_id,
                     ..
                 },
             ) => {
@@ -622,6 +626,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         operation_id,
                         attempt: *attempt,
                         fence,
+                        installation_id: installation_id.as_ref(),
                     },
                     request_sha256,
                     observation_identity_sha256.as_deref(),
@@ -895,12 +900,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ContainerRuntimeAction::RunInspect => HostRuntimeAction::RunInspect,
             ContainerRuntimeAction::Start => HostRuntimeAction::Start,
             ContainerRuntimeAction::Stop => HostRuntimeAction::Stop,
+            ContainerRuntimeAction::InstallationCleanup => HostRuntimeAction::InstallationCleanup,
         };
         if request.action != expected_action
             || &request.job_id != binding.job_id
             || &request.operation_id != binding.operation_id
             || request.attempt != binding.attempt
             || &request.fence != binding.fence
+            || request.installation_id.as_ref() != binding.installation_id
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -996,7 +1003,73 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         })
                 }
             }
+            HostRuntimeAction::InstallationCleanup => {
+                let installation_id = request
+                    .installation_id
+                    .as_ref()
+                    .ok_or(OperationError::InvalidOperation)?;
+                self.runtime_installation_cleanup(&installation_id.to_string())?;
+                Ok(RuntimeRequestOutcome {
+                    exit_code: None,
+                    recipe_run_observation: None,
+                })
+            }
         }
+    }
+
+    fn runtime_installation_cleanup(&self, installation_id: &str) -> Result<(), OperationError> {
+        if !valid_artifact_id(installation_id) {
+            return Err(OperationError::InvalidOperation);
+        }
+        let directory_flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC;
+        let agent_data = OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits() as i32,
+            )
+            .open(&self.roots.agent_data)?;
+        let installations = match rustix::fs::openat(
+            &agent_data,
+            "installations",
+            directory_flags,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(installations) => installations,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let installation = match rustix::fs::openat(
+            &installations,
+            installation_id,
+            directory_flags,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(installation) => installation,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let cache = match rustix::fs::openat(
+            &installation,
+            "runtime-cache",
+            directory_flags,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(cache) => cache,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let cache_device = rustix::fs::fstat(&cache).map_err(errno_io)?.st_dev;
+        remove_directory_contents(&cache, cache_device)?;
+        rustix::fs::unlinkat(
+            &installation,
+            "runtime-cache",
+            rustix::fs::AtFlags::REMOVEDIR,
+        )
+        .map_err(errno_io)?;
+        Ok(())
     }
 
     fn read_runtime_request(
@@ -2511,6 +2584,66 @@ fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
             .as_os_str()
             .to_str()
             .is_some_and(valid_artifact_id)
+}
+
+fn errno_io(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+fn remove_directory_contents(
+    directory: &impl std::os::fd::AsFd,
+    expected_device: u64,
+) -> Result<(), OperationError> {
+    let mut buffer = [MaybeUninit::uninit(); 8192];
+    let mut entries = Vec::new();
+    {
+        let mut directory_entries = rustix::fs::RawDir::new(directory, &mut buffer);
+        while let Some(entry) = directory_entries.next() {
+            let entry = entry.map_err(errno_io)?;
+            let name = entry.file_name();
+            if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                continue;
+            }
+            entries.push(CString::new(name.to_bytes()).map_err(|_| OperationError::UnsafePath)?);
+        }
+    }
+    for name in entries {
+        remove_directory_entry(directory, &name, expected_device)?;
+    }
+    Ok(())
+}
+
+fn remove_directory_entry(
+    parent: &impl std::os::fd::AsFd,
+    name: &CStr,
+    expected_device: u64,
+) -> Result<(), OperationError> {
+    let metadata = rustix::fs::statat(parent, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(errno_io)?;
+    if rustix::fs::FileType::from_raw_mode(metadata.st_mode) == rustix::fs::FileType::Directory {
+        if metadata.st_dev != expected_device {
+            return Err(OperationError::UnsafePath);
+        }
+        let child = rustix::fs::openat(
+            parent,
+            name,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(errno_io)?;
+        let opened = rustix::fs::fstat(&child).map_err(errno_io)?;
+        if opened.st_dev != metadata.st_dev || opened.st_ino != metadata.st_ino {
+            return Err(OperationError::UnsafePath);
+        }
+        remove_directory_contents(&child, expected_device)?;
+        rustix::fs::unlinkat(parent, name, rustix::fs::AtFlags::REMOVEDIR).map_err(errno_io)?;
+    } else {
+        rustix::fs::unlinkat(parent, name, rustix::fs::AtFlags::empty()).map_err(errno_io)?;
+    }
+    Ok(())
 }
 
 fn require_safe_model_path(
@@ -4446,6 +4579,138 @@ mod tests {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o770)).unwrap();
             assert!(validate_docker_run(&arguments, &roots, Some(owner)).is_err());
             fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).unwrap();
+        }
+    }
+
+    #[test]
+    fn installation_cleanup_removes_only_private_runtime_cache_and_is_retryable() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let installation = roots.agent_data.join("installations").join(installation_id);
+        let cache = installation.join("runtime-cache");
+        let private = cache.join("home/private/nested");
+        let models = installation.join("models/primary");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&private).unwrap();
+        fs::create_dir_all(&models).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(private.join("engine-owned.bin"), b"private").unwrap();
+        fs::write(models.join("model.bin"), b"model").unwrap();
+        fs::write(outside.join("sentinel"), b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, cache.join("outside-link")).unwrap();
+        fs::set_permissions(cache.join("home"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            cache.join("home/private"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        if rustix::process::geteuid().is_root() {
+            for path in [cache.join("home"), cache.join("home/private"), private] {
+                rustix::fs::chown(
+                    path,
+                    Some(rustix::process::Uid::from_raw(10001)),
+                    Some(rustix::process::Gid::from_raw(10001)),
+                )
+                .unwrap();
+            }
+        }
+        let executor =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+
+        executor
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        executor
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+
+        assert!(!cache.exists());
+        assert_eq!(fs::read(models.join("model.bin")).unwrap(), b"model");
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn installation_cleanup_rejects_symlinked_managed_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside");
+        let linked = temp.path().join("agent-data");
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let cache = outside
+            .join("installations")
+            .join(installation_id)
+            .join("runtime-cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("sentinel"), b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, &linked).unwrap();
+        let roots = ManagedRoots::under(&linked);
+        let executor =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+
+        assert!(matches!(
+            executor.runtime_installation_cleanup(installation_id),
+            Err(OperationError::Io(_))
+        ));
+        assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn installation_cleanup_treats_each_missing_private_cache_level_as_complete() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let executor = |roots: &ManagedRoots| {
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap()
+        };
+
+        fs::create_dir_all(&roots.agent_data).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        fs::create_dir(roots.agent_data.join("installations")).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        fs::create_dir(roots.agent_data.join("installations").join(installation_id)).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+    }
+
+    #[test]
+    fn installation_cleanup_rejects_symlinked_installation_path_components() {
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        for linked_component in ["installations", "installation", "runtime-cache"] {
+            let temp = tempfile::tempdir().unwrap();
+            let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+            let outside = temp.path().join("outside");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(outside.join("sentinel"), b"outside").unwrap();
+            fs::create_dir_all(&roots.agent_data).unwrap();
+
+            let installations = roots.agent_data.join("installations");
+            if linked_component == "installations" {
+                std::os::unix::fs::symlink(&outside, &installations).unwrap();
+            } else {
+                fs::create_dir(&installations).unwrap();
+                let installation = installations.join(installation_id);
+                if linked_component == "installation" {
+                    std::os::unix::fs::symlink(&outside, &installation).unwrap();
+                } else {
+                    fs::create_dir(&installation).unwrap();
+                    std::os::unix::fs::symlink(&outside, installation.join("runtime-cache"))
+                        .unwrap();
+                }
+            }
+
+            let executor =
+                OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+            assert!(matches!(
+                executor.runtime_installation_cleanup(installation_id),
+                Err(OperationError::Io(_))
+            ));
+            assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
         }
     }
 }

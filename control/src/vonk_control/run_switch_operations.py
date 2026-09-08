@@ -90,6 +90,7 @@ from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchBuildEvidence,
     RunSwitchCancellation,
+    RunSwitchContainerBuildResult,
     RunSwitchMemberProgress,
     RunSwitchOperation,
     RunSwitchOperationResult,
@@ -820,6 +821,27 @@ class DatabaseRunSwitchArtifactInspector:
         )
 
 
+def _container_build_result(build: RecipeBuild) -> dict[str, object]:
+    """Project the authoritative build record into its phase receipt."""
+    succeeded = build.state == "succeeded"
+    try:
+        receipt = RunSwitchContainerBuildResult(
+            phase="prepare",
+            subphase="container-build",
+            build_id=build.id,
+            build_input_sha256=build.build_input_sha256,
+            state=build.state,
+            image_digest=build.image_digest if succeeded else None,
+            oci_layout_sha256=build.oci_layout_sha256 if succeeded else None,
+            image_bytes=build.image_bytes if succeeded else None,
+        )
+    except ValidationError as error:
+        raise RunSwitchOperationConflict(
+            "run-switch.container-build-evidence-invalid"
+        ) from error
+    return json.loads(canonical_message(receipt))
+
+
 class RecipeLifecyclePhaseExecutor:
     """Default executor for phases covered by existing recipe primitives."""
 
@@ -885,26 +907,7 @@ class RecipeLifecyclePhaseExecutor:
                     "run-switch.container-build-receipt-unavailable"
                 )
             if build.state == "succeeded":
-                if (
-                    not isinstance(build.image_digest, str)
-                    or not _is_oci_digest(build.image_digest)
-                    or not _is_hex_digest(build.oci_layout_sha256)
-                    or type(build.image_bytes) is not int
-                    or build.image_bytes < 1
-                ):
-                    raise RunSwitchOperationConflict(
-                        "run-switch.container-build-evidence-invalid"
-                    )
-                return PhaseExecution(
-                    result={
-                        "build_id": build.id,
-                        "build_input_sha256": build.build_input_sha256,
-                        "image_digest": build.image_digest,
-                        "oci_layout_sha256": build.oci_layout_sha256,
-                        "image_bytes": build.image_bytes,
-                        "state": "succeeded",
-                    }
-                )
+                return PhaseExecution(result=_container_build_result(build))
             if build.state not in {"planned", "building", "failed"}:
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-state-invalid"
@@ -922,14 +925,7 @@ class RecipeLifecyclePhaseExecutor:
                 .limit(1)
             )
             if active is not None:
-                return PhaseExecution(
-                    active.id,
-                    {
-                        "build_id": build.id,
-                        "build_input_sha256": build.build_input_sha256,
-                        "state": build.state,
-                    },
-                )
+                return PhaseExecution(active.id, _container_build_result(build))
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
             source_bundle_sha256 = build.source_bundle_sha256
@@ -995,27 +991,22 @@ class RecipeLifecyclePhaseExecutor:
             raise RunSwitchOperationConflict(
                 f"run-switch.container-build-start-unavailable: {error}"
             ) from error
-        result = {
-            "build_id": build_id,
-            "build_input_sha256": build_input_sha256,
-            "state": getattr(value, "state", "unknown"),
-        }
-        if getattr(value, "state", None) == "succeeded":
-            with self._sessions() as session:
-                completed = session.get(RecipeBuild, build_id)
-                if completed is None:
-                    raise RunSwitchOperationConflict(
-                        "run-switch.container-build-receipt-unavailable"
-                    )
-                result.update(
-                    {
-                        "image_digest": completed.image_digest,
-                        "oci_layout_sha256": completed.oci_layout_sha256,
-                        "image_bytes": completed.image_bytes,
-                        "state": completed.state,
-                    }
+        with self._sessions() as session:
+            persisted = session.get(RecipeBuild, build_id)
+            if persisted is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-receipt-unavailable"
                 )
-            return PhaseExecution(result=result)
+            if (
+                persisted.recipe_revision_id != revision_id
+                or persisted.build_input_sha256 != build_input_sha256
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
+            result = _container_build_result(persisted)
+            if persisted.state == "succeeded":
+                return PhaseExecution(result=result)
         return PhaseExecution(value.id, result)
 
     def execute(

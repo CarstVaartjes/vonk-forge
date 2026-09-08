@@ -349,6 +349,7 @@ impl AgentHttpClient {
         claim: &AgentClaim,
         action: HostRuntimeAction,
         request_sha256: &str,
+        installation_id: Option<uuid::Uuid>,
     ) -> Result<SignedHostHelperGrant, ClientError> {
         if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
             return Err(ClientError::Protocol);
@@ -362,6 +363,7 @@ impl AgentHttpClient {
             action: host_runtime_grant_action(action),
             request_sha256: request_sha256.to_owned(),
             expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+            installation_id,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -1308,6 +1310,9 @@ fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantReque
         HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
         HostRuntimeAction::Start => HostRuntimeGrantRequestAction::Start,
         HostRuntimeAction::Stop => HostRuntimeGrantRequestAction::Stop,
+        HostRuntimeAction::InstallationCleanup => {
+            HostRuntimeGrantRequestAction::InstallationCleanup
+        }
     }
 }
 
@@ -2807,7 +2812,12 @@ mod tests {
         let (client, server) = host_runtime_grant_client();
 
         client
-            .host_runtime_grant(&claim, HostRuntimeAction::ImageImport, &"c".repeat(64))
+            .host_runtime_grant(
+                &claim,
+                HostRuntimeAction::ImageImport,
+                &"c".repeat(64),
+                None,
+            )
             .await
             .unwrap();
         let request = server.join().unwrap();
@@ -2833,6 +2843,7 @@ mod tests {
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
+            installation_id: None,
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
         let request_id = Uuid::new_v4();
@@ -2951,6 +2962,7 @@ mod tests {
                             fence: Uuid::new_v4(),
                             request_sha256: helper_receipt.claims.request_sha256.clone(),
                             observation_identity_sha256: Some("e".repeat(64)),
+                            installation_id: None,
                         },
                     ),
                 },

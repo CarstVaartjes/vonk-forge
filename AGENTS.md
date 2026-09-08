@@ -75,6 +75,11 @@ maintain parallel handwritten payload fields. Keep handwritten semantic and
 security validation, and pass connected producer/consumer tests that preserve
 required-field presence, nullability and strict structure.
 
+Consume wire and persisted JSON with the canonical model's JSON validation
+semantics, including JSON already decoded by the database driver. Do not treat
+JSON arrays as malformed Python tuples or disable strict validation to conceal
+that mode mismatch. Test the actual serialize/store/load/consume path.
+
 Optional fields with a declared `None` default accept omission and explicit
 `null` as the same value. Omit those unused fields when sending documents.
 Normalize through the authoritative model before hashing or signing, and use
@@ -91,6 +96,14 @@ by two parsers. See `docs/api-contracts.md` for the serialization policy.
 
 Allow engine-owned content through its declared extension fields; do not
 introduce an exhaustive engine-argument allowlist.
+
+Test fixtures and health probes are consumers too: use the same typed contract
+as the producer, rather than raw dictionary equality or duplicated key lists.
+For external protocols, model their documented required/optional fields and
+extension behavior; keep deterministic test-content assertions separate from
+structural validation. An omitted optional default is not a security failure.
+Exercise normal streaming and non-streaming paths where the protocol supports
+both.
 
 Update producers, consumers, documentation and meaningful tests together.
 A current document's version number is not a reason to introduce another

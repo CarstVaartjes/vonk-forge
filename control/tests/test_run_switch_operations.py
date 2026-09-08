@@ -1438,6 +1438,8 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         row.plan["build_input_sha256"] = build_plan.build_input_sha256
 
     def start_build(*_args, **_kwargs):
+        with sessions.begin() as session:
+            session.get(RecipeBuild, build_id).state = "building"
         return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
 
     lifecycle_stub.build = start_build
@@ -1469,8 +1471,11 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     assert execution.result == {
         "build_id": build_id,
         "build_input_sha256": "e" * 64,
-        "state": "running",
+        "state": "building",
+        "phase": "prepare",
+        "subphase": "container-build",
     }
+    assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A durable plan mutation is rejected before dispatch; execution never
     # re-plans around the changed identity.
@@ -2233,3 +2238,75 @@ def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_
     service.tick()
     with pytest.raises(RunSwitchOperationConflict, match="explicit Stop"):
         service.cancel(active.operation_id, actor="admin", request_key=str(uuid.uuid4()), reason="Stop running")
+
+
+def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tmp_path: Path) -> None:
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.recipe_builds import RecipeBuildService
+    from vonk_control.recipe_operations import RecipeOperationService
+
+    from .test_recipe_builds import setup as setup_build
+
+    sessions, bundles, now, node_id, revision = setup_build(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    selected = builds.plan(revision.id, node_id, now=now)
+    queue = AgentJobService(sessions, clock=lambda: now)
+    lifecycle = RecipeOperationService(
+        sessions, install_admission=object(), run_admission=object(),
+        agent_jobs=queue, clock=lambda: now, builds=builds,
+    )
+    executor = RecipeLifecyclePhaseExecutor(
+        lifecycle, sessions, ClusterMappingService(sessions), lambda: now,
+    )
+    # This phase consumes only the build identities already selected by preview.
+    plan = SimpleNamespace(
+        recipe_build_id=selected.build_id,
+        recipe_revision_id=selected.recipe_revision_id,
+        build=SimpleNamespace(
+            build_id=selected.build_id,
+            build_input_sha256=selected.build_input_sha256,
+        ),
+    )
+    phase = RunSwitchPhase(
+        index=0, kind="prepare", subphase="container-build", state="planned",
+        detail="Build selected source recipe",
+    )
+    request_key = str(uuid.uuid4())
+
+    def execute():
+        return executor.execute(
+            plan, phase, item_index=0, actor="admin", request_key=request_key,
+            progress={},
+        )
+
+    scheduled = execute()
+    assert scheduled.operation_id is not None
+    assert lifecycle.get(scheduled.operation_id).state == "running"
+    received = _phase_result(scheduled.result, phase=phase)
+    assert received["state"] == "building"
+    assert received["build_id"] == selected.build_id
+    assert received["build_input_sha256"] == selected.build_input_sha256
+    assert "image_digest" not in received
+    replay = execute()
+    assert replay.operation_id == scheduled.operation_id
+    assert _phase_result(replay.result, phase=phase) == received
+
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, selected.build_id)
+        build.state = "succeeded"
+        build.image_digest = "sha256:" + "a" * 64
+        build.oci_layout_sha256 = "b" * 64
+        build.image_bytes = 123
+        session.get(Job, scheduled.operation_id).state = "succeeded"
+    completed = execute()
+    assert completed.operation_id is None
+    receipt = _phase_result(completed.result, phase=phase)
+    assert receipt["state"] == "succeeded"
+    assert receipt["image_digest"] == "sha256:" + "a" * 64
+    assert receipt["oci_layout_sha256"] == "b" * 64
+    assert receipt["image_bytes"] == 123
+    # Success never substitutes defaults for incomplete immutable evidence.
+    with sessions.begin() as session:
+        session.get(RecipeBuild, selected.build_id).image_bytes = None
+    with pytest.raises(RunSwitchOperationConflict, match="container-build-evidence-invalid"):
+        execute()

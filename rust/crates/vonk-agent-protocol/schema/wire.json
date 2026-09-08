@@ -2743,7 +2743,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -2758,6 +2759,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3195,7 +3209,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3216,6 +3231,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3262,7 +3290,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3288,6 +3317,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -8428,6 +8470,65 @@
       "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
+    "SupervisorAcknowledgement": {
+      "additionalProperties": false,
+      "description": "One live, ready child acknowledging an exact finite route activation.",
+      "properties": {
+        "acknowledged_at": {
+          "title": "Acknowledged At",
+          "type": "string"
+        },
+        "activation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Activation Sha256",
+          "type": "string"
+        },
+        "child_pid": {
+          "exclusiveMinimum": 0,
+          "title": "Child Pid",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "generation": {
+          "exclusiveMinimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "litellm_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Litellm Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "maintenance",
+            "published"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "acknowledged_at",
+        "activation_sha256",
+        "child_pid",
+        "expires_at",
+        "generation",
+        "litellm_sha256",
+        "state"
+      ],
+      "title": "SupervisorAcknowledgement",
+      "type": "object"
+    },
     "TelemetryCapability": {
       "additionalProperties": false,
       "properties": {
@@ -10318,6 +10419,7 @@
     "SignedPackageHelperGrant": "#/$defs/SignedPackageHelperGrant",
     "SignedPackageObjectReceipt": "#/$defs/SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
+    "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryCapability": "#/$defs/TelemetryCapability",
     "TelemetryDetails": "#/$defs/TelemetryDetails",
     "TelemetryMetrics": "#/$defs/TelemetryMetrics",

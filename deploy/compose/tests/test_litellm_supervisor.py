@@ -240,7 +240,9 @@ def test_supervisor_recovers_from_a_transient_pre_health_child_exit(
 
     monkeypatch.setattr(module, "_active_request", active_request)
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: next(health))
+    monkeypatch.setattr(
+        module, "_await_healthy", lambda _child, **_kwargs: next(health)
+    )
     monkeypatch.setattr(module, "_clear_ack", clear_ack)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
@@ -283,7 +285,7 @@ def test_supervisor_bounds_pre_health_child_exit_retries(
 
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: None)
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: False)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(module.time, "sleep", retry_delays.append)
@@ -331,7 +333,7 @@ def test_supervisor_does_not_retry_a_live_child_after_the_health_deadline(
 
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: None)
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: False)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(
@@ -735,7 +737,7 @@ def test_live_supervisor_removes_ack_when_the_acknowledged_child_crashes(
 
     child = CrashedChild()
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: request)
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
     monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: child)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
 
@@ -811,7 +813,7 @@ def test_live_supervisor_stops_published_child_at_exact_lease_expiry(
         "_selected",
         lambda **_kwargs: bootstrap,
     )
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
@@ -950,8 +952,8 @@ def test_live_supervisor_renews_same_config_route_lease_without_restart(
             super().publish_ack(request, now=now)
 
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: next(requests))
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
-    monkeypatch.setattr(module, "_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
+    monkeypatch.setattr(module, "_healthy", lambda _child, **_kwargs: True)
     monkeypatch.setattr(module, "_start_route_lease_server", start_server)
     monkeypatch.setattr(module, "_write_ack", write_ack)
     monkeypatch.setattr(module, "_ServingLeaseGuard", Guard)
@@ -1032,8 +1034,8 @@ def test_same_config_renewal_denies_and_aborts_when_rearm_fails(
             raise RuntimeError("simulated rearm failure")
 
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: next(requests))
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
-    monkeypatch.setattr(module, "_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
+    monkeypatch.setattr(module, "_healthy", lambda _child, **_kwargs: True)
     monkeypatch.setattr(module, "_ServingLeaseGuard", Guard)
     monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: Child())
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
@@ -1177,7 +1179,7 @@ def test_live_supervisor_denies_malformed_activation_before_cleanup(
 
     monkeypatch.setattr(module, "_start_route_lease_server", start_server)
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
-    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
     monkeypatch.setattr(module, "_clear_ack", clear_ack)
     monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: child)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
@@ -1456,7 +1458,6 @@ def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor
         in entrypoint
     )
     assert "POLL_SECONDS = 2" in source
-    assert "TERMINATE_SECONDS = 30" in source
     assert "shell=True" not in source
 
 
@@ -1552,3 +1553,205 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     assert worker_volumes["/routes"].get("read_only", False) is False
     assert worker_volumes["/supervisor"]["read_only"] is True
     assert "control-signer" not in worker["depends_on"]
+
+
+@pytest.mark.parametrize("health_after,accepted", [(90, True), (121, False)])
+def test_health_must_arrive_within_the_total_startup_window(
+    monkeypatch, health_after, accepted
+):
+    module = _module()
+    elapsed = [0.0]
+    child = types.SimpleNamespace(poll=lambda: None)
+
+    def healthy(_child):
+        elapsed[0] += health_after
+        return True
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(module, "_healthy", healthy)
+    assert module._await_healthy(child, deadline=120) is accepted
+
+
+def test_retries_share_one_cumulative_startup_deadline(tmp_path, monkeypatch):
+    module = _module()
+    bootstrap = tmp_path / "bootstrap.json"
+    bootstrap.write_text('{"model_list":[]}\n')
+    module.ACK = tmp_path / "ack.json"
+    elapsed = [0.0]
+    attempts = []
+
+    def spawn(*_args, **_kwargs):
+        attempts.append(elapsed[0])
+        elapsed[0] += 60
+        return types.SimpleNamespace(pid=123, poll=lambda: 70)
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: None)
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    assert module._supervise(module._RouteLeaseAuthority()) == 1
+    assert attempts == [0, 61]
+
+
+def test_preparation_consumes_the_same_startup_deadline(monkeypatch):
+    module = _module()
+    elapsed = [0.0]
+
+    def prepare(*, deadline):
+        assert deadline == 120
+        elapsed[0] = 90
+
+    def supervise(_authority, *, startup_deadline):
+        assert startup_deadline - elapsed[0] == 30
+        return 0
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(module, "_prepare_query_engine", prepare)
+    monkeypatch.setattr(module, "_supervise", supervise)
+    monkeypatch.setattr(
+        module,
+        "_start_route_lease_server",
+        lambda _authority: types.SimpleNamespace(
+            shutdown=lambda: None, server_close=lambda: None
+        ),
+    )
+    assert module.main() == 0
+
+
+@pytest.mark.parametrize("reaped", [True, False])
+def test_shutdown_reserves_bounded_kill_reap_and_requires_confirmed_exit(
+    monkeypatch, reaped
+):
+    module = _module()
+    elapsed = [0.0]
+    killed = []
+    waits = []
+    exited = []
+
+    def wait(*, timeout):
+        waits.append(timeout)
+        elapsed[0] += timeout
+        if killed and reaped:
+            exited.append(True)
+            return -9
+        raise subprocess.TimeoutExpired("child", timeout)
+
+    child = types.SimpleNamespace(
+        poll=lambda: -9 if exited else None,
+        terminate=lambda: None,
+        wait=wait,
+        kill=lambda: killed.append(True),
+    )
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    if reaped:
+        module._stop(child)
+    else:
+        with pytest.raises(RuntimeError, match="exit was not confirmed"):
+            module._stop(child)
+    assert elapsed[0] == 30
+    assert waits == [25, 5]
+    assert killed == [True]
+
+
+def test_expired_activation_cannot_reset_startup_for_the_same_generation(
+    tmp_path, monkeypatch
+):
+    module = _module()
+    config = tmp_path / "config.json"
+    config.write_text('{"model_list":[]}\n')
+    module.ACK = tmp_path / "ack.json"
+    request = module.ActiveRequest(config, {"generation": 1}, "a" * 64)
+    attempts = []
+
+    def spawn(*_args, **_kwargs):
+        attempts.append(True)
+        return types.SimpleNamespace(pid=123, poll=lambda: -9)
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: request)
+    monkeypatch.setattr(
+        module,
+        "_ServingLeaseGuard",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            start=lambda: None, cancel=lambda: None, expired=True
+        ),
+    )
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    assert module._supervise(module._RouteLeaseAuthority()) == 1
+    assert attempts == [True]
+
+
+@pytest.mark.parametrize("bootstrap", [True, False])
+def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
+    tmp_path, monkeypatch, bootstrap
+):
+    module = _module()
+    config = tmp_path / "config.json"
+    config.write_text('{"model_list":[]}\n')
+    module.ACK = tmp_path / "ack.json"
+    old = (
+        None if bootstrap else module.ActiveRequest(config, {"generation": 1}, "a" * 64)
+    )
+    generation = 1 if bootstrap else 2
+    new = module.ActiveRequest(config, {"generation": generation}, "b" * 64)
+    current = [old]
+    elapsed = [0.0]
+    children = []
+    spawns = []
+    acknowledgements = []
+
+    def spawn(*_args, **_kwargs):
+        assert not children or children[-1].returncode == 0
+        child = types.SimpleNamespace(pid=100 + len(children), returncode=None)
+        child.poll = lambda: child.returncode
+
+        def terminate():
+            elapsed[0] += 2
+            child.returncode = 0
+
+        child.terminate = terminate
+        children.append(child)
+        spawns.append(elapsed[0])
+        return child
+
+    def healthy(child):
+        elapsed[0] += 90
+        if child is children[0]:
+            current[0] = new
+            return False
+        return True
+
+    def guard(_request, child, **_kwargs):
+        def publish_ack(request, **_kwargs):
+            acknowledgements.append((request.marker["generation"], elapsed[0]))
+            child.returncode = 23
+
+        return types.SimpleNamespace(
+            start=lambda: None,
+            cancel=lambda: None,
+            expired=False,
+            publish_ack=publish_ack,
+        )
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: current[0])
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: config)
+    monkeypatch.setattr(module, "_healthy", healthy)
+    monkeypatch.setattr(module, "_ServingLeaseGuard", guard)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    authority = types.SimpleNamespace(deny=lambda: None, activate=lambda _request: None)
+    assert module._supervise(authority) == 23
+    assert spawns == [0, 94]
+    assert acknowledgements == [(generation, 184)]
