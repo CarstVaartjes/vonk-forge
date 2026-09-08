@@ -94,7 +94,11 @@ def test_profile_handoff_covers_persisted_view_update_apply_and_delete() -> None
 
 def test_run_switch_handoff_covers_preview_apply_read_and_cancel(tmp_path) -> None:
     from .test_recipe_operations import NOW, setup_services
-    from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
+    from .test_run_switch_operations import (
+        RecordingArtifactExecutor,
+        _request,
+        _service,
+    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
