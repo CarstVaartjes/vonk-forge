@@ -13,8 +13,10 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.operation_evidence_provenance import OperationEvidenceProvenance
+  from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.operation_evidence_download import OperationEvidenceDownload
   from ..models.operation_progress import OperationProgress
+  from ..models.agent_failure_result import AgentFailureResult
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_recovery import OperationRecovery
 
@@ -36,7 +38,7 @@ class JobOperationResponse:
             node_id (str):
             state (str):
             evidence_download (Union['OperationEvidenceDownload', None, Unset]):
-            failure (Union['OperationFailureEvidence', None, Unset]):
+            failure (Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset]):
             progress (Union['OperationProgress', None, Unset]):
             provenance (Union['OperationEvidenceProvenance', None, Unset]):
             recovery (Union['OperationRecovery', None, Unset]):
@@ -49,7 +51,7 @@ class JobOperationResponse:
     node_id: str
     state: str
     evidence_download: Union['OperationEvidenceDownload', None, Unset] = UNSET
-    failure: Union['OperationFailureEvidence', None, Unset] = UNSET
+    failure: Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset] = UNSET
     progress: Union['OperationProgress', None, Unset] = UNSET
     provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
     recovery: Union['OperationRecovery', None, Unset] = UNSET
@@ -61,8 +63,10 @@ class JobOperationResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.operation_evidence_download import OperationEvidenceDownload
         from ..models.operation_progress import OperationProgress
+        from ..models.agent_failure_result import AgentFailureResult
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         attempt = self.attempt
@@ -86,6 +90,10 @@ class JobOperationResponse:
         failure: Union[None, Unset, dict[str, Any]]
         if isinstance(self.failure, Unset):
             failure = UNSET
+        elif isinstance(self.failure, AgentFailureResult):
+            failure = self.failure.to_dict()
+        elif isinstance(self.failure, AvailabilityOperationFailure):
+            failure = self.failure.to_dict()
         elif isinstance(self.failure, OperationFailureEvidence):
             failure = self.failure.to_dict()
         else:
@@ -151,8 +159,10 @@ class JobOperationResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.operation_evidence_download import OperationEvidenceDownload
         from ..models.operation_progress import OperationProgress
+        from ..models.agent_failure_result import AgentFailureResult
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         d = dict(src_dict)
@@ -186,7 +196,7 @@ class JobOperationResponse:
         evidence_download = _parse_evidence_download(d.pop("evidence_download", UNSET))
 
 
-        def _parse_failure(data: object) -> Union['OperationFailureEvidence', None, Unset]:
+        def _parse_failure(data: object) -> Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -194,14 +204,34 @@ class JobOperationResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                failure_type_0 = OperationFailureEvidence.from_dict(data)
+                failure_type_0 = AgentFailureResult.from_dict(data)
 
 
 
                 return failure_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['OperationFailureEvidence', None, Unset], data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                failure_type_1 = AvailabilityOperationFailure.from_dict(data)
+
+
+
+                return failure_type_1
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                failure_type_2 = OperationFailureEvidence.from_dict(data)
+
+
+
+                return failure_type_2
+            except: # noqa: E722
+                pass
+            return cast(Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset], data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
 

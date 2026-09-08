@@ -15,23 +15,12 @@ export type TelemetryHistoryPoint = components["schemas"]["TelemetryPoint"] | co
 export type TelemetryHistoryMetadata = components["schemas"]["TelemetryHistoryMetadata"];
 export type TelemetryRollupPoint = components["schemas"]["TelemetryRollupPoint"];
 export type TelemetryMetricSummary = components["schemas"]["TelemetryMetricSummary"];
-export type AgentUpgradeStrategy = "one-at-a-time" | "all-at-once";
-export type AgentUpgradePackage = {
-  architecture: "linux-arm64"; package_bytes: number; package_sha256: string;
-  package_signature: string; package_url: string; package_version: string;
-  schema_version: 1; target_binary_digest: string; target_build_digest: string;
-};
-export type AgentRepairManifest = {
-  schema_version: 2;
-  kind: "agent-upgrade-repair";
-  node_id: string;
-  authority_sha256: string;
-  package: AgentUpgradePackage;
-};
-export type AgentUpgradePlan = {
-  authority_revision: string; node_ids: string[]; package: AgentUpgradePackage;
-  plan_digest: string; repair_manifest?: AgentRepairManifest; strategy: AgentUpgradeStrategy;
-};
+export type AgentUpgradeStrategy = components["schemas"]["AgentUpgradePreviewRequest"]["strategy"];
+export type AgentUpgradePackage = components["schemas"]["AgentUpgradePackageRequest"];
+export type AgentRepairManifest = components["schemas"]["AgentRepairManifestRequest"];
+export type AgentUpgradePlan = components["schemas"]["AgentUpgradePreviewResponse"];
+export type AgentUpgradeApplyInput = components["schemas"]["AgentUpgradeApplyRequest"];
+export type AgentUpgradeApplyResponse = components["schemas"]["AgentUpgradeApplyResponse"];
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];
 export type EnrollmentSummary = components["schemas"]["EnrollmentSummary"];
@@ -47,17 +36,11 @@ export type FleetProfileRetryInput = components["schemas"]["FleetProfileRetryReq
 export type ProposalInput = components["schemas"]["ProposalRequest"];
 export type ProposalPreview = components["schemas"]["ProposalPreviewResponse"];
 export type ChangeResponse = components["schemas"]["ChangeResponse"];
-export type AuditSummary = {request_id: string; actor: string; action: string; authority_revision?: string; targets: string[]; occurred_at?: string | null};
-export type AuditResponse = {events: AuditSummary[]};
+export type AuditSummary = components["schemas"]["AuditEventResponse"];
+export type AuditResponse = components["schemas"]["AuditResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type LibraryRecipeModel = components["schemas"]["LibraryRecipeModel"];
-export type SourceBundleReceipt = {sha256: string; archive_bytes: number; total_bytes: number; file_count: number; files: string[]};
-export type SourcePolicyFinding = {code: string; path: string; line: number | null; detail: string};
-export type SourcePolicyReport = {passed: boolean; source_bundle_sha256: string; dockerfile: string; findings: SourcePolicyFinding[]};
-export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; topology_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
-export type RecipeBuildPlan = {build_id: string; recipe_revision_id: string; recipe_content_sha256: string; builder_node_id: string; source_bundle_sha256: string; build_input_sha256: string};
-export type RecipeOperation = {id: string; kind: string; owner_id: string; state: string; plan_digest: string; nodes: string[]; result: Record<string, unknown> | null};
 export type LibrarySnapshot = components["schemas"]["LibrarySnapshot"];
 export type LibraryRecipeDetail = components["schemas"]["LibraryRecipeDetail"];
 export type LibraryRecipeSummary = components["schemas"]["LibraryRecipeSummary"];
@@ -173,6 +156,10 @@ export type LibraryPlacementPreview = components["schemas"]["LibraryPlacementPre
 export type LibraryPlacementApplyInput = components["schemas"]["LibraryPlacementApplyRequest"];
 export type LibraryPlacementApplication = components["schemas"]["LibraryPlacementApplication"];
 export type LibraryModelDeletionPlan = components["schemas"]["ModelDeletionPlanResponse"];
+export type FleetSnapshotEvent = components["schemas"]["FleetSnapshotEvent"];
+export type FleetTelemetryEvent = components["schemas"]["FleetTelemetryEvent"];
+export type FleetChangeEvent = components["schemas"]["FleetChangeEvent"];
+export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface CatalogApi {
 }
 export interface LibraryApi {
@@ -260,7 +247,7 @@ export interface ControlApi extends LibraryApi {
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
-  audit(): Promise<AuditResponse>;
+  audit(signal?: AbortSignal): Promise<AuditResponse>;
   preview(input: ProposalInput): Promise<ProposalPreview>; submit(digest: string): Promise<ChangeResponse>;
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
@@ -268,5 +255,5 @@ export interface ControlApi extends LibraryApi {
   createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;
   previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan>;
-  applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<{id: string; state: string}>;
+  applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<AgentUpgradeApplyResponse>;
 }

@@ -456,6 +456,41 @@ class CacheOperationView:
     failure: Mapping[str, object] | None = None
 
 
+def _cache_failure(
+    code: str, detail: str, *, retryable: bool, recovery: str,
+    retry_time: str | None = None, retry_after_seconds: int | None = None,
+    required_bytes: int | None = None, free_bytes: int | None = None,
+    shortfall_bytes: int | None = None, artifact_key: str | None = None,
+) -> dict[str, object]:
+    """Translate an exception once, then persist the canonical public contract."""
+    semantic_codes = {
+        "model_cache.credentials_missing": "access_required",
+        "model_cache.credentials_denied": "access_denied",
+        "model_cache.credentials_invalid": "credentials_invalid",
+        "model_cache.rate_limited": "rate_limited",
+        "model_cache.digest_mismatch": "integrity_mismatch",
+        "model_cache.source_size_mismatch": "integrity_mismatch",
+        "model_cache.capacity": "capacity",
+        "model_cache.interrupted": "interrupted",
+    }
+    recovery_actions = {
+        "access_required": ["open_model_access", "configure_hf_token", "check_access_and_resume"],
+        "access_denied": ["open_model_access", "check_access_and_resume"],
+        "credentials_invalid": ["configure_hf_token", "check_access_and_resume"],
+        "resume": ["resume"], "download_again": ["download_again"],
+        "retry": ["retry"], "capacity": ["free_space", "resume"],
+        "check_access_and_resume": ["check_access_and_resume"], "inspect": ["inspect"],
+    }
+    return AvailabilityOperationFailure.model_validate({
+        "code": semantic_codes.get(code, code), "detail": redact_text(detail)[:512],
+        "retryable": retryable, "recovery_actions": recovery_actions[recovery],
+        "retry_time": retry_time, "retry_after_seconds": retry_after_seconds,
+        "required_bytes": required_bytes, "free_bytes": free_bytes,
+        "shortfall_bytes": shortfall_bytes, "artifact_key": artifact_key,
+        "log_excerpt": redact_text(detail)[:1024],
+    }).model_dump(mode="json")
+
+
 def _sha256_json(value: object) -> str:
     encoded = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -2384,17 +2419,11 @@ class ModelCacheService:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
                 operation.payload = dict(operation.payload) | {
-                    "failure": {
-                        "code": "model_cache.interrupted",
-                        "detail": f"{detail[:480]}; preserved bytes remain available to resume",
-                        "retryable": True,
-                        "recovery": "resume",
-                        "retry_time": None,
-                        "retry_after_seconds": None,
-                        "required_bytes": None,
-                        "free_bytes": None,
-                        "shortfall_bytes": None,
-                    }
+                    "failure": _cache_failure(
+                        "model_cache.interrupted",
+                        f"{detail[:480]}; preserved bytes remain available to resume",
+                        retryable=True, recovery="resume",
+                    )
                 }
                 operation.payload = {
                     key: value
@@ -2442,9 +2471,11 @@ class ModelCacheService:
         required_bytes = free_bytes = shortfall_bytes = None
         if isinstance(error, OSError) and error.errno == errno.ENOSPC:
             try:
-                required_bytes = manifest.expected_bytes
-                free_bytes = self.storage_summary().free_bytes
-                shortfall_bytes = max(0, required_bytes - free_bytes)
+                measured_required = manifest.expected_bytes
+                measured_free = self.storage_summary().free_bytes
+                required_bytes, free_bytes, shortfall_bytes = (
+                    measured_required, measured_free, max(0, measured_required - measured_free)
+                )
             except (OSError, RuntimeError, ValueError):
                 pass
         failure_code = getattr(error, "code", None)
@@ -2499,26 +2530,16 @@ class ModelCacheService:
                 provider_rate_limited = getattr(error, "code", None) == "model_cache.rate_limited"
                 if provider_rate_limited and self._manifest_has_huggingface_source(manifest):
                     self._record_huggingface_cooldown(next_retry)
-                failure_payload = {
-                    "code": failure_code,
-                    "detail": detail[:512],
-                    "retryable": retryable,
-                    "automatic_exhausted": retryable and not bounded_retry,
-                    "recovery": getattr(error, "recovery", None)
+                failure_payload = _cache_failure(
+                    failure_code, detail, retryable=retryable,
+                    recovery=getattr(error, "recovery", None)
                     or ("capacity" if failure_code == "model_cache.capacity" else None)
                     or ("resume" if bounded_retry else "retry"),
-                    "retry_time": _iso(next_retry)
-                    if bounded_retry or provider_rate_limited
-                    else None,
-                    "retry_after_seconds": retry_delay
-                    if bounded_retry or provider_rate_limited
-                    else None,
-                    "required_bytes": required_bytes,
-                    "free_bytes": free_bytes,
-                    "shortfall_bytes": shortfall_bytes,
-                }
-                if isinstance(failed_artifact_key, str):
-                    failure_payload["artifact_key"] = failed_artifact_key
+                    retry_time=_iso(next_retry) if bounded_retry or provider_rate_limited else None,
+                    retry_after_seconds=retry_delay if bounded_retry or provider_rate_limited else None,
+                    required_bytes=required_bytes, free_bytes=free_bytes,
+                    shortfall_bytes=shortfall_bytes, artifact_key=failed_artifact_key,
+                )
                 operation.payload = dict(operation.payload) | {
                     "failure": failure_payload,
                     "retry": retry,
@@ -2572,7 +2593,7 @@ class ModelCacheService:
                         "request key was already used for another cache operation",
                     )
                 return self._operation_view(existing)
-            failure = previous.payload.get("failure", {})
+            failure = self._canonical_failure(previous)
             retryable = (
                 isinstance(failure, Mapping)
                 and failure.get("retryable") is True
@@ -2640,9 +2661,9 @@ class ModelCacheService:
         requested_plan = _optional_digest(plan_digest)
         assert requested_set is not None and requested_plan is not None
         auth_codes = {
-            "model_cache.credentials_missing",
-            "model_cache.credentials_denied",
-            "model_cache.credentials_invalid",
+            "access_required",
+            "access_denied",
+            "credentials_invalid",
         }
         with self._lock, self._session(write=True) as session:
             previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
@@ -2679,7 +2700,7 @@ class ModelCacheService:
                     "model_cache.request_key_reused",
                     "request key was already used for another cache operation",
                 )
-            failure = previous.payload.get("failure", {})
+            failure = self._canonical_failure(previous)
             if (
                 previous.kind not in {"download", "repair"}
                 or previous.state != "failed"
@@ -2732,20 +2753,11 @@ class ModelCacheService:
                 raise
             safe_detail = redact_text(error.detail)[:512]
             now = self._clock()
-            failure_payload = {
-                "code": error.code,
-                "detail": safe_detail,
-                "retryable": False,
-                "automatic_exhausted": True,
-                "recovery": error.recovery or "check_access_and_resume",
-                "retry_time": None,
-                "retry_after_seconds": None,
-                "required_bytes": None,
-                "free_bytes": None,
-                "shortfall_bytes": None,
-            }
-            if isinstance(failed_artifact_key, str):
-                failure_payload["artifact_key"] = failed_artifact_key
+            failure_payload = _cache_failure(
+                error.code, safe_detail, retryable=False,
+                recovery=error.recovery or "check_access_and_resume",
+                artifact_key=failed_artifact_key,
+            )
             with self._lock, self._session(write=True) as session:
                 previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
                 if previous is None:
@@ -3060,76 +3072,14 @@ class ModelCacheService:
         return view
 
     @staticmethod
-    def _canonical_failure(
-        operation: ModelCacheOperation,
-    ) -> Mapping[str, object] | None:
-        raw = operation.payload.get("failure") if isinstance(operation.payload, Mapping) else None
-        if not isinstance(raw, Mapping):
-            return None
-        semantic_codes = {
-            "model_cache.credentials_missing": "access_required",
-            "model_cache.credentials_denied": "access_denied",
-            "model_cache.credentials_invalid": "credentials_invalid",
-            "model_cache.rate_limited": "rate_limited",
-            "model_cache.digest_mismatch": "integrity_mismatch",
-            "model_cache.source_size_mismatch": "integrity_mismatch",
-            "model_cache.capacity": "capacity",
-            "model_cache.interrupted": "interrupted",
-        }
-        code = semantic_codes.get(
-            str(raw.get("code", "model_cache.operation_failed")),
-            str(raw.get("code", "model_cache.operation_failed")),
-        )
-        recovery = raw.get("recovery")
-        recovery_actions = {
-            "access_required": [
-                "open_model_access",
-                "configure_hf_token",
-                "check_access_and_resume",
-            ],
-            "access_denied": ["open_model_access", "check_access_and_resume"],
-            "credentials_invalid": [
-                "configure_hf_token",
-                "check_access_and_resume",
-            ],
-            "resume": ["resume"],
-            "download_again": ["download_again"],
-            "retry": ["retry"],
-            "capacity": ["free_space", "resume"],
-            "check_access_and_resume": ["check_access_and_resume"],
-        }
-        actions = (
-            recovery_actions.get(recovery, ["inspect"])
-            if isinstance(recovery, str) and recovery
-            else ["inspect"]
-        )
-        retry_time = raw.get("retry_time")
-        retry_after = raw.get("retry_after_seconds")
-        if not isinstance(retry_time, str):
-            retry_time = None
-            retry_after = None
-        capacity = {
-            key: raw.get(key)
-            for key in ("required_bytes", "free_bytes", "shortfall_bytes")
-        }
-        if not all(type(capacity[key]) is int and capacity[key] >= 0 for key in capacity):
-            capacity = {key: None for key in capacity}
-        return AvailabilityOperationFailure.model_validate(
-            {
-                "code": code,
-                "detail": redact_text(
-                    raw.get("detail") or operation.last_error or "model cache operation failed"
-                )[:512],
-                "recovery_actions": actions,
-                "retryable": raw.get("retryable") is True,
-                "retry_time": retry_time,
-                "retry_after_seconds": retry_after,
-                "log_excerpt": redact_text(raw.get("detail"))[:1024]
-                if raw.get("detail")
-                else None,
-                **capacity,
-            }
-        ).model_dump(mode="json")
+    def _canonical_failure(operation: ModelCacheOperation) -> Mapping[str, object] | None:
+        """Read the one current persisted failure contract without repair/defaults."""
+        if not isinstance(operation.payload, Mapping):
+            raise TypeError("cache operation payload must be a JSON object")
+        raw = operation.payload.get("failure")
+        return (None if raw is None else
+                AvailabilityOperationFailure.model_validate(raw).model_dump(mode="json"))
+
 
     def resume_operations(self, *, limit: int = 16) -> int:
         """Return durable cache work for the Controller worker to resume.
@@ -3612,22 +3562,13 @@ class ModelCacheService:
             payload = operation.payload if isinstance(operation.payload, Mapping) else {}
             if not self._payload_has_huggingface_source(payload):
                 continue
-            failure = payload.get("failure")
-            if not isinstance(failure, Mapping) or failure.get("code") not in {
-                "model_cache.rate_limited",
-                "rate_limited",
-            }:
+            failure = self._canonical_failure(operation)
+            if failure is None or failure["code"] != "rate_limited":
                 continue
-            retry_at = failure.get("retry_time")
-            if not isinstance(retry_at, str):
-                retry = payload.get("retry")
-                retry_at = retry.get("next_retry_at") if isinstance(retry, Mapping) else None
-            if not isinstance(retry_at, str):
+            retry_at = failure["retry_time"]
+            if retry_at is None:
                 continue
-            try:
-                candidate = _datetime(datetime.fromisoformat(retry_at))
-            except ValueError:
-                continue
+            candidate = _datetime(datetime.fromisoformat(retry_at))
             if candidate > now and (latest is None or candidate > latest):
                 latest = candidate
         self._hf_cooldown_until = latest if latest is not None and latest > now else None
@@ -4927,13 +4868,10 @@ class ModelCacheService:
                     payload = dict(operation.payload)
                     payload.pop("claim", None)
                     payload.pop("result", None)
-                    payload["failure"] = {
-                        "code": error.code if isinstance(error, ModelCacheError)
-                        else "model_cache.eviction_failed",
-                        "detail": operation.last_error,
-                        "retryable": False,
-                        "recovery": "inspect",
-                    }
+                    payload["failure"] = _cache_failure(
+                        error.code if isinstance(error, ModelCacheError) else "model_cache.eviction_failed",
+                        operation.last_error, retryable=False, recovery="inspect",
+                    )
                     operation.payload = payload
                     operation.progress = cache_phase(operation.progress, "failed", now)
                     operation.updated_at = now

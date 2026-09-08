@@ -991,7 +991,7 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     queries = []
     def psql(query):
         queries.append(query)
-        return [[json.dumps(evidence)]]
+        return [[json.dumps(evidence)]] if "receipt_fingerprint" in query else []
     run._psql = psql
     operation = {
         "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -1006,6 +1006,7 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     assert '"observed_at": 100' in message
     assert '"controller_now": 102' in message
     assert len(message) < 2000
-    assert len(queries) == 1
+    assert len(queries) == 2
     assert "LIMIT 2" in queries[0]
+    assert "attempt_state" in queries[1]
     assert "signed_grant" not in queries[0]
