@@ -48,23 +48,42 @@ supply-chain evidence were refreshed before the platform merge. A second
 client generation left all 811 inspected files unchanged. Public-contract
 packaging pins its build backend so production and local wheel bytes agree.
 
-The local connected engineering replay used actual built API and worker images
-and agent/helper binaries. It reached healthy services, enrollment, recipe
-build, preflight, artifact distribution, installation and START. The Controller
-accepted the signed runtime observation with a ready endpoint. Routing then
-failed: the Controller allowed 30 seconds for acknowledgement, while the
-replacement LiteLLM child was still starting after 90 seconds. This is a real
-integration failure; inference and switch completion remain unproven.
+The routing follow-up is integrated in the PR #630 branch. Controller and
+supervisor share finite transition budgets and a typed acknowledgement; initial
+bootstrap also observes the first real activation correctly. The engineering
+replay at `44839a5e`, with the corrected synthetic request fixture, reached
+inference through the proxy, then stopped the runtime and withdrew its route.
+Uninstall failed because the unprivileged agent could not remove helper-owned
+runtime-cache directories. This is not a completed clean lifecycle replay.
+
+Recipe PR #79 removes obsolete package-test skips. PR #80 makes the synthetic
+acceptance server consume a nested Pydantic request model, accept declared
+defaults and extensions, and serve both JSON and SSE. Its offline ARM64 image
+passed probes as UID 10001 with a read-only root and no capabilities. These
+fixture probes do not replace the final proxy-to-runtime replay.
+
+A separate current source-build defect is fixed in `f12a34b8`: the producer
+copied the child job state `running` into a receipt that requires the build
+state `building`. The producer now constructs the canonical phase model from
+the persisted build. A real build-service/queue/executor regression passes its
+output to the actual receipt consumer for dispatch, retry and completion, and
+rejects incomplete success evidence. The focused suite passed 36 tests. A fast
+build can finish before the invalid intermediate state is observed, so an
+earlier successful replay did not exclude this defect.
 
 Remaining work has explicit owners:
 
-- Routing/canary owner: centralize Controller and supervisor transition budgets
-  and their Pydantic acknowledgement model; retain finite serving leases and
-  confirmed old-child termination. Test delayed readiness, exhausted budgets,
-  expired authority and stale acknowledgements, then complete the connected
-  start-to-serving and switch replay with rebuilt affected images.
-- Parent: review and integrate that follow-up, refresh affected packaged
-  artifacts, run relevant checks and merge after green PR CI.
+- Helper owner: finish the signed installation-scoped runtime-cache cleanup
+  across the shared contract, Controller, generated Rust and helper. Verify
+  private directories, exact installation authority, outside-path isolation
+  and idempotent retries; preserve shared model/image caches.
+- Canary owner: rebuild production images and ARM64 agent/helper from the
+  final packaged checkpoint. Run a clean source-image build, both JSON and SSE
+  inference through the proxy, stop, uninstall, certificate renewal and cleanup.
+- Parent: integrate tested follow-ups, regenerate derived contracts and
+  packaged artifacts, and merge after green PR CI. Verify signed development
+  publication, refresh the NAS bundle, upgrade Sparks through the Controller,
+  and verify physical serving separately.
 
 Signed platform publication, Controller deployment and physical Spark
 acceptance remain separate evidence boundaries. The engineering replay does
