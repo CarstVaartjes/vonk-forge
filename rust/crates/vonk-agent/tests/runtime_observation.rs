@@ -24,7 +24,7 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
     ))
     .unwrap();
     value["runtime"]["placement"] = json!({
-        "endpoint_address": "192.168.1.212", "rank": 1, "role": "worker", "world_size": 2,
+        "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
         "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64
     });
@@ -186,6 +186,13 @@ fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp(
         .unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
+    assert_eq!(inspections[0].endpoint_address, None);
+    assert!(
+        !inspections[0]
+            .arguments
+            .iter()
+            .any(|value| value == "--publish")
+    );
     assert_eq!(
         &inspections[0].arguments[..4],
         &[

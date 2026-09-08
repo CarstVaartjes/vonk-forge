@@ -140,6 +140,10 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         assert pending
         for child in pending:
             assert child.payload.get("run_generation") is not None
+            placement = child.payload["compiled_execution_plan"]["runtime"]["placement"]
+            if nodes > 1 and child.payload["local_address"] != child.payload["master_address"]:
+                assert placement["endpoint_address"] is None
+                assert child.payload["endpoint_address"] == child.payload["local_address"]
             with sessions() as session:
                 run = session.get(RecipeRun, started.owner_id)
                 assert run is not None
