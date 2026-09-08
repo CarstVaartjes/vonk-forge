@@ -3401,6 +3401,393 @@
       "title": "InstallVonkDebOperation",
       "type": "object"
     },
+    "InstallerAcceptanceBaselineRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_only": {
+          "const": true,
+          "title": "Acceptance Only",
+          "type": "boolean"
+        },
+        "artifacts": {
+          "$ref": "#/$defs/InstallerBaselineArtifacts"
+        },
+        "bootstraps": {
+          "$ref": "#/$defs/InstallerBaselineBootstraps"
+        },
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version",
+        "acceptance_only",
+        "artifacts",
+        "bootstraps"
+      ],
+      "title": "InstallerAcceptanceBaselineRelease",
+      "type": "object"
+    },
+    "InstallerBaselineArtifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "agent-package-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "agent-package-linux-arm64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-arm64"
+      ],
+      "title": "InstallerBaselineArtifacts",
+      "type": "object"
+    },
+    "InstallerBaselineBootstraps": {
+      "additionalProperties": false,
+      "properties": {
+        "spark": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "spark"
+      ],
+      "title": "InstallerBaselineBootstraps",
+      "type": "object"
+    },
+    "InstallerCandidateArtifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "agent-package-linux-arm64": {
+          "$ref": "#/$defs/InstallerPackageArtifact"
+        },
+        "agent-package-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-payload": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-darwin-amd64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-darwin-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-linux-amd64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "agent-package-linux-arm64",
+        "agent-package-signature-linux-arm64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-arm64",
+        "nas-payload",
+        "nas-setup-darwin-amd64",
+        "nas-setup-darwin-arm64",
+        "nas-setup-linux-amd64",
+        "nas-setup-linux-arm64"
+      ],
+      "title": "InstallerCandidateArtifacts",
+      "type": "object"
+    },
+    "InstallerCandidateBootstraps": {
+      "additionalProperties": false,
+      "properties": {
+        "nas": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "spark",
+        "nas"
+      ],
+      "title": "InstallerCandidateBootstraps",
+      "type": "object"
+    },
+    "InstallerCandidateRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "$ref": "#/$defs/InstallerCandidateArtifacts"
+        },
+        "bootstraps": {
+          "$ref": "#/$defs/InstallerCandidateBootstraps"
+        },
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version",
+        "artifacts",
+        "bootstraps"
+      ],
+      "title": "InstallerCandidateRelease",
+      "type": "object"
+    },
+    "InstallerPackageArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "const": "linux-arm64",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "host_signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Host Signature",
+          "type": "string"
+        },
+        "package_version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Package Version",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        },
+        "target_binary_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Binary Digest",
+          "type": "string"
+        },
+        "target_build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Target Build Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "architecture",
+        "host_signature",
+        "package_version",
+        "target_binary_digest",
+        "target_build_digest"
+      ],
+      "title": "InstallerPackageArtifact",
+      "type": "object"
+    },
+    "InstallerReleaseIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version"
+      ],
+      "title": "InstallerReleaseIdentity",
+      "type": "object"
+    },
+    "InstallerReleaseImages": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Api",
+          "type": "string"
+        },
+        "hermes": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Hermes",
+          "type": "string"
+        },
+        "litellm": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Litellm",
+          "type": "string"
+        },
+        "worker": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Worker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api",
+        "worker",
+        "hermes",
+        "litellm"
+      ],
+      "title": "InstallerReleaseImages",
+      "type": "object"
+    },
+    "InstallerReleaseManifest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InstallerCandidateRelease"
+        },
+        {
+          "$ref": "#/$defs/InstallerAcceptanceBaselineRelease"
+        }
+      ],
+      "description": "Candidate and acceptance-only baseline are the two current graph roles.",
+      "title": "InstallerReleaseManifest"
+    },
+    "InstallerReleaseObject": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "title": "InstallerReleaseObject",
+      "type": "object"
+    },
     "InventoryRequest": {
       "additionalProperties": false,
       "description": "Canonical Controller body and Rust agent inventory wire shape.",
@@ -8470,6 +8857,112 @@
       "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
+    "SourceBundleDigestManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes"
+      ],
+      "title": "SourceBundleDigestManifest",
+      "type": "object"
+    },
+    "SourceBundleFile": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            420,
+            493
+          ],
+          "title": "Mode",
+          "type": "integer"
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 33554432,
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "size",
+        "sha256"
+      ],
+      "title": "SourceBundleFile",
+      "type": "object"
+    },
+    "SourceBundleManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes",
+        "sha256"
+      ],
+      "title": "SourceBundleManifest",
+      "type": "object"
+    },
     "SupervisorAcknowledgement": {
       "additionalProperties": false,
       "description": "One live, ready child acknowledging an exact finite route activation.",
@@ -10268,6 +10761,18 @@
     "CompiledDistributionObject": [
       "DistributionObject"
     ],
+    "InstallerAcceptanceBaselineRelease": [
+      "InstallerReleaseIdentity"
+    ],
+    "InstallerCandidateBootstraps": [
+      "InstallerBaselineBootstraps"
+    ],
+    "InstallerCandidateRelease": [
+      "InstallerReleaseIdentity"
+    ],
+    "InstallerPackageArtifact": [
+      "InstallerReleaseObject"
+    ],
     "RecipeJobOutputManifest": [
       "RecipeJobOutputManifestContent"
     ],
@@ -10281,6 +10786,9 @@
     "RecipeRunObservationWire": [
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
+    ],
+    "SourceBundleManifest": [
+      "SourceBundleDigestManifest"
     ]
   },
   "x-vonk-models": {
@@ -10339,6 +10847,17 @@
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
+    "InstallerAcceptanceBaselineRelease": "#/$defs/InstallerAcceptanceBaselineRelease",
+    "InstallerBaselineArtifacts": "#/$defs/InstallerBaselineArtifacts",
+    "InstallerBaselineBootstraps": "#/$defs/InstallerBaselineBootstraps",
+    "InstallerCandidateArtifacts": "#/$defs/InstallerCandidateArtifacts",
+    "InstallerCandidateBootstraps": "#/$defs/InstallerCandidateBootstraps",
+    "InstallerCandidateRelease": "#/$defs/InstallerCandidateRelease",
+    "InstallerPackageArtifact": "#/$defs/InstallerPackageArtifact",
+    "InstallerReleaseIdentity": "#/$defs/InstallerReleaseIdentity",
+    "InstallerReleaseImages": "#/$defs/InstallerReleaseImages",
+    "InstallerReleaseManifest": "#/$defs/InstallerReleaseManifest",
+    "InstallerReleaseObject": "#/$defs/InstallerReleaseObject",
     "InventoryRequest": "#/$defs/InventoryRequest",
     "IssuedCertificateResponse": "#/$defs/IssuedCertificateResponse",
     "OciBundleMetadata": "#/$defs/OciBundleMetadata",
@@ -10419,6 +10938,9 @@
     "SignedPackageHelperGrant": "#/$defs/SignedPackageHelperGrant",
     "SignedPackageObjectReceipt": "#/$defs/SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
+    "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
+    "SourceBundleFile": "#/$defs/SourceBundleFile",
+    "SourceBundleManifest": "#/$defs/SourceBundleManifest",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryCapability": "#/$defs/TelemetryCapability",
     "TelemetryDetails": "#/$defs/TelemetryDetails",

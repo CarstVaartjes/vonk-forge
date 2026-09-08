@@ -1,3 +1,5 @@
+mod common;
+
 use std::{
     collections::VecDeque,
     fs,
@@ -12,7 +14,7 @@ use tempfile::tempdir;
 use vonk_spark_setup::{
     CallerIdentity, Command, CommandOutput, CommandRunner, CommandStderr, InstallPaths, Prompt,
     ReleaseAuthority, SetupError, SetupRequest, TtyPrompt, apply_setup_from_with_authority,
-    handoff_to_root, prepare_setup_with_authority,
+    handoff_to_root_with_authority, prepare_setup_with_authority,
 };
 
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
@@ -25,18 +27,10 @@ struct NativeReleaseIdentity {
 }
 
 fn native_release_identity() -> NativeReleaseIdentity {
-    match std::env::consts::ARCH {
-        "x86_64" => NativeReleaseIdentity {
-            platform: "linux-amd64",
-            architecture: "amd64",
-            wrong_architecture: "arm64",
-        },
-        "aarch64" => NativeReleaseIdentity {
-            platform: "linux-arm64",
-            architecture: "arm64",
-            wrong_architecture: "amd64",
-        },
-        architecture => panic!("unsupported test architecture: {architecture}"),
+    NativeReleaseIdentity {
+        platform: "linux-arm64",
+        architecture: "arm64",
+        wrong_architecture: "amd64",
     }
 }
 
@@ -125,7 +119,7 @@ fn signed_release(
         .write_all(b"\n")
         .unwrap();
     let setup_signature_raw = fs::read(&setup_signature).unwrap();
-    let release = serde_json::json!({
+    let release = common::candidate_release(serde_json::json!({
         "artifacts": {
             (agent_artifact): {
                 "architecture": identity.platform,
@@ -166,7 +160,7 @@ fn signed_release(
         "schema_version": 2,
         "source_sha": "b".repeat(40),
         "version": "1.0.0",
-    });
+    }));
     fs::write(
         &manifest,
         format!("{}\n", serde_json::to_string(&release).unwrap()),
@@ -611,7 +605,12 @@ fn root_apply_accepts_only_artifacts_bound_by_the_trusted_signed_release() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let frame = handoff_runner.commands[0].stdin.clone();
     let staged_executable = root_session(temporary.path(), &prepared);
 
@@ -669,7 +668,12 @@ fn root_apply_rejects_an_attacker_signed_release_and_non_session_execution() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&attacker_prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &attacker_prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let frame = handoff_runner.commands[0].stdin.clone();
     let staged_executable = root_session(temporary.path(), &attacker_prepared);
 
@@ -768,7 +772,8 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
     );
 
     let mut root_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut root_runner).unwrap();
+    handoff_to_root_with_authority(&prepared, &mut root_runner, &ReleaseAuthority::canonical())
+        .unwrap();
 
     assert_eq!(root_runner.commands.len(), 1);
     let sudo = &root_runner.commands[0];
@@ -840,7 +845,12 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
             .contains(&"--cacert".to_owned())
     );
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let frame = handoff_runner.commands[0].stdin.clone();
     let mut apply_runner = RecordingRunner::default();
 
@@ -954,7 +964,12 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
     assert_eq!(prompt.secrets, 1);
     assert!(prepare_runner.commands.is_empty());
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let mut apply_runner = RecordingRunner::default();
     apply_setup_from(
         handoff_runner.commands[0].stdin.as_slice(),
@@ -995,7 +1010,12 @@ fn start_converges_when_reset_failed_reports_unit_not_loaded() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let mut apply_runner = RecordingRunner {
         fail_reset_failed: true,
         ..Default::default()
@@ -1048,7 +1068,12 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
     assert_eq!(prompt.secrets, 1);
     assert!(prepare_runner.commands.is_empty());
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let mut apply_runner = RecordingRunner::default();
     apply_setup_from(
         handoff_runner.commands[0].stdin.as_slice(),
@@ -1139,7 +1164,12 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let mut failing_runner = FailingReadinessRunner::default();
 
     let result = apply_setup_from(
@@ -1189,7 +1219,12 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
     )
     .unwrap();
     let mut retry_handoff_runner = RecordingRunner::default();
-    handoff_to_root(&retry, &mut retry_handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &retry,
+        &mut retry_handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     assert!(
         !retry_handoff_runner.commands[0]
             .stdin
@@ -1238,7 +1273,12 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
 
     assert!(prepare_runner.commands.is_empty());
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     assert!(
         !handoff_runner.commands[0]
             .stdin
@@ -1344,7 +1384,12 @@ fn fresh_prepared(
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     (prepared, handoff_runner)
 }
 
@@ -1727,7 +1772,12 @@ fn pairing_plan_must_match_root_owned_configuration_before_package_processing() 
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut handoff_runner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
     let frame = rewrite_frame(&handoff_runner.commands[0].stdin, |plan| {
         plan.insert(
             "ca_sha256".to_owned(),

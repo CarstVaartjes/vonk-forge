@@ -1,3 +1,5 @@
+mod common;
+
 use std::{
     collections::{BTreeMap, VecDeque},
     fs,
@@ -12,8 +14,7 @@ use tempfile::tempdir;
 use vonk_spark_setup::{
     CallerIdentity, Command, CommandOutput, CommandRunner, CommandStderr, InstallPaths, Prompt,
     ReleaseAuthority, SetupRequest, SystemCommandRunner, TtyPrompt,
-    apply_setup_from_with_authority, handoff_to_root, handoff_to_root_with_authority,
-    prepare_setup_with_authority,
+    apply_setup_from_with_authority, handoff_to_root_with_authority, prepare_setup_with_authority,
 };
 
 const HELPER_ROOT: &str = "VONK_SPARK_PROCESS_HELPER_ROOT";
@@ -27,16 +28,9 @@ struct NativeReleaseIdentity {
 }
 
 fn native_release_identity() -> NativeReleaseIdentity {
-    match std::env::consts::ARCH {
-        "x86_64" => NativeReleaseIdentity {
-            platform: "linux-amd64",
-            architecture: "amd64",
-        },
-        "aarch64" => NativeReleaseIdentity {
-            platform: "linux-arm64",
-            architecture: "arm64",
-        },
-        architecture => panic!("unsupported test architecture: {architecture}"),
+    NativeReleaseIdentity {
+        platform: "linux-arm64",
+        architecture: "arm64",
     }
 }
 
@@ -207,7 +201,7 @@ fn signed_request_with_setup(
     let setup_artifact = format!("spark-setup-{}", identity.platform);
     let setup_signature_artifact = format!("spark-setup-signature-{}", identity.platform);
     let manifest = root.join("release.json");
-    let release = serde_json::json!({
+    let release = common::candidate_release(serde_json::json!({
         "artifacts": {
             (agent_artifact): {
                 "architecture": identity.platform,
@@ -237,7 +231,7 @@ fn signed_request_with_setup(
         "schema_version": 2,
         "source_sha": "d".repeat(40),
         "version": "1.0.0",
-    });
+    }));
     fs::write(
         &manifest,
         format!("{}\n", serde_json::to_string(&release).unwrap()),
@@ -358,7 +352,12 @@ fn run_headless_upgrade_process(root: PathBuf) {
         &authority,
     )
     .unwrap();
-    handoff_to_root(&prepared, &mut SystemCommandRunner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut SystemCommandRunner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
 }
 
 fn run_fresh_handoff_process(root: PathBuf) {
@@ -415,7 +414,12 @@ fn run_fresh_handoff_process(root: PathBuf) {
         &authority,
     )
     .unwrap();
-    handoff_to_root(&prepared, &mut SystemCommandRunner).unwrap();
+    handoff_to_root_with_authority(
+        &prepared,
+        &mut SystemCommandRunner,
+        &ReleaseAuthority::canonical(),
+    )
+    .unwrap();
 }
 
 fn run_apply_process(root: PathBuf) {
@@ -618,12 +622,15 @@ fn compiled_cli_rejects_direct_apply_from_the_unprivileged_phase() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
+    let write = child
         .stdin
         .take()
         .unwrap()
-        .write_all(&caller_bound_frame(rustix::process::geteuid().as_raw()))
-        .unwrap();
+        .write_all(&caller_bound_frame(rustix::process::geteuid().as_raw()));
+    if let Err(error) = write {
+        // The real entry point can reject the caller before reading stdin.
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
     let output = child.wait_with_output().unwrap();
 
     assert!(!output.status.success());

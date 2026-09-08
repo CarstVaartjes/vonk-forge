@@ -4,7 +4,6 @@ import copy
 import hashlib
 import io
 import json
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -138,7 +137,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 total_bytes=bundle.manifest.total_bytes,
                 file_count=len(bundle.manifest.files),
                 storage_key=f"{bundle.sha256[:2]}/{bundle.sha256}.tar",
-                manifest={"files": [asdict(item) for item in bundle.manifest.files]},
+                manifest=bundle.manifest.model_dump(mode="json"),
                 verified_at=now,
             )
         )
