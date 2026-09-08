@@ -878,3 +878,15 @@ def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
             complete | {"downloaded_bytes": "1024"},
             state="succeeded",
         )
+
+
+def test_lease_only_progress_omission_and_null_have_identical_canonical_bytes() -> None:
+    omitted = AgentProgress.model_validate(valid_attempt())
+    explicit = AgentProgress.model_validate(valid_attempt() | {"progress": None})
+    assert omitted.progress is None
+    assert canonical_message(omitted) == canonical_message(explicit)
+    assert "progress" not in json.loads(canonical_message(omitted))
+    measured = AgentProgress.model_validate(valid_attempt() | {"progress": {"phase": "queued"}})
+    assert json.loads(canonical_message(measured))["progress"] == {
+        "phase": "queued", "completed_bytes": 0, "total_bytes_known": False, "members": [],
+    }

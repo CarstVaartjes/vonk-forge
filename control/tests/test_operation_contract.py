@@ -102,6 +102,7 @@ def test_progress_preserves_distribution_object_identity() -> None:
         "completed_bytes": 10,
         "total_bytes": 20,
         "total_bytes_known": True,
+        "members": [],
     }
 
 
@@ -174,3 +175,30 @@ def test_uncertain_operations_require_inspection_before_resume() -> None:
         OperationRecoveryAction.RESUME,
         OperationRecoveryAction.CANCEL,
     ]
+
+
+def test_partial_progress_preserves_omitted_members_but_clears_explicit_empty() -> None:
+    previous = {
+        "phase": "transfer", "completed_bytes": 10,
+        "total_bytes": 100, "total_bytes_known": True,
+        "members": [{"member_id": "node", "phase": "transfer", "completed_bytes": 10}],
+    }
+    retained = validate_progress_update(previous, {"phase": "verify"})
+    assert retained["completed_bytes"] == 10
+    assert retained["total_bytes"] == 100
+    assert retained["members"][0]["member_id"] == "node"
+    cleared = validate_progress_update(previous, {"phase": "verify", "members": []})
+    assert cleared["members"] == []
+    assert cleared["completed_bytes"] == 10
+    snapshot = validate_progress_update(previous, {
+        "phase": "verify", "completed_bytes": 10, "total_bytes_known": False, "members": [],
+    }, partial=False)
+    assert snapshot["members"] == []
+    assert snapshot["total_bytes_known"] is False
+    assert "total_bytes" not in snapshot
+
+
+def test_canonical_progress_retains_default_zero_false_and_empty_members() -> None:
+    assert normalize_operation_progress({"phase": "queued"}) == {
+        "phase": "queued", "completed_bytes": 0, "total_bytes_known": False, "members": [],
+    }

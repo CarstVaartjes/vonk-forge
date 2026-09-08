@@ -1086,7 +1086,7 @@ class AgentProgress(_ProtocolEnvelopeModel):
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
-    progress: OperationProgress
+    progress: OperationProgress | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1109,13 +1109,14 @@ class AgentProgress(_ProtocolEnvelopeModel):
         _uuid(self.fence, name="fence")
         _node_id(self.node_id)
         _deadline(self.deadline)
-        object.__setattr__(
-            self,
-            "progress",
-            OperationProgress.model_validate(
-                json.loads(canonical_message(self.progress)), strict=True
-            ),
-        )
+        if self.progress is not None:
+            object.__setattr__(
+                self,
+                "progress",
+                OperationProgress.model_validate(
+                    json.loads(canonical_message(self.progress)), strict=True
+                ),
+            )
         return self
 
     @classmethod
