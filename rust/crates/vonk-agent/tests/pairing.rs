@@ -16,8 +16,7 @@ use vonk_agent::{
     },
     pair::{
         EnrollmentEvidence, IssuedCertificateResponse, PairingError, pair,
-        validate_enrollment_response,
-        validate_issued,
+        validate_enrollment_response, validate_issued,
     },
 };
 
@@ -233,6 +232,40 @@ fn issued_certificate_must_bind_the_generated_key_and_node_identity() {
 
     validate_issued(&response, &pending, NODE_ID).unwrap();
     assert!(validate_issued(&response, &pending, "spk_ffffffffffffffffffffffffffffffff").is_err());
+}
+
+#[test]
+fn issued_certificate_response_uses_the_exact_generated_wire_shape() {
+    let document = serde_json::json!({
+        "node_id": NODE_ID,
+        "certificate_pem": "certificate",
+        "chain_pem": "chain",
+        "serial": "42",
+        "fingerprint": "a".repeat(64),
+        "not_before": "2026-08-07T00:00:00+00:00",
+        "not_after": "2026-08-08T00:00:00+00:00",
+        "generation": 1,
+    });
+    assert!(
+        validate_enrollment_response(200, &serde_json::to_vec(&document).unwrap(), NODE_ID).is_ok()
+    );
+
+    let mut coerced_generation = document.clone();
+    coerced_generation["generation"] = serde_json::json!(1.0);
+    assert!(
+        validate_enrollment_response(
+            200,
+            &serde_json::to_vec(&coerced_generation).unwrap(),
+            NODE_ID,
+        )
+        .is_err()
+    );
+
+    let mut unknown = document;
+    unknown["legacy_state"] = serde_json::json!("issued");
+    assert!(
+        validate_enrollment_response(200, &serde_json::to_vec(&unknown).unwrap(), NODE_ID).is_err()
+    );
 }
 
 #[test]

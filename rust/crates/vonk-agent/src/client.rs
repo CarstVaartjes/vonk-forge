@@ -12,17 +12,18 @@ use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
+use vonk_agent_protocol::generated::{
+    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
+    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
+    PackageActivationGrantRequest, RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire,
+    RenewRequest, TelemetryRequest,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
     InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
     RecipeRunObservationsWire, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
-};
-use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, IssuedCertificateResponse, PackageActivationGrantRequest,
-    RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire, RenewRequest,
 };
 
 use crate::{
@@ -82,7 +83,10 @@ pub fn claim_request_document(
         .observation_receipt_public_key()
         .map_err(|_| ClientError::Protocol)?;
     canonical_json(&ClaimRequest {
-        capabilities: capabilities.iter().map(|value| (*value).to_owned()).collect(),
+        capabilities: capabilities
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect(),
         hostname: hostname.map(str::to_owned),
         lease_seconds: 60,
         node_id: node_id.to_owned(),
@@ -354,14 +358,14 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let body = canonical_json(&HostRuntimeGrantRequest {
-            node_id: &self.node_id,
+            node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
-            attempt: claim.attempt,
+            attempt: u64::from(claim.attempt),
             fence: claim.fence,
-            action,
-            request_sha256,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            action: host_runtime_grant_action(action),
+            request_sha256: request_sha256.to_owned(),
+            expires_in_seconds: u64::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -373,7 +377,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -398,16 +402,33 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&RecipeRunInspectionGrantRequest {
+        let body = canonical_json(&RecipeRunObservationGrantRequest {
             schema_version: 1,
-            node_id: &self.node_id,
-            binding,
+            node_id: self.node_id.clone(),
+            run_id: binding.run_id,
+            installation_id: binding.installation_id,
+            recipe_revision_id: binding.recipe_revision_id,
+            recipe_content_sha256: binding.recipe_content_sha256.clone(),
+            mapping_id: binding.mapping_id,
+            mapping_generation: binding.mapping_generation,
+            run_generation: binding.run_generation,
+            image_digest: binding.image_digest.clone(),
+            artifact_set_digest: binding.artifact_set_digest.clone(),
+            model_identity: binding.model_identity.clone(),
+            rank: u64::from(binding.rank),
+            role: binding.role.clone(),
+            world_size: u64::from(binding.world_size),
+            local_address: binding.local_address.map(|value| value.to_string()),
+            master_address: binding.master_address.map(|value| value.to_string()),
+            master_port: binding.master_port.map(u64::from),
+            port: u64::from(binding.port),
+            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
             job_id: request.job_id,
             operation_id: request.operation_id,
-            attempt: request.attempt,
+            attempt: u64::from(request.attempt),
             fence: request.fence,
-            request_sha256,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            request_sha256: request_sha256.to_owned(),
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS as u8,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -422,7 +443,7 @@ impl AgentHttpClient {
         }
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: RecipeRunInspectionGrantResponse =
+        let response: RecipeRunObservationGrantWire =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if response.schema_version != 1
             || !valid_sha256(&response.observation_identity_sha256)
@@ -472,7 +493,12 @@ impl AgentHttpClient {
         receipt: &vonk_agent_protocol::PackageActivationReceipt,
         runtime_identity: &AgentRuntimeIdentity,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        let body = canonical_json(&serde_json::json!({"node_id": self.node_id, "receipt": receipt, "runtime_identity": runtime_identity})).map_err(|_| ClientError::Protocol)?;
+        let body = canonical_json(&PackageActivationGrantRequest {
+            node_id: self.node_id.clone(),
+            receipt: receipt.clone(),
+            runtime_identity: runtime_identity.clone(),
+        })
+        .map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?)
@@ -482,7 +508,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -504,14 +530,14 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let body = canonical_json(&AgentUpgradeGrantRequest {
-            node_id: &self.node_id,
+            node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
-            attempt: claim.attempt,
+            attempt: u64::from(claim.attempt),
             fence: claim.fence,
-            package_sha256,
-            package_signature,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            package_sha256: package_sha256.to_owned(),
+            package_signature: package_signature.to_owned(),
+            expires_in_seconds: u64::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -523,7 +549,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -1203,9 +1229,9 @@ impl AgentHttpClient {
             .client
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
-            .json(&crate::telemetry::TelemetryRequest {
+            .json(&TelemetryRequest {
                 schema_version: 1,
-                samples,
+                samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
             })
             .send()
             .await?;
@@ -1217,7 +1243,7 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn renew(&self, csr: &[u8]) -> Result<IssuedResponse, ClientError> {
+    pub async fn renew(&self, csr: &[u8]) -> Result<IssuedCertificateResponse, ClientError> {
         let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
         if csr.is_empty() || csr.len() > 16 * 1024 {
             return Err(ClientError::Protocol);
@@ -1226,15 +1252,15 @@ impl AgentHttpClient {
             .client
             .post(self.endpoint("/agent/v1/renew")?)
             .json(&RenewRequest {
-                csr,
-                node_id: &self.node_id,
+                csr: csr.to_owned(),
+                node_id: self.node_id.clone(),
             })
             .send()
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let issued: IssuedResponse =
-            serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
+        let issued: IssuedCertificateResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if issued.node_id != self.node_id || issued.generation == 0 {
             return Err(ClientError::Protocol);
         }
@@ -1250,7 +1276,7 @@ impl AgentHttpClient {
             .post(self.endpoint("/agent/v1/renew/activate")?)
             .json(&ActivateRequest {
                 generation,
-                node_id: &self.node_id,
+                node_id: self.node_id.clone(),
             })
             .send()
             .await?;
@@ -1265,6 +1291,17 @@ impl AgentHttpClient {
         self.controller
             .join(path)
             .map_err(|_| ClientError::Protocol)
+    }
+}
+
+fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantRequestAction {
+    match action {
+        HostRuntimeAction::RuntimePreflight => HostRuntimeGrantRequestAction::RuntimePreflight,
+        HostRuntimeAction::ImageImport => HostRuntimeGrantRequestAction::ImageImport,
+        HostRuntimeAction::ImageInspect => HostRuntimeGrantRequestAction::ImageInspect,
+        HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
+        HostRuntimeAction::Start => HostRuntimeGrantRequestAction::Start,
+        HostRuntimeAction::Stop => HostRuntimeGrantRequestAction::Stop,
     }
 }
 

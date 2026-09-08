@@ -22,6 +22,8 @@ pub enum RuntimeIdentityError {
     Io(#[from] std::io::Error),
     #[error("observation receipt public key is unsafe")]
     UnsafeObservationReceiptKey,
+    #[error("agent runtime identity is invalid")]
+    InvalidIdentity,
 }
 
 #[used]
@@ -102,7 +104,7 @@ impl PreparedRuntimeIdentity {
         let observation_receipt_public_key = self
             .observation_receipt_public_key
             .ok_or(RuntimeIdentityError::UnsafeObservationReceiptKey)?;
-        Ok(AgentRuntimeIdentity {
+        let identity = AgentRuntimeIdentity {
             semantic_version: self.semantic_version,
             build_digest: self.build_digest,
             binary_digest: self.binary_digest,
@@ -110,7 +112,10 @@ impl PreparedRuntimeIdentity {
             self_test_passed: true,
             package_activation: None,
             observation_receipt_public_key: hex::encode(observation_receipt_public_key),
-        })
+        };
+        let document =
+            serde_json::to_vec(&identity).map_err(|_| RuntimeIdentityError::InvalidIdentity)?;
+        serde_json::from_slice(&document).map_err(|_| RuntimeIdentityError::InvalidIdentity)
     }
 }
 
