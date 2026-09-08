@@ -33,7 +33,7 @@ function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): M
     request_key: "00000000-0000-4000-8000-000000000401",
     artifact_set_sha256: "a".repeat(64),
     plan_digest: "b".repeat(64),
-    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 10, expected_bytes: 20, total_bytes_known: true, current_artifact_key: "second"},
+    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 10, expected_bytes: 20, total_bytes_known: true, current_artifact_key: "second", measurement: {phase: "failed", completed_bytes: 10, total_bytes: 20, total_bytes_known: true, completed_items: 1, total_items: 2}},
     created_at: "2026-09-06T12:00:00Z",
     completed_at: "2026-09-06T12:01:00Z",
     failure: {code: "temporary_transfer_failure", detail: "temporary transfer failure", retryable: true, recovery_actions: ["retry"]},
@@ -46,7 +46,7 @@ function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): M
 test("retries a transient cache operation in place with retained progress", async () => {
   const model = librarySnapshot.models[0]!;
   const failed = cacheOperation();
-  const replacement = cacheOperation({id: "cache-operation-2", state: "running", attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10}});
+  const replacement = cacheOperation({id: "cache-operation-2", state: "running", attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10, measurement: {phase: "download", completed_bytes: 10, total_bytes: 20, total_bytes_known: true, completed_items: 1, total_items: 2, bytes_per_second: 5, eta_seconds: 2}}});
   const previewModelCacheDownload = vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []}));
   const downloadModelCache = vi.fn(async () => failed);
   const retryModelCacheOperation = vi.fn(async () => replacement);
@@ -59,6 +59,7 @@ test("retries a transient cache operation in place with retained progress", asyn
   expect(previewModelCacheDownload).toHaveBeenCalledTimes(1);
   expect(downloadModelCache).toHaveBeenCalledTimes(1);
   expect(screen.getByText("1 of 2 files · 10 B")).toBeVisible();
+  expect(screen.getByText(/5 B\/s/)).toBeVisible();
 });
 
 test("does not offer cache retry for terminal integrity failures", async () => {

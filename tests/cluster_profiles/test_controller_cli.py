@@ -1533,9 +1533,9 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
                     "state": "running",
                     "progress": {
                         "phase": "downloading",
-                        "downloaded_bytes": 12,
-                        "expected_bytes": 34,
-                        "current_artifact_key": "weights.safetensors",
+                        "completed_bytes": 12,
+                        "total_bytes": 34,
+                        "checkpoint": {"key": "artifact-set", "sequence": 0, "cursor": "weights.safetensors"},
                     },
                 },
                 {
@@ -1543,9 +1543,9 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
                     "last_error": "source unavailable",
                     "progress": {
                         "phase": "failed",
-                        "downloaded_bytes": 12,
-                        "expected_bytes": 34,
-                        "current_artifact_key": "weights.safetensors",
+                        "completed_bytes": 12,
+                        "total_bytes": 34,
+                        "checkpoint": {"key": "artifact-set", "sequence": 0, "cursor": "weights.safetensors"},
                     },
                 },
             ],
@@ -2242,3 +2242,15 @@ def test_progress_line_shows_canonical_aggregate_rates_eta_and_freshness():
     }}})
     for value in ("bytes: 10/100", "smoothed: 15 bytes/s", "ETA: 6s", "elapsed: 2s", "last progress: 2026-09-08T00:00:02Z", "activity: possibly stalled"):
         assert value in line
+
+
+def test_direct_cache_progress_formatter_uses_current_measurement():
+    from cluster_profiles.controller_cli import _operation_progress_line
+
+    text = _operation_progress_line({"kind": "download", "progress": {"measurement": {
+        "phase": "download", "completed_bytes": 10, "total_bytes": 100,
+        "total_bytes_known": True, "bytes_per_second": 5.0, "eta_seconds": 18.0,
+        "observed_at": "2026-09-08T12:00:00Z"}}})
+    assert "bytes: 10/100" in text
+    assert "current: 5 bytes/s" in text
+    assert "ETA: 18s" in text

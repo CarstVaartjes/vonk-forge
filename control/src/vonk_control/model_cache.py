@@ -32,17 +32,20 @@ import httpx
 from pydantic import ConfigDict, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import OperationMemberProgress
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
 from .logging import redact_text
 from .model_cache_contract import (
+    ModelCacheOperationProgress,
     ModelCacheOperationResponse,
     ModelCacheOperationResult,
     ModelCacheRepairCheckpoint,
     parse_model_cache_result,
 )
+from .model_cache_progress import cache_phase, cache_progress
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
@@ -1646,6 +1649,7 @@ class ModelCacheService:
         expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
         transfer: Mapping[str, object] | None = None,
+        previous: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         document: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
@@ -1660,57 +1664,23 @@ class ModelCacheService:
             ),
             "current_artifact_key": current_artifact_key,
         }
-        if expected_bytes is not None:
-            document["total_bytes_known"] = True
-        else:
-            document["total_bytes_known"] = False
-        members: list[dict[str, object]] = []
-        aggregate_rate = 0.0
-        aggregate_eta: float | None = None
-        counted_rates: set[str] = set()
-        raw_artifacts = transfer.get("artifacts") if isinstance(transfer, Mapping) else None
-        if isinstance(raw_artifacts, Mapping):
-            now = self._clock()
-            for spec in manifest.artifacts:
-                raw = raw_artifacts.get(spec.sha256, {})
-                entry = dict(raw) if isinstance(raw, Mapping) else {}
-                baseline = entry.get("baseline_bytes")
-                baseline = baseline if type(baseline) is int and baseline >= 0 else 0
-                received = entry.get("received_bytes")
-                received = received if type(received) is int and received >= 0 else 0
-                completed = min(spec.expected_bytes, baseline + received)
-                started = entry.get("started_at")
-                rate: float | None = None
-                if isinstance(started, str):
-                    try:
-                        elapsed = max(0.001, (now - datetime.fromisoformat(started)).total_seconds())
-                    except (TypeError, ValueError):
-                        elapsed = 0.0
-                    if elapsed and received:
-                        rate = received / elapsed
-                        if spec.sha256 not in counted_rates:
-                            aggregate_rate += rate
-                            counted_rates.add(spec.sha256)
-                state = "completed" if completed >= spec.expected_bytes else (
-                    "downloading" if received else "queued"
-                )
-                members.append({
-                    "member_id": spec.key,
-                    "phase": "verify" if phase == "verifying" else phase,
-                    "completed_bytes": completed,
-                    "total_bytes": spec.expected_bytes,
-                    "bytes_per_second": rate,
-                    "state": state,
-                })
-            if aggregate_rate and expected_bytes is not None and downloaded_bytes < expected_bytes:
-                aggregate_eta = max(0.0, (expected_bytes - downloaded_bytes) / aggregate_rate)
-        if members:
-            document["members"] = members
-        if aggregate_rate:
-            document["bytes_per_second"] = aggregate_rate
-        if aggregate_eta is not None:
-            document["eta_seconds"] = aggregate_eta
-        return document
+        members = []
+        raw_artifacts = transfer.get("artifacts") if transfer is not None else None
+        unique = _unique_artifacts(manifest.artifacts)
+        # Progress cannot impose a shard-count limit on installable models.
+        # Larger sets retain exact aggregate counters without a partial member list.
+        if isinstance(raw_artifacts, Mapping) and len(unique) <= 1024:
+            for spec in unique.values():
+                entry = raw_artifacts[spec.sha256]
+                baseline, received = entry["baseline_bytes"], entry["received_bytes"]
+                members.append(OperationMemberProgress(
+                    member_id=spec.sha256, object_sha256=spec.sha256,
+                    phase={"downloading": "download", "verifying": "verify", "completed": "completed"}.get(phase, phase),
+                    completed_bytes=min(spec.expected_bytes, baseline + received),
+                    total_bytes=spec.expected_bytes,
+                    state="succeeded" if phase == "completed" or baseline == spec.expected_bytes else "running",
+                ))
+        return cache_progress(document, previous=previous, now=self._clock(), members=members)
 
     def _run_download(
         self,
@@ -1974,7 +1944,17 @@ class ModelCacheService:
                         actual_bytes=received,
                         state="partial",
                         completed_artifacts=completed_artifacts,
+                        force_progress=False,
                     )
+        except (OSError, httpx.HTTPError, ModelCacheError):
+            # Flush the last received counter when a stream fails between the
+            # regular one-second samples; resumable bytes are already on disk.
+            self._checkpoint_artifact(
+                spec, operation_id=operation_id, set_digest=set_digest,
+                actual_bytes=part.stat().st_size, state="partial",
+                completed_artifacts=completed_artifacts,
+            )
+            raise
         finally:
             close()
         if received != spec.expected_bytes:
@@ -1990,6 +1970,10 @@ class ModelCacheService:
                 "source ended before the immutable artifact size",
                 recovery="resume",
             )
+        self._checkpoint_artifact(
+            spec, operation_id=operation_id, set_digest=set_digest,
+            actual_bytes=received, state="verifying", completed_artifacts=completed_artifacts,
+        )
         if not self._verify_file(part, spec):
             self._checkpoint_artifact(
                 spec,
@@ -2268,15 +2252,21 @@ class ModelCacheService:
         actual_bytes: int,
         state: str,
         completed_artifacts: int = 0,
+        force_progress: bool = True,
     ) -> None:
         now = self._clock()
         with self._lock, self._session(write=True) as session:
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if operation is not None and not force_progress:
+                prior = ModelCacheOperationProgress.model_validate(operation.progress).measurement
+                if (prior.phase == "download" and prior.observed_at is not None
+                    and 0 <= (now - datetime.fromisoformat(prior.observed_at)).total_seconds() < 1):
+                    return
             artifact = session.get(ModelCacheArtifact, spec.sha256)
             if artifact is not None:
                 artifact.actual_bytes = actual_bytes
-                artifact.state = state
+                artifact.state = "partial" if state == "verifying" else state
                 artifact.updated_at = now
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is not None:
                 manifest = ArtifactSetManifest.from_document(operation.payload["manifest"])
                 payload = dict(operation.payload)
@@ -2325,6 +2315,7 @@ class ModelCacheService:
                 operation.state = "running" if state != "partial" else "partial"
                 operation.progress = self._progress(
                     manifest,
+                    previous=operation.progress,
                     phase="downloading" if state == "partial" else "verifying",
                     completed_artifacts=max(old_completed, completed_artifacts),
                     downloaded_bytes=max(old_downloaded, received),
@@ -2411,6 +2402,7 @@ class ModelCacheService:
                 _total, received = self._transfer_totals(operation.payload)
                 operation.progress = self._progress(
                     manifest,
+                    previous=operation.progress,
                     phase="downloading",
                     completed_artifacts=(
                         operation.progress.get("completed_artifacts", 0)
@@ -2427,6 +2419,7 @@ class ModelCacheService:
                         else None
                     ),
                 )
+                operation.progress = cache_phase(operation.progress, "downloading", now, waiting=True)
                 operation.updated_at = now
 
     def _finish_failed(
@@ -2542,6 +2535,7 @@ class ModelCacheService:
                     for key, value in operation.payload.items()
                     if key != "claim"
                 }
+                operation.progress = cache_phase(operation.progress, "queued" if bounded_retry else "failed", now)
                 operation.updated_at = now
 
     def retry(
@@ -2611,7 +2605,7 @@ class ModelCacheService:
                 artifact_set_sha256=previous.artifact_set_sha256,
                 plan_digest=previous.plan_digest,
                 payload=payload,
-                progress=dict(previous.progress),
+                progress=cache_phase(previous.progress, "queued", now),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
                 created_at=now,
@@ -2901,6 +2895,8 @@ class ModelCacheService:
                 else:
                     operation.attempt = max(1, int(operation.attempt))
             operation.state = state
+            if state in {"succeeded", "failed", "cancelled"}:
+                operation.progress = cache_phase(operation.progress, "completed" if state == "succeeded" else "failed", now)
             operation.updated_at = now
             if state == "running":
                 operation.payload = {
@@ -2948,6 +2944,7 @@ class ModelCacheService:
             old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
             operation.progress = self._progress(
                 manifest,
+                previous=operation.progress,
                 phase=phase,
                 completed_artifacts=max(old_completed, completed_artifacts),
                 downloaded_bytes=max(old_downloaded, downloaded_bytes),
@@ -4839,7 +4836,7 @@ class ModelCacheService:
                     artifact_set_sha256=None,
                     plan_digest=requested_plan,
                     payload=payload,
-                    progress={
+                    progress=cache_progress({
                         "schema_version": SCHEMA_VERSION,
                         "phase": "queued",
                         "completed_artifacts": 0,
@@ -4847,7 +4844,7 @@ class ModelCacheService:
                         "downloaded_bytes": 0,
                         "expected_bytes": int(preview["selected_bytes"]),
                         "current_artifact_key": None,
-                    },
+                    }, previous=None, now=self._clock()),
                     actor=actor,
                     created_at=self._clock(),
                     updated_at=self._clock(),
@@ -4883,7 +4880,7 @@ class ModelCacheService:
                     session.delete(row)
                     operation = session.get(ModelCacheOperation, operation_id)
                     if operation is not None:
-                        operation.progress = {
+                        operation.progress = cache_progress({
                             "schema_version": SCHEMA_VERSION,
                             "phase": "reclaiming",
                             "completed_artifacts": index,
@@ -4891,7 +4888,7 @@ class ModelCacheService:
                             "downloaded_bytes": 0,
                             "expected_bytes": int(operation.progress.get("expected_bytes", 0)),
                             "current_artifact_key": None,
-                        }
+                        }, previous=operation.progress, now=self._clock())
                 session.flush()
                 referenced = {
                     item.artifact_sha256
@@ -4936,7 +4933,7 @@ class ModelCacheService:
                         "recovery": "inspect",
                     }
                     operation.payload = payload
-                    operation.progress = dict(operation.progress) | {"phase": "failed"}
+                    operation.progress = cache_phase(operation.progress, "failed", now)
                     operation.updated_at = now
                     operation.completed_at = now
 

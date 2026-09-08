@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import DistributionAssignment
+from vonk_agent_protocol import DistributionAssignment, OperationProgress
 
 from .model_cache_contract import ModelCacheDownloadResult
 from .preparation_contract import RolloutPreparation
@@ -465,6 +465,8 @@ class RunSwitchRankReceipt(_StrictModel):
 
 class RunSwitchChildProgress(_StrictModel):
     """Progress nested in a durable child receipt."""
+
+    operation: OperationProgress | None = None
 
     phase: Literal[
         "transfer", "verify", "prepare", "cleanup", "stop", "start", "final_verify",

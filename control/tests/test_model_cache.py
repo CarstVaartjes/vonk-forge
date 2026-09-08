@@ -3,7 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -688,7 +688,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
     progress = operation_contract.OperationProgress.model_validate(first["progress"])
-    assert progress.phase == "prepare"
+    assert progress.phase == "queued"
     assert progress.completed_bytes == 0
     assert progress.total_bytes_known is True
     assert first_page.next_cursor
@@ -1277,16 +1277,18 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    progress = ModelCacheOperationProvider._progress(
-        {"phase": "downloading", "downloaded_bytes": 12}
-    )
-    assert progress == {
-        "phase": "download",
-        "completed_bytes": 12,
-        "total_bytes_known": False,
-    }
-    assert "percent" not in progress
+    from vonk_control.model_cache_progress import cache_progress
+    value = cache_progress({"phase": "downloading", "completed_artifacts": 0,
+        "total_artifacts": 1, "downloaded_bytes": 12, "expected_bytes": None},
+        previous=None, now=NOW)
+    progress = ModelCacheOperationProvider._progress(value)
+    assert progress["phase"] == "download"
+    assert progress["completed_bytes"] == 12
+    assert progress["total_bytes_known"] is False
     assert "eta_seconds" not in progress
+    assert "bytes_per_second" not in progress
+    with pytest.raises(ValidationError):
+        ModelCacheOperationProvider._progress({"phase": "downloading", "downloaded_bytes": 12})
 
 
 def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, monkeypatch):
@@ -1445,3 +1447,76 @@ def test_repair_checkpoint_requires_exact_nested_contract():
                     dict(valid, completed_objects=[7]), dict(valid, legacy=True)):
         with pytest.raises(ValidationError):
             ModelCacheRepairCheckpoint.model_validate(invalid)
+
+
+def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cache, tmp_path):
+    from vonk_control.model_cache_progress import project_cache_progress
+    service, sessions = cache
+    clock = [datetime.now(UTC)]
+    service._clock = lambda: clock[0]
+    raw = _artifact(tmp_path, b"x" * 100)
+    preview = service.download_preview(artifacts=[raw])
+    operation = service.start_download(actor="test", request_key="00000000-0000-4000-8000-000000000991",
+        plan_digest=preview["plan_digest"], artifacts=[raw])
+    with sessions() as session:
+        manifest = ArtifactSetManifest.from_document(session.get(ModelCacheOperation, operation.id).payload["manifest"])
+    spec = manifest.artifacts[0]
+    def checkpoint(owner, count, state="partial", force=False):
+        owner._checkpoint_artifact(spec, operation_id=operation.id, set_digest=manifest.digest,
+            actual_bytes=count, state=state, force_progress=force)
+    checkpoint(service, 10)
+    clock[0] += timedelta(seconds=0.1)
+    checkpoint(service, 20)
+    assert service.get_operation(operation.id).progress["downloaded_bytes"] == 10
+    clock[0] += timedelta(seconds=0.9)
+    checkpoint(service, 30)
+    measured = service.get_operation(operation.id).progress["measurement"]
+    assert measured["bytes_per_second"] == 20
+    assert measured["members"][0]["bytes_per_second"] == 20
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True, clock=lambda: clock[0])
+    clock[0] += timedelta(seconds=1)
+    checkpoint(restarted, 40)
+    current = restarted.get_operation(operation.id).progress
+    assert current["measurement"]["bytes_per_second"] == 10
+    assert 10 < current["measurement"]["smoothed_bytes_per_second"] < 20
+    assert project_cache_progress(current, clock[0])["members"][0]["observed_at"] == clock[0].isoformat()
+    clock[0] += timedelta(seconds=0.1)
+    checkpoint(restarted, 100, state="verifying", force=True)
+    verifying = restarted.get_operation(operation.id).progress["measurement"]
+    assert verifying["completed_bytes"] == 100
+    assert verifying["phase"] == "verify"
+    assert "eta_seconds" not in verifying
+    assert "bytes_per_second" not in verifying
+    restarted.close()
+
+
+def test_cache_measurements_handle_unknown_total_and_observation_gap():
+    from vonk_control.model_cache_progress import cache_progress, project_cache_progress
+    def snapshot(count, total=100):
+        return {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1,
+            "downloaded_bytes": count, "expected_bytes": total}
+    first = cache_progress(snapshot(0), previous=None, now=NOW)
+    second = cache_progress(snapshot(10), previous=first, now=NOW + timedelta(seconds=1))
+    assert second["measurement"]["eta_seconds"] == 9
+    restarted = cache_progress(snapshot(20), previous=second, now=NOW + timedelta(seconds=60))
+    assert "bytes_per_second" not in restarted["measurement"]
+    unknown = cache_progress(snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61))
+    assert unknown["measurement"]["bytes_per_second"] == 10
+    assert "eta_seconds" not in unknown["measurement"]
+    stale = project_cache_progress(unknown, NOW + timedelta(seconds=200))
+    assert stale["activity"] == "possibly_stalled"
+    assert "bytes_per_second" not in stale
+
+
+def test_large_model_keeps_exact_aggregate_without_truncated_member_list(cache, tmp_path):
+    from dataclasses import replace
+    service, _ = cache
+    raw = _artifact(tmp_path, b"x")
+    manifest = service.resolve_artifact_set(artifacts=[raw])
+    specs = tuple(replace(manifest.artifacts[0], key=f"file-{i}", sha256=f"{i:064x}") for i in range(1025))
+    large = replace(manifest, artifacts=specs)
+    transfer = {"artifacts": {spec.sha256: {"baseline_bytes": 0, "received_bytes": 0} for spec in specs}}
+    progress = service._progress(large, phase="downloading", transfer=transfer)
+    assert progress["measurement"]["total_items"] == 1025
+    assert progress["measurement"]["total_bytes"] == 1025
+    assert "members" not in progress["measurement"]

@@ -1210,7 +1210,7 @@ class ModelCacheOperation(Base):
             name="ck_model_cache_operations_plan_digest",
         ),
         CheckConstraint(
-            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 65536",
+            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 1048576",
             name="ck_model_cache_operations_progress_size",
         ),
         CheckConstraint(
