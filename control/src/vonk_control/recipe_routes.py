@@ -38,6 +38,11 @@ from .models import (
     RunNode,
 )
 from .presence import ManagementAddressPolicy, PresenceError
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_endpoint,
+    run_plan_document,
+)
 from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from .routes import RouteState
 
@@ -837,7 +842,13 @@ class RecipeRouteService:
                 )
             if tuple(node.rank for node in nodes) != tuple(range(len(nodes))):
                 raise RecipeRouteError("recipe rank set is not exact", run_id=run.id)
-            expected = run.plan.get("nodes") if isinstance(run.plan, dict) else None
+            try:
+                stored_run_plan = run_plan_document(run.plan)
+            except RecipeExecutionContractError as error:
+                raise RecipeRouteError(
+                    "stored recipe run plan is invalid", run_id=run.id
+                ) from error
+            expected = stored_run_plan.get("nodes")
             if isinstance(expected, list):
                 expected_identity = (
                     {
@@ -856,8 +867,7 @@ class RecipeRouteService:
                         run_id=run.id,
                     )
             exact_observations = (
-                isinstance(run.plan, Mapping)
-                and run.plan.get("observation_schema_version") == 2
+                stored_run_plan.get("observation_schema_version") == 2
             )
             if len(nodes) > 1 and not exact_observations:
                 raise RecipeRouteError(
@@ -1083,9 +1093,13 @@ def _endpoint(
     *,
     operation_id: str,
 ) -> _RecipeEndpoint:
-    raw = node.endpoint.get("url") if isinstance(node.endpoint, dict) else None
-    if not isinstance(raw, str):
+    try:
+        endpoint = parse_stored_run_endpoint(node.endpoint)
+    except RecipeExecutionContractError as error:
+        raise RecipeRouteError("entrypoint endpoint is invalid") from error
+    if endpoint is None:
         raise RecipeRouteError("entrypoint endpoint evidence is missing")
+    raw = endpoint.url
     try:
         parsed = urlsplit(raw)
         raw_address = parsed.hostname or ""

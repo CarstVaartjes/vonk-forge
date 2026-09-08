@@ -79,6 +79,10 @@ from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
 from .download_contract import download_responses, upload_request_body
@@ -1980,23 +1984,24 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification installation authority is stale",
                 )
-            if not isinstance(installation.plan, Mapping):
+            try:
+                stored_installation_plan = parse_stored_installation_plan(
+                    installation.plan
+                )
+            except RecipeExecutionContractError:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is invalid",
+                ) from None
+            candidate_model = stored_installation_plan.compiled_execution_plans.get(
+                identity.node_id
+            )
+            if candidate_model is None:
                 raise HTTPException(
                     status_code=409,
                     detail="recipe specification compiled execution plan is unavailable",
                 )
-            compiled_plans = installation.plan.get("compiled_execution_plans")
-            if not isinstance(compiled_plans, Mapping):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
-            candidate = compiled_plans.get(identity.node_id)
-            if not isinstance(candidate, Mapping):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
+            candidate = candidate_model.model_dump(mode="json")
             candidate_identity = candidate.get("identity")
             candidate_runtime_image = candidate.get("runtime_image")
             effective_execution_key = (

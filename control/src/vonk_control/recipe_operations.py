@@ -71,6 +71,17 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    installation_plan_document,
+    parse_stored_build_plan,
+    parse_stored_build_policy,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
+    run_plan_document,
+    run_endpoint_document,
+)
 from .recipe_lifecycle_contract import (
     parse_recipe_lifecycle_result,
     validate_recipe_lifecycle_terminal,
@@ -138,6 +149,20 @@ def _validated_result(kind: str, value: object) -> dict[str, object] | None:
     except (TypeError, ValueError) as error:
         raise RecipeOperationConflict("recipe operation result is invalid") from error
     return dict(value)
+
+
+def _stored_run_plan(value: object) -> dict[str, object]:
+    try:
+        return run_plan_document(value)
+    except RecipeExecutionContractError as error:
+        raise RecipeOperationConflict("stored run plan is invalid") from error
+
+
+def _stored_installation_plan(value: object) -> dict[str, object]:
+    try:
+        return installation_plan_document(value)
+    except RecipeExecutionContractError as error:
+        raise RecipeOperationConflict("stored installation plan is invalid") from error
 
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
@@ -492,12 +517,13 @@ class RecipeOperationService:
                 .limit(1)
             )
             if existing is not None:
-                stored_plans = (
-                    existing.plan.get("compiled_execution_plans")
-                    if isinstance(existing.plan, Mapping)
-                    else None
-                )
-                if not isinstance(stored_plans, Mapping):
+                try:
+                    stored_plan = parse_stored_installation_plan(existing.plan)
+                except RecipeExecutionContractError as error:
+                    raise RecipeOperationConflict(
+                        "stored installation plan is invalid"
+                    ) from error
+                if not stored_plan.compiled_execution_plans:
                     raise RecipeOperationConflict(
                         "stored installation has no compiled execution plan"
                     )
@@ -510,9 +536,13 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
-            if not isinstance(installation.plan, Mapping) or not isinstance(
-                installation.plan.get("compiled_execution_plans"), Mapping
-            ):
+            try:
+                stored_plan = parse_stored_installation_plan(installation.plan)
+            except RecipeExecutionContractError as error:
+                raise RecipeOperationConflict(
+                    "compiled execution plan was not persisted"
+                ) from error
+            if not stored_plan.compiled_execution_plans:
                 raise RecipeOperationConflict(
                     "compiled execution plan was not persisted"
                 )
@@ -577,13 +607,15 @@ class RecipeOperationService:
                 return self._view(active)
             if installation.state not in {"planned", "partial", "failed", "installing"}:
                 raise RecipeOperationConflict("recipe installation is not launchable")
-            raw_plans = (
-                installation.plan.get("compiled_execution_plans")
-                if isinstance(installation.plan, Mapping)
-                else None
-            )
-            if not isinstance(raw_plans, Mapping):
-                raise RecipeOperationConflict("compiled execution plan is unavailable")
+            try:
+                stored_installation_plan = parse_stored_installation_plan(
+                    installation.plan
+                )
+            except RecipeExecutionContractError as error:
+                raise RecipeOperationConflict(
+                    "compiled execution plan is unavailable"
+                ) from error
+            raw_plans = stored_installation_plan.compiled_execution_plans
             nodes = tuple(
                 session.scalars(
                     select(InstallationNode)
@@ -591,9 +623,7 @@ class RecipeOperationService:
                     .order_by(InstallationNode.rank, InstallationNode.node_id)
                 )
             )
-            if not nodes or any(
-                not isinstance(raw_plans.get(node.node_id), Mapping) for node in nodes
-            ):
+            if not nodes or any(node.node_id not in raw_plans for node in nodes):
                 raise RecipeOperationConflict(
                     "compiled execution plan is missing for one or more nodes"
                 )
@@ -623,7 +653,9 @@ class RecipeOperationService:
                             "rank": node.rank,
                             "role": node.role,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": raw_plans[node.node_id],
+                            "compiled_execution_plan": raw_plans[
+                                node.node_id
+                            ].model_dump(mode="json"),
                         },
                     )
                     for node in nodes
@@ -761,7 +793,11 @@ class RecipeOperationService:
                     .order_by(RunNode.rank)
                 )
             )
-            expected = run.plan.get("nodes") if isinstance(run.plan, dict) else None
+            try:
+                stored_plan = parse_stored_run_plan(run.plan)
+            except RecipeExecutionContractError as error:
+                raise RecipeOperationConflict("stored run plan is invalid") from error
+            expected = [node.model_dump(mode="json") for node in stored_plan.nodes]
             exact_ranks = (
                 isinstance(expected, list)
                 and len(expected) == len(nodes)
@@ -944,8 +980,19 @@ class RecipeOperationService:
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
-            compiled_plans = installation.plan.get("compiled_execution_plans")
-            if not isinstance(compiled_plans, Mapping):
+            try:
+                stored_installation_plan = parse_stored_installation_plan(
+                    installation.plan
+                )
+            except RecipeExecutionContractError as error:
+                raise RecipeOperationConflict(
+                    "compiled execution plan is unavailable for the installed recipe"
+                ) from error
+            compiled_plans = {
+                node_id: value.model_dump(mode="json")
+                for node_id, value in stored_installation_plan.compiled_execution_plans.items()
+            }
+            if not compiled_plans:
                 raise RecipeOperationConflict(
                     "compiled execution plan is unavailable for the installed recipe"
                 )
@@ -1189,7 +1236,12 @@ class RecipeOperationService:
             assert run is not None and revision is not None
             run.state = "running"
             run.route_state = "withdrawn"
-            run.plan = {**run.plan, "execution_mode": "one-shot-jobs"}
+            try:
+                updated_plan = run_plan_document(run.plan)
+                updated_plan["execution_mode"] = "one-shot-jobs"
+                run.plan = run_plan_document(updated_plan)
+            except RecipeExecutionContractError as error:
+                raise RecipeOperationConflict("stored run plan is invalid") from error
             run.updated_at = now
             nodes = tuple(
                 session.scalars(
@@ -1685,18 +1737,19 @@ class RecipeOperationService:
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
         assert revision is not None and revision.content_digest is not None
         recipe_digest = revision.content_digest
-        compiled_plans = (
-            installation.plan.get("compiled_execution_plans")
-            if isinstance(installation.plan, Mapping)
-            else None
-        )
-        if (
-            not isinstance(compiled_plans, Mapping)
-            or not nodes
-            or any(
-                not isinstance(compiled_plans.get(node.node_id), Mapping)
-                for node in nodes
+        try:
+            stored_installation_plan = parse_stored_installation_plan(
+                installation.plan
             )
+        except RecipeExecutionContractError as error:
+            raise RecipeOperationConflict(
+                "stored compiled execution plan is missing for install retry"
+            ) from error
+        compiled_plans = stored_installation_plan.compiled_execution_plans
+        if (
+            not compiled_plans
+            or not nodes
+            or any(node.node_id not in compiled_plans for node in nodes)
         ):
             raise RecipeOperationConflict(
                 "stored compiled execution plan is missing for install retry"
@@ -1723,7 +1776,9 @@ class RecipeOperationService:
                         "rank": node.rank,
                         "role": node.role,
                         "expected_bytes": node.required_bytes,
-                        "compiled_execution_plan": compiled_plans[node.node_id],
+                        "compiled_execution_plan": compiled_plans[
+                            node.node_id
+                        ].model_dump(mode="json"),
                     },
                 )
                 for node in nodes
@@ -1758,20 +1813,19 @@ class RecipeOperationService:
         )
         if active:
             raise RecipeOperationConflict("recipe build already has an active retry")
-        payload = dict(build.plan) if isinstance(build.plan, Mapping) else {}
         try:
+            payload = build_plan_document(build.plan)
+            parsed_payload = parse_stored_build_plan(payload)
             plan = RecipeBuildPlan(
                 build_id=owner_id,
-                recipe_revision_id=_required_string(payload, "recipe_revision_id"),
-                recipe_content_sha256=_required_string(
-                    payload, "recipe_content_sha256"
-                ),
+                recipe_revision_id=parsed_payload.recipe_revision_id,
+                recipe_content_sha256=parsed_payload.recipe_content_sha256,
                 builder_node_id=build.builder_node_id,
-                source_bundle_sha256=_required_string(payload, "source_bundle_sha256"),
+                source_bundle_sha256=parsed_payload.source_bundle_sha256,
                 build_input_sha256=build.build_input_sha256,
                 agent_payload=payload,
             )
-        except (KeyError, TypeError) as error:
+        except (RecipeExecutionContractError, KeyError, TypeError) as error:
             raise RecipeOperationConflict(
                 "stored recipe build plan is invalid"
             ) from error
@@ -2000,7 +2054,12 @@ class RecipeOperationService:
                             )
                         started_node.state = "running"
                         started_node.updated_at = now
-                    node.endpoint = {"url": endpoint}
+                    try:
+                        node.endpoint = run_endpoint_document({"url": endpoint})
+                    except RecipeExecutionContractError as error:
+                        raise RecipeOperationConflict(
+                            "recipe start endpoint evidence is invalid"
+                        ) from error
                     node.evidence_digest = digest
                 node.updated_at = now
             else:
@@ -2015,13 +2074,18 @@ class RecipeOperationService:
                     endpoint, digest = _validate_start_evidence(
                         session, owner_id, operation, evidence
                     )
-                    node.endpoint = {"url": endpoint}
+                    try:
+                        node.endpoint = run_endpoint_document({"url": endpoint})
+                    except RecipeExecutionContractError as error:
+                        raise RecipeOperationConflict(
+                            "recipe start endpoint evidence is invalid"
+                        ) from error
                     node.evidence_digest = digest
                 node.updated_at = now
             if job.kind == "recipe.start" and succeeded and start_phase != "rank-launch":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                if run.plan.get("observation_schema_version") == 2:
+                if _stored_run_plan(run.plan).get("observation_schema_version") == 2:
                     run.observation_deadline_at = now + timedelta(
                         seconds=_INITIAL_OBSERVATION_GRACE_SECONDS
                     )
@@ -2489,12 +2553,13 @@ class RecipeOperationService:
             existing_run = session.get(RecipeRun, run_id)
             if (
                 existing_run is None
-                or existing_run.plan.get("execution_mode") != "one-shot-jobs"
+                or _stored_run_plan(existing_run.plan).get("execution_mode")
+                != "one-shot-jobs"
             ):
                 return None
         with self._sessions.begin() as session:
             run = session.get(RecipeRun, run_id, with_for_update=True)
-            if run is None or run.plan.get("execution_mode") != "one-shot-jobs":
+            if run is None or _stored_run_plan(run.plan).get("execution_mode") != "one-shot-jobs":
                 raise RecipeOperationConflict(
                     "logical recipe run changed while stopping"
                 )
@@ -2558,7 +2623,7 @@ class RecipeOperationService:
         run = session.scalar(run_statement)
         if run is None:
             raise RecipeOperationConflict("recipe run does not exist")
-        if run.plan.get("execution_mode") == "one-shot-jobs":
+        if _stored_run_plan(run.plan).get("execution_mode") == "one-shot-jobs":
             active_artifact_job = session.scalar(
                 select(ArtifactJob.id)
                 .where(
@@ -2634,9 +2699,8 @@ class RecipeOperationService:
             if reservation.node_id in active_by_node:
                 active_by_node[reservation.node_id] += reservation.amount_bytes
 
-        expected_nodes = (
-            run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
-        )
+        stored_run_plan = _stored_run_plan(run.plan)
+        expected_nodes = stored_run_plan.get("nodes")
         expected_identity = (
             {
                 (item.get("node_id"), item.get("rank"), item.get("role"))
@@ -2653,11 +2717,11 @@ class RecipeOperationService:
             and len(expected_nodes) == len(nodes)
             and len(expected_identity) == len(nodes)
             and expected_identity == actual_identity
-            and run.plan.get("installation_id") == run.installation_id
-            and run.plan.get("mapping_id") == run.mapping_id
-            and run.plan.get("mapping_generation") == run.mapping_generation
-            and run.plan.get("recipe_revision_id") == revision.id
-            and run.plan.get("plan_digest") == run.plan_digest
+            and stored_run_plan.get("installation_id") == run.installation_id
+            and stored_run_plan.get("mapping_id") == run.mapping_id
+            and stored_run_plan.get("mapping_generation") == run.mapping_generation
+            and stored_run_plan.get("recipe_revision_id") == revision.id
+            and stored_run_plan.get("plan_digest") == run.plan_digest
         )
         reservation_membership_exact = (
             len(reservations) == len(nodes)
@@ -2733,6 +2797,7 @@ class RecipeOperationService:
             or not isinstance(revision.document, Mapping)
         ):
             raise RecipeOperationConflict("recipe revision authority is unavailable")
+        stored_installation_plan = _stored_installation_plan(installation.plan)
 
         node_statement = (
             select(InstallationNode)
@@ -2781,11 +2846,7 @@ class RecipeOperationService:
             operation_statement = operation_statement.with_for_update(of=Job)
         active_operation = session.scalar(operation_statement) is not None
 
-        expected_nodes = (
-            installation.plan.get("nodes")
-            if isinstance(installation.plan, Mapping)
-            else None
-        )
+        expected_nodes = stored_installation_plan.get("nodes")
         expected_identity = (
             {
                 (item.get("node_id"), item.get("rank"), item.get("role"))
@@ -2802,13 +2863,13 @@ class RecipeOperationService:
             and len(expected_nodes) == len(nodes)
             and len(expected_identity) == len(nodes)
             and expected_identity == actual_identity
-            and installation.plan.get("mapping_id") == installation.mapping_id
-            and installation.plan.get("mapping_generation")
+            and stored_installation_plan.get("mapping_id") == installation.mapping_id
+            and stored_installation_plan.get("mapping_generation")
             == installation.mapping_generation
-            and installation.plan.get("recipe_revision_id") == revision.id
-            and installation.plan.get("recipe_content_sha256")
+            and stored_installation_plan.get("recipe_revision_id") == revision.id
+            and stored_installation_plan.get("recipe_content_sha256")
             == revision.content_digest
-            and installation.plan.get("plan_digest") == installation.plan_digest
+            and stored_installation_plan.get("plan_digest") == installation.plan_digest
         )
         model_content_sha256, model_title = _primary_model_identity(revision.document)
         if installation.model_content_sha256 not in {None, model_content_sha256}:
@@ -2996,11 +3057,10 @@ class RecipeOperationService:
                 nodes_by_installation.get(installation.id, []),
                 key=lambda item: (item.rank, item.node_id),
             )
-            expected = (
-                installation.plan.get("nodes")
-                if isinstance(installation.plan, Mapping)
-                else None
-            )
+            try:
+                expected = _stored_installation_plan(installation.plan).get("nodes")
+            except RecipeOperationConflict:
+                raise
             exact = (
                 installation.state == "installed"
                 and isinstance(expected, list)
@@ -3562,6 +3622,11 @@ def _record_build_evidence(
     image_digest = evidence.get("image_digest")
     layout_digest = evidence.get("oci_layout_sha256")
     image_bytes = evidence.get("image_bytes")
+    try:
+        stored_build_plan = parse_stored_build_plan(build.plan)
+        parse_stored_build_policy(build.policy_report)
+    except RecipeExecutionContractError as error:
+        raise RecipeOperationConflict("stored recipe build envelope is invalid") from error
     if (
         set(evidence) != expected
         or evidence.get("build_input_sha256") != build.build_input_sha256
@@ -3579,7 +3644,7 @@ def _record_build_evidence(
         or policy.get("passed") is not True
         or not isinstance(findings, (list, tuple))
         or bool(findings)
-        or policy.get("dockerfile") != build.plan.get("dockerfile")
+        or policy.get("dockerfile") != stored_build_plan.dockerfile
         or (not replace_existing and build.image_digest not in {None, image_digest})
         or (
             not replace_existing
@@ -3921,7 +3986,7 @@ def prepare_exact_recipe_run_observation_nodes(
         )
         if (
             (run := session.get(RecipeRun, node.run_id)) is not None
-            and run.plan.get("observation_schema_version") == 2
+            and _stored_run_plan(run.plan).get("observation_schema_version") == 2
         )
     )
     if included_run_ids - {node.run_id for node in assigned}:

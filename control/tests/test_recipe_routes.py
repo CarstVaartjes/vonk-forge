@@ -335,9 +335,38 @@ def setup(
             alias=run_alias,
             plan_digest="c" * 64,
             plan={
-                "observation_schema_version": (
-                    2 if ranks > 1 and exact_distributed else 1
-                )
+                "schema_version": 1,
+                "observation_schema_version": 2,
+                "run_generation": 1,
+                "installation_id": installation.id,
+                "alias": run_alias,
+                "mapping_id": mapping.id,
+                "mapping_generation": 1,
+                "recipe_revision_id": revision.id,
+                "plan_digest": "c" * 64,
+                "nodes": [
+                    {
+                        "node_id": node,
+                        "rank": rank,
+                        "role": "entrypoint" if rank == endpoint_owner_rank else "worker",
+                        "endpoint_owner": rank == endpoint_owner_rank,
+                        "port": 8000,
+                        "allowed": True,
+                        "inventory_observed_at": NOW.isoformat(),
+                        "memory_kind": "unified",
+                        "required_memory_bytes": 100,
+                        "available_memory_bytes": None,
+                        "active_reserved_bytes": 0,
+                        "free_after_bytes": None,
+                        "memory_floor_bytes": 0,
+                        "fabric_address": None,
+                        "fabric_bandwidth_mbps": None,
+                        "rendezvous_port": None,
+                        "blockers": [],
+                        "warnings": [],
+                    }
+                    for rank, node in enumerate(nodes)
+                ],
             },
             state="running",
             actor="admin",
@@ -359,15 +388,14 @@ def setup(
                     endpoint={"url": f"http://10.0.0.{rank + 2}:8000"},
                     evidence_digest=str(rank + 1) * 64,
                     observed_run_generation=(
-                        run.run_generation if ranks > 1 and exact_distributed else None
+                        run.run_generation if exact_distributed else None
                     ),
                     observation_receipt_sha256=(
-                        str(rank + 1) * 64 if ranks > 1 and exact_distributed else None
+                        str(rank + 1) * 64 if exact_distributed else None
                     ),
                     observation_endpoint_ready=(
                         True
-                        if ranks > 1
-                        and exact_distributed
+                        if exact_distributed
                         and rank == endpoint_owner_rank
                         else None
                     ),
@@ -468,7 +496,39 @@ def add_running_run(
             mapping_generation=mapping.generation,
             alias=alias,
             plan_digest=f"{identity:x}" * 64,
-            plan={},
+            plan={
+                "schema_version": 1,
+                "observation_schema_version": 2,
+                "run_generation": 1,
+                "installation_id": installation.id,
+                "alias": alias,
+                "mapping_id": mapping.id,
+                "mapping_generation": mapping.generation,
+                "recipe_revision_id": source_installation.recipe_revision_id,
+                "plan_digest": f"{identity:x}" * 64,
+                "nodes": [
+                    {
+                        "node_id": node_id,
+                        "rank": 0,
+                        "role": "entrypoint",
+                        "endpoint_owner": True,
+                        "port": 8000,
+                        "allowed": True,
+                        "inventory_observed_at": NOW.isoformat(),
+                        "memory_kind": "unified",
+                        "required_memory_bytes": 100,
+                        "available_memory_bytes": None,
+                        "active_reserved_bytes": 0,
+                        "free_after_bytes": None,
+                        "memory_floor_bytes": 0,
+                        "fabric_address": None,
+                        "fabric_bandwidth_mbps": None,
+                        "rendezvous_port": None,
+                        "blockers": [],
+                        "warnings": [],
+                    }
+                ],
+            },
             state="running",
             route_state=route_state,
             actor="admin",
@@ -488,6 +548,9 @@ def add_running_run(
                 reserved_memory_bytes=100,
                 endpoint={"url": f"http://10.0.0.{identity}:8000"},
                 evidence_digest=f"{identity:x}" * 64,
+                observed_run_generation=1,
+                observation_receipt_sha256=f"{identity:x}" * 64,
+                observation_endpoint_ready=True,
                 updated_at=NOW,
             )
         )
@@ -534,7 +597,7 @@ def test_legacy_distributed_route_is_rejected_without_exact_local_rank_evidence(
 
     with pytest.raises(
         RecipeRouteError,
-        match="distributed recipe route requires exact rank observations",
+        match="exact observation",
     ):
         service.publish_run(run_id)
 
@@ -673,7 +736,7 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
             ]
         }
 
-    with pytest.raises(RecipeRouteError, match="accepted plan"):
+    with pytest.raises(RecipeRouteError, match="stored recipe run plan is invalid"):
         service.publish_run(run_id)
     assert applied == []
 
@@ -858,7 +921,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
-        run.plan = {"observation_schema_version": 2}
+        run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = NOW + timedelta(seconds=60)
         for node in session.query(RunNode).filter_by(run_id=run_id):
@@ -916,7 +979,7 @@ def test_initial_exact_observation_deadline_fails_late_signed_ranks(
     deadline = NOW + timedelta(seconds=60)
     with service.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
-        run.plan = {"observation_schema_version": 2}
+        run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = deadline
         for node in session.query(RunNode).filter_by(run_id=run_id):
@@ -946,7 +1009,7 @@ def test_direct_publication_rejects_exact_observation_after_deadline(
     deadline = NOW - timedelta(seconds=1)
     with service.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
-        run.plan = {"observation_schema_version": 2}
+        run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = deadline
         for node in session.query(RunNode).filter_by(run_id=run_id):

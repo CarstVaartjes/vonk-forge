@@ -53,6 +53,11 @@ from .models import (
     RunNode,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
+)
 from .strict_json import StrictJSONModel
 
 MAX_INPUT_FILES = 32
@@ -1045,8 +1050,13 @@ class ArtifactJobService:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
             revision, recipe = resolved
             node = self._job_node_in_session(session, run)
-            plans = installation.plan.get("compiled_execution_plans")
-            if not isinstance(plans, Mapping) or node.node_id not in plans:
+            try:
+                installation_plan = parse_stored_installation_plan(installation.plan)
+            except RecipeExecutionContractError as error:
+                raise ArtifactJobError(
+                    "installed job execution plan is invalid"
+                ) from error
+            if node.node_id not in installation_plan.compiled_execution_plans:
                 raise ArtifactJobError("installed job execution plan is unavailable")
             contract = _canonical_contract(artifact_job.compiled_contract)
             try:
@@ -1060,7 +1070,9 @@ class ArtifactJobService:
             invocation = compile_job_invocation(
                 session,
                 recipe=recipe,
-                installed=plans[node.node_id],
+                installed=installation_plan.compiled_execution_plans[
+                    node.node_id
+                ].model_dump(mode="json"),
                 build=(session.get(RecipeBuild, installation.recipe_build_id)
                        if installation.recipe_build_id is not None else None),
                 parameters=parameters,
@@ -1545,7 +1557,13 @@ class ArtifactJobService:
                 select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
             )
         )
-        plan_nodes = run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
+        try:
+            plan_nodes = [
+                node.model_dump(mode="json")
+                for node in parse_stored_run_plan(run.plan).nodes
+            ]
+        except RecipeExecutionContractError as error:
+            raise ArtifactJobError("recipe run plan is invalid") from error
         endpoint_ids = (
             {
                 item.get("node_id")
