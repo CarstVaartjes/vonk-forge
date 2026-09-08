@@ -332,6 +332,7 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
         (command, cwd, timeout)
     )
 
+    lifecycle._agent_package_installed = lambda: False
     run._cleanup()
 
     assert observed == [
@@ -894,7 +895,7 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
         "serial": serial_after,
     }
     rejected_serials: list[str] = []
-    run._old_certificate_rejected = lambda serial: (
+    run._old_certificate_rejected = lambda serial, _serial_after: (
         rejected_serials.append(serial) is None
     )
 
@@ -1061,3 +1062,79 @@ def test_failed_canary_uninstall_reports_redacted_operation_evidence(monkeypatch
     assert "runtime cache cleanup failed" in message
     assert secret not in message
     assert "<redacted>" in message
+
+
+@pytest.mark.parametrize(
+    ("code", "status", "detail", "accepted"),
+    [
+        (0, "401", "", True),
+        (
+            56,
+            "000",
+            "curl: (56) OpenSSL SSL_read: OpenSSL/3.0.13: error:0A000415:SSL routines::sslv3 alert certificate expired, errno 0",
+            True,
+        ),
+        (0, "404", "", False),
+        (0, "500", "", False),
+        (56, "000", "curl: (56) Recv failure: Connection reset by peer", False),
+        (56, "000", "curl: (56) SSL_read: SSL routines::tlsv1 alert unknown ca", False),
+        (
+            60,
+            "000",
+            "curl: (60) SSL certificate problem: certificate has expired",
+            False,
+        ),
+        (28, "000", "curl: (28) Operation timed out", False),
+        (58, "000", "curl: (58) unable to set private key file", False),
+    ],
+)
+def test_retired_certificate_requires_explicit_rejection_and_active_control(
+    code: int,
+    status: str,
+    detail: str,
+    accepted: bool,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run._psql = lambda _query: [["2"]]
+    probes = []
+
+    def probe(serial, root, *, retired):
+        probes.append((serial, root, retired))
+        return subprocess.CompletedProcess(
+            [],
+            code if retired else 0,
+            status if retired else "404",
+            detail if retired else "",
+        )
+
+    run._certificate_probe = probe
+    assert (
+        run._old_certificate_rejected("123456789012345678", "987654321098765432")
+        is accepted
+    )
+    assert probes == [
+        (
+            "987654321098765432",
+            lifecycle.AGENT_DATA / "credentials/generation-00000000000000000002",
+            False,
+        ),
+        ("123456789012345678", lifecycle.AGENT_DATA / "credentials", True),
+    ]
+
+
+@pytest.mark.parametrize("status", ["000", "401", "403", "500"])
+def test_retired_certificate_probe_cannot_pass_without_current_identity(
+    status: str,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run._psql = lambda _query: [["2"]]
+
+    def probe(_serial, _root, *, retired):
+        assert not retired, "must not count rejection without a positive control"
+        return subprocess.CompletedProcess([], 0, status, "")
+
+    run._certificate_probe = probe
+    with pytest.raises(lifecycle.LifecycleError, match="current certificate"):
+        run._old_certificate_rejected("123456789012345678", "987654321098765432")
