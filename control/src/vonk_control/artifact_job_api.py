@@ -22,6 +22,7 @@ from .artifact_jobs import (
     OutputLimits,
 )
 from .auth import Actor, agent_identity_from_scope
+from .download_contract import download_responses, upload_request_body
 from .operation_api import bounded_error_responses
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -202,6 +203,7 @@ def install_artifact_job_routes(
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="submitArtifactJob",
+        openapi_extra={"x-vonk-request-body": "none"},
     )
     def submit_job(
         request: Request,
@@ -330,7 +332,9 @@ def install_artifact_job_routes(
 
     @app.get(
         "/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}",
-        include_in_schema=False,
+        response_class=Response,
+        responses=download_responses("*/*"),
+        openapi_extra={"x-vonk-streaming-transport": True},
     )
     def agent_input(request: Request, job_id: str, sha256: str) -> Response:
         identity = agent_identity_from_scope(request.scope)
@@ -360,7 +364,7 @@ def install_artifact_job_routes(
     @app.put(
         "/agent/v1/recipe-jobs/{job_id}/outputs/{sha256}",
         status_code=status.HTTP_204_NO_CONTENT,
-        include_in_schema=False,
+        openapi_extra=upload_request_body("*/*"),
     )
     async def agent_output(
         request: Request,

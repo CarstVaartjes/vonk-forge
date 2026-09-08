@@ -1086,6 +1086,22 @@
       "title": "ArtifactDistributionResult",
       "type": "object"
     },
+    "BoundedErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "BoundedErrorResponse",
+      "type": "object"
+    },
     "ClaimRequest": {
       "additionalProperties": false,
       "properties": {
@@ -8328,6 +8344,65 @@
       "title": "RenewRequest",
       "type": "object"
     },
+    "RequestValidationIssue": {
+      "additionalProperties": false,
+      "description": "A structural input error without the submitted input or validator context.",
+      "properties": {
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Loc",
+          "type": "array"
+        },
+        "msg": {
+          "title": "Msg",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "loc",
+        "msg"
+      ],
+      "title": "RequestValidationIssue",
+      "type": "object"
+    },
+    "RequestValidationProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/RequestValidationIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "detail",
+        "issues"
+      ],
+      "title": "RequestValidationProblem",
+      "type": "object"
+    },
     "Resolver": {
       "additionalProperties": false,
       "properties": {
@@ -10787,9 +10862,177 @@
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
     ],
+    "RequestValidationProblem": [
+      "BoundedErrorResponse"
+    ],
     "SourceBundleManifest": [
       "SourceBundleDigestManifest"
     ]
+  },
+  "x-vonk-model-sources": {
+    "ActivateRequest": "vonk_agent_protocol.enrollment.ActivateRequest",
+    "ActivationMarker": "vonk_agent_protocol.route_activation.ActivationMarker",
+    "AgentClaim": "vonk_agent_protocol.contracts.AgentClaim",
+    "AgentDirective": "vonk_agent_protocol.contracts.AgentDirective",
+    "AgentFailureResult": "vonk_agent_protocol.contracts.AgentFailureResult",
+    "AgentInstallResult": "vonk_agent_protocol.contracts.AgentInstallResult",
+    "AgentPackageSource": "vonk_agent_protocol.package_source.AgentPackageSource",
+    "AgentProgress": "vonk_agent_protocol.contracts.AgentProgress",
+    "AgentResult": "vonk_agent_protocol.contracts.AgentResult",
+    "AgentRuntimeIdentity": "vonk_agent_protocol.claims.AgentRuntimeIdentity",
+    "AgentUpgradeGrantRequest": "vonk_control.agent_api.AgentUpgradeGrantRequest",
+    "AgentUpgradePayload": "vonk_agent_protocol.contracts.AgentUpgradePayload",
+    "AgentUpgradeResult": "vonk_agent_protocol.contracts.AgentUpgradeResult",
+    "ArtifactDistributionPayload": "vonk_agent_protocol.contracts.ArtifactDistributionPayload",
+    "ArtifactDistributionResult": "vonk_agent_protocol.contracts.ArtifactDistributionResult",
+    "BoundedErrorResponse": "vonk_control.operation_api.BoundedErrorResponse",
+    "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
+    "Compatibility": "vonk_agent_protocol.workload_packages.Compatibility",
+    "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
+    "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
+    "CompiledDistributionObject": "vonk_agent_protocol.compiled_execution_plan.CompiledDistributionObject",
+    "CompiledEndpoint": "vonk_agent_protocol.compiled_execution_plan.CompiledEndpoint",
+    "CompiledEnvironmentEntry": "vonk_agent_protocol.compiled_execution_plan.CompiledEnvironmentEntry",
+    "CompiledExecutionPlan": "vonk_agent_protocol.compiled_execution_plan.CompiledExecutionPlan",
+    "CompiledIdentity": "vonk_agent_protocol.compiled_execution_plan.CompiledIdentity",
+    "CompiledJob": "vonk_agent_protocol.compiled_execution_plan.CompiledJob",
+    "CompiledJobInput": "vonk_agent_protocol.compiled_execution_plan.CompiledJobInput",
+    "CompiledJobInputSlot": "vonk_agent_protocol.compiled_execution_plan.CompiledJobInputSlot",
+    "CompiledLifecycle": "vonk_agent_protocol.compiled_execution_plan.CompiledLifecycle",
+    "CompiledModelIdentity": "vonk_agent_protocol.compiled_execution_plan.CompiledModelIdentity",
+    "CompiledPlacement": "vonk_agent_protocol.compiled_execution_plan.CompiledPlacement",
+    "CompiledRuntime": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntime",
+    "CompiledRuntimeImage": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeImage",
+    "CompiledRuntimeTelemetry": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeTelemetry",
+    "CompiledSecurity": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurity",
+    "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
+    "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
+    "ComponentDescriptor": "vonk_agent_protocol.workload_packages.ComponentDescriptor",
+    "ComponentEvidence": "vonk_agent_protocol.workload_packages.ComponentEvidence",
+    "ConfirmPackageActivationOperation": "vonk_agent_protocol.host_helper.ConfirmPackageActivationOperation",
+    "DistributionAssignment": "vonk_agent_protocol.distribution.DistributionAssignment",
+    "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
+    "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
+    "EnrollmentEvidence": "vonk_agent_protocol.enrollment.EnrollmentEvidence",
+    "EnrollmentSubmitRequest": "vonk_agent_protocol.enrollment.EnrollmentSubmitRequest",
+    "ExecuteContainerRuntimeRequestOperation": "vonk_agent_protocol.host_helper.ExecuteContainerRuntimeRequestOperation",
+    "FailureDiagnostics": "vonk_agent_protocol.failure_evidence.FailureDiagnostics",
+    "FailureLogTail": "vonk_agent_protocol.failure_evidence.FailureLogTail",
+    "FailureProperty": "vonk_agent_protocol.failure_evidence.FailureProperty",
+    "HostHelperGrantClaims": "vonk_agent_protocol.host_helper.HostHelperGrantClaims",
+    "HostHelperGrantResponse": "vonk_control.agent_api.HostHelperGrantResponse",
+    "HostHelperResponse": "vonk_agent_protocol.helper_response.HostHelperResponse",
+    "HostHelperSignature": "vonk_agent_protocol.host_helper.HostHelperSignature",
+    "HostRuntimeGrantRequest": "vonk_control.agent_api.HostRuntimeGrantRequest",
+    "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
+    "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
+    "InstallerAcceptanceBaselineRelease": "vonk_agent_protocol.installer_release.InstallerAcceptanceBaselineRelease",
+    "InstallerBaselineArtifacts": "vonk_agent_protocol.installer_release.InstallerBaselineArtifacts",
+    "InstallerBaselineBootstraps": "vonk_agent_protocol.installer_release.InstallerBaselineBootstraps",
+    "InstallerCandidateArtifacts": "vonk_agent_protocol.installer_release.InstallerCandidateArtifacts",
+    "InstallerCandidateBootstraps": "vonk_agent_protocol.installer_release.InstallerCandidateBootstraps",
+    "InstallerCandidateRelease": "vonk_agent_protocol.installer_release.InstallerCandidateRelease",
+    "InstallerPackageArtifact": "vonk_agent_protocol.installer_release.InstallerPackageArtifact",
+    "InstallerReleaseIdentity": "vonk_agent_protocol.installer_release.InstallerReleaseIdentity",
+    "InstallerReleaseImages": "vonk_agent_protocol.installer_release.InstallerReleaseImages",
+    "InstallerReleaseManifest": "vonk_agent_protocol.installer_release.InstallerReleaseManifest",
+    "InstallerReleaseObject": "vonk_agent_protocol.installer_release.InstallerReleaseObject",
+    "InventoryRequest": "vonk_agent_protocol.inventory.InventoryRequest",
+    "IssuedCertificateResponse": "vonk_agent_protocol.enrollment.IssuedCertificateResponse",
+    "OciBundleMetadata": "vonk_agent_protocol.workload_packages.OciBundleMetadata",
+    "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
+    "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
+    "OperationProgress": "vonk_agent_protocol.wire_model.OperationProgress",
+    "PackageActivationGrantRequest": "vonk_control.agent_api.PackageActivationGrantRequest",
+    "PackageActivationReceipt": "vonk_agent_protocol.package_upgrade.PackageActivationReceipt",
+    "PackageHelperGrantClaims": "vonk_agent_protocol.workload_packages.PackageHelperGrantClaims",
+    "PackageHelperGrantRequest": "vonk_control.agent_api.PackageHelperGrantRequest",
+    "PackageHelperGrantResponse": "vonk_control.agent_api.PackageHelperGrantResponse",
+    "PackageHelperReceiptsRequest": "vonk_control.agent_api.PackageHelperReceiptsRequest",
+    "PackageHelperReceiptsResponse": "vonk_control.agent_api.PackageHelperReceiptsResponse",
+    "PackageHelperSignature": "vonk_agent_protocol.workload_packages.PackageHelperSignature",
+    "PackageObjectReceiptClaims": "vonk_agent_protocol.workload_packages.PackageObjectReceiptClaims",
+    "PackageReleaseGraph": "vonk_agent_protocol.workload_packages.PackageReleaseGraph",
+    "PackageReleaseLock": "vonk_agent_protocol.workload_packages.PackageReleaseLock",
+    "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
+    "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
+    "PythonRuntimeMetadata": "vonk_agent_protocol.workload_packages.PythonRuntimeMetadata",
+    "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
+    "RecipeBuildArgument": "vonk_agent_protocol.build_import.RecipeBuildArgument",
+    "RecipeBuildBaseImage": "vonk_agent_protocol.build_import.RecipeBuildBaseImage",
+    "RecipeBuildEnvironmentArgument": "vonk_agent_protocol.build_import.RecipeBuildEnvironmentArgument",
+    "RecipeBuildEvidence": "vonk_agent_protocol.build_import.RecipeBuildEvidence",
+    "RecipeBuildLimits": "vonk_agent_protocol.build_import.RecipeBuildLimits",
+    "RecipeBuildMetadata": "vonk_agent_protocol.build_import.RecipeBuildMetadata",
+    "RecipeBuildNetwork": "vonk_agent_protocol.build_import.RecipeBuildNetwork",
+    "RecipeBuildOptions": "vonk_agent_protocol.build_import.RecipeBuildOptions",
+    "RecipeBuildPolicy": "vonk_agent_protocol.build_import.RecipeBuildPolicy",
+    "RecipeBuildPolicyFinding": "vonk_agent_protocol.build_import.RecipeBuildPolicyFinding",
+    "RecipeBuildRequest": "vonk_agent_protocol.build_import.RecipeBuildRequest",
+    "RecipeImageImportEvidence": "vonk_agent_protocol.build_import.RecipeImageImportEvidence",
+    "RecipeImageImportRequest": "vonk_agent_protocol.build_import.RecipeImageImportRequest",
+    "RecipeInstallPayload": "vonk_agent_protocol.recipe_operations.RecipeInstallPayload",
+    "RecipeJobEvidence": "vonk_agent_protocol.recipe_jobs.RecipeJobEvidence",
+    "RecipeJobFile": "vonk_agent_protocol.recipe_jobs.RecipeJobFile",
+    "RecipeJobInputFile": "vonk_agent_protocol.recipe_jobs.RecipeJobInputFile",
+    "RecipeJobInputManifest": "vonk_agent_protocol.job_inputs.RecipeJobInputManifest",
+    "RecipeJobOutputLimits": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputLimits",
+    "RecipeJobOutputManifest": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputManifest",
+    "RecipeJobOutputManifestContent": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputManifestContent",
+    "RecipeJobOutputMapping": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputMapping",
+    "RecipeJobRunRequest": "vonk_agent_protocol.recipe_jobs.RecipeJobRunRequest",
+    "RecipeJobRunResult": "vonk_agent_protocol.recipe_jobs.RecipeJobRunResult",
+    "RecipeModelCleanupInstallation": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupInstallation",
+    "RecipeModelCleanupPayload": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupPayload",
+    "RecipeModelCleanupResult": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupResult",
+    "RecipeOperationRequest": "vonk_agent_protocol.recipe_operations.RecipeOperationRequest",
+    "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
+    "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
+    "RecipeRunObservationGrantWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantWire",
+    "RecipeRunObservationIdentity": "vonk_agent_protocol.recipe_observations.RecipeRunObservationIdentity",
+    "RecipeRunObservationReceiptClaims": "vonk_agent_protocol.host_helper.RecipeRunObservationReceiptClaims",
+    "RecipeRunObservationWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationWire",
+    "RecipeRunObservationsWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationsWire",
+    "RecipeStartCollectiveReadinessEvidence": "vonk_agent_protocol.contracts.RecipeStartCollectiveReadinessEvidence",
+    "RecipeStartPayload": "vonk_agent_protocol.recipe_operations.RecipeStartPayload",
+    "RecipeStartRankLaunchEvidence": "vonk_agent_protocol.contracts.RecipeStartRankLaunchEvidence",
+    "RecipeStartResult": "vonk_agent_protocol.contracts.RecipeStartResult",
+    "RecipeStartSingleEvidence": "vonk_agent_protocol.contracts.RecipeStartSingleEvidence",
+    "RecipeStopPayload": "vonk_agent_protocol.recipe_operations.RecipeStopPayload",
+    "RecipeStopResult": "vonk_agent_protocol.recipe_operations.RecipeStopResult",
+    "RecipeUninstallPayload": "vonk_agent_protocol.recipe_operations.RecipeUninstallPayload",
+    "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
+    "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
+    "RequestValidationProblem": "vonk_control.operation_api.RequestValidationProblem",
+    "Resolver": "vonk_agent_protocol.workload_packages.Resolver",
+    "ResourceEnvelope": "vonk_agent_protocol.workload_packages.ResourceEnvelope",
+    "ResourceFabric": "vonk_agent_protocol.workload_packages.ResourceFabric",
+    "ResourceRank": "vonk_agent_protocol.workload_packages.ResourceRank",
+    "ResourceValues": "vonk_agent_protocol.workload_packages.ResourceValues",
+    "RestartVonkUnitOperation": "vonk_agent_protocol.host_helper.RestartVonkUnitOperation",
+    "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
+    "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
+    "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
+    "ScheduleRebootOperation": "vonk_agent_protocol.host_helper.ScheduleRebootOperation",
+    "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
+    "SignedPackageHelperGrant": "vonk_agent_protocol.workload_packages.SignedPackageHelperGrant",
+    "SignedPackageObjectReceipt": "vonk_agent_protocol.workload_packages.SignedPackageObjectReceipt",
+    "SignedRecipeRunObservationReceipt": "vonk_agent_protocol.host_helper.SignedRecipeRunObservationReceipt",
+    "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
+    "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
+    "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
+    "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
+    "TelemetryCapability": "vonk_agent_protocol.telemetry.TelemetryCapability",
+    "TelemetryDetails": "vonk_agent_protocol.telemetry.TelemetryDetails",
+    "TelemetryMetrics": "vonk_agent_protocol.telemetry.TelemetryMetrics",
+    "TelemetryProvenance": "vonk_agent_protocol.telemetry.TelemetryProvenance",
+    "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
+    "TelemetryRuntime": "vonk_agent_protocol.telemetry.TelemetryRuntime",
+    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
+    "TelemetrySeries": "vonk_agent_protocol.telemetry.TelemetrySeries",
+    "TelemetryWorkload": "vonk_agent_protocol.telemetry.TelemetryWorkload",
+    "TensorParallelStartEvidence": "vonk_agent_protocol.contracts.TensorParallelStartEvidence",
+    "ValidationRecord": "vonk_agent_protocol.workload_packages.ValidationRecord"
   },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
@@ -10807,6 +11050,7 @@
     "AgentUpgradeResult": "#/$defs/AgentUpgradeResult",
     "ArtifactDistributionPayload": "#/$defs/ArtifactDistributionPayload",
     "ArtifactDistributionResult": "#/$defs/ArtifactDistributionResult",
+    "BoundedErrorResponse": "#/$defs/BoundedErrorResponse",
     "ClaimRequest": "#/$defs/ClaimRequest",
     "Compatibility": "#/$defs/Compatibility",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
@@ -10924,6 +11168,7 @@
     "RecipeUninstallPayload": "#/$defs/RecipeUninstallPayload",
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
+    "RequestValidationProblem": "#/$defs/RequestValidationProblem",
     "Resolver": "#/$defs/Resolver",
     "ResourceEnvelope": "#/$defs/ResourceEnvelope",
     "ResourceFabric": "#/$defs/ResourceFabric",

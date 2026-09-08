@@ -33,22 +33,14 @@ def export_schema() -> dict[str, object]:
             ):
                 models.add(value)
 
-    # These transport envelopes are owned by the API, rather than a job model.
-    # The entries select whole canonical models; no field/type definitions live here.
-    from vonk_control import agent_api
+    from vonk_control.contract_graph import discover_contracts, schema_application
 
-    for name in (
-        "HostRuntimeGrantRequest",
-        "PackageActivationGrantRequest",
-        "AgentUpgradeGrantRequest",
-        "PackageHelperReceiptsRequest",
-        "PackageHelperGrantRequest",
-        "PackageHelperGrantResponse",
-        "HostHelperGrantResponse",
-        "PackageHelperReceiptsResponse",
-    ):
-        models.add(getattr(agent_api, name))
+    for browser_auth in (False, True):
+        _operations, api_models = discover_contracts(schema_application(browser_auth=browser_auth))
+        models.update(api_models)
     ordered = sorted(models, key=lambda model: (model.__module__, model.__name__))
+    if len({model.__name__ for model in ordered}) != len(ordered):
+        raise ValueError("Wire model names collide across canonical modules")
     references, schema = models_json_schema(
         [(model, "validation") for model in ordered],
         title="Vonk Agent Wire",
@@ -74,6 +66,9 @@ def export_schema() -> dict[str, object]:
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["x-vonk-models"] = {
         model.__name__: references[model, "validation"]["$ref"] for model in ordered
+    }
+    schema["x-vonk-model-sources"] = {
+        model.__name__: f"{model.__module__}.{model.__name__}" for model in ordered
     }
     schema["x-vonk-model-bases"] = {
         model.__name__: [base.__name__ for base in model.__mro__[1:] if base in models]

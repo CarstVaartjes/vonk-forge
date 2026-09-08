@@ -871,7 +871,12 @@ def create_app(
     def readyz() -> ReadyzResponse:
         return ReadyzResponse(status="ready")
 
-    @app.get("/metrics", include_in_schema=False)
+    @app.get(
+        "/metrics",
+        response_class=Response,
+        responses=download_responses("text/plain"),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def platform_metrics(request: Request) -> Response:
         if metrics is None or metrics_token is None:
             raise HTTPException(status_code=404, detail="not found")

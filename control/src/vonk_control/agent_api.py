@@ -56,8 +56,8 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -79,8 +79,9 @@ from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
+from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
-from .download_contract import download_responses
+from .download_contract import download_responses, upload_request_body
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -1394,6 +1395,7 @@ def install_agent_routes(
 
     @human.post(
         "/nodes/{node_id}/revoke",
+        openapi_extra={"x-vonk-request-body": "none"},
         status_code=status.HTTP_204_NO_CONTENT,
         responses=bounded_error_responses(401, 403, 404, 503),
     )
@@ -1464,6 +1466,7 @@ def install_agent_routes(
         )
 
     @agent.post("/enroll", response_model=IssuedCertificateResponse)
+    @raw_json_body(EnrollmentSubmitRequest)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -2363,7 +2366,9 @@ def install_agent_routes(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.put(
-        "/recipe-builds/{build_id}/image", status_code=status.HTTP_204_NO_CONTENT
+        "/recipe-builds/{build_id}/image",
+        status_code=status.HTTP_204_NO_CONTENT,
+        openapi_extra=upload_request_body("application/x-tar"),
     )
     async def upload_recipe_image(build_id: str, request: Request) -> Response:
         _scope_identity(request)
