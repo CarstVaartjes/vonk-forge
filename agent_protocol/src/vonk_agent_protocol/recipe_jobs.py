@@ -127,11 +127,18 @@ class RecipeJobInputFile(_RecipeJobModel):
 def _manifest_document(
     files: Sequence[RecipeJobFile | RecipeJobInputFile],
 ) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "total_bytes": sum(item.size_bytes for item in files),
-        "files": [item.to_mapping() for item in files],
-    }
+    from .job_inputs import RecipeJobInputManifest
+
+    model = (
+        RecipeJobInputManifest
+        if not files or isinstance(files[0], RecipeJobInputFile)
+        else RecipeJobOutputManifestContent
+    )
+    return model(
+        schema_version=1,
+        total_bytes=sum(item.size_bytes for item in files),
+        files=list(files),
+    ).model_dump(mode="json")
 
 
 def manifest_document(
@@ -194,9 +201,10 @@ class RecipeJobOutputMapping(_RecipeJobModel):
         return _parse_model(cls, raw, label="output mapping")
 
 
-class RecipeJobOutputManifest(_RecipeJobModel):
+class RecipeJobOutputManifestContent(_RecipeJobModel):
+    """Canonical output bytes hashed before the manifest digest is attached."""
+
     schema_version: Literal[1]
-    manifest_sha256: Digest
     total_bytes: int = Field(ge=0, le=MAX_OUTPUT_TOTAL_BYTES)
     files: tuple[RecipeJobFile, ...] = Field(max_length=MAX_OUTPUT_FILES)
 
@@ -206,7 +214,7 @@ class RecipeJobOutputManifest(_RecipeJobModel):
         return _as_tuple(value)
 
     @model_validator(mode="after")
-    def manifest_is_canonical(self) -> RecipeJobOutputManifest:
+    def files_are_canonical(self) -> RecipeJobOutputManifestContent:
         names = [item.name for item in self.files]
         if names != sorted(names, key=lambda value: value.encode("utf-8")):
             raise ValueError("artifact manifest is not canonically sorted")
@@ -214,6 +222,14 @@ class RecipeJobOutputManifest(_RecipeJobModel):
             raise ValueError("artifact manifest limits are exceeded")
         if self.total_bytes != sum(item.size_bytes for item in self.files):
             raise ValueError("output manifest digest or size does not match")
+        return self
+
+
+class RecipeJobOutputManifest(RecipeJobOutputManifestContent):
+    manifest_sha256: Digest
+
+    @model_validator(mode="after")
+    def manifest_is_canonical(self) -> RecipeJobOutputManifest:
         if self.manifest_sha256 != manifest_sha256(self.files):
             raise ValueError("output manifest digest or size does not match")
         return self
