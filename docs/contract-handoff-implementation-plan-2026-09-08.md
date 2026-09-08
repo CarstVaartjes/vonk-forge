@@ -14,6 +14,11 @@ clarification that Rust wire structures must be generated with typify.
    unknown-field policy through generation. If generated Rust types alone do
    not enforce a schema constraint, enforce the exported schema at the wire
    boundary. Test real Python and Rust serializers in both directions.
+   Optional nullable fields with default `None` accept missing or null and are
+   omitted on output. Both sides normalize through the authoritative model
+   before hashing/signing/verifying. Keep required nulls, false/zero/empty
+   values and engine-defined nulls. Do not force optional fields to required
+   to conceal generation drift; preserve formatted string bytes.
 3. A job carries the Controller-compiled invocation, including its effective
    settings. Rust executes the signed canonical plan; it never recompiles
    engine settings or ignores an accepted parameter. Bind stable installed
@@ -77,6 +82,7 @@ scope. Prior completed agent assignments do not authorize unrelated edits.
 | Handoff | Required regression |
 | --- | --- |
 | Pydantic → schema → typify → Rust | Required-nullable omitted versus null, exact scalar types, union variants, unknown-field policy, current producer values and Rust serialized values. |
+| Canonical serialization → digest/signature verification | Optional default-null missing and null yield identical canonical bytes; output omits both. Required nulls and engine nulls remain. Actual Python-signed documents verify in Rust, and Rust output verifies in Python; formatted strings retain their declared representation. |
 | Job API → compiler → agent → invocation | Installed seed differs from selected seed; actual invoked argv reflects selection, including serialized compound values; immutable installed identity stays bound. |
 | START → retained runtime → telemetry | Current writer, real retained document, expected engine/rank and actual metrics address. Include worker/no endpoint and unsupported metrics. |
 | Staged job inputs → LTX adapter | Declared prompt plus agent manifest succeeds; absent/extra/unsafe or malformed declared input fails appropriately. Both active adapters covered. |

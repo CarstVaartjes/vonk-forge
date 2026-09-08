@@ -170,7 +170,6 @@ def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
         None,
         True,
         MIN_TELEMETRY_SCALAR_INTEGER,
-    TelemetryRuntime,
         MAX_TELEMETRY_SCALAR_INTEGER,
         2**53 + 1,
         1.5,
