@@ -3,9 +3,15 @@
 Run the complete `tests/acceptance/test_spark_lifecycle.py run` lane in a fresh,
 disposable Ubuntu ARM64 systemd machine with the signed candidate, baseline,
 object root, exact Compose overlay, and environment required by
-`.github/workflows/installer-publication-source.yml`. Use the intended OrbStack
+`.github/workflows/installer-publication.yml`. Use the intended OrbStack
 Docker engine for container checks. A container-only helper test does not prove
 the installed service's systemd isolation or the complete installer lifecycle.
+
+Use a normal disposable OrbStack machine for the complete lane. OrbStack's
+isolated-machine mode can block nested Docker image extraction with
+`operation not permitted`, before the installer is exercised. Verify the
+machine configuration and a real candidate image pull first; do not weaken
+the packaged Vonk services to work around a test-machine restriction.
 
 Before installing the package in an OrbStack Linux machine, run from the exact
 platform checkout inside that machine:
