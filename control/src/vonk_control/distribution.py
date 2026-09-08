@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
 )
 
 from .cached_file_verification import verified_files
+from .catalog_revision_contract import read_catalog_document
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
@@ -228,16 +229,11 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 )
                 if revision is None:
                     return False
-                execution = revision.document.get("execution")
-                image = execution.get("image") if isinstance(execution, Mapping) else None
-                raw_registry = image.get("digest") if isinstance(image, Mapping) else None
-                expected_registry = (
-                    raw_registry
-                    if isinstance(raw_registry, str) and raw_registry.startswith("sha256:")
-                    else f"sha256:{raw_registry}"
-                    if isinstance(raw_registry, str)
-                    else None
-                )
+                recipe = read_catalog_document(revision)
+                execution = recipe.execution if hasattr(recipe, "execution") else None
+                image = execution.image if execution is not None and execution.mode == "image" else None
+                raw_registry = image.digest if image is not None else None
+                expected_registry = f"sha256:{raw_registry}" if raw_registry is not None else None
                 if expected_registry != receipt.registry_manifest_digest:
                     return False
                 durable = session.scalar(
@@ -295,16 +291,11 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             ))
             registry_digests: set[str] = set()
             for revision in revisions:
-                execution = revision.document.get("execution")
-                image = execution.get("image") if isinstance(execution, Mapping) else None
-                raw_digest = image.get("digest") if isinstance(image, Mapping) else None
-                expected = (
-                    raw_digest
-                    if isinstance(raw_digest, str) and raw_digest.startswith("sha256:")
-                    else f"sha256:{raw_digest}"
-                    if isinstance(raw_digest, str)
-                    else None
-                )
+                recipe = read_catalog_document(revision)
+                execution = recipe.execution if hasattr(recipe, "execution") else None
+                image = execution.image if execution is not None and execution.mode == "image" else None
+                raw_digest = image.digest if image is not None else None
+                expected = f"sha256:{raw_digest}" if raw_digest is not None else None
                 if expected is not None:
                     registry_digests.add(expected)
             if image_digest in registry_digests:

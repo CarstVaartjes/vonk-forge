@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from vonk_control.catalog_entities import _build_projection
 from vonk_control.compiled_execution_plan import CompiledRuntimeImage
 from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_control.models import (
@@ -50,6 +51,18 @@ def _runtime() -> dict[str, str]:
     return {"architecture": "linux/arm64", "interface": "vonk.runtime.v1"}
 
 
+def _projection(recipe: RecipeDefinition) -> dict[str, object]:
+    value: dict[str, object] = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    value.update(_build_projection(recipe))
+    return value
+
+
 def _add_revision(
     session: Session,
     revision_id: str,
@@ -58,6 +71,9 @@ def _add_revision(
     number: int = 1,
     state: str = "active",
 ) -> None:
+    projected = _projection(recipe)
+    if recipe.execution.mode == "build":
+        projected["source_bundle_sha256"] = "c" * 64
     session.add(
         CatalogDocumentRevision(
             id=revision_id,
@@ -72,7 +88,7 @@ def _add_revision(
             content_digest=content_sha256(recipe),
             artifact_key="b" * 64,
             execution_key="a" * 64,
-            projected={},
+            projected=projected,
             created_by="test",
             created_at=datetime.now(UTC),
         )
@@ -723,10 +739,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                     state="active",
                     document=original.model_dump(mode="json"),
                     content_digest=old_digest,
-                    projected={
-                        "source_bundle_sha256": "c" * 64,
-                        "package_handle": {"sha256": "1" * 64},
-                    },
+                        projected=_projection(original) | {"source_bundle_sha256": "c" * 64},
                     artifact_key="b" * 64,
                     execution_key="a" * 64,
                     created_by="test",
@@ -743,10 +756,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                     state="active",
                     document=revised.model_dump(mode="json"),
                     content_digest=new_digest,
-                    projected={
-                        "source_bundle_sha256": "c" * 64,
-                        "package_handle": {"sha256": "2" * 64},
-                    },
+                        projected=_projection(revised) | {"source_bundle_sha256": "c" * 64},
                     artifact_key="b" * 64,
                     execution_key="a" * 64,
                     created_by="test",

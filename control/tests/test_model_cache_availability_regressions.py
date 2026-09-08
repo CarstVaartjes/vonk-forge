@@ -654,8 +654,8 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         assert persisted.state == failed.state
         assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
         assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"]["next_retry_at"] is None
-        assert persisted.payload["retry"]["retry_after_seconds"] is None
+        assert persisted.payload["retry"].get("next_retry_at") is None
+        assert persisted.payload["retry"].get("retry_after_seconds") is None
     assert service._hf_cooldown_until is None
 
     # Terminal auth failures do not re-enter the automatic scheduler.
@@ -677,8 +677,8 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         assert persisted is not None
         assert persisted.state == denied.state
         assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"]["next_retry_at"] is None
-        assert persisted.payload["retry"]["retry_after_seconds"] is None
+        assert persisted.payload["retry"].get("next_retry_at") is None
+        assert persisted.payload["retry"].get("retry_after_seconds") is None
     assert service._hf_cooldown_until is None
     assert len(requests) == 3
     denied_repeat = service.check_access_and_resume(

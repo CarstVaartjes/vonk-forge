@@ -25,24 +25,28 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
-from pydantic import ConfigDict, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationMemberProgress
+from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
+from .catalog_revision_contract import read_catalog_document
 from .logging import redact_text
 from .model_cache_contract import (
+    CacheManifest,
+    CacheManifestArtifact,
     ModelCacheOperationProgress,
     ModelCacheOperationResponse,
     ModelCacheOperationResult,
     ModelCacheRepairCheckpoint,
+    ModelCacheTransfer,
+    parse_model_cache_payload,
     parse_model_cache_result,
 )
 from .model_cache_progress import cache_phase, cache_progress
@@ -58,7 +62,7 @@ from .models import (
 )
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
-from .strict_json import StrictJSONModel
+from .strict_json import serialize_json_value
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
@@ -115,34 +119,6 @@ class ModelCacheResolutionError(ModelCacheError):
 
 class ModelCacheStorageError(ModelCacheError):
     pass
-
-
-class _CacheManifestWireModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class _ArtifactManifestWire(_CacheManifestWireModel):
-    key: str
-    id: str
-    path: str
-    kind: str
-    repository: str | None
-    source: str
-    revision: str | None
-    sha256: str
-    download_bytes: int
-    roles: list[str]
-    model_content_sha256: str | None
-
-
-class _ArtifactSetManifestWire(_CacheManifestWireModel):
-    schema_version: Literal[2]
-    source_policy: Literal["nas-first"]
-    model_content_sha256: str | None
-    recipe_revision_sha256: str | None
-    model_definition_ref: ModelReference | None
-    model_content_digests: list[str]
-    artifacts: list[_ArtifactManifestWire]
 
 
 _TERMINAL_FAILURE_MARKERS = (
@@ -309,7 +285,7 @@ class ArtifactSpec:
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
         try:
-            wire = _ArtifactManifestWire.model_validate(value)
+            wire = CacheManifestArtifact.model_validate_json(canonical_message(value))
         except ValidationError as error:
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid", "cache manifest artifact is invalid"
@@ -317,7 +293,7 @@ class ArtifactSpec:
         return cls._from_wire(wire)
 
     @classmethod
-    def _from_wire(cls, wire: _ArtifactManifestWire) -> ArtifactSpec:
+    def _from_wire(cls, wire: CacheManifestArtifact) -> ArtifactSpec:
         result = cls(
             key=wire.key,
             artifact_id=wire.id,
@@ -380,11 +356,13 @@ class ArtifactSetManifest:
     @classmethod
     def from_document(cls, value: Mapping[str, object]) -> ArtifactSetManifest:
         try:
-            wire = _ArtifactSetManifestWire.model_validate(value)
-        except ValidationError as error:
+            _reject_non_json_containers(value)
+            wire = CacheManifest.model_validate_json(canonical_message(value))
+        except (TypeError, ValueError, ValidationError) as error:
             code = (
                 "model_cache.schema_unsupported"
-                if any(
+                if isinstance(error, ValidationError)
+                and any(
                     issue.get("loc") == ("schema_version",)
                     for issue in error.errors()
                 )
@@ -410,6 +388,65 @@ class ArtifactSetManifest:
         )
         _validate_manifest(result)
         return result
+
+
+def _reject_non_json_containers(value: object) -> None:
+    """Keep Python-only tuple values from being normalized into JSON arrays."""
+
+    if isinstance(value, tuple):
+        raise TypeError("manifest JSON must use arrays, not tuples")
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _reject_non_json_containers(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_non_json_containers(item)
+
+
+def _validated_operation_payload(
+    operation: ModelCacheOperation,
+) -> dict[str, object]:
+    """Read and normalize one persisted operation envelope."""
+
+    try:
+        parsed = parse_model_cache_payload(operation.kind, operation.payload)
+        if hasattr(parsed, "manifest"):
+            ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
+        return serialize_json_value(parsed)  # type: ignore[return-value]
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ModelCacheStorageError(
+            "model_cache.payload_invalid",
+            "persisted cache operation payload is invalid",
+        ) from error
+
+
+def _validated_operation_progress(operation: ModelCacheOperation) -> ModelCacheOperationProgress:
+    """Read one persisted operation progress document through its wire model."""
+
+    try:
+        return ModelCacheOperationProgress.model_validate_json(
+            canonical_message(operation.progress)
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ModelCacheStorageError(
+            "model_cache.progress_invalid",
+            "persisted cache operation progress is invalid",
+        ) from error
+
+
+def _write_operation_payload(kind: str, value: Mapping[str, object]) -> dict[str, object]:
+    """Validate and normalize a newly assembled operation envelope."""
+
+    try:
+        parsed = parse_model_cache_payload(kind, value)
+        if hasattr(parsed, "manifest"):
+            ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
+        return serialize_json_value(parsed)  # type: ignore[return-value]
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ModelCacheStorageError(
+            "model_cache.payload_invalid",
+            "cache operation payload is invalid",
+        ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,7 +843,9 @@ def _recipe_model_file_ids(
 
 def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, object]]:
     try:
-        definition = ModelDefinition.model_validate(row.document)
+        definition = read_catalog_document(row)
+        if not isinstance(definition, ModelDefinition):
+            raise TypeError("catalog revision is not a model")
     except (TypeError, ValueError) as error:
         raise ModelCacheResolutionError(
             "model_cache.model_definition_invalid", "canonical model definition is invalid"
@@ -848,10 +887,12 @@ def _same_model_artifact_identity(
     return bool(selected) and all(current.get(key) == identity for key, identity in selected.items())
 
 
-def _model_lineage_signature(document: Mapping[str, object]) -> tuple[object, object, object]:
+def _model_lineage_signature(
+    document: Mapping[str, object] | ModelDefinition,
+) -> tuple[object, object, object]:
     """Return the logical model and representation identity from ModelDefinition."""
 
-    model = ModelDefinition.model_validate(document)
+    model = document if isinstance(document, ModelDefinition) else ModelDefinition.model_validate(document)
     identity = model.identity
     publisher = identity.model.publisher
     slug = identity.model.slug
@@ -867,24 +908,9 @@ def _model_lineage_signature(document: Mapping[str, object]) -> tuple[object, ob
 def _supersedes_revision(
     revision: CatalogDocumentRevision, current: CatalogDocumentRevision
 ) -> bool:
-    document = revision.document
-    projected = revision.projected if isinstance(revision.projected, Mapping) else {}
-    value = document.get("supersedes") if isinstance(document, Mapping) else None
-    if value is None:
-        value = projected.get("supersedes")
-    values = value if isinstance(value, list) else [value]
-    for item in values:
-        if isinstance(item, str) and item == current.content_digest:
-            return True
-        if isinstance(item, Mapping):
-            if item.get("content_sha256") == current.content_digest:
-                return True
-            if (
-                item.get("publisher") == current.publisher
-                and item.get("slug") == current.slug
-            ):
-                return True
-    return False
+    document = read_catalog_document(revision)
+    value = document.supersedes if isinstance(document, ModelDefinition) else None
+    return value is not None and value.content_sha256 == current.content_digest
 
 
 def _revision_identity(row: CatalogDocumentRevision | None) -> dict[str, object] | None:
@@ -1134,7 +1160,9 @@ class ModelCacheService:
                 "exact recipe revision is not resolved",
             )
         try:
-            recipe = RecipeDefinition.model_validate(revision.document)
+            recipe = read_catalog_document(revision)
+            if not isinstance(recipe, RecipeDefinition):
+                raise TypeError("catalog revision is not a recipe")
         except (TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
                 "model_cache.recipe_invalid", "canonical recipe definition is invalid"
@@ -1181,7 +1209,9 @@ class ModelCacheService:
                 "exact model definition is not resolved",
             )
         try:
-            definition = ModelDefinition.model_validate(row.document)
+            definition = read_catalog_document(row)
+            if not isinstance(definition, ModelDefinition):
+                raise TypeError("catalog revision is not a model")
             rows[digest] = row
             for dependency in definition.dependencies:
                 self._collect_model_definitions(
@@ -1330,9 +1360,10 @@ class ModelCacheService:
                 )
             )
             if existing is not None:
+                existing_payload = _validated_operation_payload(existing)
                 if (
                     existing.kind != "download"
-                    or existing.payload.get("artifact_set_sha256") != set_digest
+                    or existing_payload.get("artifact_set_sha256") != set_digest
                     or existing.plan_digest != requested_plan
                 ):
                     raise ModelCacheConflict(
@@ -1360,6 +1391,7 @@ class ModelCacheService:
             "transfer": dict(transfer),
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
+        payload = _write_operation_payload("download", payload)
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
                 select(ModelCacheOperation).where(
@@ -1367,9 +1399,10 @@ class ModelCacheService:
                 )
             )
             if existing is not None:
+                existing_payload = _validated_operation_payload(existing)
                 if (
                     existing.kind != "download"
-                    or existing.payload.get("artifact_set_sha256") != set_digest
+                    or existing_payload.get("artifact_set_sha256") != set_digest
                     or existing.plan_digest != requested_plan
                 ):
                     raise ModelCacheConflict(
@@ -1542,22 +1575,10 @@ class ModelCacheService:
 
     @staticmethod
     def _transfer_totals(payload: Mapping[str, object]) -> tuple[int | None, int]:
-        raw_transfer = payload.get("transfer")
-        if not isinstance(raw_transfer, Mapping):
-            return None, 0
-        raw_total = raw_transfer.get("total_bytes")
-        total = raw_total if type(raw_total) is int and raw_total >= 0 else None
-        raw_artifacts = raw_transfer.get("artifacts")
-        if not isinstance(raw_artifacts, Mapping):
-            return total, 0
-        received = 0
-        for raw_entry in raw_artifacts.values():
-            if not isinstance(raw_entry, Mapping):
-                continue
-            value = raw_entry.get("received_bytes")
-            if type(value) is int and value >= 0:
-                received += value
-        return total, received
+        transfer = ModelCacheTransfer.model_validate(payload["transfer"])
+        return transfer.total_bytes, sum(
+            entry.received_bytes for entry in transfer.artifacts.values()
+        )
 
     def _ensure_transfer_state(
         self,
@@ -1573,12 +1594,9 @@ class ModelCacheService:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
-            raw = operation.payload.get("transfer")
-            if isinstance(raw, Mapping):
-                return dict(raw)
-            transfer = self._transfer_state_for_manifest(manifest, force=force)
-            operation.payload = dict(operation.payload) | {"transfer": transfer}
-            return transfer
+            payload = _validated_operation_payload(operation)
+            transfer = payload["transfer"]
+            return dict(transfer) if isinstance(transfer, Mapping) else transfer
 
     def _operation_transfer_snapshot(
         self, operation_id: str
@@ -1589,14 +1607,14 @@ class ModelCacheService:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
-            return self._transfer_totals(operation.payload)
+            return self._transfer_totals(_validated_operation_payload(operation))
 
     def _transfer_state_for_operation(self, operation_id: str) -> Mapping[str, object] | None:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
-            if operation is None or not isinstance(operation.payload, Mapping):
+            if operation is None:
                 return None
-            value = operation.payload.get("transfer")
+            value = _validated_operation_payload(operation).get("transfer")
             return value if isinstance(value, Mapping) else None
 
     def _ensure_set(
@@ -1728,13 +1746,9 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            operation_payload = dict(operation.payload)
+            operation_payload = _validated_operation_payload(operation)
             operation_set_digest = operation.artifact_set_sha256
-            manifest = ArtifactSetManifest.from_document(
-                operation_payload.get("manifest", {})
-                if isinstance(operation_payload, Mapping)
-                else {}
-            )
+            manifest = ArtifactSetManifest.from_document(operation_payload["manifest"])
             set_digest = operation_set_digest
         if set_digest is None:
             raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
@@ -1866,7 +1880,9 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             assert operation is not None
             checkpoint = (
-                ModelCacheRepairCheckpoint.model_validate(operation.payload.get("repair_checkpoint"))
+                ModelCacheRepairCheckpoint.model_validate(
+                    _validated_operation_payload(operation)["repair_checkpoint"]
+                )
                 if force else None
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
@@ -1885,13 +1901,13 @@ class ModelCacheService:
             with self._session(write=True) as session:
                 operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
                 assert operation is not None
-                payload = dict(operation.payload)
-                checkpoint = ModelCacheRepairCheckpoint.model_validate(payload.get("repair_checkpoint"))
+                payload = _validated_operation_payload(operation)
+                checkpoint = ModelCacheRepairCheckpoint.model_validate(payload["repair_checkpoint"])
                 payload["repair_checkpoint"] = ModelCacheRepairCheckpoint(
                     transfer_id=checkpoint.transfer_id,
                     completed_objects=list(dict.fromkeys([*checkpoint.completed_objects, spec.sha256])),
                 ).model_dump(mode="json")
-                operation.payload = payload
+                operation.payload = _write_operation_payload("repair", payload)
 
     def _download_artifact(
         self,
@@ -1908,7 +1924,9 @@ class ModelCacheService:
             with self._session() as session:
                 operation = session.get(ModelCacheOperation, operation_id)
                 assert operation is not None
-                checkpoint = ModelCacheRepairCheckpoint.model_validate(operation.payload.get("repair_checkpoint"))
+                checkpoint = ModelCacheRepairCheckpoint.model_validate(
+                    _validated_operation_payload(operation)["repair_checkpoint"]
+                )
                 partial_owner = "repair-" + checkpoint.transfer_id
         part = self._partial_path(partial_owner, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -2293,7 +2311,7 @@ class ModelCacheService:
         with self._lock, self._session(write=True) as session:
             operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is not None and not force_progress:
-                prior = ModelCacheOperationProgress.model_validate(operation.progress).measurement
+                prior = _validated_operation_progress(operation).measurement
                 if (prior.phase == "download" and prior.observed_at is not None
                     and 0 <= (now - datetime.fromisoformat(prior.observed_at)).total_seconds() < 1):
                     return
@@ -2303,8 +2321,8 @@ class ModelCacheService:
                 artifact.state = "partial" if state == "verifying" else state
                 artifact.updated_at = now
             if operation is not None:
-                manifest = ArtifactSetManifest.from_document(operation.payload["manifest"])
-                payload = dict(operation.payload)
+                payload = _validated_operation_payload(operation)
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
                 raw_transfer = payload.get("transfer")
                 transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
                 raw_artifacts = transfer.get("artifacts")
@@ -2341,18 +2359,16 @@ class ModelCacheService:
                     payload["claim"] = dict(claim) | {
                         "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
                     }
-                operation.payload = payload
-                old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
-                old_downloaded = old_progress.get("downloaded_bytes")
-                old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
-                old_completed = old_progress.get("completed_artifacts")
-                old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
+                operation.payload = _write_operation_payload(operation.kind, payload)
+                old_progress = _validated_operation_progress(operation)
+                old_downloaded = old_progress.downloaded_bytes
+                old_completed = old_progress.completed_artifacts
                 # A partial file is an active download checkpoint. Only an
                 # interrupted operation should enter the resumable partial state.
                 operation.state = "running"
                 operation.progress = self._progress(
                     manifest,
-                    previous=operation.progress,
+                    previous=old_progress.model_dump(mode="json"),
                     phase="downloading" if state == "partial" else "verifying",
                     completed_artifacts=max(old_completed, completed_artifacts),
                     downloaded_bytes=max(old_downloaded, received),
@@ -2418,35 +2434,28 @@ class ModelCacheService:
             if operation is not None:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
-                operation.payload = dict(operation.payload) | {
+                payload = _validated_operation_payload(operation) | {
                     "failure": _cache_failure(
                         "model_cache.interrupted",
                         f"{detail[:480]}; preserved bytes remain available to resume",
                         retryable=True, recovery="resume",
                     )
                 }
-                operation.payload = {
-                    key: value
-                    for key, value in operation.payload.items()
-                    if key != "claim"
-                }
-                _total, received = self._transfer_totals(operation.payload)
+                payload.pop("claim", None)
+                operation.payload = _write_operation_payload(operation.kind, payload)
+                _total, received = self._transfer_totals(payload)
+                previous_progress = _validated_operation_progress(operation)
                 operation.progress = self._progress(
                     manifest,
-                    previous=operation.progress,
+                    previous=previous_progress.model_dump(mode="json"),
                     phase="downloading",
-                    completed_artifacts=(
-                        operation.progress.get("completed_artifacts", 0)
-                        if isinstance(operation.progress, Mapping)
-                        else 0
-                    ),
+                    completed_artifacts=previous_progress.completed_artifacts,
                     downloaded_bytes=received,
                     expected_bytes=_total,
                     current_artifact_key=operation.current_artifact_key,
                     transfer=(
-                        operation.payload.get("transfer")
-                        if isinstance(operation.payload, Mapping)
-                        and isinstance(operation.payload.get("transfer"), Mapping)
+                        payload.get("transfer")
+                        if isinstance(payload.get("transfer"), Mapping)
                         else None
                     ),
                 )
@@ -2497,7 +2506,8 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is not None:
                 retryable = _retryable_failure(error)
-                raw_retry = operation.payload.get("retry", {})
+                operation_payload = _validated_operation_payload(operation)
+                raw_retry = operation_payload["retry"]
                 retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
                 automatic_attempts = retry.get("automatic_attempts")
                 automatic_attempts = (
@@ -2540,7 +2550,7 @@ class ModelCacheService:
                     required_bytes=required_bytes, free_bytes=free_bytes,
                     shortfall_bytes=shortfall_bytes, artifact_key=failed_artifact_key,
                 )
-                operation.payload = dict(operation.payload) | {
+                operation_payload = operation_payload | {
                     "failure": failure_payload,
                     "retry": retry,
                 }
@@ -2549,16 +2559,17 @@ class ModelCacheService:
                     # manifest, plan digest, and transfer ledger remain intact.
                     operation.attempt = int(operation.attempt) + 1
                     retry["automatic_attempts"] = automatic_attempts + 1
-                    operation.payload = dict(operation.payload) | {"retry": retry}
+                    operation_payload = operation_payload | {"retry": retry}
                     operation.completed_at = None
                 else:
                     operation.completed_at = now
-                operation.payload = {
-                    key: value
-                    for key, value in operation.payload.items()
-                    if key != "claim"
-                }
-                operation.progress = cache_phase(operation.progress, "queued" if bounded_retry else "failed", now)
+                operation_payload.pop("claim", None)
+                operation.payload = _write_operation_payload(operation.kind, operation_payload)
+                operation.progress = cache_phase(
+                    _validated_operation_progress(operation).model_dump(mode="json"),
+                    "queued" if bounded_retry else "failed",
+                    now,
+                )
                 operation.updated_at = now
 
     def retry(
@@ -2598,7 +2609,8 @@ class ModelCacheService:
                 isinstance(failure, Mapping)
                 and failure.get("retryable") is True
             )
-            raw_retry = previous.payload.get("retry", {})
+            previous_payload = _validated_operation_payload(previous)
+            raw_retry = previous_payload["retry"]
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
             operator_retries = retry.get("operator_retries")
             operator_retries = (
@@ -2618,7 +2630,8 @@ class ModelCacheService:
                 )
             now = self._clock()
             retry.update(automatic_attempts=1, operator_retries=operator_retries + 1)
-            payload = dict(previous.payload) | {"retry": retry}
+            payload = previous_payload | {"retry": retry, "retry_of": previous.id}
+            previous_progress = _validated_operation_progress(previous)
             operation = ModelCacheOperation(
                 request_key=request_key,
                 schema_version=2,
@@ -2627,14 +2640,15 @@ class ModelCacheService:
                 attempt=1,
                 artifact_set_sha256=previous.artifact_set_sha256,
                 plan_digest=previous.plan_digest,
-                payload=payload,
-                progress=cache_phase(previous.progress, "queued", now),
+                payload=_write_operation_payload(previous.kind, payload),
+                progress=cache_phase(
+                    previous_progress.model_dump(mode="json"), "queued", now
+                ),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
                 created_at=now,
                 updated_at=now,
             )
-            operation.payload["retry_of"] = previous.id
             session.add(operation)
             session.flush()
             return self._operation_view(operation)
@@ -2711,15 +2725,14 @@ class ModelCacheService:
                     "model_cache.access_recheck_unavailable",
                     "the operation does not have a terminal Hugging Face access failure",
                 )
-            prior_check = previous.payload.get("access_recheck")
+            previous_payload = _validated_operation_payload(previous)
+            prior_check = previous_payload.get("access_recheck")
             if (
                 isinstance(prior_check, Mapping)
                 and prior_check.get("request_key") == request_key
             ):
                 return self._operation_view(previous)
-            manifest = ArtifactSetManifest.from_document(
-                previous.payload.get("manifest", {})
-            )
+            manifest = ArtifactSetManifest.from_document(previous_payload["manifest"])
             failed_artifact_key = (
                 failure.get("artifact_key")
                 if isinstance(failure.get("artifact_key"), str)
@@ -2768,7 +2781,7 @@ class ModelCacheService:
                 previous.last_error = safe_detail
                 previous.completed_at = now
                 previous.updated_at = now
-                previous.payload = dict(previous.payload) | {
+                payload = _validated_operation_payload(previous) | {
                     "failure": failure_payload,
                     "access_recheck": {
                         "request_key": request_key,
@@ -2776,7 +2789,8 @@ class ModelCacheService:
                         "authorized": False,
                     },
                 }
-                previous.payload.pop("claim", None)
+                payload.pop("claim", None)
+                previous.payload = _write_operation_payload(previous.kind, payload)
                 return self._operation_view(previous)
 
         now = self._clock()
@@ -2786,7 +2800,7 @@ class ModelCacheService:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
-            payload = dict(previous.payload)
+            payload = _validated_operation_payload(previous)
             payload.pop("failure", None)
             payload.pop("result", None)
             payload.pop("claim", None)
@@ -2801,15 +2815,11 @@ class ModelCacheService:
                 "authorized": True,
             }
             total, received = self._transfer_totals(payload)
-            prior_progress = previous.progress if isinstance(previous.progress, Mapping) else {}
+            prior_progress = _validated_operation_progress(previous)
             progress = self._progress(
                 manifest,
                 phase="queued",
-                completed_artifacts=(
-                    int(prior_progress.get("completed_artifacts", 0))
-                    if type(prior_progress.get("completed_artifacts")) is int
-                    else 0
-                ),
+                completed_artifacts=prior_progress.completed_artifacts,
                 downloaded_bytes=received,
                 expected_bytes=total,
                 current_artifact_key=(
@@ -2831,7 +2841,7 @@ class ModelCacheService:
                 attempt=1,
                 artifact_set_sha256=previous.artifact_set_sha256,
                 plan_digest=previous.plan_digest,
-                payload=payload,
+                payload=_write_operation_payload(previous.kind, payload),
                 progress=progress,
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
@@ -2910,27 +2920,22 @@ class ModelCacheService:
                     operation.attempt = max(1, int(operation.attempt))
             operation.state = state
             if state in {"succeeded", "failed", "cancelled"}:
-                operation.progress = cache_phase(operation.progress, "completed" if state == "succeeded" else "failed", now)
+                operation.progress = cache_phase(
+                    _validated_operation_progress(operation).model_dump(mode="json"),
+                    "completed" if state == "succeeded" else "failed",
+                    now,
+                )
             operation.updated_at = now
+            payload = _validated_operation_payload(operation)
             if state == "running":
-                operation.payload = {
-                    key: value
-                    for key, value in operation.payload.items()
-                    if key != "failure"
-                }
+                payload.pop("failure", None)
             if result is not None:
                 parsed_result = parse_model_cache_result(operation.kind, result)
-                payload = dict(operation.payload) | {
-                    "result": parsed_result.model_dump(mode="json")
-                }
+                payload["result"] = parsed_result.model_dump(mode="json")
                 payload.pop("failure", None)
-                operation.payload = payload
             if state in {"succeeded", "failed", "cancelled"}:
-                operation.payload = {
-                    key: value
-                    for key, value in operation.payload.items()
-                    if key != "claim"
-                }
+                payload.pop("claim", None)
+            operation.payload = _write_operation_payload(operation.kind, payload)
             if state in {"succeeded", "failed", "cancelled"}:
                 operation.completed_at = now
 
@@ -2951,14 +2956,12 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
-            old_downloaded = old_progress.get("downloaded_bytes")
-            old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
-            old_completed = old_progress.get("completed_artifacts")
-            old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
+            old_progress = _validated_operation_progress(operation)
+            old_downloaded = old_progress.downloaded_bytes
+            old_completed = old_progress.completed_artifacts
             operation.progress = self._progress(
                 manifest,
-                previous=operation.progress,
+                previous=old_progress.model_dump(mode="json"),
                 phase=phase,
                 completed_artifacts=max(old_completed, completed_artifacts),
                 downloaded_bytes=max(old_downloaded, downloaded_bytes),
@@ -2967,12 +2970,7 @@ class ModelCacheService:
                 transfer=(
                     transfer
                     if transfer is not None
-                    else (
-                        operation.payload.get("transfer")
-                        if isinstance(operation.payload, Mapping)
-                        and isinstance(operation.payload.get("transfer"), Mapping)
-                        else None
-                    )
+                    else _validated_operation_payload(operation).get("transfer")
                 ),
             )
             operation.current_artifact_key = current_artifact_key
@@ -3044,7 +3042,9 @@ class ModelCacheService:
 
     @staticmethod
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
-        result = operation.payload.get("result") if isinstance(operation.payload, Mapping) else None
+        payload = _validated_operation_payload(operation)
+        progress = _validated_operation_progress(operation)
+        result = payload.get("result")
         failure = ModelCacheService._canonical_failure(operation)
         view = CacheOperationView(
             id=operation.id,
@@ -3054,7 +3054,7 @@ class ModelCacheService:
             attempt=int(operation.attempt),
             artifact_set_sha256=operation.artifact_set_sha256,
             plan_digest=operation.plan_digest,
-            progress=dict(operation.progress),
+            progress=serialize_json_value(progress),  # type: ignore[arg-type]
             result=(
                 parse_model_cache_result(operation.kind, result)
                 if result is not None else None
@@ -3074,9 +3074,7 @@ class ModelCacheService:
     @staticmethod
     def _canonical_failure(operation: ModelCacheOperation) -> Mapping[str, object] | None:
         """Read the one current persisted failure contract without repair/defaults."""
-        if not isinstance(operation.payload, Mapping):
-            raise TypeError("cache operation payload must be a JSON object")
-        raw = operation.payload.get("failure")
+        raw = _validated_operation_payload(operation).get("failure")
         return (None if raw is None else
                 AvailabilityOperationFailure.model_validate(raw).model_dump(mode="json"))
 
@@ -3222,7 +3220,9 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            manifest = ArtifactSetManifest.from_document(operation.payload.get("manifest", {}))
+            manifest = ArtifactSetManifest.from_document(
+                _validated_operation_payload(operation)["manifest"]
+            )
             set_digest = operation.artifact_set_sha256
         if set_digest is None:
             raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
@@ -3385,14 +3385,15 @@ class ModelCacheService:
         with self._session(write=True) as session:
             for operation_id in self._background_operations:
                 operation = session.get(ModelCacheOperation, operation_id)
-                if operation is None or not isinstance(operation.payload, Mapping):
+                if operation is None:
                     continue
-                claim = operation.payload.get("claim")
+                operation_payload = _validated_operation_payload(operation)
+                claim = operation_payload.get("claim")
                 if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
-                    operation.payload = dict(operation.payload) | {
-                        "claim": dict(claim)
-                        | {"expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))}
+                    operation_payload["claim"] = dict(claim) | {
+                        "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
                     }
+                    operation.payload = _write_operation_payload(operation.kind, operation_payload)
                     operation.updated_at = now
 
     def _finish_background_success(
@@ -3472,9 +3473,13 @@ class ModelCacheService:
                 )
                 if operation is None:
                     continue
-                payload = dict(operation.payload) if isinstance(operation.payload, Mapping) else {}
+                payload = _validated_operation_payload(operation)
                 retry = payload.get("retry")
-                retry = dict(retry) if isinstance(retry, Mapping) else {}
+                retry = dict(retry) if isinstance(retry, Mapping) else None
+                if retry is None and operation.kind in {"download", "repair"}:
+                    raise ModelCacheStorageError(
+                        "model_cache.payload_invalid", "cache retry state is missing"
+                    )
                 if respect_backoff:
                     retry_at = retry.get("next_retry_at")
                     if isinstance(retry_at, str):
@@ -3509,25 +3514,16 @@ class ModelCacheService:
                     "owner": self._claim_owner,
                     "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)),
                 }
-                operation.payload = payload
+                operation.payload = _write_operation_payload(operation.kind, payload)
                 operation.updated_at = now
                 claimed.append((operation.id, operation.kind))
         return claimed
 
     @staticmethod
     def _payload_has_huggingface_source(payload: Mapping[str, object]) -> bool:
-        raw_manifest = payload.get("manifest")
-        if not isinstance(raw_manifest, Mapping):
-            return False
-        raw_artifacts = raw_manifest.get("artifacts")
-        if not isinstance(raw_artifacts, list):
-            return False
-        for raw_artifact in raw_artifacts:
-            if not isinstance(raw_artifact, Mapping):
-                continue
-            source = raw_artifact.get("source")
-            if not isinstance(source, str):
-                continue
+        manifest = ArtifactSetManifest.from_document(payload["manifest"])
+        for artifact in manifest.artifacts:
+            source = artifact.source
             try:
                 host = urlsplit(source).hostname
             except ValueError:
@@ -3559,7 +3555,7 @@ class ModelCacheService:
 
         latest = self._hf_cooldown_until
         for operation in rows:
-            payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+            payload = _validated_operation_payload(operation)
             if not self._payload_has_huggingface_source(payload):
                 continue
             failure = self._canonical_failure(operation)
@@ -3616,6 +3612,7 @@ class ModelCacheService:
                 select(ModelCacheOperation).where(ModelCacheOperation.request_key == request_key)
             )
             if existing is not None:
+                _validated_operation_payload(existing)
                 if existing.kind != "repair" or existing.plan_digest != requested_plan:
                     raise ModelCacheConflict(
                         "model_cache.request_key_reused",
@@ -3638,6 +3635,7 @@ class ModelCacheService:
             "transfer": transfer,
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
+        payload = _write_operation_payload("repair", payload)
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
                 select(ModelCacheOperation).where(
@@ -4151,7 +4149,10 @@ class ModelCacheService:
         if revision is None or revision.kind != "recipe" or revision.state != "active":
             return False
         try:
-            direct_model_digests = set(_recipe_model_content_digests(revision.document))
+            recipe = read_catalog_document(revision)
+            if not isinstance(recipe, RecipeDefinition):
+                raise TypeError("catalog revision is not a recipe")
+            direct_model_digests = set(_recipe_model_content_digests(recipe))
             if cache_model_digests.intersection(direct_model_digests):
                 return True
             model_rows: dict[str, CatalogDocumentRevision] = {}
@@ -4241,7 +4242,10 @@ class ModelCacheService:
             )
         if current is None:
             return None, []
-        current_signature = _model_lineage_signature(current.document)
+        current_document = read_catalog_document(current)
+        if not isinstance(current_document, ModelDefinition):
+            return None, []
+        current_signature = _model_lineage_signature(current_document)
         candidates: list[CatalogDocumentRevision] = []
         for candidate in session.scalars(
             select(CatalogDocumentRevision).where(
@@ -4251,7 +4255,10 @@ class ModelCacheService:
         ):
             if candidate.content_digest == current.content_digest:
                 continue
-            same_lineage = _model_lineage_signature(candidate.document) == current_signature
+            candidate_document = read_catalog_document(candidate)
+            if not isinstance(candidate_document, ModelDefinition):
+                continue
+            same_lineage = _model_lineage_signature(candidate_document) == current_signature
             if not same_lineage and not _supersedes_revision(candidate, current):
                 continue
             if not _same_model_artifact_identity(candidate, manifest) and (
@@ -4546,15 +4553,11 @@ class ModelCacheService:
             }
             in_flight_artifacts: set[str] = set()
             for operation in operations:
-                manifest = operation.payload.get("manifest") if isinstance(operation.payload, Mapping) else None
-                if isinstance(manifest, Mapping):
-                    try:
-                        in_flight_artifacts.update(
-                            item.sha256
-                            for item in ArtifactSetManifest.from_document(manifest).artifacts
-                        )
-                    except ModelCacheError:
-                        continue
+                if operation.kind not in {"download", "repair"}:
+                    continue
+                payload = _validated_operation_payload(operation)
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                in_flight_artifacts.update(item.sha256 for item in manifest.artifacts)
             artifact_rows = {
                 row.sha256: row for row in session.scalars(select(ModelCacheArtifact))
             }
@@ -4756,6 +4759,7 @@ class ModelCacheService:
             ),
             "before_unique_used_bytes": self.storage_summary().unique_used_bytes,
         }
+        payload = _write_operation_payload("evict", payload)
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
                 select(ModelCacheOperation).where(
@@ -4763,6 +4767,7 @@ class ModelCacheService:
                 )
             )
             if existing is not None:
+                _validated_operation_payload(existing)
                 if existing.kind != "evict" or existing.plan_digest != requested_plan:
                     raise ModelCacheConflict(
                         "model_cache.request_key_reused",
@@ -4802,8 +4807,9 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            selected = tuple(str(item) for item in operation.payload.get("selected", ()))
-            before_unique = int(operation.payload.get("before_unique_used_bytes", 0))
+            payload = _validated_operation_payload(operation)
+            selected = tuple(payload["selected"])
+            before_unique = payload["before_unique_used_bytes"]
         self._set_operation_state(operation_id, "running")
         try:
             with self._session(write=True) as session:
@@ -4823,15 +4829,19 @@ class ModelCacheService:
                     session.delete(row)
                     operation = session.get(ModelCacheOperation, operation_id)
                     if operation is not None:
+                        operation_progress = _validated_operation_progress(operation)
                         operation.progress = cache_progress({
                             "schema_version": SCHEMA_VERSION,
                             "phase": "reclaiming",
                             "completed_artifacts": index,
                             "total_artifacts": len(selected),
                             "downloaded_bytes": 0,
-                            "expected_bytes": int(operation.progress.get("expected_bytes", 0)),
+                            "expected_bytes": operation_progress.expected_bytes or 0,
                             "current_artifact_key": None,
-                        }, previous=operation.progress, now=self._clock())
+                        },
+                            previous=operation_progress.model_dump(mode="json"),
+                            now=self._clock(),
+                        )
                 session.flush()
                 referenced = {
                     item.artifact_sha256
@@ -4865,15 +4875,19 @@ class ModelCacheService:
                     operation.last_error = redact_text(
                         error.detail if isinstance(error, ModelCacheError) else str(error)
                     )[:512]
-                    payload = dict(operation.payload)
+                    payload = _validated_operation_payload(operation)
                     payload.pop("claim", None)
                     payload.pop("result", None)
                     payload["failure"] = _cache_failure(
                         error.code if isinstance(error, ModelCacheError) else "model_cache.eviction_failed",
                         operation.last_error, retryable=False, recovery="inspect",
                     )
-                    operation.payload = payload
-                    operation.progress = cache_phase(operation.progress, "failed", now)
+                    operation.payload = _write_operation_payload("evict", payload)
+                    operation.progress = cache_phase(
+                        _validated_operation_progress(operation).model_dump(mode="json"),
+                        "failed",
+                        now,
+                    )
                     operation.updated_at = now
                     operation.completed_at = now
 
