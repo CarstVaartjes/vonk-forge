@@ -82,6 +82,11 @@ def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
             exclude_defaults=False,
         )
         return apply_optional_none_policy(value, document, by_alias=by_alias)
+    if isinstance(value, Mapping):
+        return {
+            key: serialize_json_value(item, by_alias=by_alias)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [serialize_json_value(item, by_alias=by_alias) for item in value]
     if isinstance(value, tuple):
@@ -95,6 +100,8 @@ class ControllerAPIRoute(APIRoute):
     def get_route_handler(self):
         original_dependant = self.dependant
         original_call = original_dependant.call
+        original_response_param_name = original_dependant.response_param_name
+        response_param_name = original_response_param_name or "__controller_response"
         response_field = self.secure_cloned_response_field
         by_alias = self.response_model_by_alias
         response_class = self.response_class
@@ -102,6 +109,9 @@ class ControllerAPIRoute(APIRoute):
             response_class = response_class.value
 
         async def policy_endpoint(**values: Any) -> Any:
+            injected_response = values.get(response_param_name)
+            if original_response_param_name is None:
+                values.pop(response_param_name, None)
             if inspect.iscoroutinefunction(original_call):
                 result = await original_call(**values)
             else:
@@ -111,7 +121,6 @@ class ControllerAPIRoute(APIRoute):
             value, errors = response_field.validate(result, {}, loc=("response",))
             if errors:
                 return result
-            injected_response = values.get("response")
             status_code = self.status_code or 200
             if isinstance(injected_response, Response) and injected_response.status_code:
                 status_code = injected_response.status_code
@@ -125,6 +134,7 @@ class ControllerAPIRoute(APIRoute):
 
         dependant = copy(original_dependant)
         dependant.call = policy_endpoint
+        dependant.response_param_name = response_param_name
         self.dependant = dependant
         try:
             return super().get_route_handler()

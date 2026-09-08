@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 import pytest
-from fastapi import BackgroundTasks, FastAPI, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
 from vonk_agent_protocol import RecipeRunObservationsWire
@@ -180,6 +180,52 @@ def test_fastapi_presence_policy_preserves_injected_response_metadata() -> None:
     assert response.headers["x-presence"] == "retained"
     assert response.cookies["presence"] == "retained"
     assert completed == ["done"]
+
+
+def test_fastapi_presence_policy_preserves_dependency_response_metadata() -> None:
+    def set_metadata(response: Response) -> None:
+        response.status_code = 208
+        response.headers["x-presence"] = "dependency"
+        response.set_cookie("presence", "dependency")
+
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+
+    @app.get(
+        "/presence",
+        dependencies=[Depends(set_metadata)],
+        response_model=_PresenceResponseProbe,
+    )
+    def presence() -> _PresenceResponseProbe:
+        return _PresenceResponseProbe(
+            nested=_PresenceNestedProbe(required_nullable=None),
+            required_nullable=None,
+            engine={"future_option": None},
+        )
+
+    with TestClient(app) as client:
+        response = client.get("/presence")
+
+    assert response.status_code == 208
+    assert response.headers["x-presence"] == "dependency"
+    assert response.cookies["presence"] == "dependency"
+
+
+def test_fastapi_presence_policy_traverses_mapping_response_values() -> None:
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+
+    @app.get("/presence", response_model=dict[str, _PresenceNestedProbe])
+    def presence() -> dict[str, _PresenceNestedProbe]:
+        return {"nested": _PresenceNestedProbe(required_nullable=None)}
+
+    with TestClient(app) as client:
+        response = client.get("/presence")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "nested": {"required_nullable": None, "enabled": False}
+    }
 
 
 def test_library_snapshot_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
