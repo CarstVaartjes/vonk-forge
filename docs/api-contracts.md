@@ -51,6 +51,14 @@ exposes them. Use model validators for relationships between fields and
 execution/security rules. Wrapping a handwritten parser in a mostly untyped
 Pydantic class does not create an authoritative structural contract.
 
+Fixtures, acceptance servers and health probes must follow the same rule.
+A hand-written expected dictionary is an assertion about test content, not a
+replacement request/response schema. Validate through the shared model first,
+then check the meaningful values for the test. External protocol fixtures must
+accept declared optional defaults and supported extensions, and exercise both
+streaming and non-streaming when supported. Structural rejection and security
+validation must not depend on whether a client spelled out a default value.
+
 Ordinary internal records and database tables can use dataclasses and ORM
 models. A JSON contract document loaded from a database must still be parsed
 with its canonical model before use. A database row is not proof that the

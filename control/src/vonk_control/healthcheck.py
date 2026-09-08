@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, Self
 
+from pydantic import ValidationError
+
 from .api_preexec import drop_runtime_privileges
+from .operation_api import ReadyzResponse
 
 _READINESS_URL = "http://127.0.0.1:8000/api/v1/readyz"
 _MAXIMUM_RESPONSE_BYTES = 256
@@ -35,11 +37,9 @@ def main(
         if response.status != 200 or len(content) > _MAXIMUM_RESPONSE_BYTES:
             raise RuntimeError("API readiness response is invalid")
     try:
-        payload = json.loads(content)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        ReadyzResponse.model_validate_json(content)
+    except ValidationError as error:
         raise RuntimeError("API readiness response is invalid") from error
-    if payload != {"status": "ready"}:
-        raise RuntimeError("API readiness response is invalid")
 
 
 if __name__ == "__main__":

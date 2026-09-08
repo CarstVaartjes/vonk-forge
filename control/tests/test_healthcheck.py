@@ -25,6 +25,7 @@ class _Response:
 
 def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) -> None:
     from vonk_control import healthcheck
+    from vonk_control.operation_api import ReadyzResponse
 
     events: list[object] = []
     monkeypatch.setattr(
@@ -35,7 +36,7 @@ def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) 
 
     def open_url(request, *, timeout: float):
         events.append(("request", request.full_url, timeout))
-        return _Response({"status": "ready"})
+        return _Response(ReadyzResponse(status="ready").model_dump(mode="json"))
 
     healthcheck.main(open_url=open_url)
 

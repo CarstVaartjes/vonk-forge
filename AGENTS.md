@@ -92,6 +92,14 @@ by two parsers. See `docs/api-contracts.md` for the serialization policy.
 Allow engine-owned content through its declared extension fields; do not
 introduce an exhaustive engine-argument allowlist.
 
+Test fixtures and health probes are consumers too: use the same typed contract
+as the producer, rather than raw dictionary equality or duplicated key lists.
+For external protocols, model their documented required/optional fields and
+extension behavior; keep deterministic test-content assertions separate from
+structural validation. An omitted optional default is not a security failure.
+Exercise normal streaming and non-streaming paths where the protocol supports
+both.
+
 Update producers, consumers, documentation and meaningful tests together.
 A current document's version number is not a reason to introduce another
 version reader. Historical audit documents may remain clearly marked as
