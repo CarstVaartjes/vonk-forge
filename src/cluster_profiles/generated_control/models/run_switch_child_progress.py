@@ -15,6 +15,7 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+  from ..models.operation_progress import OperationProgress
 
 
 
@@ -31,6 +32,7 @@ class RunSwitchChildProgress:
         Attributes:
             completed_bytes (Union[Unset, int]):  Default: 0.
             members (Union[Unset, list['RunSwitchMemberReceipt']]):
+            operation (Union['OperationProgress', None, Unset]):
             phase (Union[None, RunSwitchChildProgressPhaseType0, Unset]):
             total_bytes (Union[None, Unset, int]):
             total_bytes_known (Union[Unset, bool]):  Default: False.
@@ -38,6 +40,7 @@ class RunSwitchChildProgress:
 
     completed_bytes: Union[Unset, int] = 0
     members: Union[Unset, list['RunSwitchMemberReceipt']] = UNSET
+    operation: Union['OperationProgress', None, Unset] = UNSET
     phase: Union[None, RunSwitchChildProgressPhaseType0, Unset] = UNSET
     total_bytes: Union[None, Unset, int] = UNSET
     total_bytes_known: Union[Unset, bool] = False
@@ -48,6 +51,7 @@ class RunSwitchChildProgress:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+        from ..models.operation_progress import OperationProgress
         completed_bytes = self.completed_bytes
 
         members: Union[Unset, list[dict[str, Any]]] = UNSET
@@ -58,6 +62,14 @@ class RunSwitchChildProgress:
                 members.append(members_item)
 
 
+
+        operation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.operation, Unset):
+            operation = UNSET
+        elif isinstance(self.operation, OperationProgress):
+            operation = self.operation.to_dict()
+        else:
+            operation = self.operation
 
         phase: Union[None, Unset, str]
         if isinstance(self.phase, Unset):
@@ -84,6 +96,8 @@ class RunSwitchChildProgress:
             field_dict["completed_bytes"] = completed_bytes
         if members is not UNSET:
             field_dict["members"] = members
+        if operation is not UNSET:
+            field_dict["operation"] = operation
         if phase is not UNSET:
             field_dict["phase"] = phase
         if total_bytes is not UNSET:
@@ -98,6 +112,7 @@ class RunSwitchChildProgress:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+        from ..models.operation_progress import OperationProgress
         d = dict(src_dict)
         completed_bytes = d.pop("completed_bytes", UNSET)
 
@@ -109,6 +124,26 @@ class RunSwitchChildProgress:
 
 
             members.append(members_item)
+
+
+        def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                operation_type_0 = OperationProgress.from_dict(data)
+
+
+
+                return operation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['OperationProgress', None, Unset], data)
+
+        operation = _parse_operation(d.pop("operation", UNSET))
 
 
         def _parse_phase(data: object) -> Union[None, RunSwitchChildProgressPhaseType0, Unset]:
@@ -146,6 +181,7 @@ class RunSwitchChildProgress:
         run_switch_child_progress = cls(
             completed_bytes=completed_bytes,
             members=members,
+            operation=operation,
             phase=phase,
             total_bytes=total_bytes,
             total_bytes_known=total_bytes_known,

@@ -1325,6 +1325,23 @@ def test_high_level_apply_without_apply_flag_only_emits_plan(argv: tuple[str, ..
     assert client.calls == []
 
 
+@pytest.mark.parametrize("apply", [False, True])
+def test_run_cancel_uses_current_typed_contract_and_explicit_request_key(apply: bool) -> None:
+    client = _Client()
+    request_key = "11111111-1111-4111-8111-111111111111"
+    arguments = ["--json", "models", "run", "cancel", "run-1", "--reason", "Change of plan", "--request-key", request_key]
+    if apply:
+        arguments.append("--apply")
+    result, document = _invoke(client, *arguments)
+    assert result == 0
+    expected = {"schema_version": 2, "request_key": request_key, "reason": "Change of plan"}
+    if apply:
+        assert client.calls[-1][:3] == ("POST", "/api/v1/recipes/run-switches/run-1/cancel", expected)
+    else:
+        assert document["body"] == expected
+        assert client.calls == []
+
+
 def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     client = _Client(
         {

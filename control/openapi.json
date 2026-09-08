@@ -5317,6 +5317,16 @@
             "title": "Node Ids",
             "type": "array"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "phase": {
             "enum": [
               "model-download",
@@ -9556,6 +9566,68 @@
           "code"
         ],
         "title": "LifecycleCodeFailureResult",
+        "type": "object"
+      },
+      "LifecyclePreflightCheckpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "maxProperties": 33,
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "maximum": 3.0,
+                "minimum": 1.0,
+                "type": "integer"
+              }
+            },
+            "title": "Attempts",
+            "type": "object"
+          },
+          "pending_job_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Job Id"
+          },
+          "pending_node_id": {
+            "anyOf": [
+              {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Node Id"
+          },
+          "phase_index": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Phase Index",
+            "type": "integer"
+          },
+          "receipts": {
+            "maxProperties": 33,
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "$ref": "#/components/schemas/RuntimePreflightResult"
+              }
+            },
+            "title": "Receipts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "phase_index"
+        ],
+        "title": "LifecyclePreflightCheckpoint",
         "type": "object"
       },
       "LoginRequest": {
@@ -19973,6 +20045,69 @@
         "title": "RunSwitchCachedTransferResult",
         "type": "object"
       },
+      "RunSwitchCancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_key",
+          "reason"
+        ],
+        "title": "RunSwitchCancelRequest",
+        "type": "object"
+      },
+      "RunSwitchCancellation": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key",
+          "actor",
+          "reason",
+          "requested_at"
+        ],
+        "title": "RunSwitchCancellation",
+        "type": "object"
+      },
       "RunSwitchChildProgress": {
         "additionalProperties": false,
         "description": "Progress nested in a durable child receipt.",
@@ -19990,6 +20125,16 @@
             "maxItems": 32,
             "title": "Members",
             "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "phase": {
             "anyOf": [
@@ -20748,6 +20893,16 @@
         "additionalProperties": false,
         "description": "Exact durable result tree stored in ``Job.result``.",
         "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "child_operation_id": {
             "anyOf": [
               {
@@ -20883,6 +21038,29 @@
             "title": "Members",
             "type": "array"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_phase_index": {
+            "anyOf": [
+              {
+                "maximum": 31.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Phase Index"
+          },
           "phase": {
             "anyOf": [
               {
@@ -20962,6 +21140,16 @@
             },
             "title": "Phase Results",
             "type": "array"
+          },
+          "preflight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LifecyclePreflightCheckpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "retry_attempt": {
             "anyOf": [
@@ -21559,6 +21747,16 @@
             "title": "Members",
             "type": "array"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "phase": {
             "anyOf": [
               {
@@ -21597,6 +21795,7 @@
               "running",
               "succeeded",
               "failed",
+              "cancelled",
               "unknown"
             ],
             "title": "State",
@@ -22739,6 +22938,92 @@
           "spark_coverage"
         ],
         "title": "RuntimeImageStorageImpact",
+        "type": "object"
+      },
+      "RuntimePreflightFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+            "title": "Capability",
+            "type": "string"
+          },
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "status",
+          "code"
+        ],
+        "title": "RuntimePreflightFinding",
+        "type": "object"
+      },
+      "RuntimePreflightResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "exclusiveMaximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimePreflightFinding"
+            },
+            "maxItems": 96,
+            "title": "Findings",
+            "type": "array"
+          },
+          "fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "observed_at": {
+            "maximum": 1.8446744073709552e+19,
+            "minimum": 0.0,
+            "title": "Observed At",
+            "type": "integer"
+          },
+          "request_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Request Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "fingerprint",
+          "request_sha256",
+          "observed_at",
+          "duration_ms",
+          "cached",
+          "findings"
+        ],
+        "title": "RuntimePreflightResult",
         "type": "object"
       },
       "SourceBundleResponse": {
@@ -34771,6 +35056,111 @@
           }
         ],
         "summary": "Get Run Switch"
+      }
+    },
+    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+      "post": {
+        "operationId": "cancelRecipeRunSwitchOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSwitchCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cancel Run Switch"
       }
     },
     "/api/v1/recipes/run-switches/{operation_id}/retry": {

@@ -25,6 +25,7 @@ import type {
   FleetProfilePreview,
   FleetProfileStatus,
   RunSwitchApplyRequest,
+  RunSwitchCancelRequest,
   RunSwitchOperation,
   RunSwitchPlan,
   RunSwitchPreviewRequest,
@@ -327,6 +328,12 @@ export class ApiClient implements ControlApi {
       params: {path: {operation_id: operationId}},
       body: input,
       signal,
+    }));
+  }
+
+  async cancelRecipeRunSwitchOperation(operationId: string, input: RunSwitchCancelRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}}, body: input, signal,
     }));
   }
 

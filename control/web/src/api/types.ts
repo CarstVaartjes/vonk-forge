@@ -112,6 +112,7 @@ export type RunSwitchSparkNode = components["schemas"]["SparkGroupNode"];
 export type RunSwitchSparkGroup = components["schemas"]["SparkGroup"];
 export type RunSwitchPreviewRequest = components["schemas"]["RunSwitchPreviewRequest"];
 export type RunSwitchApplyRequest = components["schemas"]["RunSwitchApplyRequest"];
+export type RunSwitchCancelRequest = components["schemas"]["RunSwitchCancelRequest"];
 export type RunSwitchReason = components["schemas"]["RunSwitchReason"];
 export type RunSwitchCapabilityEvidence = components["schemas"]["CapabilityEvidence"];
 export type RunSwitchPlanPhase = components["schemas"]["RunSwitchPhase"];
@@ -227,6 +228,7 @@ export interface ControlApi extends LibraryApi {
   applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation>;
   getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation>;
   retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation>;
+  cancelRecipeRunSwitchOperation(operationId: string, input: RunSwitchCancelRequest, signal?: AbortSignal): Promise<RunSwitchOperation>;
   captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile>;
   duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile>;
   fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus>;

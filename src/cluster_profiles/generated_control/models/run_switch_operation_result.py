@@ -20,22 +20,25 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
   from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
-  from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
-  from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
-  from ..models.run_switch_prepared_result import RunSwitchPreparedResult
-  from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
-  from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
-  from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
-  from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
-  from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+  from ..models.operation_progress import OperationProgress
+  from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
   from ..models.run_switch_start_result import RunSwitchStartResult
-  from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
-  from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
-  from ..models.run_switch_stop_result import RunSwitchStopResult
   from ..models.run_switch_verify_result import RunSwitchVerifyResult
   from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+  from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+  from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
+  from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
+  from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+  from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
+  from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+  from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
+  from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
+  from ..models.run_switch_prepared_result import RunSwitchPreparedResult
+  from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
+  from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
+  from ..models.run_switch_cancellation import RunSwitchCancellation
+  from ..models.run_switch_stop_result import RunSwitchStopResult
 
 
 
@@ -50,6 +53,7 @@ class RunSwitchOperationResult:
     """ Exact durable result tree stored in ``Job.result``.
 
         Attributes:
+            cancellation (Union['RunSwitchCancellation', None, Unset]):
             child_operation_id (Union[None, Unset, str]):
             completed_bytes (Union[Unset, int]):  Default: 0.
             completed_phases (Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]]):
@@ -63,6 +67,8 @@ class RunSwitchOperationResult:
             final_verify_started_at (Union[None, Unset, float]):
             item_index (Union[Unset, int]):  Default: 0.
             members (Union[Unset, list['RunSwitchMemberReceipt']]):
+            operation (Union['OperationProgress', None, Unset]):
+            operation_phase_index (Union[None, Unset, int]):
             phase (Union[None, RunSwitchOperationResultPhaseType0, Unset]):
             phase_index (Union[Unset, int]):  Default: 0.
             phase_results (Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult',
@@ -70,6 +76,7 @@ class RunSwitchOperationResult:
                 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult',
                 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult',
                 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult']]]):
+            preflight (Union['LifecyclePreflightCheckpoint', None, Unset]):
             retry_attempt (Union[None, Unset, int]):
             retry_reason (Union[None, Unset, str]):
             retryable (Union[Unset, bool]):  Default: False.
@@ -78,6 +85,7 @@ class RunSwitchOperationResult:
             total_bytes_known (Union[Unset, bool]):  Default: False.
      """
 
+    cancellation: Union['RunSwitchCancellation', None, Unset] = UNSET
     child_operation_id: Union[None, Unset, str] = UNSET
     completed_bytes: Union[Unset, int] = 0
     completed_phases: Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]] = UNSET
@@ -86,9 +94,12 @@ class RunSwitchOperationResult:
     final_verify_started_at: Union[None, Unset, float] = UNSET
     item_index: Union[Unset, int] = 0
     members: Union[Unset, list['RunSwitchMemberReceipt']] = UNSET
+    operation: Union['OperationProgress', None, Unset] = UNSET
+    operation_phase_index: Union[None, Unset, int] = UNSET
     phase: Union[None, RunSwitchOperationResultPhaseType0, Unset] = UNSET
     phase_index: Union[Unset, int] = 0
     phase_results: Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult']]] = UNSET
+    preflight: Union['LifecyclePreflightCheckpoint', None, Unset] = UNSET
     retry_attempt: Union[None, Unset, int] = UNSET
     retry_reason: Union[None, Unset, str] = UNSET
     retryable: Union[Unset, bool] = False
@@ -101,22 +112,33 @@ class RunSwitchOperationResult:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
         from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
-        from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
-        from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
-        from ..models.run_switch_prepared_result import RunSwitchPreparedResult
-        from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
-        from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
-        from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
-        from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
-        from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+        from ..models.operation_progress import OperationProgress
+        from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
         from ..models.run_switch_start_result import RunSwitchStartResult
-        from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
-        from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
-        from ..models.run_switch_stop_result import RunSwitchStopResult
         from ..models.run_switch_verify_result import RunSwitchVerifyResult
         from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+        from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+        from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
+        from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
+        from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+        from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
+        from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+        from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
+        from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
+        from ..models.run_switch_prepared_result import RunSwitchPreparedResult
+        from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
+        from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
+        from ..models.run_switch_cancellation import RunSwitchCancellation
+        from ..models.run_switch_stop_result import RunSwitchStopResult
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, RunSwitchCancellation):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
+
         child_operation_id: Union[None, Unset, str]
         if isinstance(self.child_operation_id, Unset):
             child_operation_id = UNSET
@@ -195,6 +217,20 @@ class RunSwitchOperationResult:
 
 
 
+        operation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.operation, Unset):
+            operation = UNSET
+        elif isinstance(self.operation, OperationProgress):
+            operation = self.operation.to_dict()
+        else:
+            operation = self.operation
+
+        operation_phase_index: Union[None, Unset, int]
+        if isinstance(self.operation_phase_index, Unset):
+            operation_phase_index = UNSET
+        else:
+            operation_phase_index = self.operation_phase_index
+
         phase: Union[None, Unset, str]
         if isinstance(self.phase, Unset):
             phase = UNSET
@@ -245,6 +281,14 @@ class RunSwitchOperationResult:
 
 
 
+        preflight: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.preflight, Unset):
+            preflight = UNSET
+        elif isinstance(self.preflight, LifecyclePreflightCheckpoint):
+            preflight = self.preflight.to_dict()
+        else:
+            preflight = self.preflight
+
         retry_attempt: Union[None, Unset, int]
         if isinstance(self.retry_attempt, Unset):
             retry_attempt = UNSET
@@ -280,6 +324,8 @@ class RunSwitchOperationResult:
 
         field_dict.update({
         })
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if child_operation_id is not UNSET:
             field_dict["child_operation_id"] = child_operation_id
         if completed_bytes is not UNSET:
@@ -296,12 +342,18 @@ class RunSwitchOperationResult:
             field_dict["item_index"] = item_index
         if members is not UNSET:
             field_dict["members"] = members
+        if operation is not UNSET:
+            field_dict["operation"] = operation
+        if operation_phase_index is not UNSET:
+            field_dict["operation_phase_index"] = operation_phase_index
         if phase is not UNSET:
             field_dict["phase"] = phase
         if phase_index is not UNSET:
             field_dict["phase_index"] = phase_index
         if phase_results is not UNSET:
             field_dict["phase_results"] = phase_results
+        if preflight is not UNSET:
+            field_dict["preflight"] = preflight
         if retry_attempt is not UNSET:
             field_dict["retry_attempt"] = retry_attempt
         if retry_reason is not UNSET:
@@ -321,23 +373,46 @@ class RunSwitchOperationResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
         from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
-        from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
-        from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
-        from ..models.run_switch_prepared_result import RunSwitchPreparedResult
-        from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
-        from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
-        from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
-        from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
-        from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+        from ..models.operation_progress import OperationProgress
+        from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
         from ..models.run_switch_start_result import RunSwitchStartResult
-        from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
-        from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
-        from ..models.run_switch_stop_result import RunSwitchStopResult
         from ..models.run_switch_verify_result import RunSwitchVerifyResult
         from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+        from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
+        from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
+        from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
+        from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
+        from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
+        from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+        from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
+        from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
+        from ..models.run_switch_prepared_result import RunSwitchPreparedResult
+        from ..models.run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
+        from ..models.run_switch_container_build_result import RunSwitchContainerBuildResult
+        from ..models.run_switch_cancellation import RunSwitchCancellation
+        from ..models.run_switch_stop_result import RunSwitchStopResult
         d = dict(src_dict)
+        def _parse_cancellation(data: object) -> Union['RunSwitchCancellation', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = RunSwitchCancellation.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RunSwitchCancellation', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
+
         def _parse_child_operation_id(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -562,6 +637,36 @@ class RunSwitchOperationResult:
             members.append(members_item)
 
 
+        def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                operation_type_0 = OperationProgress.from_dict(data)
+
+
+
+                return operation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['OperationProgress', None, Unset], data)
+
+        operation = _parse_operation(d.pop("operation", UNSET))
+
+
+        def _parse_operation_phase_index(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        operation_phase_index = _parse_operation_phase_index(d.pop("operation_phase_index", UNSET))
+
+
         def _parse_phase(data: object) -> Union[None, RunSwitchOperationResultPhaseType0, Unset]:
             if data is None:
                 return data
@@ -741,6 +846,26 @@ class RunSwitchOperationResult:
             phase_results.append(phase_results_item)
 
 
+        def _parse_preflight(data: object) -> Union['LifecyclePreflightCheckpoint', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                preflight_type_0 = LifecyclePreflightCheckpoint.from_dict(data)
+
+
+
+                return preflight_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['LifecyclePreflightCheckpoint', None, Unset], data)
+
+        preflight = _parse_preflight(d.pop("preflight", UNSET))
+
+
         def _parse_retry_attempt(data: object) -> Union[None, Unset, int]:
             if data is None:
                 return data
@@ -796,6 +921,7 @@ class RunSwitchOperationResult:
         total_bytes_known = d.pop("total_bytes_known", UNSET)
 
         run_switch_operation_result = cls(
+            cancellation=cancellation,
             child_operation_id=child_operation_id,
             completed_bytes=completed_bytes,
             completed_phases=completed_phases,
@@ -804,9 +930,12 @@ class RunSwitchOperationResult:
             final_verify_started_at=final_verify_started_at,
             item_index=item_index,
             members=members,
+            operation=operation,
+            operation_phase_index=operation_phase_index,
             phase=phase,
             phase_index=phase_index,
             phase_results=phase_results,
+            preflight=preflight,
             retry_attempt=retry_attempt,
             retry_reason=retry_reason,
             retryable=retryable,

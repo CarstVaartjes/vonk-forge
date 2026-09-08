@@ -84,7 +84,12 @@ class LifecyclePreflight:
                 phase_index=phase_index, receipts=checkpoint.receipts
             )
         with self._sessions.begin() as session:
-            for node_id, source_build in sorted(nodes.items()):
+            # Consume the outstanding probe first, then recheck every other node.
+            # A previously checked rank can change while its peer is probing.
+            ordered_nodes = sorted(
+                nodes.items(), key=lambda item: (item[0] != checkpoint.pending_node_id, item[0])
+            )
+            for node_id, source_build in ordered_nodes:
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
                     return checkpoint, "runtime_preflight.node_missing"

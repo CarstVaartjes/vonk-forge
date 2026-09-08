@@ -735,6 +735,12 @@ def add_controller_commands(
     model_run_apply.add_argument("--request-key", required=True)
     _apply(model_run_apply)
     _add_json(model_run_apply)
+    model_run_cancel = model_run_commands.add_parser("cancel", help="Cancel pending preparation at a safe phase boundary")
+    model_run_cancel.add_argument("operation_id")
+    model_run_cancel.add_argument("--reason", default="Cancelled by operator")
+    _request_key(model_run_cancel)
+    _apply(model_run_cancel)
+    _add_json(model_run_cancel)
     model_run_stop = model_run_commands.add_parser("stop")
     stop_variants = _subcommands(model_run_stop, "model_run_stop_command")
     stop_preview = stop_variants.add_parser("preview")
@@ -2666,6 +2672,18 @@ def _run_model_run(
                 "body": payload,
             }
         return client.request("POST", "/api/v1/recipes/run-switches", payload)
+    if command == "cancel":
+        from .generated_control.models.run_switch_cancel_request import RunSwitchCancelRequest
+
+        payload = RunSwitchCancelRequest.from_dict({
+            "schema_version": 2,
+            "request_key": _explicit_request_key(args.request_key or request_id_factory()),
+            "reason": args.reason,
+        }).to_dict()
+        path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}/cancel"
+        if not args.apply:
+            return {"mode": "plan", "apply": False, "method": "POST", "path": path, "body": payload}
+        return client.request("POST", path, payload)
     variant = args.model_run_stop_command
     payload: dict[str, object] = {"run_id": args.run_id}
     if variant == "preview":

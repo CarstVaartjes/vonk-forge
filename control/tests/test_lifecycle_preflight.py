@@ -77,8 +77,8 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
         )
 
 
-def _setup(tmp_path):
-    sessions, _lifecycle, queue, _, _, nodes = setup_services(tmp_path)
+def _setup(tmp_path, *, node_count=1):
+    sessions, _lifecycle, queue, _, _, nodes = setup_services(tmp_path, nodes=node_count)
     _clear(sessions)
     clock = SimpleNamespace(now=NOW)
     with sessions() as session:
@@ -154,6 +154,30 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
     assert error is None and refreshed.pending_job_id != pending.pending_job_id
     assert refreshed.attempts[node_id] == 2
     assert refreshed.receipts == completed.receipts
+
+
+def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path):
+    sessions, _, clock, first_node, service, arguments = _setup(tmp_path, node_count=2)
+    with sessions() as session:
+        nodes = sorted(session.scalars(select(AgentNode.node_id)))
+    assert len(nodes) == 2 and nodes[0] == first_node
+    arguments["nodes"] = dict.fromkeys(nodes, False)
+    first, error = service.ensure(**arguments, previous=None)
+    assert error is None and first.pending_node_id == nodes[0]
+    _finish(sessions, first, clock.now)
+    second, error = service.ensure(**arguments, previous=first)
+    assert error is None and second.pending_node_id == nodes[1]
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[0])
+        node.capabilities = [
+            value for value in node.capabilities
+            if not value.startswith("runtime.preflight.fingerprint.")
+        ] + ["runtime.preflight.fingerprint." + "b" * 64]
+    _finish(sessions, second, clock.now)
+    refreshed, error = service.ensure(**arguments, previous=second)
+    assert error is None
+    assert refreshed.pending_node_id == nodes[0]
+    assert refreshed.attempts[nodes[0]] == 2
 
 
 def test_repeated_host_changes_exhaust_bounded_probe_attempts(tmp_path):

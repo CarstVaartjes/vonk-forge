@@ -405,6 +405,20 @@ it("uses the durable retry endpoints for Run and NAS cache operations", async ()
   expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});
 });
 
+it("cancels a pending rollout with the exact typed request and retry identity", async () => {
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request.clone());
+    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: 202});
+  });
+  const input = {schema_version: 2 as const, request_key: "00000000-0000-4000-8000-000000000405", reason: "Change of plan"};
+  await new ApiClient().cancelRecipeRunSwitchOperation("run-operation", input);
+  expect(new URL(requests[0]!.url).pathname).toBe("/api/v1/recipes/run-switches/run-operation/cancel");
+  expect(requests[0]!.method).toBe("POST");
+  expect(await requests[0]!.json()).toEqual(input);
+});
+
 it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
   const requests: Request[] = [];
   let uploadBody: BodyInit | null | undefined;

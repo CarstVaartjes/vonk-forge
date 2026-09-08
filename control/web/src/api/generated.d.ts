@@ -1623,6 +1623,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Run Switch */
+        post: operations["cancelRecipeRunSwitchOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recipes/run-switches/{operation_id}/retry": {
         parameters: {
             query?: never;
@@ -3438,6 +3455,7 @@ export interface components {
             bytes?: number | null;
             /** Node Ids */
             node_ids?: string[];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /**
              * Phase
              * @enum {string}
@@ -4818,6 +4836,23 @@ export interface components {
             code: string;
             /** Detail */
             detail?: string | null;
+        };
+        /** LifecyclePreflightCheckpoint */
+        LifecyclePreflightCheckpoint: {
+            /** Attempts */
+            attempts?: {
+                [key: string]: number;
+            };
+            /** Pending Job Id */
+            pending_job_id?: string | null;
+            /** Pending Node Id */
+            pending_node_id?: string | null;
+            /** Phase Index */
+            phase_index: number;
+            /** Receipts */
+            receipts?: {
+                [key: string]: components["schemas"]["RuntimePreflightResult"];
+            };
         };
         /** LoginRequest */
         LoginRequest: {
@@ -8028,6 +8063,33 @@ export interface components {
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256: string;
         };
+        /** RunSwitchCancelRequest */
+        RunSwitchCancelRequest: {
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** RunSwitchCancellation */
+        RunSwitchCancellation: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+        };
         /**
          * RunSwitchChildProgress
          * @description Progress nested in a durable child receipt.
@@ -8040,6 +8102,7 @@ export interface components {
             completed_bytes: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /** Phase */
             phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify" | "container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
@@ -8303,6 +8366,7 @@ export interface components {
          * @description Exact durable result tree stored in ``Job.result``.
          */
         RunSwitchOperationResult: {
+            cancellation?: components["schemas"]["RunSwitchCancellation"] | null;
             /** Child Operation Id */
             child_operation_id?: string | null;
             /**
@@ -8325,6 +8389,9 @@ export interface components {
             item_index: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
+            /** Operation Phase Index */
+            operation_phase_index?: number | null;
             /** Phase */
             phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
             /**
@@ -8334,6 +8401,7 @@ export interface components {
             phase_index: number;
             /** Phase Results */
             phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"])[];
+            preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Retry Attempt */
             retry_attempt?: number | null;
             /** Retry Reason */
@@ -8514,6 +8582,7 @@ export interface components {
             completed_bytes: number;
             /** Members */
             members: components["schemas"]["RunSwitchMemberProgress"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /** Phase */
             phase: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
             /** Phase Count */
@@ -8524,7 +8593,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "succeeded" | "failed" | "unknown";
+            state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
@@ -8931,6 +9000,38 @@ export interface components {
              * @enum {string}
              */
             spark_coverage: "complete" | "partial" | "unknown";
+        };
+        /** RuntimePreflightFinding */
+        RuntimePreflightFinding: {
+            /** Capability */
+            capability: string;
+            /** Code */
+            code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "unknown";
+        };
+        /** RuntimePreflightResult */
+        RuntimePreflightResult: {
+            /** Cached */
+            cached: boolean;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Findings */
+            findings: components["schemas"]["RuntimePreflightFinding"][];
+            /** Fingerprint */
+            fingerprint: string;
+            /** Observed At */
+            observed_at: number;
+            /** Request Sha256 */
+            request_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
         };
         /** SourceBundleResponse */
         SourceBundleResponse: {
@@ -15905,6 +16006,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelRecipeRunSwitchOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */

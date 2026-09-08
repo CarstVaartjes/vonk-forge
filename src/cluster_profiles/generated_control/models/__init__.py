@@ -264,6 +264,9 @@ from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
 from .lifecycle_code_failure_result import LifecycleCodeFailureResult
+from .lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
+from .lifecycle_preflight_checkpoint_attempts import LifecyclePreflightCheckpointAttempts
+from .lifecycle_preflight_checkpoint_receipts import LifecyclePreflightCheckpointReceipts
 from .list_recipe_image_availability_state_type_0 import ListRecipeImageAvailabilityStateType0
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
@@ -540,6 +543,8 @@ from .run_switch_build_evidence import RunSwitchBuildEvidence
 from .run_switch_build_evidence_state import RunSwitchBuildEvidenceState
 from .run_switch_cached_transfer_result import RunSwitchCachedTransferResult
 from .run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals
+from .run_switch_cancel_request import RunSwitchCancelRequest
+from .run_switch_cancellation import RunSwitchCancellation
 from .run_switch_child_progress import RunSwitchChildProgress
 from .run_switch_child_progress_phase_type_0 import RunSwitchChildProgressPhaseType0
 from .run_switch_cleanup_result import RunSwitchCleanupResult
@@ -607,6 +612,9 @@ from .runtime_image_storage_impact import RuntimeImageStorageImpact
 from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
 from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageImpactRunningCoverage
 from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
+from .runtime_preflight_finding import RuntimePreflightFinding
+from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
+from .runtime_preflight_result import RuntimePreflightResult
 from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
@@ -934,6 +942,9 @@ __all__ = (
     "LibraryRunSummaryState",
     "LibrarySnapshot",
     "LifecycleCodeFailureResult",
+    "LifecyclePreflightCheckpoint",
+    "LifecyclePreflightCheckpointAttempts",
+    "LifecyclePreflightCheckpointReceipts",
     "ListRecipeImageAvailabilityStateType0",
     "ManagedCatalogStaleRecipe",
     "ManagedCatalogSyncProblem",
@@ -1210,6 +1221,8 @@ __all__ = (
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
     "RunSwitchCachedTransferResultCachedTargetTotals",
+    "RunSwitchCancellation",
+    "RunSwitchCancelRequest",
     "RunSwitchChildProgress",
     "RunSwitchChildProgressPhaseType0",
     "RunSwitchCleanupResult",
@@ -1277,6 +1290,9 @@ __all__ = (
     "RuntimeImageStorageImpactNasCoverage",
     "RuntimeImageStorageImpactRunningCoverage",
     "RuntimeImageStorageImpactSparkCoverage",
+    "RuntimePreflightFinding",
+    "RuntimePreflightFindingStatus",
+    "RuntimePreflightResult",
     "SourceBundleResponse",
     "SourceCheckRequest",
     "SourcePolicyFindingResponse",
