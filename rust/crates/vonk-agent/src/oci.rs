@@ -22,7 +22,8 @@ use crate::{
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
     workloads::{
-        CompiledExecutionPlan, Placement, WorkloadError, managed_path, same_installed_workload,
+        CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
+        same_installed_workload,
     },
 };
 
@@ -97,7 +98,7 @@ pub struct RecipeRunInspectionPlan {
 type LoadedRunLifecycle = (
     CompiledExecutionPlan,
     String,
-    Placement,
+    CompiledRuntimePlacement,
     Option<RecipeRunInspectionBinding>,
 );
 
@@ -182,7 +183,7 @@ struct RuntimePolicyLabel {
 #[serde(deny_unknown_fields)]
 struct RunLifecycle {
     installation_id: String,
-    placement: Placement,
+    placement: CompiledRuntimePlacement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observation: Option<RecipeRunInspectionBinding>,
 }
@@ -486,16 +487,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
-        placement.validate()?;
-        if placement.rank != spec.runtime.placement.rank
-            || placement.role != spec.runtime.placement.role
-            || placement.world_size != spec.runtime.placement.world_size
-            || placement.port != spec.runtime.placement.port
-            || placement.reserved_memory_bytes != spec.runtime.placement.reserved_memory_bytes
-        {
+        placement.validate_bound()?;
+        if placement != &spec.runtime.placement {
             return Err(OciError::Runtime);
         }
         managed_path(self.data_root, "installations", installation_id)?;
@@ -542,7 +538,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.prepare_start_internal(spec, installation_id, run_id, placement, None)
     }
@@ -552,7 +548,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: &RecipeRunStartIdentity,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.prepare_start_internal(spec, installation_id, run_id, placement, Some(identity))
@@ -563,7 +559,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.verify_image(spec)?;
@@ -697,7 +693,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
     ) -> Result<RuntimeStartPlan, OciError> {
         self.verify_image(spec)?;
         let Some((retained_spec, retained_installation_id, retained_placement, _)) =
@@ -733,7 +729,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         identity: &RecipeRunStartIdentity,
     ) -> Result<RuntimeStartPlan, OciError> {
         let plan = self.prepare_retained_start(spec, installation_id, run_id, placement)?;
@@ -756,7 +752,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
-        placement: &Placement,
+        placement: &CompiledRuntimePlacement,
         parameters: &serde_json::Value,
         timeout_seconds: u16,
     ) -> Result<RuntimeStartPlan, OciError> {
@@ -1009,7 +1005,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let Some(record) = self.read_run_lifecycle(&path)? else {
             return Ok(None);
         };
-        record.placement.validate()?;
+        record.placement.validate_bound()?;
         if !canonical_uuid(&record.installation_id) {
             return Err(OciError::Artifact);
         }
@@ -1026,17 +1022,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             installed_job.timeout_seconds = retained_job.timeout_seconds;
         }
-        let placement = &spec.runtime.placement;
-        if !same_installed_workload(&installed, &spec)
-            || placement.endpoint_address != record.placement.endpoint_address
-            || placement.rank != record.placement.rank
-            || placement.role != record.placement.role
-            || placement.world_size != record.placement.world_size
-            || placement.local_address != record.placement.local_address
-            || placement.master_address != record.placement.master_address
-            || placement.master_port != record.placement.master_port
-            || placement.port != record.placement.port
-            || placement.reserved_memory_bytes != record.placement.reserved_memory_bytes
+        if !same_installed_workload(&installed, &spec) || spec.runtime.placement != record.placement
         {
             return Err(OciError::Artifact);
         }
@@ -1378,7 +1364,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec: &CompiledExecutionPlan,
         _installation_id: &str,
         _run_id: &str,
-        _placement: &Placement,
+        _placement: &CompiledRuntimePlacement,
         _parameters: Option<&serde_json::Value>,
     ) -> Result<(), OciError> {
         let metadata = self.run_metadata_path(_run_id)?;
@@ -2199,8 +2185,7 @@ mod tests {
         let recipe_digest = "9".repeat(64);
         authorize_installation(&installation, &recipe_digest);
         let run_id = Uuid::new_v4().to_string();
-        let placement: crate::workloads::Placement =
-            serde_json::from_value(serde_json::to_value(&plan.runtime.placement).unwrap()).unwrap();
+        let placement = plan.runtime.placement.clone();
         let identity = super::RecipeRunStartIdentity {
             mapping_generation: 12,
             mapping_id: Uuid::new_v4(),
