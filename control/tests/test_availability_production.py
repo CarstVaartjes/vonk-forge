@@ -18,6 +18,8 @@ from vonk_control.availability_production import (
     RecipeImageAvailabilityScheduler,
     build_recipe_image_availability,
 )
+from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
@@ -31,6 +33,31 @@ from vonk_control.models import (
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 from vonk_control.runtime_image_preparation import PulledImageEvidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+
+def _model_projection(model: ModelDefinition) -> dict[str, object]:
+    return write_catalog_projection(
+        {
+            "identity": model.identity.model_dump(mode="json"),
+            "modalities": model.modalities,
+            "artifact_count": len(model.files),
+            "download_bytes": model.download_bytes,
+            "installed_bytes": model.installed_bytes,
+        },
+        kind="model",
+    )
+
+
+def _recipe_projection(recipe: RecipeDefinition) -> dict[str, object]:
+    projected: dict[str, object] = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    projected.update(_build_projection(recipe))
+    return write_catalog_projection(projected, kind="recipe")
 
 
 class _Claim:
@@ -136,7 +163,7 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
                 document=model,
                 content_digest=content_sha256(ModelDefinition.model_validate(model)),
                 artifact_key="b" * 64,
-                projected={},
+                projected=_model_projection(ModelDefinition.model_validate(model)),
                 created_by="test",
                 created_at=now,
             )
@@ -155,7 +182,7 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
                 content_digest=content_sha256(recipe),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
-                projected={},
+                projected=_recipe_projection(recipe),
                 created_by="test",
                 created_at=now,
             )
@@ -217,7 +244,8 @@ def test_source_build_without_builder_queues_provisional_parent(tmp_path, monkey
             publisher=recipe.identity.publisher, slug=recipe.identity.slug,
             revision_number=1, schema_version=2, state="active",
             document=recipe.model_dump(mode="json"), content_digest=content_sha256(recipe),
-            artifact_key="c" * 64, execution_key="a" * 64, projected={},
+            artifact_key="c" * 64, execution_key="a" * 64,
+            projected=_recipe_projection(recipe),
             created_by="test", created_at=now,
         ))
 
@@ -585,7 +613,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                     document=model.model_dump(mode="json"),
                     content_digest=model_digest,
                     artifact_key="b" * 64,
-                    projected={},
+                    projected=_model_projection(model),
                     created_by="test",
                     created_at=now,
                 ),
@@ -602,7 +630,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                     content_digest=recipe_digest,
                     artifact_key="c" * 64,
                     execution_key="a" * 64,
-                    projected={},
+                    projected=_recipe_projection(recipe),
                     created_by="test",
                     created_at=now,
                 ),

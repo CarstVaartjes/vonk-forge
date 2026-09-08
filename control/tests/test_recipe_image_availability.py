@@ -11,6 +11,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.catalog_entities import _build_projection
+from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
 from vonk_control.recipe_image_availability import (
@@ -70,6 +72,14 @@ class Transport:
 
 
 def _add_revision(session: Session, revision_id: str, recipe: RecipeDefinition) -> CatalogDocumentRevision:
+    projected = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    projected.update(_build_projection(recipe))
     revision = CatalogDocumentRevision(
         id=revision_id,
         document_id="document-" + revision_id,
@@ -83,7 +93,7 @@ def _add_revision(session: Session, revision_id: str, recipe: RecipeDefinition) 
         content_digest=content_sha256(recipe),
         artifact_key="b" * 64,
         execution_key="a" * 64,
-        projected={},
+        projected=write_catalog_projection(projected, kind="recipe"),
         created_by="test",
         created_at=datetime.now(UTC),
     )
