@@ -388,24 +388,6 @@ class LoginSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class AgentProfile(Base):
-    __tablename__ = "agent_profiles"
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
-    )
-    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    lifecycle: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="managed"
-    )
-    labels: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
     __table_args__ = (
@@ -2156,9 +2138,6 @@ class RecipeInstallation(Base):
     # without attempting to infer it from mutable catalog display metadata.
     model_content_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
-    )
-    model_content_digests: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list
     )
     mapping_id: Mapped[str] = mapped_column(
         ForeignKey("cluster_mappings.id", ondelete="RESTRICT"),
