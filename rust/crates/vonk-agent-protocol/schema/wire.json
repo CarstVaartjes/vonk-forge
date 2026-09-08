@@ -8428,6 +8428,65 @@
       "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
+    "SupervisorAcknowledgement": {
+      "additionalProperties": false,
+      "description": "One live, ready child acknowledging an exact finite route activation.",
+      "properties": {
+        "acknowledged_at": {
+          "title": "Acknowledged At",
+          "type": "string"
+        },
+        "activation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Activation Sha256",
+          "type": "string"
+        },
+        "child_pid": {
+          "exclusiveMinimum": 0,
+          "title": "Child Pid",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "generation": {
+          "exclusiveMinimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "litellm_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Litellm Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "maintenance",
+            "published"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "acknowledged_at",
+        "activation_sha256",
+        "child_pid",
+        "expires_at",
+        "generation",
+        "litellm_sha256",
+        "state"
+      ],
+      "title": "SupervisorAcknowledgement",
+      "type": "object"
+    },
     "TelemetryCapability": {
       "additionalProperties": false,
       "properties": {
@@ -10318,6 +10377,7 @@
     "SignedPackageHelperGrant": "#/$defs/SignedPackageHelperGrant",
     "SignedPackageObjectReceipt": "#/$defs/SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
+    "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryCapability": "#/$defs/TelemetryCapability",
     "TelemetryDetails": "#/$defs/TelemetryDetails",
     "TelemetryMetrics": "#/$defs/TelemetryMetrics",

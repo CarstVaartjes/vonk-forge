@@ -4652,6 +4652,77 @@ impl ::std::convert::TryFrom<::std::string::String> for SimpleMaterializationMet
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SupervisorAcknowledgement {
+    pub acknowledged_at: ::std::string::String,
+    pub activation_sha256: ::std::string::String,
+    pub child_pid: u64,
+    pub expires_at: ::std::string::String,
+    pub generation: u64,
+    pub litellm_sha256: ::std::string::String,
+    pub schema_version: u8,
+    pub state: SupervisorAcknowledgementState,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum SupervisorAcknowledgementState {
+    #[serde(rename = "maintenance")]
+    Maintenance,
+    #[serde(rename = "published")]
+    Published,
+}
+impl ::std::fmt::Display for SupervisorAcknowledgementState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Maintenance => f.write_str("maintenance"),
+            Self::Published => f.write_str("published"),
+        }
+    }
+}
+impl ::std::str::FromStr for SupervisorAcknowledgementState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "maintenance" => Ok(Self::Maintenance),
+            "published" => Ok(Self::Published),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SupervisorAcknowledgementState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for SupervisorAcknowledgementState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SupervisorAcknowledgementState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TelemetryCapability {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub device_id: ::std::option::Option<::std::string::String>,
@@ -10817,6 +10888,61 @@ impl ::std::cmp::PartialEq<str> for SimpleMaterializationMethod {
     }
 }
 impl ::std::cmp::PartialEq<&str> for SimpleMaterializationMethod {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SupervisorAcknowledgement", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub acknowledged_at: ::std::string::String,
+            pub activation_sha256: ::std::string::String,
+            pub child_pid: u64,
+            pub expires_at: ::std::string::String,
+            pub generation: u64,
+            pub litellm_sha256: ::std::string::String,
+            pub schema_version: u8,
+            pub state: SupervisorAcknowledgementState,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            acknowledged_at: raw.acknowledged_at,
+            activation_sha256: raw.activation_sha256,
+            child_pid: raw.child_pid,
+            expires_at: raw.expires_at,
+            generation: raw.generation,
+            litellm_sha256: raw.litellm_sha256,
+            schema_version: raw.schema_version,
+            state: raw.state,
+        })
+    }
+}
+impl SupervisorAcknowledgementState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Maintenance => "maintenance",
+            Self::Published => "published",
+        }
+    }
+}
+impl ::std::ops::Deref for SupervisorAcknowledgementState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SupervisorAcknowledgementState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SupervisorAcknowledgementState {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
