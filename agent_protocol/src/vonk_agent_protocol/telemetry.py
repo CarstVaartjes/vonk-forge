@@ -236,7 +236,8 @@ class TelemetryRuntime(TelemetryWireModel):
     recipe_revision: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     context_limit_tokens: int | None = Field(default=None, ge=1, le=2**63 - 1)
     serving_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(max_length=64)
-    ranks: list[int] = Field(max_length=64)
+    # Rank identity is shared with the compiled placement and native u32 rank.
+    ranks: list[Annotated[int, Field(ge=0, le=2**32 - 1)]] = Field(max_length=64)
     readiness: TelemetryRunState
     error: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     adapter: Annotated[str, Field(min_length=1, max_length=64)]

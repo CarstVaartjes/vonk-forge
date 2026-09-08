@@ -23,7 +23,7 @@ use crate::{
     process::{ProcessError, ProcessRunner, Program},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
-        same_installed_workload,
+        same_installed_workload, same_job_workload,
     },
 };
 
@@ -579,7 +579,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
         let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
+        self.write_runtime_contract(spec, run_id)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let runtime_image_reference = spec.runtime_image.local_image_reference();
@@ -753,30 +753,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         run_id: &str,
         placement: &CompiledRuntimePlacement,
-        parameters: &serde_json::Value,
-        timeout_seconds: u16,
+        invocation: &CompiledExecutionPlan,
     ) -> Result<RuntimeStartPlan, OciError> {
-        let Some(installed_job) = spec.job.as_ref() else {
-            return Err(OciError::Runtime);
-        };
-        if timeout_seconds == 0 || timeout_seconds > installed_job.timeout_seconds {
+        invocation.validate()?;
+        if !same_job_workload(spec, invocation) {
             return Err(OciError::Runtime);
         }
-        let mut effective = spec.clone();
-        effective
-            .job
-            .as_mut()
-            .ok_or(OciError::Runtime)?
-            .timeout_seconds = timeout_seconds;
-        let plan = self.prepare_start(&effective, installation_id, run_id, placement)?;
-        self.write_runtime_contract(
-            &effective,
-            installation_id,
-            run_id,
-            placement,
-            Some(parameters),
-        )?;
-        Ok(plan)
+        self.prepare_start(invocation, installation_id, run_id, placement)
     }
 
     pub fn prepare_stop(&self, run_id: &str) -> Result<RuntimeStopPlan, OciError> {
@@ -999,6 +982,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .is_some_and(|status| (200..300).contains(&status))
     }
 
+    pub(crate) fn retained_telemetry_plan(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<CompiledExecutionPlan>, OciError> {
+        Ok(self.load_run_lifecycle(run_id)?.map(|(plan, _, _, _)| plan))
+    }
+
     fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let path = metadata.join("lifecycle.json");
@@ -1015,15 +1005,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
         )?)?;
         spec.validate()?;
-        let mut installed = self.load_spec(&record.installation_id)?;
-        // A job may select a shorter timeout at start, within its installed limit.
-        if let (Some(installed_job), Some(retained_job)) = (&mut installed.job, &spec.job)
-            && retained_job.timeout_seconds <= installed_job.timeout_seconds
-        {
-            installed_job.timeout_seconds = retained_job.timeout_seconds;
-        }
-        if !same_installed_workload(&installed, &spec) || spec.runtime.placement != record.placement
-        {
+        let installed = self.load_spec(&record.installation_id)?;
+        let matches = if spec.job.is_some() {
+            same_job_workload(&installed, &spec)
+        } else {
+            same_installed_workload(&installed, &spec)
+        };
+        if !matches || spec.runtime.placement != record.placement {
             return Err(OciError::Artifact);
         }
         Ok(Some((
@@ -1362,12 +1350,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     fn write_runtime_contract(
         &self,
         spec: &CompiledExecutionPlan,
-        _installation_id: &str,
-        _run_id: &str,
-        _placement: &CompiledRuntimePlacement,
-        _parameters: Option<&serde_json::Value>,
+        run_id: &str,
     ) -> Result<(), OciError> {
-        let metadata = self.run_metadata_path(_run_id)?;
+        let metadata = self.run_metadata_path(run_id)?;
         atomic_write(&metadata, "runtime.json", &serde_json::to_vec(spec)?)?;
         Ok(())
     }

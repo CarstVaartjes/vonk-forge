@@ -618,6 +618,7 @@ class CompiledExecutionPlan(_StrictModel):
                 "env": environment,
                 "image_digest": self.runtime_image.image_digest,
                 "placement": placement_doc,
+                "telemetry": runtime["telemetry"],
             },
             "artifacts": artifacts,
             "runtime_image": runtime_image,

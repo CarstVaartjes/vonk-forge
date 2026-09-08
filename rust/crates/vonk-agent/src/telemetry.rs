@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::process::{ProcessRunner, Program};
+use crate::{
+    oci::OciRuntime,
+    process::{ProcessRunner, Program},
+};
 
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
@@ -873,30 +876,36 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         let mut runtimes = Vec::new();
         let mut gaps = 0_i64;
         for run_id in run_ids {
-            let path = self
-                .paths
-                .store
-                .join("run-metadata")
-                .join(&run_id)
-                .join("runtime.json");
-            let Some(document) = read_bounded_text(&path) else {
+            let runtime = OciRuntime {
+                runner: &self.runner,
+                data_root: &self.paths.store,
+                huggingface_curl_config: None,
+            };
+            let Ok(Some(plan)) = runtime.retained_telemetry_plan(&run_id) else {
                 continue;
             };
-            let Ok(contract) = serde_json::from_str::<RuntimeTelemetryContract>(&document) else {
-                continue;
+            let metadata = &plan.runtime.telemetry;
+            let adapter = metadata.engine.clone();
+            let rank = plan.runtime.placement.rank;
+            let endpoint = plan.endpoint.as_ref().and_then(|_| {
+                let address = plan.runtime.placement.endpoint_address?;
+                let port = plan.runtime.placement.port?;
+                let path = metadata.metrics_path.as_deref()?;
+                let _format = metadata.metrics_format.as_ref()?;
+                Some(format!(
+                    "http://{}{path}",
+                    std::net::SocketAddr::new(address, port)
+                ))
+            });
+            let unavailable_reason = if metadata.metrics_format.is_none() {
+                "engine has no supported metrics contract"
+            } else if endpoint.is_none() {
+                "this rank has no published metrics endpoint"
+            } else {
+                "managed runtime metrics were not observed"
             };
-            if contract.run_id != run_id {
-                continue;
-            }
-            let adapter = contract
-                .adapter
-                .clone()
-                .unwrap_or_else(|| "unknown".to_owned());
-            let rank = contract.placement.as_ref().map_or(0, |value| value.rank);
-            let endpoint = known_runtime_endpoint(&adapter, contract.endpoint.as_ref());
             let mut body = None;
-            if let Some((port, path)) = endpoint.as_ref() {
-                let url = format!("http://127.0.0.1:{port}{path}");
+            if let Some(url) = endpoint.as_ref() {
                 let arguments = vec![
                     "--silent".to_owned(),
                     "--show-error".to_owned(),
@@ -921,38 +930,41 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                     })
                     .map(|output| output.stdout);
             }
-            let (runtime_series, runtime_caps, runtime_ok, runtime_gaps) =
-                match (body.as_deref(), adapter.as_str()) {
-                    (Some(body), "comfyui") => {
-                        parse_comfy_runtime(body, &contract, rank, observed_at)
-                    }
-                    (Some(body), "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3") => {
-                        parse_prometheus_runtime(
-                            body,
-                            &contract,
-                            rank,
-                            observed_at,
-                            elapsed,
-                            &mut self.runtime_counters,
-                        )
-                    }
-                    _ => (
-                        Vec::new(),
-                        runtime_capabilities_for_run(
-                            &contract.run_id,
-                            Some("managed runtime metrics endpoint unavailable"),
-                        ),
-                        false,
-                        0,
-                    ),
-                };
+            let (runtime_series, runtime_caps, runtime_ok, runtime_gaps) = match (
+                body.as_deref(),
+                metadata.metrics_format.as_deref(),
+                adapter.as_str(),
+            ) {
+                (Some(body), Some("comfyui-queue"), "comfyui") => {
+                    parse_comfy_runtime(body, &run_id, rank, observed_at)
+                }
+                (
+                    Some(body),
+                    Some("prometheus"),
+                    "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3",
+                ) => parse_prometheus_runtime(
+                    body,
+                    &run_id,
+                    &adapter,
+                    rank,
+                    observed_at,
+                    elapsed,
+                    &mut self.runtime_counters,
+                ),
+                _ => (
+                    Vec::new(),
+                    runtime_capabilities_for_run(&run_id, Some(unavailable_reason)),
+                    false,
+                    0,
+                ),
+            };
             runtimes.push(TelemetryRuntime {
-                run_id: contract.run_id.clone(),
-                engine_id: contract.run_id.clone(),
+                run_id: run_id.clone(),
+                engine_id: run_id.clone(),
                 backend: adapter.clone(),
-                version: contract.adapter_version.map(|value| value.to_string()),
+                version: metadata.engine_version.clone(),
                 // Endpoint and model identity are Controller-owned launch
-                // metadata.  The agent uses the allowlisted loopback endpoint
+                // metadata. The agent uses only the compiled published endpoint
                 // internally, but does not echo it or recipe data upstream.
                 endpoint: None,
                 model: None,
@@ -962,12 +974,11 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 serving_node_ids: Vec::new(),
                 ranks: vec![rank],
                 readiness: if runtime_ok { "running" } else { "unknown" }.to_owned(),
-                error: (!runtime_ok).then_some("managed runtime metrics unavailable".to_owned()),
+                error: (!runtime_ok).then_some(unavailable_reason.to_owned()),
                 adapter: adapter.clone(),
-                adapter_version: contract.adapter_version.map(|value| value.to_string()),
+                adapter_version: metadata.engine_version.clone(),
                 adapter_supported: runtime_ok,
-                adapter_reason: (!runtime_ok)
-                    .then_some("known local managed-runtime metrics were not observed".to_owned()),
+                adapter_reason: (!runtime_ok).then_some(unavailable_reason.to_owned()),
             });
             series.extend(runtime_series);
             capabilities.extend(runtime_caps);
@@ -979,32 +990,6 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
 
 const MAX_MANAGED_RUNTIME_ENTRIES: usize = 64;
 
-/// Only the agent-owned runtime contract is read. It is written when the
-/// Controller-authorized run starts and never comes from an arbitrary URL.
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryContract {
-    run_id: String,
-    #[serde(default)]
-    adapter: Option<String>,
-    #[serde(default)]
-    adapter_version: Option<u32>,
-    #[serde(default)]
-    endpoint: Option<RuntimeTelemetryEndpoint>,
-    #[serde(default)]
-    placement: Option<RuntimeTelemetryPlacement>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryEndpoint {
-    listen_port: u16,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryPlacement {
-    #[serde(default)]
-    rank: u32,
-}
-
 #[derive(Debug, Clone)]
 struct PrometheusSample {
     name: String,
@@ -1014,21 +999,6 @@ struct PrometheusSample {
 
 fn canonical_runtime_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|uuid| !uuid.is_nil() && uuid.to_string() == value)
-}
-
-fn known_runtime_endpoint(
-    adapter: &str,
-    endpoint: Option<&RuntimeTelemetryEndpoint>,
-) -> Option<(u16, &'static str)> {
-    let path = match adapter {
-        "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3" => "/metrics",
-        // The managed Comfy adapter owns this endpoint and exposes queue
-        // identity without requiring a broad runtime or port scan.
-        "comfyui" => "/queue",
-        _ => return None,
-    };
-    let port = endpoint?.listen_port;
-    (1024..=65_535).contains(&port).then_some((port, path))
 }
 
 fn parse_prometheus_samples(value: &[u8]) -> Vec<PrometheusSample> {
@@ -1544,7 +1514,8 @@ fn normalize_percent(value: Option<f64>) -> Option<f64> {
 
 fn parse_prometheus_runtime(
     value: &[u8],
-    contract: &RuntimeTelemetryContract,
+    run_id: &str,
+    adapter: &str,
     rank: u32,
     observed_at: DateTime<Utc>,
     elapsed: Option<f64>,
@@ -1555,7 +1526,6 @@ fn parse_prometheus_runtime(
     let mut capabilities = Vec::new();
     let mut recognized = false;
     let mut gaps = 0_i64;
-    let adapter = contract.adapter.as_deref().unwrap_or("");
     for (key, _, _) in runtime_metric_capabilities() {
         let reading = runtime_metric_reading(adapter, key, &samples);
         let mut metric = reading.value;
@@ -1590,7 +1560,7 @@ fn parse_prometheus_runtime(
         }
         let raw_available = metric.is_some();
         if let Some(counter_key) = reading.counter_key {
-            let state_key = format!("{}:{rank}:{counter_key}", contract.run_id);
+            let state_key = format!("{}:{rank}:{counter_key}", run_id);
             metric = metric.and_then(|current| {
                 let previous = counters.insert(state_key, current);
                 let previous = previous?;
@@ -1609,7 +1579,7 @@ fn parse_prometheus_runtime(
         let reason = (!raw_available).then_some("metric was not exposed by the managed runtime");
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             reading.unit,
             reading.measurement_kind,
@@ -1619,7 +1589,7 @@ fn parse_prometheus_runtime(
         if let Some(metric) = metric {
             add_runtime_number(
                 &mut series,
-                &contract.run_id,
+                run_id,
                 rank,
                 key,
                 metric,
@@ -1652,17 +1622,14 @@ fn comfy_queue_value(value: &serde_json::Value, names: &[&str]) -> Option<f64> {
 
 fn parse_comfy_runtime(
     value: &[u8],
-    contract: &RuntimeTelemetryContract,
+    run_id: &str,
     rank: u32,
     observed_at: DateTime<Utc>,
 ) -> (Vec<TelemetrySeries>, Vec<TelemetryCapability>, bool, i64) {
     let Ok(document) = serde_json::from_slice::<serde_json::Value>(value) else {
         return (
             Vec::new(),
-            runtime_capabilities_for_run(
-                &contract.run_id,
-                Some("ComfyUI queue response was invalid"),
-            ),
+            runtime_capabilities_for_run(run_id, Some("ComfyUI queue response was invalid")),
             false,
             0,
         );
@@ -1684,7 +1651,7 @@ fn parse_comfy_runtime(
     for (key, value) in values {
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             "requests",
             "measured",
@@ -1694,7 +1661,7 @@ fn parse_comfy_runtime(
         if let Some(value) = value {
             add_runtime_number(
                 &mut series,
-                &contract.run_id,
+                run_id,
                 rank,
                 key,
                 value,
@@ -1711,7 +1678,7 @@ fn parse_comfy_runtime(
         }
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             unit,
             kind,
