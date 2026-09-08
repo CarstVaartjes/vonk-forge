@@ -60,6 +60,10 @@ class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
 
 
+class RecipeRunObservationReplayError(HostHelperAuthorityError):
+    """A valid observation repeats an already consumed current grant."""
+
+
 class HostHelperGrantIssuer:
     """Sign one short-lived, exact host operation for one GPU node."""
 
@@ -437,9 +441,10 @@ class HostRuntimeAuthorityService:
             pending is None
             or pending.request_id != grant.claims.request_id
             or pending.identity_sha256 != observation_identity
-            or pending.consumed is not False
         ):
             raise HostHelperAuthorityError("recipe run observation grant was replayed")
+        if pending.consumed is not False:
+            raise RecipeRunObservationReplayError("recipe run observation grant was replayed")
         pending.consumed = True
         receipt_digest = hashlib.sha256(
             canonical_message(receipt.to_mapping())

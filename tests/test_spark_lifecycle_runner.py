@@ -972,3 +972,40 @@ def test_running_channel_alias_must_match_the_candidate(
     else:
         with pytest.raises(lifecycle.LifecycleError, match="differs from publication"):
             run._assert_running_publication_images()
+
+
+def test_preflight_failure_reports_only_projected_receipt_comparison_fields() -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = object()
+    evidence = {
+        "node_id": "spk_" + "a" * 32,
+        "current_fingerprint": "b" * 64,
+        "receipt_fingerprint": "c" * 64,
+        "request_sha256": "d" * 64,
+        "payload_sha256": "d" * 64,
+        "observed_at": 100,
+        "controller_now": 102,
+        "failed_findings": None,
+    }
+    queries = []
+    def psql(query):
+        queries.append(query)
+        return [[json.dumps(evidence)]]
+    run._psql = psql
+    operation = {
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "state": "failed", "completed_phases": [],
+        "status_reason": "runtime_preflight.retry_exhausted",
+    }
+    with pytest.raises(lifecycle.LifecycleError) as failure:
+        run._await_canary_run_switch(operation, expected_phases=["start"], label="canary")
+    message = str(failure.value)
+    assert evidence["current_fingerprint"] in message
+    assert evidence["receipt_fingerprint"] in message
+    assert '"observed_at": 100' in message
+    assert '"controller_now": 102' in message
+    assert len(message) < 2000
+    assert len(queries) == 1
+    assert "LIMIT 2" in queries[0]
+    assert "signed_grant" not in queries[0]
