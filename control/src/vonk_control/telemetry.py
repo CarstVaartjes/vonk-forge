@@ -20,7 +20,7 @@ from .models import (
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
 )
-from .telemetry_contract import TelemetryMetrics
+from .telemetry_contract import TelemetryDetails, TelemetryMetrics
 from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -363,7 +363,7 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
 
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
-    details = dict(row.details)
+    details = TelemetryDetails.model_validate(row.details)
     metrics = TelemetryMetrics.model_validate(row.metrics)
     return TelemetrySampleView(
         id=row.id,
@@ -387,8 +387,8 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
         network_transmit_bytes_per_second=row.network_transmit_bytes_per_second,
         gap_samples=row.gap_samples,
         details=TelemetryDetailsInput(
-            accelerator_name=details.get("accelerator_name"),
-            accelerator_performance_state=details.get("accelerator_performance_state"),
+            accelerator_name=details.accelerator_name,
+            accelerator_performance_state=details.accelerator_performance_state,
         ),
         metrics=metrics,
     )

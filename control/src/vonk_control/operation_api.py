@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_serializer
+from pydantic import ConfigDict, Field, ValidationError, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.route_activation import ActivationMarker
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -141,6 +142,15 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
     ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
 }
+
+
+def _stored_activation_marker(value: object) -> ActivationMarker:
+    try:
+        return ActivationMarker.model_validate(value)
+    except ValidationError as error:
+        raise RuntimeError("durable activation marker is invalid") from error
+
+
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
 NodeIdentifier = Annotated[str, Field(pattern=NODE_PATTERN)]
@@ -1059,7 +1069,7 @@ class _DurableOperationProjection:
                 or _aware(publication.lease_expires_at) <= _aware(self._clock())
             ):
                 raise RuntimeError("active publication is unavailable")
-            marker = dict(publication.activation_marker)
+            marker = _stored_activation_marker(publication.activation_marker).model_dump()
             marker_digest = publication.activation_marker_digest
             route_digest = publication.route_digest
             evidence_digest = publication.evidence_digest

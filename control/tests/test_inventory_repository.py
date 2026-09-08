@@ -1,12 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentNode, Base
+from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
 
 
 def repository(tmp_path):
@@ -30,3 +31,28 @@ def test_stale_inventory_is_explicit(tmp_path) -> None:
     repo, now = repository(tmp_path); node = "spk_"+"1"*32
     repo.record(InventorySnapshotInput(node, now, 1000, 700, 500, 300, 400, 250, 1, False, ("runtime.vllm.v1",)))
     assert repo.latest(node, now=now + timedelta(minutes=6), maximum_age=300).stale is True
+
+
+def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
+    repo, now = repository(tmp_path)
+    node = "spk_" + "1" * 32
+    stored = repo.record(
+        InventorySnapshotInput(
+            node,
+            now,
+            1000,
+            700,
+            500,
+            300,
+            400,
+            250,
+            1,
+            False,
+            ("runtime.vllm.v1",),
+        )
+    )
+    with repo._sessions.begin() as session:
+        session.get(NodeInventorySnapshot, stored.id).capabilities = {"bad": "value"}
+
+    with pytest.raises(ValueError, match="inventory capabilities are invalid"):
+        repo.latest(node, now=now, maximum_age=60)
