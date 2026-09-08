@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -45,6 +45,7 @@ from .operation_contract import (
     recovery_for_operation,
     sanitize_failure_evidence,
 )
+from .operation_progress import aggregate_progress, project_progress
 from .route_runtime import verify_active_route_bundle
 from .strict_json import StrictJSONModel
 
@@ -61,6 +62,8 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/upgrades/preview"): "previewAgentUpgrade",
     ("post", "/api/v1/agents/upgrades"): "applyAgentUpgrade",
     ("get", "/api/v1/fleet"): "getFleetStatus",
+    ("get", "/api/v1/deployment-provenance"): "getDeploymentProvenance",
+    ("get", "/api/v1/operations/{operation_id}/evidence"): "getOperationEvidence",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
     ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
     ("post", "/api/v1/fleet-profiles"): "createFleetProfile",
@@ -337,6 +340,7 @@ class OperationsResponse(StrictModel):
 
 
 class JobProgress(StrictModel):
+    operation: OperationProgress | None = None
     completed: int = Field(ge=0)
     failed: int = Field(ge=0)
     running: int = Field(ge=0)
@@ -607,7 +611,14 @@ def job_response(
     target_cursor: int,
     limit: int,
     cursors: CursorCodec,
+    evidence_decorator: Callable[[Mapping[str, object]], Mapping[str, object]]
+    | None = None,
 ) -> JobDetailResponse:
+    items = (
+        [evidence_decorator(item) for item in operation_page.items]
+        if evidence_decorator is not None
+        else operation_page.items
+    )
     projected = [
         JobOperationResponse(
             id=item["id"],
@@ -615,7 +626,7 @@ def job_response(
             kind=item["kind"],
             state=item["state"],
             attempt=item["attempt"],
-            progress=_progress_projection(item.get("progress")),
+            progress=_progress_projection(item.get("progress"), item.get("state")),
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
             ),
@@ -632,7 +643,7 @@ def job_response(
                 ),
             ),
         )
-        for item in operation_page.items
+        for item in items
     ]
     targets = list(job.targets)
     visible_targets = targets[target_cursor : target_cursor + limit]
@@ -704,19 +715,19 @@ def decode_offset(
     return offset
 
 
-def _progress_projection(value: object) -> JobOperationProgress | None:
-    if not isinstance(value, Mapping):
+def _progress_projection(value: object, state: object = None) -> JobOperationProgress | None:
+    if value is None:
         return None
-    try:
-        return JobOperationProgress.model_validate(value, strict=True)
-    except (TypeError, ValueError):
-        return None
+    projected = project_progress(JobOperationProgress.model_validate(value, strict=True))
+    if state in {"succeeded", "accepted", "compensated", "failed", "cancelled", "waiting-for-operator"}:
+        return projected.model_copy(update={"activity": None, "bytes_per_second": None, "smoothed_bytes_per_second": None, "eta_seconds": None})
+    return projected
 
 
-def _progress_document(value: object) -> dict[str, object] | None:
+def _progress_document(value: object, state: object = None) -> dict[str, object] | None:
     """Project one durable progress value with a single canonical parse."""
 
-    projected = _progress_projection(value)
+    projected = _progress_projection(value, state)
     return None if projected is None else projected.model_dump(mode="json")
 
 
@@ -790,7 +801,7 @@ def _operation_item(
     progress = None
     result = None
     if attempt is not None:
-        projected = _progress_projection(attempt.progress)
+        projected = _progress_projection(attempt.progress, operation.state)
         progress = None if projected is None else projected.model_dump(mode="json")
         result = attempt.result
     return {
@@ -830,7 +841,7 @@ def operation_detail_response(
         kind=item["kind"],
         state=item["state"],
         attempt=item["attempt"],
-        progress=_progress_projection(item.get("progress")),
+        progress=_progress_projection(item.get("progress"), item.get("state")),
         created_at=str(item["created_at"]),
         updated_at=(None if item.get("updated_at") is None else item["updated_at"]),
         failure=failure,
@@ -1217,6 +1228,25 @@ class _DurableOperationProjection:
             )
             has_more = len(operations) > limit
             operations = operations[:limit]
+            # Aggregate the full job, independently of its displayed page.
+            aggregate_members = []
+            for operation, progress in session.execute(
+                select(AgentOperation, AgentOperationAttempt.progress)
+                .outerjoin(AgentOperationAttempt, (AgentOperationAttempt.operation_id == AgentOperation.id)
+                           & (AgentOperationAttempt.attempt == AgentOperation.current_attempt))
+                .where(AgentOperation.parent_job_id == job_id)
+                .order_by(AgentOperation.created_at, AgentOperation.id)
+            ):
+                projected = _progress_projection(progress, operation.state)
+                document = {} if projected is None else projected.model_dump(mode="json", exclude_none=True)
+                # A member is one independent node operation. Its identity is
+                # the durable operation ID, since a node can have several steps.
+                for key in ("checkpoint", "members", "total_bytes_known"):
+                    document.pop(key, None)
+                document.update(member_id=operation.id, kind=operation.kind,
+                                phase=document.get("phase", operation.state), state=operation.state)
+                aggregate_members.append(OperationMemberProgress.model_validate(document))
+            aggregate = aggregate_progress(aggregate_members) if aggregate_members else None
             state_counts = {
                 str(state): int(count)
                 for state, count in session.execute(
@@ -1249,7 +1279,7 @@ class _DurableOperationProjection:
                 "progress": (
                     None
                     if attempts.get(operation.id) is None
-                    else _progress_document(attempts[operation.id].progress)
+                    else _progress_document(attempts[operation.id].progress, operation.state)
                 ),
                 "result": (
                     None
@@ -1282,6 +1312,7 @@ class _DurableOperationProjection:
             items=items,
             next_cursor=next_cursor,
             progress=JobProgress(
+                operation=aggregate,
                 completed=sum(state_counts.get(state, 0) for state in terminal),
                 failed=sum(state_counts.get(state, 0) for state in failed),
                 running=sum(state_counts.get(state, 0) for state in running),

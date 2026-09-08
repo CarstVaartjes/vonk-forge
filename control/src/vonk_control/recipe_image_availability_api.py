@@ -208,10 +208,7 @@ def _progress(value: object) -> OperationProgress:
     raw.setdefault("total_bytes_known", raw.get("total_bytes") is not None)
     return OperationProgress.model_validate({
         key: raw[key]
-        for key in (
-            "phase", "completed_bytes", "total_bytes", "bytes_per_second",
-            "eta_seconds", "total_bytes_known", "checkpoint", "members",
-        )
+        for key in OperationProgress.model_fields
         if key in raw
     })
 

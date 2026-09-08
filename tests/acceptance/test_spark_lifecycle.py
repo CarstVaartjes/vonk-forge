@@ -927,6 +927,7 @@ class SparkLifecycle:
         *,
         cwd: Path,
         timeout: int = 300,
+        report_failure_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
@@ -947,8 +948,12 @@ class SparkLifecycle:
         except (OSError, subprocess.SubprocessError) as error:
             raise LifecycleError("acceptance command could not execute") from error
         if result.returncode != 0:
+            detail = (
+                "; " + self._redact_diagnostics(result.stderr or result.stdout)
+                if report_failure_output else ""
+            )
             raise LifecycleError(
-                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip()
+                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip() + detail
             )
         return result
 
@@ -1022,7 +1027,7 @@ class SparkLifecycle:
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
     def _installation_failure(
-        self, stage: str, error: AcceptanceError
+        self, stage: str, error: Exception
     ) -> LifecycleError:
         raw = ""
         if getattr(self, "bundle", None) is not None:
@@ -1033,6 +1038,7 @@ class SparkLifecycle:
                     "--tail",
                     "120",
                     "control-api",
+                    "control-worker",
                     "step-ca",
                     "caddy",
                 )
@@ -1191,11 +1197,13 @@ class SparkLifecycle:
                 self._local_controller_up_command(),
                 cwd=self.bundle,
                 timeout=420,
+                report_failure_output=True,
             )
         except LifecycleError as error:
             diagnostics = self._controller_startup_diagnostics()
             raise LifecycleError(
-                f"candidate controller startup failed; {diagnostics}"
+                "candidate controller startup failed; "
+                f"{self._redact_diagnostics(str(error))}; {diagnostics}"
             ) from error
         status = self._run_command(
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
@@ -2187,7 +2195,7 @@ class SparkLifecycle:
                 plan_digest=uninstall_digest,
             )
             completed.append("uninstalled")
-        except (SliceError, ServingExecutionError) as error:
+        except (SliceError, ServingExecutionError, LifecycleError) as error:
             # Keep the API response concise for the lifecycle client, but make
             # the bounded Controller logs available before cleanup.  This is
             # the only useful evidence for an unexpected 5xx from a fresh
@@ -2242,8 +2250,16 @@ class SparkLifecycle:
             or operation.get("completed_phases") != expected_phases
         ):
             reason = operation.get("status_reason")
+            details = self._redact_diagnostics(json.dumps({
+                key: operation.get(key)
+                for key in (
+                    "operation_id", "state", "failed_phase", "completed_phases",
+                    "progress", "result", "status_reason",
+                )
+            }))
             raise LifecycleError(
-                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}"
+                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}; "
+                f"operation evidence: {details}"
             )
         return operation
 

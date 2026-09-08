@@ -97,6 +97,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .canonical_recipe_fixtures import canonical_example
+from .preflight_fixtures import record_passing_preflight
 
 
 class RecordingQueue:
@@ -698,6 +699,7 @@ def setup_services(
         clock=lambda: NOW,
         route_withdrawer=route_withdrawer,
     )
+    record_passing_preflight(sessions, NOW)
     return sessions, service, queue, mapping_id, build_id, node_ids
 
 
@@ -1124,8 +1126,8 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
     assert operation.state == "running"
     assert queue.available == 1
     with sessions() as session:
-        jobs = list(session.scalars(select(Job)))
-        child_operations = list(session.scalars(select(AgentOperation)))
+        jobs = list(session.scalars(select(Job).where(Job.kind == "recipe.install")))
+        child_operations = list(session.scalars(select(AgentOperation).where(AgentOperation.kind == "recipe.install")))
         assert len(jobs) == 1
         assert {item.kind for item in child_operations} == {"recipe.install"}
         assert all(
@@ -1824,7 +1826,7 @@ def test_install_admission_and_queue_creation_roll_back_together(
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []
-        assert list(session.scalars(select(Job))) == []
+        assert list(session.scalars(select(Job).where(Job.kind.like("recipe.%")))) == []
 
 
 def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> None:

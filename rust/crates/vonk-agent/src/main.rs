@@ -169,7 +169,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 
 async fn run_control_lane(
     config: &AgentConfig,
-    runtime_identity: AgentRuntimeIdentity,
+    mut runtime_identity: AgentRuntimeIdentity,
     mut client: AgentHttpClient,
     mut state: StateStore,
     client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
@@ -215,6 +215,10 @@ async fn run_control_lane(
                 }
                 Err(error) => return Err(error.into()),
             }
+        }
+        match vonk_agent::package_activation::acknowledge(&client, &runtime_identity).await {
+            Ok(receipt) => runtime_identity.package_activation = receipt,
+            Err(error) => eprintln!("vonk-agent: package activation not acknowledged: {error}"),
         }
         let executor = ControlExecutor {
             recipes: RecipeExecutor {
@@ -262,12 +266,24 @@ async fn run_control_lane(
             exact_observation_count,
             readiness_published,
         );
+        let fingerprint = vonk_agent::runtime_preflight::host_fingerprint(
+            &runner,
+            &runtime_identity.build_digest,
+            &config.data_dir,
+            Path::new("/run/vonk-forge-agent"),
+        )
+        .ok()
+        .map(|value| format!("runtime.preflight.fingerprint.{value}"));
+        let mut claim_capabilities = CLAIM_CAPABILITIES.to_vec();
+        if let Some(value) = &fingerprint {
+            claim_capabilities.push(value.as_str());
+        }
         let operation = async {
             run_once_with_claim_hook(
                 &client,
                 &mut state,
                 &executor,
-                CLAIM_CAPABILITIES,
+                &claim_capabilities,
                 wait_seconds,
                 Some(&runtime_identity),
                 || {

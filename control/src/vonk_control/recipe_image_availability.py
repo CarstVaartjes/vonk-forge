@@ -24,11 +24,14 @@ from typing import Any, Protocol
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .model_cache import ModelCacheNotFound
+from .model_cache_progress import project_cache_progress
 from .models import CatalogDocumentRevision, Job, RecipeBuild
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
+from .operation_progress import aggregate_progress
 from .runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageStorage,
@@ -635,7 +638,7 @@ class RecipeImageAvailabilityService:
             "artifacts": [dict(item) for item in artifacts if isinstance(item, Mapping)]
             if isinstance(artifacts, list)
             else [],
-            "progress": dict(operation.progress),
+            "progress": project_cache_progress(operation.progress, self._clock()),
         }
 
     def _start_model_repair(
@@ -759,7 +762,7 @@ class RecipeImageAvailabilityService:
             return dict(child) | {
                 "id": operation.id,
                 "state": operation.state,
-                "progress": dict(operation.progress),
+                "progress": project_cache_progress(operation.progress, self._clock()),
                 "artifact_set_sha256": operation.artifact_set_sha256,
                 "plan_digest": operation.plan_digest,
                 "failure": (dict(operation.failure) if isinstance(operation.failure, Mapping) else None),
@@ -1278,7 +1281,7 @@ class RecipeImageAvailabilityService:
         failure = operation.failure
         return dict(child) | {
             "state": operation.state,
-            "progress": dict(operation.progress),
+            "progress": project_cache_progress(operation.progress, self._clock()),
             "artifact_set_sha256": operation.artifact_set_sha256,
             "plan_digest": operation.plan_digest,
             "failure": (dict(failure) if isinstance(failure, Mapping) else None),
@@ -1603,44 +1606,16 @@ class RecipeImageAvailabilityService:
         }]
         progress["members"] = image_members
         if model_child is not None:
-            child_progress = model_child.get("progress")
-            if isinstance(child_progress, Mapping):
-                child_completed = child_progress.get(
-                    "completed_bytes", child_progress.get("downloaded_bytes", 0)
-                )
-                child_total = child_progress.get("total_bytes", child_progress.get("expected_bytes"))
-                image_member = image_members[0]
-                image_completed = image_member.get("completed_bytes", 0)
-                image_total = image_member.get("total_bytes")
-                progress["completed_bytes"] = (
-                    (child_completed if isinstance(child_completed, int) else 0)
-                    + (image_completed if isinstance(image_completed, int) else 0)
-                )
-                if isinstance(child_total, int) and isinstance(image_total, int):
-                    progress["total_bytes"] = child_total + image_total
-                    progress["total_bytes_known"] = True
-                else:
-                    progress["total_bytes"] = None
-                    progress["total_bytes_known"] = False
-                # One child's rate/ETA is not an aggregate transfer estimate.
-                progress.pop("bytes_per_second", None)
-                progress.pop("eta_seconds", None)
-                if image_ready and model_child.get("state") != "succeeded":
-                    progress["phase"] = str(child_progress.get("phase", "download"))
-                members = list(progress["members"])
-                members = [member for member in members if not (
-                    isinstance(member, Mapping) and member.get("member_id") == "model-cache"
-                )]
-                members.append(
-                    {
-                        "member_id": "model-cache",
-                        "phase": str(child_progress.get("phase", "download")),
-                        "completed_bytes": child_completed if isinstance(child_completed, int) else 0,
-                        "total_bytes": child_total if isinstance(child_total, int) else None,
-                        "state": str(model_child.get("state", "running")),
-                    }
-                )
-                progress["members"] = members
+            child = OperationProgress.model_validate(model_child["progress"])
+            model_progress = child.model_dump(mode="json", exclude_none=True,
+                exclude={"members", "checkpoint", "total_bytes_known"})
+            image = OperationProgress.model_validate(image_progress)
+            image_member = image.model_dump(mode="json", exclude_none=True,
+                exclude={"members", "checkpoint", "total_bytes_known"})
+            progress = aggregate_progress([
+                OperationMemberProgress.model_validate(image_member | {"member_id": "runtime-image", "state": image_state}),
+                OperationMemberProgress.model_validate(model_progress | {"member_id": "model-cache", "state": str(model_child["state"])}),
+            ]).model_dump(mode="json", exclude_none=True)
         actions = (
             tuple(str(item) for item in failure.get("recovery_actions", []) if isinstance(item, str))
             if failure is not None and isinstance(failure.get("recovery_actions"), list)

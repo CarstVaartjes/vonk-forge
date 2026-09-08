@@ -10,6 +10,7 @@ import type {
   AuditResponse,
   AuditSummary,
   ControlApi,
+  DeploymentProvenance,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetNodeIdentity,
@@ -24,6 +25,7 @@ import type {
   FleetProfilePreview,
   FleetProfileStatus,
   RunSwitchApplyRequest,
+  RunSwitchCancelRequest,
   RunSwitchOperation,
   RunSwitchPlan,
   RunSwitchPreviewRequest,
@@ -329,6 +331,12 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async cancelRecipeRunSwitchOperation(operationId: string, input: RunSwitchCancelRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/cancel", {
+      params: {path: {operation_id: operationId}}, body: input, signal,
+    }));
+  }
+
   async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
     return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
   }
@@ -364,8 +372,12 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
   }
 
-  async modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100}}, signal}));
+  async deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance> {
+    return resultData(await this.generated.GET("/api/v1/deployment-provenance", {signal}));
+  }
+
+  async modelCacheUpdates(signal?: AbortSignal, checkUpstream = false): Promise<ModelCacheUpdatesResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100, check_upstream: checkUpstream}}, signal}));
   }
 
   async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {

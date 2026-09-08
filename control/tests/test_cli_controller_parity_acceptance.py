@@ -168,6 +168,7 @@ def _cache_operation(ledger: _Ledger, operation_id: str, request_key: str, plan_
         "downloaded_bytes": 128,
         "expected_bytes": 128,
         "current_artifact_key": None,
+        "measurement": {"phase": "completed", "completed_bytes": 128, "total_bytes": 128, "total_bytes_known": True, "completed_items": 1, "total_items": 1},
     }
     ledger.add(
         operation_id=operation_id,

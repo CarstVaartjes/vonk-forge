@@ -25,9 +25,10 @@ REQUIRED_ELF = {
     "usr/lib/vonk-forge/vonk-agent",
     "usr/lib/vonk-forge/vonk-agent-helper",
     "usr/lib/vonk-forge/vonk-build-egress",
+    "usr/lib/vonk-forge/vonk-runtime-probe",
     "usr/lib/vonk-forge/oras",
 }
-REPAIR_ELF_REMOVALS = {"usr/lib/vonk-forge/vonk-build-egress"}
+REPAIR_ELF_REMOVALS = {"usr/lib/vonk-forge/vonk-build-egress", "usr/lib/vonk-forge/vonk-runtime-probe"}
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
@@ -46,6 +47,7 @@ REQUIRED_PAYLOAD = {
     "lib/systemd/system/vonk-forge-docker-firewall.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
+    "lib/systemd/system/vonk-forge-package-rollback.service",
     "lib/systemd/system/vonk-forge-package-upgrade-recover.service",
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
     "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
@@ -673,7 +675,7 @@ def _verify_payload(
             or struct.unpack_from("<H", raw, 18)[0] != ARCHITECTURES[architecture]
         ):
             raise VerificationError(f"binary architecture is invalid: {name}")
-        if name == "usr/lib/vonk-forge/vonk-build-egress":
+        if name in {"usr/lib/vonk-forge/vonk-build-egress", "usr/lib/vonk-forge/vonk-runtime-probe"}:
             program_offset = struct.unpack_from("<Q", raw, 32)[0]
             program_size = struct.unpack_from("<H", raw, 54)[0]
             program_count = struct.unpack_from("<H", raw, 56)[0]

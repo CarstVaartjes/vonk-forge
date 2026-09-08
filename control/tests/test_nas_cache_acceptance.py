@@ -627,7 +627,7 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
     assert failed.result is None
     expected_progress = {
         "schema_version": 2,
-        "phase": "downloading",
+        "phase": "failed",
         "completed_artifacts": 0,
         "total_artifacts": 1,
         "downloaded_bytes": 0,
@@ -636,7 +636,7 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
     }
     assert {key: failed.progress[key] for key in expected_progress} == expected_progress
     assert failed.progress["total_bytes_known"] is True
-    members = failed.progress["members"]
+    members = failed.progress["measurement"]["members"]
     assert len(members) == 1
     assert members[0]["completed_bytes"] == 0
     assert members[0]["total_bytes"] == len(expected)

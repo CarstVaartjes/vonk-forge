@@ -159,6 +159,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
 ) -> None:
     jobs, sessions, clock = service
+    from .package_upgrade_fixtures import activation_receipt, source_transport
     target = {
         "architecture": "linux-arm64",
         "package_bytes": 1234,
@@ -174,6 +175,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "target_build_digest": "sha256:" + "b" * 64,
     }
     job = parent(sessions, clock)
+    target.update(source_transport())
     operation = jobs.enqueue(job.id, NODE_A, "agent.upgrade.v1", COMMIT, target)
     old_identity = {
         "architecture": "linux-arm64",
@@ -199,6 +201,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         **old_identity,
         "binary_digest": target["target_binary_digest"],
         "build_digest": target["target_build_digest"],
+        "package_activation": activation_receipt(claim.payload.model_dump(mode="json"), NODE_A, now=int(clock.now.timestamp())),
     }
     assert (
         claim_agent(
@@ -230,6 +233,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
             "package_version": "0.1.0~dev.330+g0123456789ab",
             "self_test_passed": True,
             "status": "upgraded",
+            "activation_receipt": new_identity["package_activation"],
         }
 
 
@@ -867,7 +871,10 @@ def test_heartbeat_persists_canonical_progress_and_renews_lease(service) -> None
             )
         )
         assert attempt is not None
-        assert attempt.progress == {"phase": "checking"}
+        assert attempt.progress["phase"] == "checking"
+        assert attempt.progress["activity"] == "active"
+        assert attempt.progress["observed_at"] == clock.now.isoformat()
+        assert attempt.progress["last_progress_at"] == clock.now.isoformat()
 
 
 def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
@@ -916,7 +923,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
             "observation_receipt_public_key": node.observation_receipt_public_key,
-        } == runtime_identity.model_dump()
+        } == runtime_identity.model_dump(exclude={"package_activation"})
         assert node.contact_observation_digest is not None
         assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
 
@@ -1113,3 +1120,73 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
     jobs.succeed(succeeded, STOP_RESULT)
 
     assert job_state(sessions, parent_job.id).state == "waiting-for-operator"
+
+
+def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(service) -> None:
+    jobs, sessions, clock = service
+    jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 10}, 60)
+    first_time = clock.now
+    for count in range(11, 100):
+        jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": count}, 60)
+    with sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        assert attempt.progress["completed_bytes"] == 10
+        assert attempt.progress["observed_at"] == first_time.isoformat()
+    clock.advance(seconds=0.1)
+    jobs.heartbeat(claim, {"phase": "verifying", "completed_bytes": 100}, 60)
+    with sessions() as session:
+        rows = list(session.scalars(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence)))
+        assert len(rows) == 1
+        assert rows[0].progress["phase"] == "verifying"
+        assert rows[0].progress["completed_bytes"] == 100
+
+
+def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay(service) -> None:
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT,
+                             {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
+    capabilities = ["agent.runtime.rust.v1", kind]
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities)
+    jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 100, "completed_items": 1}, 60)
+    # Resume the same authorized, durable transfer after its prior attempt ended.
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        stored.state = "waiting-for-operator"
+        stored.retry_disposition = "retry"
+        stored.retry_disposition_attempt = 1
+        prior = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        prior.state = "failed"
+    clock.advance(seconds=61)
+    resumed = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities)
+    assert resumed is not None and resumed.attempt == 2
+    jobs.heartbeat(resumed, {"phase": "verifying", "completed_bytes": 50, "completed_items": 0}, 60)
+    with sessions() as session:
+        current = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == resumed.fence))
+        assert current.progress["completed_bytes"] == 100
+        assert current.progress["completed_items"] == 1
+        assert current.progress["phase"] == "verifying"
+
+
+def test_successful_distribution_receipt_closes_coalesced_final_counters(service) -> None:
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT,
+                 {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3,
+                        capabilities=["agent.runtime.rust.v1", kind])
+    jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 100, "total_bytes": 200,
+                           "total_bytes_known": True, "completed_items": 1, "total_items": 2}, 60)
+    jobs.succeed(claim, {
+        "assignment_id": "33333333-3333-4333-8333-333333333333", "model_artifact_set_sha256": COMMIT,
+        "verified": True, "verified_digests": [COMMIT], "verified_image_digest": "sha256:"+COMMIT,
+        "imported_image_digest": "sha256:"+COMMIT, "verified_oci_layout_sha256": COMMIT,
+        "oci_image_digest": "sha256:"+COMMIT, "downloaded_bytes": 200, "evidence_digest": COMMIT,
+    })
+    with sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        assert attempt.progress["completed_bytes"] == 200
+        assert attempt.progress["completed_items"] == 2
+        assert attempt.progress["phase"] == "completed"

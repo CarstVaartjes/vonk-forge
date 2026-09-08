@@ -14,6 +14,9 @@ from typing import cast, Union
 from typing import Literal, cast
 from typing import Union
 
+if TYPE_CHECKING:
+  from ..models.package_activation_receipt import PackageActivationReceipt
+  from ..models.failure_diagnostics import FailureDiagnostics
 
 
 
@@ -28,10 +31,12 @@ class AgentFailureResult:
     """
         Attributes:
             diagnostic (Union[None, Unset, str]):
+            diagnostics (Union['FailureDiagnostics', None, Unset]):
             error_code (Union[None, Unset, str]):
             helper_error_code (Union[None, Unset, str]):
             helper_exit_code (Union[None, Unset, int]):
             operation (Union[AgentOperation, None, Unset]):
+            package_activation (Union['PackageActivationReceipt', None, Unset]):
             reason (Union[None, Unset, str]):
             recovery (Union[None, Unset, str]):
             stage (Union[None, Unset, str]):
@@ -41,10 +46,12 @@ class AgentFailureResult:
      """
 
     diagnostic: Union[None, Unset, str] = UNSET
+    diagnostics: Union['FailureDiagnostics', None, Unset] = UNSET
     error_code: Union[None, Unset, str] = UNSET
     helper_error_code: Union[None, Unset, str] = UNSET
     helper_exit_code: Union[None, Unset, int] = UNSET
     operation: Union[AgentOperation, None, Unset] = UNSET
+    package_activation: Union['PackageActivationReceipt', None, Unset] = UNSET
     reason: Union[None, Unset, str] = UNSET
     recovery: Union[None, Unset, str] = UNSET
     stage: Union[None, Unset, str] = UNSET
@@ -57,11 +64,21 @@ class AgentFailureResult:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.package_activation_receipt import PackageActivationReceipt
+        from ..models.failure_diagnostics import FailureDiagnostics
         diagnostic: Union[None, Unset, str]
         if isinstance(self.diagnostic, Unset):
             diagnostic = UNSET
         else:
             diagnostic = self.diagnostic
+
+        diagnostics: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.diagnostics, Unset):
+            diagnostics = UNSET
+        elif isinstance(self.diagnostics, FailureDiagnostics):
+            diagnostics = self.diagnostics.to_dict()
+        else:
+            diagnostics = self.diagnostics
 
         error_code: Union[None, Unset, str]
         if isinstance(self.error_code, Unset):
@@ -88,6 +105,14 @@ class AgentFailureResult:
             operation = self.operation
         else:
             operation = self.operation
+
+        package_activation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.package_activation, Unset):
+            package_activation = UNSET
+        elif isinstance(self.package_activation, PackageActivationReceipt):
+            package_activation = self.package_activation.to_dict()
+        else:
+            package_activation = self.package_activation
 
         reason: Union[None, Unset, str]
         if isinstance(self.reason, Unset):
@@ -132,6 +157,8 @@ class AgentFailureResult:
         })
         if diagnostic is not UNSET:
             field_dict["diagnostic"] = diagnostic
+        if diagnostics is not UNSET:
+            field_dict["diagnostics"] = diagnostics
         if error_code is not UNSET:
             field_dict["error_code"] = error_code
         if helper_error_code is not UNSET:
@@ -140,6 +167,8 @@ class AgentFailureResult:
             field_dict["helper_exit_code"] = helper_exit_code
         if operation is not UNSET:
             field_dict["operation"] = operation
+        if package_activation is not UNSET:
+            field_dict["package_activation"] = package_activation
         if reason is not UNSET:
             field_dict["reason"] = reason
         if recovery is not UNSET:
@@ -159,6 +188,8 @@ class AgentFailureResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.package_activation_receipt import PackageActivationReceipt
+        from ..models.failure_diagnostics import FailureDiagnostics
         d = dict(src_dict)
         def _parse_diagnostic(data: object) -> Union[None, Unset, str]:
             if data is None:
@@ -168,6 +199,26 @@ class AgentFailureResult:
             return cast(Union[None, Unset, str], data)
 
         diagnostic = _parse_diagnostic(d.pop("diagnostic", UNSET))
+
+
+        def _parse_diagnostics(data: object) -> Union['FailureDiagnostics', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                diagnostics_type_0 = FailureDiagnostics.from_dict(data)
+
+
+
+                return diagnostics_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FailureDiagnostics', None, Unset], data)
+
+        diagnostics = _parse_diagnostics(d.pop("diagnostics", UNSET))
 
 
         def _parse_error_code(data: object) -> Union[None, Unset, str]:
@@ -218,6 +269,26 @@ class AgentFailureResult:
             return cast(Union[AgentOperation, None, Unset], data)
 
         operation = _parse_operation(d.pop("operation", UNSET))
+
+
+        def _parse_package_activation(data: object) -> Union['PackageActivationReceipt', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                package_activation_type_0 = PackageActivationReceipt.from_dict(data)
+
+
+
+                return package_activation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['PackageActivationReceipt', None, Unset], data)
+
+        package_activation = _parse_package_activation(d.pop("package_activation", UNSET))
 
 
         def _parse_reason(data: object) -> Union[None, Unset, str]:
@@ -286,10 +357,12 @@ class AgentFailureResult:
 
         agent_failure_result = cls(
             diagnostic=diagnostic,
+            diagnostics=diagnostics,
             error_code=error_code,
             helper_error_code=helper_error_code,
             helper_exit_code=helper_exit_code,
             operation=operation,
+            package_activation=package_activation,
             reason=reason,
             recovery=recovery,
             stage=stage,

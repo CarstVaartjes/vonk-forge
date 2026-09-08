@@ -19,6 +19,23 @@ use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json,
 const NOW: i64 = 2_100_000_000;
 const NODE_ID: &str = "spk_11111111111111111111111111111111";
 
+fn rollback_authority() -> vonk_agent_protocol::PackageRollbackAuthority {
+    let source_sha = hex_sha256(b"signed source deb");
+    let signature = signer(9)
+        .sign(&vonk_agent_helper::protocol::artifact_signing_bytes("deb", &source_sha).unwrap());
+    vonk_agent_protocol::PackageRollbackAuthority {
+        source: vonk_agent_protocol::PackageRollbackSource {
+            package_sha256: source_sha,
+            package_signature: hex::encode(signature.as_ref()),
+            package_version: "0.1.0".into(),
+            binary_sha256: "a".repeat(64),
+            helper_sha256: "b".repeat(64),
+        },
+        attempt_nonce: "c".repeat(64),
+        activation_deadline: NOW + 300,
+    }
+}
+
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../agent_protocol/fixtures")
 }
@@ -145,6 +162,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
             relative_path: "sha256/aa".to_owned(),
         },
         HostOperation::InstallVonkDeb {
+            rollback: rollback_authority(),
             package_sha256: "c".repeat(64),
             package_signature: "d".repeat(128),
         },
@@ -316,6 +334,19 @@ struct AdversarialPackageRunner {
 }
 
 impl CommandRunner for AdversarialPackageRunner {
+    fn arm_package_rollback(
+        &self,
+        _node: &str,
+        _source: &std::path::Path,
+        _candidate: &std::path::Path,
+        _digest: &str,
+        _authority: &vonk_agent_protocol::PackageRollbackAuthority,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn package_activation_failed(&self) -> Result<(), String> {
+        Ok(())
+    }
     fn run(
         &self,
         executable: &std::path::Path,
@@ -376,6 +407,19 @@ impl CommandRunner for AdversarialPackageRunner {
 type SharedCalls = Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>;
 
 impl CommandRunner for RecordingRunner {
+    fn arm_package_rollback(
+        &self,
+        _node: &str,
+        _source: &std::path::Path,
+        _candidate: &std::path::Path,
+        _digest: &str,
+        _authority: &vonk_agent_protocol::PackageRollbackAuthority,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn package_activation_failed(&self) -> Result<(), String> {
+        Ok(())
+    }
     fn run(
         &self,
         executable: &std::path::Path,
@@ -501,6 +545,7 @@ fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     )
     .unwrap();
     fs::create_dir_all(roots.package_custody.parent().unwrap()).unwrap();
+    signed_package(&roots, &signer(9), b"signed source deb");
     (temp, roots, RecordingRunner::default(), signer(9))
 }
 
@@ -522,6 +567,7 @@ fn write_runtime_request(roots: &ManagedRoots, request: &HostRuntimeRequest) -> 
 fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperation {
     HostOperation::ExecuteContainerRuntimeRequest {
         action: match request.action {
+            HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
             HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
             HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
             HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
@@ -1133,10 +1179,14 @@ fn artifacts_are_verified_before_package_mutation() {
     fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(
         executor
-            .execute(&HostOperation::InstallVonkDeb {
-                package_sha256: bad_package,
-                package_signature: "0".repeat(128),
-            })
+            .execute_for_node(
+                &HostOperation::InstallVonkDeb {
+                    rollback: rollback_authority(),
+                    package_sha256: bad_package,
+                    package_signature: "0".repeat(128),
+                },
+                Some(NODE_ID)
+            )
             .is_err()
     );
     assert!(runner.calls.lock().unwrap().is_empty());
@@ -1172,10 +1222,14 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
     );
 
     executor
-        .execute(&HostOperation::InstallVonkDeb {
-            package_sha256: digest.clone(),
-            package_signature: hex::encode(signature.as_ref()),
-        })
+        .execute_for_node(
+            &HostOperation::InstallVonkDeb {
+                rollback: rollback_authority(),
+                package_sha256: digest.clone(),
+                package_signature: hex::encode(signature.as_ref()),
+            },
+            Some(NODE_ID),
+        )
         .unwrap();
     executor
         .execute(&HostOperation::RestartVonkUnit {
@@ -1342,10 +1396,14 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
 
         assert!(
             executor
-                .execute(&HostOperation::InstallVonkDeb {
-                    package_sha256: digest,
-                    package_signature: hex::encode(signature.as_ref()),
-                })
+                .execute_for_node(
+                    &HostOperation::InstallVonkDeb {
+                        rollback: rollback_authority(),
+                        package_sha256: digest,
+                        package_signature: hex::encode(signature.as_ref()),
+                    },
+                    Some(NODE_ID)
+                )
                 .is_err(),
             "accepted {attack} package"
         );
@@ -1381,10 +1439,14 @@ fn root_custody_closes_the_agent_path_swap_race_and_compiles_exact_dpkg_argv() {
     .with_package_owner(package_owner);
 
     executor
-        .execute(&HostOperation::InstallVonkDeb {
-            package_sha256: digest.clone(),
-            package_signature: signature,
-        })
+        .execute_for_node(
+            &HostOperation::InstallVonkDeb {
+                rollback: rollback_authority(),
+                package_sha256: digest.clone(),
+                package_signature: signature,
+            },
+            Some(NODE_ID),
+        )
         .unwrap();
 
     let observed = runner.observed_candidates.lock().unwrap();
@@ -1474,10 +1536,14 @@ fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
 
     assert!(
         executor
-            .execute(&HostOperation::InstallVonkDeb {
-                package_sha256: digest,
-                package_signature: signature,
-            })
+            .execute_for_node(
+                &HostOperation::InstallVonkDeb {
+                    rollback: rollback_authority(),
+                    package_sha256: digest,
+                    package_signature: signature,
+                },
+                Some(NODE_ID)
+            )
             .is_err()
     );
     assert_eq!(fs::read(incoming).unwrap(), body);

@@ -95,7 +95,7 @@ def _assert_frozen_schema2_runtime() -> None:
             "f22422eab5c7408f1295780dc297ceec7a09f1d24f219571614691021517b677"
         ),
         ROOT / "scripts/build-agent-deb": (
-            "fec5fba5b5c285565bc370acd3b3e07f10671c34665d5755ac85ea1bf7f0c084"
+            "1822d09c2737b0e768597e961ebcc99cd29da4c6761a03444b22f9fc56948638"
         ),
     }
     for path, digest in expected.items():

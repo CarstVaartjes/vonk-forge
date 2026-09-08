@@ -177,7 +177,7 @@ def runtime_service(
 def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package() -> (
     None
 ):
-    package = {"package_sha256": "a" * 64, "package_signature": "b" * 128}
+    package = upgrade_payload()
     service = runtime_service(
         operation_kind="agent.upgrade.v1",
         operation_payload=package,
@@ -197,7 +197,9 @@ def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package
 
     assert grant.claims.operation.to_mapping() == {
         "type": "install-vonk-deb",
-        **package,
+        "package_sha256": package["package_sha256"],
+        "package_signature": package["package_signature"],
+        "rollback": package["rollback"],
     }
     with pytest.raises(HostHelperAuthorityError, match="stale"):
         service.issue_agent_upgrade_grant(
@@ -300,6 +302,28 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
         )
 
 
+def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
+    arguments = {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 2,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT,
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+    service = runtime_service(operation_kind="runtime.preflight.v1")
+    grant = service.issue_grant(**arguments)
+    assert grant.claims.operation.action == "runtime-preflight"
+    assert grant.claims.operation.request_sha256 == "e" * 64
+    for changes in [{"fence": "50000000-0000-4000-8000-000000000005"}, {"action": ContainerRuntimeAction.START}]:
+        with pytest.raises(HostHelperAuthorityError):
+            service.issue_grant(**{**arguments, **changes})
+    with pytest.raises(HostHelperAuthorityError):
+        runtime_service(operation_kind="recipe.start").issue_grant(**arguments)
+
+
 def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None:
     with pytest.raises(HostHelperAuthorityError, match="lease"):
         runtime_service(lease_seconds=10).issue_grant(
@@ -313,3 +337,38 @@ def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None
             certificate_serial="certificate-1",
             expires_in_seconds=30,
         )
+
+
+def upgrade_payload():
+    return {"schema_version": 1, "architecture": "linux-arm64", "package_sha256": "a" * 64,
+        "package_signature": "b" * 128, "package_bytes": 1000, "package_version": "0.1.2",
+        "package_url": "https://install.vonkforge.ai/artifacts/candidate/vonk-forge-agent.deb",
+        "target_binary_digest": "c" * 64, "target_build_digest": "sha256:" + "d" * 64,
+        "source_package_url": "https://install.vonkforge.ai/artifacts/source/vonk-forge-agent.deb",
+        "source_package_bytes": 999,
+        "rollback": {"attempt_nonce": "e" * 64, "activation_deadline": int(NOW.timestamp()) + 900,
+            "source": {"package_sha256": "f" * 64, "package_signature": "1" * 128,
+                "package_version": "0.1.1", "binary_sha256": "2" * 64, "helper_sha256": "3" * 64}}}
+
+
+def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
+    from vonk_agent_protocol.claims import AgentRuntimeIdentity
+    from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+    payload = upgrade_payload()
+    service = runtime_service(operation_kind="agent.upgrade.v1", operation_payload=payload)
+    receipt = PackageActivationReceipt(schema_version=2, node_id="spk_" + "1" * 32,
+        source_package_sha256="f" * 64, source_version="0.1.1", source_binary_sha256="2" * 64,
+        candidate_package_sha256="a" * 64, candidate_version="0.1.2", candidate_binary_sha256="c" * 64,
+        attempt_nonce="e" * 64, phase="armed", created_at=int(NOW.timestamp()), updated_at=int(NOW.timestamp()), outcome="watchdog_armed")
+    identity = AgentRuntimeIdentity(architecture="linux-arm64", semantic_version="0.1.2",
+        build_digest="sha256:" + "d" * 64, binary_digest="c" * 64, self_test_passed=True,
+        observation_receipt_public_key="4" * 64)
+    grant = service.issue_package_activation_grant(node_id=receipt.node_id, receipt=receipt, runtime_identity=identity, certificate_serial="certificate-1")
+    assert grant.claims.operation.to_mapping() == {"type": "confirm-package-activation", "package_sha256": "a" * 64, "attempt_nonce": "e" * 64}
+    issuer().public_key.verify(bytes.fromhex(grant.signature.value), host_helper_grant_signing_bytes(grant.claims))
+    for changed in ({"attempt_nonce": "0" * 64}, {"source_package_sha256": "0" * 64}, {"phase": "rolled_back"}, {"candidate_binary_sha256": "0" * 64}):
+        invalid = PackageActivationReceipt.model_validate({**receipt.model_dump(mode="json"), **changed})
+        with pytest.raises(HostHelperAuthorityError):
+            service.issue_package_activation_grant(node_id=receipt.node_id, receipt=invalid, runtime_identity=identity, certificate_serial="certificate-1")
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_package_activation_grant(node_id=receipt.node_id, receipt=receipt, runtime_identity=identity.model_copy(update={"binary_digest": "0" * 64}), certificate_serial="certificate-1")

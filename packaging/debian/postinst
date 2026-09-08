@@ -490,6 +490,7 @@ ensure_observation_receipt_key || {
 }
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
+deb-systemd-helper enable vonk-forge-package-rollback.service >/dev/null
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true

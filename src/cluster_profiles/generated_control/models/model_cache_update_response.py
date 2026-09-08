@@ -14,6 +14,7 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.model_reference import ModelReference
+  from ..models.model_cache_upstream_revision import ModelCacheUpstreamRevision
 
 
 
@@ -40,6 +41,7 @@ class ModelCacheUpdateResponse:
             model_update_to (Union['ModelReference', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             updated_at (Union[None, Unset, str]):
+            upstream_revisions (Union[Unset, list['ModelCacheUpstreamRevision']]):
      """
 
     artifact_set_sha256: str
@@ -55,6 +57,7 @@ class ModelCacheUpdateResponse:
     model_update_to: Union['ModelReference', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     updated_at: Union[None, Unset, str] = UNSET
+    upstream_revisions: Union[Unset, list['ModelCacheUpstreamRevision']] = UNSET
 
 
 
@@ -62,6 +65,7 @@ class ModelCacheUpdateResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.model_reference import ModelReference
+        from ..models.model_cache_upstream_revision import ModelCacheUpstreamRevision
         artifact_set_sha256 = self.artifact_set_sha256
 
         latest_model_content_sha256: Union[None, str]
@@ -115,6 +119,15 @@ class ModelCacheUpdateResponse:
         else:
             updated_at = self.updated_at
 
+        upstream_revisions: Union[Unset, list[dict[str, Any]]] = UNSET
+        if not isinstance(self.upstream_revisions, Unset):
+            upstream_revisions = []
+            for upstream_revisions_item_data in self.upstream_revisions:
+                upstream_revisions_item = upstream_revisions_item_data.to_dict()
+                upstream_revisions.append(upstream_revisions_item)
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -139,6 +152,8 @@ class ModelCacheUpdateResponse:
             field_dict["schema_version"] = schema_version
         if updated_at is not UNSET:
             field_dict["updated_at"] = updated_at
+        if upstream_revisions is not UNSET:
+            field_dict["upstream_revisions"] = upstream_revisions
 
         return field_dict
 
@@ -147,6 +162,7 @@ class ModelCacheUpdateResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.model_reference import ModelReference
+        from ..models.model_cache_upstream_revision import ModelCacheUpstreamRevision
         d = dict(src_dict)
         artifact_set_sha256 = d.pop("artifact_set_sha256")
 
@@ -252,6 +268,16 @@ class ModelCacheUpdateResponse:
         updated_at = _parse_updated_at(d.pop("updated_at", UNSET))
 
 
+        upstream_revisions = []
+        _upstream_revisions = d.pop("upstream_revisions", UNSET)
+        for upstream_revisions_item_data in (_upstream_revisions or []):
+            upstream_revisions_item = ModelCacheUpstreamRevision.from_dict(upstream_revisions_item_data)
+
+
+
+            upstream_revisions.append(upstream_revisions_item)
+
+
         model_cache_update_response = cls(
             artifact_set_sha256=artifact_set_sha256,
             latest_model_content_sha256=latest_model_content_sha256,
@@ -266,6 +292,7 @@ class ModelCacheUpdateResponse:
             model_update_to=model_update_to,
             schema_version=schema_version,
             updated_at=updated_at,
+            upstream_revisions=upstream_revisions,
         )
 
         return model_cache_update_response

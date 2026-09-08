@@ -14,6 +14,7 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
     Base,
     CatalogDocument,
@@ -27,6 +28,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from .preflight_fixtures import record_passing_preflight
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -377,7 +380,13 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
     }
 
 
-def _service(sessions, **kwargs):
+def _service(sessions, *, preflight=True, **kwargs):
+    if preflight:
+        record_passing_preflight(
+            sessions,
+            datetime(2026, 8, 7, 12, tzinfo=UTC),
+            floor=kwargs.get("disk_floor_bytes", 10_000_000_000),
+        )
     return InstallAdmissionService(
         sessions,
         compiled_plan_provider=_compiled_plan_provider,
@@ -408,6 +417,16 @@ def setup(
                 state="active",
                 architecture="linux-arm64",
                 capabilities=["runtime.vonk.v1"],
+            )
+        )
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial="serial-install-preflight",
+                node_id=node_id,
+                fingerprint="fingerprint-install-preflight",
+                not_before=now - timedelta(seconds=1),
+                not_after=now + timedelta(days=1),
             )
         )
     InventoryRepository(sessions, clock=lambda: now).record(
@@ -755,3 +774,17 @@ def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
         )
         assert node is not None
         node.endpoint_owner = False
+
+
+def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_path):
+    sessions, now, node_id, mapping, _build = setup(tmp_path, recipe_mode="image")
+    service = _service(sessions, preflight=False, disk_floor_bytes=10)
+    blocked = service.plan_install(mapping, None, now=now)
+    assert "runtime_preflight.required" in {reason.code for reason in blocked.nodes[0].blockers}
+    record_passing_preflight(sessions, now, floor=10)
+    assert service.plan_install(mapping, None, now=now).allowed
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        node.capabilities = ["runtime.vonk.v1", "runtime.preflight.fingerprint." + "b" * 64]
+    blocked = service.plan_install(mapping, None, now=now)
+    assert "runtime_preflight.host_changed" in {reason.code for reason in blocked.nodes[0].blockers}

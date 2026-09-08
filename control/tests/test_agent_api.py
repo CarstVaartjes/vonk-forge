@@ -825,10 +825,12 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
             self.upgrade_calls.append(kwargs)
+            from .package_upgrade_fixtures import rollback_authority
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
                 package_sha256=kwargs["package_sha256"],
                 package_signature=kwargs["package_signature"],
+                rollback=rollback_authority(),
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -3462,8 +3464,10 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
         assert new is not None and new.state == "active" and new.revoked_at is None
 
 
+@pytest.mark.parametrize("with_diagnostics", [False, True])
 def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
     agent_system,
+    with_diagnostics,
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
@@ -3491,6 +3495,19 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
     }
+    if with_diagnostics:
+        import json
+        from pathlib import Path
+
+        fixture = (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/failure-diagnostics-v1.json"
+        )
+        diagnostics = json.loads(fixture.read_text())
+        diagnostics["stderr"]["text"] = (
+            "Authorization: Bearer should-never-persist\n/proc: permission denied"
+        )
+        result["result"]["diagnostics"] = diagnostics
 
     response = client.post(
         "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3502,8 +3519,23 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
         )
         parent_job = session.get(Job, claim["job_id"])
-        assert attempt.result == {"status": "failed", "error_code": "stop_failed"}
+        assert attempt.result["status"] == "failed"
+        assert attempt.result["error_code"] == "stop_failed"
+        if with_diagnostics:
+            from vonk_agent_protocol import FailureDiagnostics
+
+            typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
+            assert "/proc: permission denied" in typed.stderr.text
+            assert "should-never-persist" not in typed.model_dump_json()
         assert parent_job is not None and parent_job.status_reason == "stop_failed"
+    if with_diagnostics:
+        from vonk_control.failure_evidence import FailureEvidenceService
+
+        evidence = FailureEvidenceService(services.sessions, clock=clock)
+        assert evidence.tick()
+        content, _, bundle = evidence.read(claim["operation_id"], claim["attempt"])
+        assert "should-never-persist" not in content.decode()
+        assert "/proc: permission denied" in bundle.diagnostics.stderr.text
 
 
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
@@ -3544,6 +3576,30 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
         )
         assert attempt.state == "running"
         assert attempt.result is None
+
+
+def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(agent_system):
+    import json
+    from pathlib import Path
+
+    client, services, _, clock = agent_system
+    vectors = Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
+    request = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())["payload"]
+    job_result = json.loads((vectors / "recipe-job-run-result-v1.json").read_text())["result"]
+    services.operations.enqueue(
+        parent(services.sessions, clock).id, NODE_A, "recipe.job.run.v1", "a" * 64, request,
+    )
+    claim_response = client.post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claim_response.status_code == 200
+    claim = claim_response.json()
+    result = {key: claim[key] for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")}
+    result.update(state="failed", result=dict(job_result, exit_code=1, reason="runtime failed"))
+    response = client.post("/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    assert response.status_code == 204
+    with services.sessions() as session:
+        attempt = session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
+        assert attempt.state == "failed"
+        assert attempt.result["exit_code"] == 1
 
 
 def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
@@ -3956,6 +4012,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
 
 
 def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
+    from .package_upgrade_fixtures import source_transport
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"expected").hexdigest()
     (services.artifact_root / digest).write_bytes(b"tampered")
@@ -3974,6 +4031,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
             "package_version": "1.2.3",
             "target_binary_digest": "b" * 64,
             "target_build_digest": "sha256:" + "c" * 64,
+            **source_transport(),
         },
     )
     assert (

@@ -51,11 +51,17 @@ pub enum RecipeBuildError {
     #[error("base image OCI archive verification failed")]
     BaseImageArchive,
     #[error("Podman could not import the verified base image ({diagnostic})")]
-    BaseImageImport { diagnostic: PodmanImportDiagnostic },
+    BaseImageImport {
+        diagnostic: PodmanImportDiagnostic,
+        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+    },
     #[error("Podman imported base image evidence is invalid")]
     BaseImageInspect,
     #[error("Podman recipe image build failed ({diagnostic})")]
-    ImageBuild { diagnostic: PodmanBuildDiagnostic },
+    ImageBuild {
+        diagnostic: PodmanBuildDiagnostic,
+        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+    },
     #[error("built recipe image evidence is invalid")]
     ImageInspect,
     #[error("Podman could not export the built recipe image")]
@@ -141,18 +147,29 @@ impl RecipeBuildError {
                 "reason": self.to_string(),
                 "stage": "bounded-build-process",
             }),
-            Self::BaseImageImport { diagnostic } => serde_json::json!({
+            Self::BaseImageImport { diagnostic, logs } => serde_json::json!({
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "base-image-import",
+                "diagnostic_logs": logs,
             }),
-            Self::ImageBuild { diagnostic } => serde_json::json!({
+            Self::ImageBuild { diagnostic, logs } => serde_json::json!({
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "image-build",
+                "diagnostic_logs": logs,
             }),
             _ => serde_json::json!({"reason": self.to_string()}),
         }
+    }
+}
+
+fn sanitized_process_logs(
+    output: &crate::process::ProcessOutput,
+) -> crate::failure_evidence::FailureProcessLogs {
+    crate::failure_evidence::FailureProcessLogs {
+        stdout: crate::failure_evidence::log_tail(&output.stdout),
+        stderr: crate::failure_evidence::log_tail(&output.stderr),
     }
 }
 
@@ -192,14 +209,14 @@ pub struct RecipeBuilder<'a, R> {
     pub egress_binary: &'a Path,
 }
 
-struct PodmanBuildStaging(TempDir);
+pub(crate) struct PodmanBuildStaging(TempDir);
 
 impl PodmanBuildStaging {
-    fn create(root: &Path) -> std::io::Result<Self> {
+    pub(crate) fn create(root: &Path) -> std::io::Result<Self> {
         Builder::new().prefix("source-").tempdir_in(root).map(Self)
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         self.0.path()
     }
 }
@@ -485,6 +502,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if !output.success {
             return Err(RecipeBuildError::ImageBuild {
                 diagnostic: podman_build_diagnostic(&output),
+                logs: Some(Box::new(sanitized_process_logs(&output))),
             });
         }
         let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
@@ -620,6 +638,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             if !loaded.success {
                 return Err(RecipeBuildError::BaseImageImport {
                     diagnostic: podman_import_diagnostic(&loaded),
+                    logs: Some(Box::new(sanitized_process_logs(&loaded))),
                 });
             }
             let mut inspect_arguments = podman_storage_arguments(storage, runroot);
@@ -739,7 +758,9 @@ fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImp
     }
 }
 
-fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
+pub(crate) fn podman_build_diagnostic(
+    output: &crate::process::ProcessOutput,
+) -> PodmanBuildDiagnostic {
     let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
     evidence.extend_from_slice(&output.stdout);
     evidence.push(b'\n');
@@ -809,7 +830,10 @@ fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
             return RecipeBuildError::Process(ProcessError::Cancelled);
         }
     };
-    RecipeBuildError::BaseImageImport { diagnostic }
+    RecipeBuildError::BaseImageImport {
+        diagnostic,
+        logs: None,
+    }
 }
 
 fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
@@ -1106,7 +1130,7 @@ fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
     podman_storage_arguments_with_cgroup_manager(storage, runroot, "systemd")
 }
 
-fn podman_storage_arguments_with_cgroup_manager(
+pub(crate) fn podman_storage_arguments_with_cgroup_manager(
     storage: &Path,
     runroot: &Path,
     cgroup_manager: &str,
@@ -1192,6 +1216,36 @@ mod tests {
     use crate::process::{ProcessError, ProcessOutput};
 
     #[test]
+    fn podman_failure_retains_sanitized_final_ring_output() {
+        let output = crate::process::ProcessOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: format!(
+                "{}\nAuthorization: Bearer never-persist\npermission denied mounting proc\n",
+                "noise\n".repeat(5000)
+            )
+            .into_bytes(),
+        };
+        let error = RecipeBuildError::ImageBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Some(Box::new(super::sanitized_process_logs(&output))),
+        };
+        let body = error.failure_evidence();
+        let diagnostics = crate::failure_evidence::from_failure("recipe.build.v1", &body);
+        assert!(diagnostics.stderr.truncated);
+        assert!(diagnostics.stderr.text.contains("permission denied"));
+        assert!(
+            !serde_json::to_string(&body)
+                .unwrap()
+                .contains("never-persist")
+        );
+        assert!(matches!(
+            diagnostics.category,
+            crate::failure_evidence::FailureCategory::PlatformPolicy
+        ));
+    }
+
+    #[test]
     fn podman_build_failures_have_stable_secret_free_diagnostics() {
         for (stdout, stderr, diagnostic) in [
             (b"".as_slice(), b"".as_slice(), "nonzero-without-output"),
@@ -1238,6 +1292,7 @@ mod tests {
             });
             let error = RecipeBuildError::ImageBuild {
                 diagnostic: classified,
+                logs: None,
             };
             assert_eq!(error.failure_evidence()["stage"], "image-build");
             assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);

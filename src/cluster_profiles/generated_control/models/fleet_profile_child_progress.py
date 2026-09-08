@@ -13,6 +13,8 @@ from typing import cast
 from typing import cast, Union
 from typing import Union
 
+if TYPE_CHECKING:
+  from ..models.operation_progress import OperationProgress
 
 
 
@@ -30,12 +32,14 @@ class FleetProfileChildProgress:
             phase (FleetProfileChildProgressPhase):
             bytes_ (Union[None, Unset, int]):
             node_ids (Union[Unset, list[str]]):
+            operation (Union['OperationProgress', None, Unset]):
             total_bytes (Union[None, Unset, int]):
      """
 
     phase: FleetProfileChildProgressPhase
     bytes_: Union[None, Unset, int] = UNSET
     node_ids: Union[Unset, list[str]] = UNSET
+    operation: Union['OperationProgress', None, Unset] = UNSET
     total_bytes: Union[None, Unset, int] = UNSET
 
 
@@ -43,6 +47,7 @@ class FleetProfileChildProgress:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.operation_progress import OperationProgress
         phase: str = self.phase
 
         bytes_: Union[None, Unset, int]
@@ -56,6 +61,14 @@ class FleetProfileChildProgress:
             node_ids = self.node_ids
 
 
+
+        operation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.operation, Unset):
+            operation = UNSET
+        elif isinstance(self.operation, OperationProgress):
+            operation = self.operation.to_dict()
+        else:
+            operation = self.operation
 
         total_bytes: Union[None, Unset, int]
         if isinstance(self.total_bytes, Unset):
@@ -73,6 +86,8 @@ class FleetProfileChildProgress:
             field_dict["bytes"] = bytes_
         if node_ids is not UNSET:
             field_dict["node_ids"] = node_ids
+        if operation is not UNSET:
+            field_dict["operation"] = operation
         if total_bytes is not UNSET:
             field_dict["total_bytes"] = total_bytes
 
@@ -82,6 +97,7 @@ class FleetProfileChildProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.operation_progress import OperationProgress
         d = dict(src_dict)
         phase = check_fleet_profile_child_progress_phase(d.pop("phase"))
 
@@ -101,6 +117,26 @@ class FleetProfileChildProgress:
         node_ids = cast(list[str], d.pop("node_ids", UNSET))
 
 
+        def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                operation_type_0 = OperationProgress.from_dict(data)
+
+
+
+                return operation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['OperationProgress', None, Unset], data)
+
+        operation = _parse_operation(d.pop("operation", UNSET))
+
+
         def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
             if data is None:
                 return data
@@ -115,6 +151,7 @@ class FleetProfileChildProgress:
             phase=phase,
             bytes_=bytes_,
             node_ids=node_ids,
+            operation=operation,
             total_bytes=total_bytes,
         )
 

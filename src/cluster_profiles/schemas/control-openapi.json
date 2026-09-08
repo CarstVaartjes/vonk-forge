@@ -1,6 +1,100 @@
 {
   "components": {
     "schemas": {
+      "AgentDeploymentEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "binary_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binary Sha256"
+          },
+          "boundary": {
+            "const": "agent_deployment",
+            "default": "agent_deployment",
+            "title": "Boundary",
+            "type": "string"
+          },
+          "build_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Digest"
+          },
+          "connectivity": {
+            "enum": [
+              "recent",
+              "offline",
+              "unknown"
+            ],
+            "title": "Connectivity",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "package_evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "package_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Sha256"
+          },
+          "semantic_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Version"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "display_name",
+          "state",
+          "connectivity",
+          "package_evidence",
+          "evidence"
+        ],
+        "title": "AgentDeploymentEvidence",
+        "type": "object"
+      },
       "AgentFailureResult": {
         "additionalProperties": false,
         "properties": {
@@ -16,6 +110,16 @@
               }
             ],
             "title": "Diagnostic"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "error_code": {
             "anyOf": [
@@ -60,6 +164,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AgentOperation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "package_activation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PackageActivationReceipt"
               },
               {
                 "type": "null"
@@ -163,6 +277,7 @@
       },
       "AgentOperation": {
         "enum": [
+          "runtime.preflight.v1",
           "agent.upgrade.v1",
           "artifact.distribution.v1",
           "recipe.build.v1",
@@ -3232,6 +3347,107 @@
         "title": "ControllerAssetState",
         "type": "object"
       },
+      "DeploymentModelIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_key": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Key"
+          },
+          "content_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "publisher": {
+            "title": "Publisher",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "selection_id": {
+            "title": "Selection Id",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection_id",
+          "publisher",
+          "slug",
+          "content_sha256",
+          "repository",
+          "revision"
+        ],
+        "title": "DeploymentModelIdentity",
+        "type": "object"
+      },
+      "DeploymentProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDeploymentEvidence"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "platform": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformBoundary"
+            },
+            "title": "Platform",
+            "type": "array"
+          },
+          "recipe_library": {
+            "$ref": "#/components/schemas/RecipeLibraryEvidence"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workloads": {
+            "items": {
+              "$ref": "#/components/schemas/WorkloadProvenance"
+            },
+            "title": "Workloads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "platform",
+          "recipe_library",
+          "agents",
+          "workloads"
+        ],
+        "title": "DeploymentProvenance",
+        "type": "object"
+      },
       "DistributionAssignment": {
         "additionalProperties": false,
         "description": "Controller authorization for one node, generation and object set.",
@@ -3843,6 +4059,157 @@
         "title": "EnumParameter",
         "type": "object"
       },
+      "EvidenceAge": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "freshness": {
+            "default": "unknown",
+            "enum": [
+              "current",
+              "stale",
+              "unknown"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "EvidenceAge",
+        "type": "object"
+      },
+      "EvidenceContext": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 0.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "authority_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authority Revision"
+          },
+          "kind": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "omitted_node_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Node Count",
+            "type": "integer"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Digest"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Digest"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "source": {
+            "enum": [
+              "agent",
+              "controller"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "attempt",
+          "kind",
+          "node_ids",
+          "updated_at",
+          "source"
+        ],
+        "title": "EvidenceContext",
+        "type": "object"
+      },
       "ExecutionMount": {
         "additionalProperties": false,
         "description": "The platform-owned mount used by one selected model file.",
@@ -3870,6 +4237,218 @@
           "read_only"
         ],
         "title": "ExecutionMount",
+        "type": "object"
+      },
+      "FailureDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "platform-policy",
+              "capacity",
+              "network",
+              "digest",
+              "timeout",
+              "runtime",
+              "unknown"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "collected_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Collected At",
+            "type": "string"
+          },
+          "collector_errors": {
+            "items": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Collector Errors",
+            "type": "array"
+          },
+          "phase": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Phase",
+            "type": "string"
+          },
+          "preflight": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Preflight",
+            "type": "array"
+          },
+          "sandbox": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 12,
+            "title": "Sandbox",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stderr": {
+            "$ref": "#/components/schemas/FailureLogTail"
+          },
+          "stdout": {
+            "$ref": "#/components/schemas/FailureLogTail"
+          },
+          "storage": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Storage",
+            "type": "array"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "collected_at",
+          "phase",
+          "category",
+          "stdout",
+          "stderr",
+          "versions",
+          "sandbox",
+          "storage",
+          "preflight",
+          "collector_errors"
+        ],
+        "title": "FailureDiagnostics",
+        "type": "object"
+      },
+      "FailureEvidenceBundle": {
+        "additionalProperties": false,
+        "properties": {
+          "collected_at": {
+            "title": "Collected At",
+            "type": "string"
+          },
+          "collector_errors": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Collector Errors",
+            "type": "array"
+          },
+          "context": {
+            "$ref": "#/components/schemas/EvidenceContext"
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/FailureDiagnostics"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationFailureEvidence"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "summary": {
+            "maxLength": 512,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context",
+          "collected_at",
+          "summary",
+          "diagnostics",
+          "receipt",
+          "collector_errors"
+        ],
+        "title": "FailureEvidenceBundle",
+        "type": "object"
+      },
+      "FailureLogTail": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Bytes"
+          },
+          "dropped_lines": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Lines"
+          },
+          "text": {
+            "maxLength": 2048,
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "truncated",
+          "dropped_bytes",
+          "dropped_lines"
+        ],
+        "title": "FailureLogTail",
+        "type": "object"
+      },
+      "FailureProperty": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 256,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "FailureProperty",
         "type": "object"
       },
       "FleetNode": {
@@ -4719,6 +5298,16 @@
             "maxItems": 32,
             "title": "Node Ids",
             "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "phase": {
             "enum": [
@@ -7285,6 +7874,16 @@
             "title": "Failed",
             "type": "integer"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "running": {
             "minimum": 0.0,
             "title": "Running",
@@ -8951,6 +9550,68 @@
         "title": "LifecycleCodeFailureResult",
         "type": "object"
       },
+      "LifecyclePreflightCheckpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "maxProperties": 33,
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "maximum": 3.0,
+                "minimum": 1.0,
+                "type": "integer"
+              }
+            },
+            "title": "Attempts",
+            "type": "object"
+          },
+          "pending_job_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Job Id"
+          },
+          "pending_node_id": {
+            "anyOf": [
+              {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Node Id"
+          },
+          "phase_index": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Phase Index",
+            "type": "integer"
+          },
+          "receipts": {
+            "maxProperties": 33,
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "$ref": "#/components/schemas/RuntimePreflightResult"
+              }
+            },
+            "title": "Receipts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "phase_index"
+        ],
+        "title": "LifecyclePreflightCheckpoint",
+        "type": "object"
+      },
       "ManagedCatalogStaleRecipe": {
         "additionalProperties": false,
         "properties": {
@@ -10277,19 +10938,6 @@
       "ModelCacheOperationProgress": {
         "additionalProperties": false,
         "properties": {
-          "bytes_per_second": {
-            "anyOf": [
-              {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bytes Per Second"
-          },
           "completed_artifacts": {
             "minimum": 0.0,
             "title": "Completed Artifacts",
@@ -10312,19 +10960,6 @@
             "title": "Downloaded Bytes",
             "type": "integer"
           },
-          "eta_seconds": {
-            "anyOf": [
-              {
-                "maximum": 1000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Eta Seconds"
-          },
           "expected_bytes": {
             "anyOf": [
               {
@@ -10337,13 +10972,8 @@
             ],
             "title": "Expected Bytes"
           },
-          "members": {
-            "items": {
-              "$ref": "#/components/schemas/OperationMemberProgress"
-            },
-            "maxItems": 1024,
-            "title": "Members",
-            "type": "array"
+          "measurement": {
+            "$ref": "#/components/schemas/OperationProgress"
           },
           "phase": {
             "enum": [
@@ -10378,7 +11008,8 @@
           "phase",
           "completed_artifacts",
           "total_artifacts",
-          "downloaded_bytes"
+          "downloaded_bytes",
+          "measurement"
         ],
         "title": "ModelCacheOperationProgress",
         "type": "object"
@@ -10815,6 +11446,13 @@
               }
             ],
             "title": "Updated At"
+          },
+          "upstream_revisions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelCacheUpstreamRevision"
+            },
+            "title": "Upstream Revisions",
+            "type": "array"
           }
         },
         "required": [
@@ -10875,6 +11513,64 @@
           "total"
         ],
         "title": "ModelCacheUpdatesResponse",
+        "type": "object"
+      },
+      "ModelCacheUpstreamRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "latest_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{40,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Revision"
+          },
+          "pinned_revision": {
+            "pattern": "^[0-9a-f]{40,64}$",
+            "title": "Pinned Revision",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "current",
+              "update-available",
+              "check-failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "pinned_revision",
+          "status",
+          "checked_at"
+        ],
+        "title": "ModelCacheUpstreamRevision",
         "type": "object"
       },
       "ModelCapabilities": {
@@ -12325,6 +13021,22 @@
         "additionalProperties": false,
         "description": "Progress for one node, rank, shard, or other operation member.",
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "waiting",
+                  "possibly_stalled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity"
+          },
           "bytes_per_second": {
             "anyOf": [
               {
@@ -12343,6 +13055,30 @@
             "minimum": 0.0,
             "title": "Completed Bytes",
             "type": "integer"
+          },
+          "completed_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed Items"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
           },
           "eta_seconds": {
             "anyOf": [
@@ -12370,6 +13106,18 @@
             ],
             "title": "Kind"
           },
+          "last_progress_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Progress At"
+          },
           "member_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -12388,11 +13136,36 @@
             ],
             "title": "Object Sha256"
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "phase": {
             "maxLength": 80,
             "minLength": 1,
             "title": "Phase",
             "type": "string"
+          },
+          "smoothed_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smoothed Bytes Per Second"
           },
           "state": {
             "default": "running",
@@ -12412,6 +13185,18 @@
               }
             ],
             "title": "Total Bytes"
+          },
+          "total_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Items"
           }
         },
         "required": [
@@ -12425,6 +13210,22 @@
         "additionalProperties": false,
         "description": "Canonical durable progress payload shared by Controller and agents.",
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "waiting",
+                  "possibly_stalled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity"
+          },
           "bytes_per_second": {
             "anyOf": [
               {
@@ -12454,6 +13255,30 @@
             "title": "Completed Bytes",
             "type": "integer"
           },
+          "completed_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed Items"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
+          },
           "eta_seconds": {
             "anyOf": [
               {
@@ -12480,6 +13305,18 @@
             ],
             "title": "Kind"
           },
+          "last_progress_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Progress At"
+          },
           "members": {
             "items": {
               "$ref": "#/components/schemas/OperationMemberProgress"
@@ -12500,11 +13337,36 @@
             ],
             "title": "Object Sha256"
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "phase": {
             "maxLength": 80,
             "minLength": 1,
             "title": "Phase",
             "type": "string"
+          },
+          "smoothed_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smoothed Bytes Per Second"
           },
           "total_bytes": {
             "anyOf": [
@@ -12522,6 +13384,18 @@
             "default": false,
             "title": "Total Bytes Known",
             "type": "boolean"
+          },
+          "total_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Items"
           }
         },
         "required": [
@@ -13041,6 +13915,100 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_nonce": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Attempt Nonce",
+            "type": "string"
+          },
+          "candidate_binary_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Binary Sha256",
+            "type": "string"
+          },
+          "candidate_package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Package Sha256",
+            "type": "string"
+          },
+          "candidate_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+            "title": "Candidate Version",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 1.0,
+            "title": "Created At",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "outcome": {
+            "pattern": "^[a-z_]{1,128}$",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "armed",
+              "activation_failed",
+              "acknowledged",
+              "rolling_back",
+              "rolled_back",
+              "rollback_failed"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_binary_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Binary Sha256",
+            "type": "string"
+          },
+          "source_package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Package Sha256",
+            "type": "string"
+          },
+          "source_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+            "title": "Source Version",
+            "type": "string"
+          },
+          "updated_at": {
+            "minimum": 1.0,
+            "title": "Updated At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "node_id",
+          "source_package_sha256",
+          "source_version",
+          "source_binary_sha256",
+          "candidate_package_sha256",
+          "candidate_version",
+          "candidate_binary_sha256",
+          "attempt_nonce",
+          "phase",
+          "created_at",
+          "updated_at",
+          "outcome"
+        ],
+        "title": "PackageActivationReceipt",
+        "type": "object"
+      },
       "ParameterDefinition": {
         "discriminator": {
           "mapping": {
@@ -13085,6 +14053,48 @@
             "type": "string"
           }
         ]
+      },
+      "PhysicalAcceptanceEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "const": "physical_acceptance",
+            "default": "physical_acceptance",
+            "title": "Boundary",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "evidence_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Sha256"
+          },
+          "state": {
+            "enum": [
+              "accepted",
+              "failed",
+              "not_qualified",
+              "identity_mismatch"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "evidence"
+        ],
+        "title": "PhysicalAcceptanceEvidence",
+        "type": "object"
       },
       "PlacementEvidenceCounts": {
         "additionalProperties": false,
@@ -13628,6 +14638,76 @@
         "title": "PlanReason",
         "type": "object"
       },
+      "PlatformBoundary": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "enum": [
+              "repository",
+              "publication",
+              "controller_deployment"
+            ],
+            "title": "Boundary",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Digest"
+          },
+          "manifest_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest Sha256"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "state": {
+            "enum": [
+              "observed",
+              "unknown",
+              "repository_not_published",
+              "publication_not_deployed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "boundary",
+          "state",
+          "evidence"
+        ],
+        "title": "PlatformBoundary",
+        "type": "object"
+      },
       "PreparationReason": {
         "additionalProperties": false,
         "properties": {
@@ -13761,6 +14841,130 @@
           "changes"
         ],
         "title": "ProposalRequest",
+        "type": "object"
+      },
+      "RankProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "identity_agreement": {
+            "enum": [
+              "match",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Identity Agreement",
+            "type": "string"
+          },
+          "installation_evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "installation_evidence_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Evidence Sha256"
+          },
+          "installation_state": {
+            "title": "Installation State",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observation_receipt_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Receipt Sha256"
+          },
+          "observed_artifact_set_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Artifact Set Sha256"
+          },
+          "observed_image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Image Digest"
+          },
+          "observed_recipe_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Recipe Sha256"
+          },
+          "observed_run_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Run Generation"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "runtime_evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "runtime_state": {
+            "title": "Runtime State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "installation_state",
+          "installation_evidence",
+          "runtime_state",
+          "identity_agreement",
+          "runtime_evidence"
+        ],
+        "title": "RankProvenance",
         "type": "object"
       },
       "RecipeBenchmark": {
@@ -15377,6 +16581,16 @@
       "RecipeJobRunResult": {
         "additionalProperties": false,
         "properties": {
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "evidence": {
             "$ref": "#/components/schemas/RecipeJobEvidence"
           },
@@ -15530,6 +16744,47 @@
           "kind"
         ],
         "title": "RecipeJobSettings",
+        "type": "object"
+      },
+      "RecipeLibraryEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceAge"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "evidence"
+        ],
+        "title": "RecipeLibraryEvidence",
         "type": "object"
       },
       "RecipeLifecycle": {
@@ -18799,6 +20054,69 @@
         "title": "RunSwitchCachedTransferResult",
         "type": "object"
       },
+      "RunSwitchCancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_key",
+          "reason"
+        ],
+        "title": "RunSwitchCancelRequest",
+        "type": "object"
+      },
+      "RunSwitchCancellation": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key",
+          "actor",
+          "reason",
+          "requested_at"
+        ],
+        "title": "RunSwitchCancellation",
+        "type": "object"
+      },
       "RunSwitchChildProgress": {
         "additionalProperties": false,
         "description": "Progress nested in a durable child receipt.",
@@ -18816,6 +20134,16 @@
             "maxItems": 32,
             "title": "Members",
             "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "phase": {
             "anyOf": [
@@ -19574,6 +20902,16 @@
         "additionalProperties": false,
         "description": "Exact durable result tree stored in ``Job.result``.",
         "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "child_operation_id": {
             "anyOf": [
               {
@@ -19709,6 +21047,29 @@
             "title": "Members",
             "type": "array"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_phase_index": {
+            "anyOf": [
+              {
+                "maximum": 31.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Phase Index"
+          },
           "phase": {
             "anyOf": [
               {
@@ -19788,6 +21149,16 @@
             },
             "title": "Phase Results",
             "type": "array"
+          },
+          "preflight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LifecyclePreflightCheckpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "retry_attempt": {
             "anyOf": [
@@ -20385,6 +21756,16 @@
             "title": "Members",
             "type": "array"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "phase": {
             "anyOf": [
               {
@@ -20423,6 +21804,7 @@
               "running",
               "succeeded",
               "failed",
+              "cancelled",
               "unknown"
             ],
             "title": "State",
@@ -21565,6 +22947,92 @@
           "spark_coverage"
         ],
         "title": "RuntimeImageStorageImpact",
+        "type": "object"
+      },
+      "RuntimePreflightFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+            "title": "Capability",
+            "type": "string"
+          },
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "status",
+          "code"
+        ],
+        "title": "RuntimePreflightFinding",
+        "type": "object"
+      },
+      "RuntimePreflightResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "exclusiveMaximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimePreflightFinding"
+            },
+            "maxItems": 96,
+            "title": "Findings",
+            "type": "array"
+          },
+          "fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "observed_at": {
+            "maximum": 1.8446744073709552e+19,
+            "minimum": 0.0,
+            "title": "Observed At",
+            "type": "integer"
+          },
+          "request_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Request Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "fingerprint",
+          "request_sha256",
+          "observed_at",
+          "duration_ms",
+          "cached",
+          "findings"
+        ],
+        "title": "RuntimePreflightResult",
         "type": "object"
       },
       "SourceBundleResponse": {
@@ -24688,6 +26156,186 @@
         "title": "UninstallRequest",
         "type": "object"
       },
+      "WorkloadProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Input Sha256"
+          },
+          "current_mapping_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Mapping Generation"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "installation_id": {
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installation_state": {
+            "title": "Installation State",
+            "type": "string"
+          },
+          "mapping_agreement": {
+            "enum": [
+              "match",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Mapping Agreement",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentModelIdentity"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "physical_acceptance": {
+            "$ref": "#/components/schemas/PhysicalAcceptanceEvidence"
+          },
+          "rank_agreement": {
+            "enum": [
+              "match",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Rank Agreement",
+            "type": "string"
+          },
+          "ranks": {
+            "items": {
+              "$ref": "#/components/schemas/RankProvenance"
+            },
+            "title": "Ranks",
+            "type": "array"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_publisher": {
+            "title": "Recipe Publisher",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "recipe_revision_number": {
+            "title": "Recipe Revision Number",
+            "type": "integer"
+          },
+          "recipe_slug": {
+            "title": "Recipe Slug",
+            "type": "string"
+          },
+          "run_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Generation"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "run_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run State"
+          },
+          "source_bundle_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Sha256"
+          }
+        },
+        "required": [
+          "installation_id",
+          "installation_state",
+          "recipe_revision_id",
+          "recipe_revision_number",
+          "recipe_publisher",
+          "recipe_slug",
+          "recipe_content_sha256",
+          "image_digest",
+          "models",
+          "mapping_id",
+          "mapping_generation",
+          "mapping_agreement",
+          "rank_agreement",
+          "ranks",
+          "physical_acceptance"
+        ],
+        "title": "WorkloadProvenance",
+        "type": "object"
+      },
       "vonk_control__compiled_execution_plan__CompiledExecutionPlan": {
         "additionalProperties": false,
         "description": "Internal verified execution plan consumed by distribution/install.",
@@ -26710,6 +28358,59 @@
           }
         ],
         "summary": "Submit Change"
+      }
+    },
+    "/api/v1/deployment-provenance": {
+      "get": {
+        "operationId": "getDeploymentProvenance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentProvenance"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Deployment Provenance"
       }
     },
     "/api/v1/endpoints/{alias}": {
@@ -31055,6 +32756,16 @@
           },
           {
             "in": "query",
+            "name": "check_upstream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Check Upstream",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "cursor",
             "required": false,
             "schema": {
@@ -32007,6 +33718,90 @@
           }
         ],
         "summary": "Operation View"
+      }
+    },
+    "/api/v1/operations/{operation_id}/evidence": {
+      "get": {
+        "operationId": "getOperationEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Attempt",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailureEvidenceBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Evidence"
       }
     },
     "/api/v1/proposals": {
@@ -33112,6 +34907,111 @@
           }
         ],
         "summary": "Get Run Switch"
+      }
+    },
+    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+      "post": {
+        "operationId": "cancelRecipeRunSwitchOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSwitchCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cancel Run Switch"
       }
     },
     "/api/v1/recipes/run-switches/{operation_id}/retry": {

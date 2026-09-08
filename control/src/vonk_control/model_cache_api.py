@@ -34,6 +34,7 @@ from .model_cache_contract import (
     ModelCacheRetryRequest,
     ModelCacheUpdatesResponse,
 )
+from .model_cache_progress import project_cache_progress
 from .operation_api import (
     OperationApiServices,
     OperationListPage,
@@ -135,7 +136,7 @@ def install_model_cache_routes(
                 "attempt": operation.attempt,
                 "artifact_set_sha256": operation.artifact_set_sha256,
                 "plan_digest": operation.plan_digest,
-                "progress": dict(operation.progress),
+                "progress": dict(operation.progress, measurement=project_cache_progress(operation.progress)),
                 "result": result,
                 "failure": failure,
                 "created_at": operation.created_at,
@@ -402,11 +403,12 @@ def install_model_cache_routes(
     def get_updates(
         artifact_set_sha256: Annotated[str | None, Query(pattern=_DIGEST)] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 100,
+        check_upstream: bool = False,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
         _actor: Actor = authenticated,
     ) -> ModelCacheUpdatesResponse:
         try:
-            context = {"limit": limit, "artifact_set_sha256": artifact_set_sha256}
+            context = {"limit": limit, "artifact_set_sha256": artifact_set_sha256, "check_upstream": check_upstream}
             boundary = decode_cursor(
                 cursor,
                 resource="model-cache-updates",
@@ -416,6 +418,7 @@ def install_model_cache_routes(
             result = cache().discover_updates(
                 artifact_set_sha256=artifact_set_sha256,
                 limit=limit,
+                check_upstream=check_upstream,
                 boundary=boundary,
             )
             return ModelCacheUpdatesResponse(
@@ -654,39 +657,7 @@ class ModelCacheOperationProvider:
 
     @staticmethod
     def _progress(value: Mapping[str, object]) -> dict[str, object]:
-        """Map cache-specific counters to the strict global progress shape."""
-        raw_phase = value.get("phase")
-        phase = {
-            "queued": "prepare",
-            "downloading": "download",
-            "verifying": "verify",
-            "reclaiming": "cleanup",
-            "completed": "final_verify",
-            "failed": "final_verify",
-        }.get(raw_phase, raw_phase)
-        if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
-            phase = "prepare"
-        progress: dict[str, object] = {"phase": phase}
-        completed = value.get("downloaded_bytes")
-        total = value.get("expected_bytes")
-        if isinstance(completed, int) and not isinstance(completed, bool) and completed >= 0:
-            progress["completed_bytes"] = completed
-        if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
-            progress["total_bytes"] = total
-            progress["total_bytes_known"] = True
-        else:
-            progress["total_bytes_known"] = False
-        completed_items = value.get("completed_artifacts")
-        current_key = value.get("current_artifact_key")
-        if isinstance(completed_items, int) and not isinstance(completed_items, bool) and completed_items >= 0:
-            checkpoint: dict[str, object] = {
-                "key": "artifact-set",
-                "sequence": completed_items,
-            }
-            if isinstance(current_key, str) and current_key:
-                checkpoint["cursor"] = current_key[:512]
-            progress["checkpoint"] = checkpoint
-        return progress
+        return project_cache_progress(value)
 
 def model_cache_operation_provider(
     service: ModelCacheService,

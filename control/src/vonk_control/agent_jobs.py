@@ -27,6 +27,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
+from .failure_evidence import safe_text, sanitize_diagnostics
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -39,6 +40,7 @@ from .models import (
 )
 from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
+from .operation_progress import observe_progress, progress_write_due
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
@@ -83,6 +85,7 @@ _NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
+        AgentOperation.RUNTIME_PREFLIGHT.value,
         "recipe.model-uninstall.v1",
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
@@ -541,6 +544,7 @@ class AgentJobService:
                 )
                 if active_mutation is not None:
                     return None
+            resumable_progress = None
             if operation.current_attempt:
                 previous = session.scalar(
                     select(AgentOperationAttempt)
@@ -550,6 +554,11 @@ class AgentJobService:
                     )
                     .with_for_update(of=AgentOperationAttempt)
                 )
+                if previous is not None and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                    resumable_progress = (
+                        None if previous.progress is None
+                        else validate_progress_update(None, previous.progress)
+                    )
                 if previous is not None and previous.state in {
                     "running",
                     "waiting-for-operator",
@@ -563,6 +572,19 @@ class AgentJobService:
                 self._project_artifact_job_expiry(session, operation, now)
                 self._aggregate_parent(session, operation.parent_job_id)
                 return None
+            if operation.kind == AgentOperation.AGENT_UPGRADE.value:
+                import secrets
+
+                from vonk_agent_protocol.contracts import AgentUpgradePayload
+                payload = AgentUpgradePayload.model_validate(operation.payload)
+                if runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+                    return None
+                # A new claim owns a fresh watchdog authority. The retry query
+                # already enforced the full previous rollback safety fence.
+                document = payload.model_dump(mode="json")
+                document["rollback"].update(attempt_nonce=secrets.token_hex(32), activation_deadline=int(now.timestamp()) + 900)
+                operation.payload = AgentUpgradePayload.model_validate(document).model_dump(mode="json")
+                operation.payload_digest = hashlib.sha256(canonical_message(operation.payload)).hexdigest()
             operation.current_attempt += 1
             operation.state = "running"
             operation.updated_at = now
@@ -575,6 +597,7 @@ class AgentJobService:
                 lease_deadline=deadline,
                 agent_certificate_serial=certificate_serial,
                 state="running",
+                progress=resumable_progress,
             )
             session.add(attempt)
             return AgentClaim(
@@ -625,7 +648,35 @@ class AgentJobService:
             .execution_options(populate_existing=True)
             .limit(1)
         )
-        if operation is None or (
+        from vonk_agent_protocol.contracts import AgentUpgradePayload
+
+        from .package_activation import matches_receipt
+        receipt = runtime_identity.package_activation
+        if operation is None or operation.current_attempt == 0 or receipt is None:
+            return
+        payload = AgentUpgradePayload.model_validate(operation.payload)
+        if not matches_receipt(receipt, payload, node_id):
+            return
+        if receipt.phase in {"rolled_back", "rollback_failed"}:
+            if receipt.phase == "rolled_back" and runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+                return
+            operation.state = "waiting-for-operator"
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.updated_at = now
+            current = session.scalar(select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt))
+            if current is not None:
+                current.state = "failed"
+                current.result = {"reason": "agent package " + receipt.phase, "package_activation": receipt.model_dump(mode="json")}
+            parent = session.get(Job, operation.parent_job_id)
+            if parent is not None:
+                parent.state = "waiting-for-operator"
+                parent.status_reason = "Spark package " + receipt.phase + "; rollout stopped"
+                parent.updated_at = now
+            return
+        if receipt.phase != "acknowledged" or (
             runtime_identity.build_digest
             != operation.payload.get("target_build_digest")
             or runtime_identity.binary_digest
@@ -642,6 +693,7 @@ class AgentJobService:
             "package_version": operation.payload["package_version"],
             "self_test_passed": True,
             "status": "upgraded",
+            "activation_receipt": receipt.model_dump(mode="json"),
         }
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -651,23 +703,8 @@ class AgentJobService:
             )
             .with_for_update(of=AgentOperationAttempt)
         )
-        if operation.state == "queued" and operation.current_attempt == 0:
-            operation.current_attempt = 1
-            attempt = AgentOperationAttempt(
-                operation_id=operation.id,
-                attempt=1,
-                fence=str(uuid.uuid4()),
-                lease_deadline=now,
-                agent_certificate_serial=certificate_serial,
-                state="succeeded",
-                result=_document(evidence),
-            )
-            session.add(attempt)
-        elif attempt is None or attempt.state not in {
-            "running",
-            "waiting-for-operator",
-            "expired",
-            "failed",
+        if attempt is None or attempt.state not in {
+            "running", "waiting-for-operator", "expired", "failed",
         }:
             return
         message = AgentResult(
@@ -926,13 +963,24 @@ class AgentJobService:
                 progress=progress,
             )
             try:
-                attempt.progress = validate_progress_update(
-                    attempt.progress, message.progress
-                )
+                current_progress = dict(message.progress)
+                if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
+                    # A restarted transfer walks already durable objects again.
+                    # Replayed offsets are not loss of retained operation bytes.
+                    for key in ("completed_bytes", "completed_items"):
+                        if key in current_progress and key in attempt.progress:
+                            current_progress[key] = max(current_progress[key], attempt.progress[key])
+                validated = validate_progress_update(attempt.progress, current_progress)
+                write_progress = progress_write_due(attempt.progress, validated, _aware(now))
+                if write_progress:
+                    attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
             except (TypeError, ValueError) as error:
                 raise ValueError(f"operation progress is invalid: {error}") from error
-            attempt.lease_deadline = deadline
-            operation.updated_at = now
+            if write_progress:
+                attempt.lease_deadline = deadline
+                operation.updated_at = now
+            else:
+                deadline = _aware(attempt.lease_deadline)
             parent = session.get(Job, operation.parent_job_id)
             cancel_requested = bool(
                 parent is not None
@@ -946,7 +994,7 @@ class AgentJobService:
                 attempt=message.attempt,
                 fence=message.fence,
                 node_id=message.node_id,
-                deadline=message.deadline,
+                deadline=deadline,
                 cancel_requested=cancel_requested,
             )
 
@@ -1035,13 +1083,45 @@ class AgentJobService:
             )
             if state in {"failed", "waiting-for-operator"}:
                 try:
-                    message_result = sanitize_failure_evidence(message.result)
+                    raw_result = _document(message.result)
+                    diagnostics = raw_result.pop("diagnostics", None)
+                    if (
+                        operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                        and "exit_code" in raw_result
+                    ):
+                        # Preserve the typed output manifest and process receipt.
+                        # Generic log truncation must not rewrite their structure.
+                        message_result = raw_result
+                        if isinstance(message_result.get("reason"), str):
+                            message_result["reason"] = safe_text(
+                                message_result["reason"]
+                            )
+                    else:
+                        message_result = sanitize_failure_evidence(raw_result)
+                    if diagnostics is not None:
+                        message_result["diagnostics"] = sanitize_diagnostics(
+                            diagnostics
+                        ).model_dump(mode="json")
+                    message = AgentResult.model_validate(
+                        {
+                            **message.model_dump(mode="json"),
+                            "result": message_result,
+                        }
+                    )
                 except (TypeError, ValueError) as error:
                     raise ValueError(
                         f"operation failure evidence is invalid: {error}"
                     ) from error
             else:
                 message_result = _document(message.result)
+            if state == "succeeded" and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                # Final authoritative evidence closes a last sample that may
+                # have been coalesced immediately before result publication.
+                final_progress = {"phase": "completed", "completed_bytes": message_result["downloaded_bytes"]}
+                if attempt.progress and attempt.progress.get("total_items") is not None:
+                    final_progress["completed_items"] = attempt.progress["total_items"]
+                final_progress = validate_progress_update(attempt.progress, final_progress)
+                attempt.progress = observe_progress(attempt.progress, final_progress, _aware(now))
             attempt.result = message_result
             attempt.state = state
             operation.state = state
@@ -1187,7 +1267,11 @@ class AgentJobService:
             not isinstance(value, str) or not value for value in values
         ):
             raise ValueError("agent capabilities are invalid")
-        return tuple(sorted(set(values) & _KNOWN_CAPABILITIES))
+        return tuple(sorted({
+            value for value in values
+            if value in _KNOWN_CAPABILITIES
+            or re.fullmatch(r"runtime\.preflight\.fingerprint\.[0-9a-f]{64}", value)
+        }))
 
     @staticmethod
     def _validate_agent_contract(

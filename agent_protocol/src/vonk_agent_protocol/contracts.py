@@ -18,10 +18,12 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import (
     BaseModel,
     Field,
+    TypeAdapter,
     ValidationError,
     model_validator,
 )
 
+from .failure_evidence import FailureDiagnostics
 from .wire_model import OperationProgress, WireModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
@@ -112,6 +114,7 @@ DigestText = Annotated[
 
 
 class AgentOperation(StrEnum):
+    RUNTIME_PREFLIGHT = "runtime.preflight.v1"
     AGENT_UPGRADE = "agent.upgrade.v1"
     ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     RECIPE_BUILD = "recipe.build.v1"
@@ -138,9 +141,15 @@ class ArtifactDistributionPayload(WireModel):
         return self
 
 
+from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority
+
+
 class AgentUpgradePayload(WireModel):
     """Signed package authority for the current agent upgrade operation."""
 
+    rollback: PackageRollbackAuthority
+    source_package_url: str = Field(pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$")
+    source_package_bytes: int = Field(strict=True, ge=1, le=1024**3)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(strict=True, ge=1, le=1024**3)
     package_sha256: DigestText
@@ -173,6 +182,7 @@ class AgentUpgradeResult(WireModel):
     ]
     self_test_passed: Literal[True]
     status: Literal["upgraded"]
+    activation_receipt: PackageActivationReceipt
 
 
 class _RecipeStartEvidenceCommon(WireModel):
@@ -266,6 +276,8 @@ class ArtifactDistributionResult(WireModel):
 
 
 class AgentFailureResult(WireModel):
+    diagnostics: FailureDiagnostics | None = None
+    package_activation: PackageActivationReceipt | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)
     error_code: str | None = Field(default=None, min_length=1, max_length=128)
     summary: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -448,7 +460,7 @@ def _validate_safe_keys(
             )
             or (
                 operation is AgentOperation.AGENT_UPGRADE
-                and path == ("package_url",)
+                and path in {("package_url",), ("source_package_url",)}
                 and AGENT_PACKAGE_URL.fullmatch(value) is not None
             )
             or (
@@ -563,6 +575,18 @@ def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
 
 
 def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
+    # These declared leaves are inert captured observations, never authority.
+    # Their enclosing Pydantic model enforces the complete diagnostic byte bound.
+    if path in {("diagnostics", "stdout", "text"), ("diagnostics", "stderr", "text")}:
+        return len(value) <= 2048 and "\x00" not in value
+    if (
+        len(path) == 4
+        and path[0] == "diagnostics"
+        and path[1] in {"versions", "sandbox", "storage", "preflight"}
+        and isinstance(path[2], int)
+        and path[3] == "value"
+    ):
+        return len(value) <= 256 and "\x00" not in value
     if path in {("endpoint",), ("evidence", "endpoint")}:
         return _recipe_endpoint(value)
     if path == ("evidence", "model_identity"):
@@ -796,8 +820,11 @@ from .recipe_operations import (
     RecipeUninstallPayload,
     RecipeUninstallResult,
 )
+from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
 
 AgentPayload = (
+    RuntimePreflightRequest
+    |
     AgentUpgradePayload
     | ArtifactDistributionPayload
     | RecipeBuildRequest
@@ -810,6 +837,8 @@ AgentPayload = (
     | RecipeModelCleanupPayload
 )
 AgentResultPayload = (
+    RuntimePreflightResult
+    |
     AgentInstallResult
     | RecipeStartResult
     | RecipeStopResult
@@ -823,6 +852,7 @@ AgentResultPayload = (
     | AgentUpgradeResult
 )
 PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.RUNTIME_PREFLIGHT: RuntimePreflightRequest,
     AgentOperation.AGENT_UPGRADE: AgentUpgradePayload,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
     AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
@@ -840,6 +870,7 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
 # payload registry so Controller ingress can resolve the stored operation and
 # validate the exact result graph before accepting it.
 RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.RUNTIME_PREFLIGHT: RuntimePreflightResult,
     AgentOperation.AGENT_UPGRADE: AgentUpgradeResult,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
     AgentOperation.RECIPE_INSTALL: AgentInstallResult,
@@ -858,13 +889,12 @@ def validate_result_for_operation(
     result: Any,
     *,
     state: str,
-) -> BaseModel | None:
+) -> BaseModel:
     """Validate a result against the operation stored by the Controller.
 
-    The generic evidence branch remains available for operation kinds whose
-    producer has no shared result model.  A current operation with a typed
-    result model must pass that model, preventing the generic branch from
-    silently accepting malformed known-operation evidence.
+    Success and failure both use the current typed graph. A one-shot recipe
+    job reports its process result on failure; infrastructure failures use the
+    shared failure model. Neither permits another operation's success receipt.
     """
 
     try:
@@ -878,9 +908,16 @@ def validate_result_for_operation(
             f"result model is not registered for {operation_kind.value}"
         ) from error
     if state != "succeeded":
-        return None
+        model = AgentFailureResult
     try:
-        return model.model_validate_json(canonical_message(result))
+        parsed = (
+            TypeAdapter(AgentFailureResult | RecipeJobRunResult).validate_json(canonical_message(result))
+            if state != "succeeded" and operation_kind == AgentOperation.RECIPE_JOB_RUN
+            else model.model_validate_json(canonical_message(result))
+        )
+        if state == "failed" and isinstance(parsed, RecipeJobRunResult) and parsed.exit_code == 0:
+            raise ValueError("failed recipe job requires a nonzero process exit code")
+        return parsed
     except (TypeError, ValueError, ValidationError) as error:
         raise AgentProtocolError(
             f"{operation_kind.value} result does not match its typed model"

@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+pub mod runtime_preflight;
 
 pub mod agent_upgrade;
 mod base_images;
@@ -7,12 +8,14 @@ pub mod client;
 pub mod compiled_oci;
 pub mod config;
 pub mod executor;
+pub mod failure_evidence;
 pub mod health;
 pub mod host_runtime;
 pub mod identity;
 pub mod image_importer;
 pub mod inventory;
 pub mod oci;
+pub mod package_activation;
 pub mod pair;
 pub mod process;
 pub mod readiness;
@@ -27,6 +30,7 @@ pub mod workloads;
 
 /// Capabilities advertised by the current Rust agent to the Controller.
 pub const CLAIM_CAPABILITIES: &[&str] = &[
+    "runtime.preflight.v1",
     "agent.runtime.rust.v1",
     "runtime.vonk.v1",
     "agent.upgrade.v1",

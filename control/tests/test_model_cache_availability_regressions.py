@@ -96,7 +96,7 @@ def _drain(
     raise AssertionError(
         f"background operation did not settle: state={observed.state}, "
         f"completed={observed.progress.get('completed_artifacts')}/"
-        f"{observed.progress.get('total_artifacts')}"
+        f"{observed.progress.get('total_artifacts')}; failure={observed.failure}"
     )
 
 
@@ -220,7 +220,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(tmp_path: Pat
     assert sibling_started.wait(2)
     time.sleep(0.05)
     service.tick()
-    assert service.get_operation(operation.id).state in {"running", "partial"}
+    assert service.get_operation(operation.id).state == "running"
     release_sibling.set()
     _drain(service, operation.id)
     final = service.get_operation(operation.id)
@@ -398,11 +398,13 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
         artifacts,
         "00000000-0000-4000-8000-000000000309",
     )
-    _drain(service, operation.id, timeout_seconds=30)
+    # This checks 129 durable file checkpoints, not a throughput requirement;
+    # allow the full set to commit on a busy shared CI filesystem.
+    _drain(service, operation.id, timeout_seconds=120)
     result = service.get_operation(operation.id)
     assert result.state == "succeeded", result.failure
     parsed = ModelCacheOperationProgress.model_validate(result.progress)
-    assert len(parsed.members) == 129
+    assert len(parsed.measurement.members) == 129
     service.close()
 
 
@@ -804,3 +806,127 @@ def test_failed_model_cache_detail_redacts_signed_source_url(tmp_path: Path) -> 
     assert failed.failure is not None
     assert "signed-download-secret" not in str(failed.failure["detail"])
     service.close()
+
+
+def test_two_controller_services_share_one_upstream_object_transfer(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    data = b"shared immutable payload"
+
+    def handler(request):
+        calls.append(str(request.url))
+        entered.set()
+        assert release.wait(5)
+        return httpx.Response(200, content=data)
+
+    first, _ = _service(tmp_path, sessions, handler=handler)
+    second, _ = _service(tmp_path, sessions, handler=handler)
+    artifact = _artifact("shared", data)
+    one = _start(first, [artifact], "00000000-0000-4000-8000-000000001101")
+    two = _start(second, [artifact], "00000000-0000-4000-8000-000000001102")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        left = pool.submit(first._run_download, one.id, force=False)
+        assert entered.wait(5)
+        right = pool.submit(second._run_download, two.id, force=False)
+        release.set()
+        left.result(timeout=10)
+        right.result(timeout=10)
+    assert first.get_operation(one.id).state == "succeeded"
+    assert second.get_operation(two.id).state == "succeeded"
+    assert len(calls) == 1
+    assert first.read_verified_artifact(one.artifact_set_sha256, artifact["sha256"], artifact["path"]) == data
+    first.close()
+    second.close()
+
+
+def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    calls = []
+    latest = "2" * 40
+
+    def handler(request):
+        assert sessions.kw["bind"].pool.checkedout() == 0
+        calls.append(str(request.url))
+        assert request.url.path == "/api/models/acme/model/revision/main"
+        return httpx.Response(200, json={"sha": latest})
+
+    service, _ = _service(tmp_path, sessions, handler=handler)
+    current_doc = _model_document("source-revision-1", "1")
+    # Two immutable files from one repository need one metadata request.
+    current_doc["files"].append(dict(current_doc["files"][0], id="extra", path="extra.json"))
+    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    assert service.discover_updates()["updates"][0]["upstream_revisions"] == []
+    assert calls == []
+    update = service.discover_updates(check_upstream=True)["updates"][0]
+    assert len(calls) == 1
+    assert update["upstream_revisions"][0]["latest_revision"] == latest
+    assert update["upstream_revisions"][0]["pinned_revision"] == "1" * 40
+    assert update["upstream_revisions"][0]["status"] == "update-available"
+    assert update["model_update_available"] is False
+    assert service.manifest_for_artifact_set(manifest.digest) == manifest
+    newer = _model_document("source-revision-2", "2", supersedes=current_digest)
+    new_digest = _insert_model_revision(sessions, newer, created_at=NOW + timedelta(hours=1))
+    assert service.resolve_artifact_set(model_content_sha256=new_digest).digest != manifest.digest
+    assert service.discover_updates()["updates"][0]["model_update_available"] is True
+    service.close()
+
+
+def test_failed_upstream_metadata_check_does_not_hide_catalog_update(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions, handler=lambda _: httpx.Response(503))
+    current_digest = _insert_model_revision(sessions, _model_document("old", "1"), created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    _insert_model_revision(sessions, _model_document("new", "2", supersedes=current_digest),
+                           created_at=NOW + timedelta(hours=1))
+    update = service.discover_updates(check_upstream=True)["updates"][0]
+    assert update["model_update_available"] is True
+    assert update["upstream_revisions"][0]["status"] == "check-failed"
+    assert update["upstream_revisions"][0]["latest_revision"] is None
+    assert update["upstream_revisions"][0]["error_code"]
+    service.close()
+
+
+def test_inventory_cursor_survives_unchanged_storage_reconciliation(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    for index in ("1", "2"):
+        artifact = _artifact(index, index.encode())
+        manifest = service.resolve_artifact_set(model_content_sha256=artifact["model_content_sha256"], artifacts=[artifact])
+        with sessions.begin() as session:
+            service._ensure_set(session, manifest)
+    page = service.inventory(limit=1)
+    following = service.inventory(limit=1, boundary=page["_next_boundary"])
+    assert following["entries"][0]["artifact_set_sha256"] != page["entries"][0]["artifact_set_sha256"]
+    assert following["_next_boundary"] is None
+    service.close()
+
+
+def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypatch):
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    release = threading.Event()
+    calls = []
+    monkeypatch.setattr("vonk_control.model_cache._UPSTREAM_CHECK_SECONDS", 0.05)
+    def check(repository, revision):
+        calls.append(repository)
+        release.wait(2)
+        return {"status": "current"}
+    monkeypatch.setattr(service, "_check_upstream_revision", check)
+    keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
+    started = time.monotonic()
+    try:
+        result = service._check_upstream_revisions(keys)
+        assert time.monotonic() - started < 0.5
+        assert len(calls) == 4
+        assert list(result) == keys
+        assert all(row["error_code"] == "model_cache.upstream_check_budget_exhausted" for row in result.values())
+    finally:
+        release.set()
+        service.close()

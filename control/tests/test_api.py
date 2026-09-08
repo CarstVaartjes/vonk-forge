@@ -129,6 +129,7 @@ class RepairPreviewUpgrades:
                 None if repair_manifest is None else dict(repair_manifest)
             ),
             strategy=strategy,
+            sources={},
         )
 
 

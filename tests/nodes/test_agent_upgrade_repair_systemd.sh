@@ -498,10 +498,12 @@ for generation in old target next; do
     "$test_root/$generation-bin/oras"
   cp -- "$build_egress_fixture" \
     "$test_root/$generation-bin/vonk-build-egress"
+  cp -- "$(dirname "$build_egress_fixture")/vonk-runtime-probe" \
+    "$test_root/$generation-bin/vonk-runtime-probe"
   printf '%s fixture license\n' "$generation" \
     > "$test_root/$generation-bin/oras.LICENSE"
   chmod 0555 \
-    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,oras}
+    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,vonk-runtime-probe,oras}
   fixture_agent=$test_root/$generation-bin/vonk-agent
   fixture_agent_sha=$(sha256sum "$fixture_agent" | cut -d' ' -f1)
   fixture_self_test=$("$fixture_agent" --config /dev/null self-test)
@@ -690,8 +692,8 @@ build_package "$source_version" target "$build_digest_target" \
   "$test_root/target-dist" "$repo_root" "$binary_revision"
 old_package="$test_root/old-dist/vonk-forge-agent_${installed_version}_arm64.deb"
 source_package="$test_root/target-dist/vonk-forge-agent_${source_version}_arm64.deb"
-"$repo_root/scripts/verify-agent-deb" --json "$old_package" >/dev/null
-"$repo_root/scripts/verify-agent-deb" --json "$source_package" >/dev/null
+"$repo_root/scripts/verify-agent-deb" --json "$old_package"
+"$repo_root/scripts/verify-agent-deb" --json "$source_package"
 for ordinary_package in "$old_package" "$source_package"; do
   ordinary_name=$(basename "$ordinary_package" .deb)
   ordinary_payload=$test_root/extracted/$ordinary_name

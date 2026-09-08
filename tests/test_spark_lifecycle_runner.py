@@ -727,6 +727,7 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
             "--tail",
             "120",
             "control-api",
+            "control-worker",
             "step-ca",
             "caddy",
         ]
@@ -754,6 +755,35 @@ def test_installer_error_survives_bounded_controller_diagnostics(
     rendered = str(failure)
     assert len(rendered) < 8_500
     assert "Error: Certificate" in rendered
+
+
+def test_canary_failure_keeps_phase_evidence_and_redacts_provider_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = object()
+    secret = "acceptance-provider-secret"
+    monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret)
+    operation = {
+        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "state": "failed",
+        "failed_phase": "prepare",
+        "completed_phases": [],
+        "status_reason": "run-switch phase operation failed: failed",
+        "progress": {"phase": "prepare", "subphase": "container-build"},
+        "result": {"failure": {"detail": f"build rejected {secret}"}},
+    }
+
+    with pytest.raises(lifecycle.LifecycleError) as failure:
+        run._await_canary_run_switch(
+            operation, expected_phases=["prepare"], label="synthetic canary run"
+        )
+
+    message = str(failure.value)
+    assert "container-build" in message
+    assert "build rejected <redacted>" in message
+    assert secret not in message
 
 
 def test_direct_health_and_protected_identity_hash_are_observed_from_native_binary() -> (

@@ -1020,6 +1020,48 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     assert ("POST", "/api/v1/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
 
 
+def test_provenance_and_explicit_upstream_check_use_current_routes() -> None:
+    document = {"platform": [], "agents": [], "workloads": []}
+    client = _Client({("GET", "/api/v1/deployment-provenance"): document})
+    result, payload = _invoke(client, "--json", "fleet", "provenance")
+    assert result == 0
+    assert payload == document
+    assert client.calls[-1][0:2] == ("GET", "/api/v1/deployment-provenance")
+    result, _ = _invoke(client, "--json", "cache", "update")
+    assert result == 0
+    assert client.calls[-1][0:2] == ("GET", "/api/v1/model-cache/updates")
+    assert client.calls[-1][3]["check_upstream"] is True
+
+
+def test_operation_evidence_download_uses_exact_attempt_and_current_bundle(
+    tmp_path,
+) -> None:
+    document = {
+        "schema_version": 2,
+        "context": {"operation_id": "op-1", "attempt": 3},
+        "diagnostics": {"category": "runtime"},
+    }
+    client = _Client(
+        {
+            ("GET", "/api/v1/operations/op-1"): {"attempt": 3},
+            ("GET", "/api/v1/operations/op-1/evidence"): document,
+        }
+    )
+    target = tmp_path / "failure.json"
+    result, payload = _invoke(
+        client, "--json", "operations", "evidence", "op-1", "--file", str(target)
+    )
+    assert result == 0
+    assert json.loads(target.read_text()) == document
+    assert client.calls[-1] == (
+        "GET",
+        "/api/v1/operations/op-1/evidence",
+        None,
+        {"attempt": 3},
+    )
+    assert payload["file"] == str(target)
+
+
 def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
     client = _Client(
         {
@@ -1223,7 +1265,7 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
         ("profiles", "status", "p"),
         ("operations", "show", "o"),
         ("operations", "watch", "o"),
-        ("operations", "evidence", "o"),
+        ("operations", "evidence", "o", "--attempt", "1"),
     ],
 )
 def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...]) -> None:
@@ -1281,6 +1323,23 @@ def test_high_level_apply_without_apply_flag_only_emits_plan(argv: tuple[str, ..
     assert result == 0
     assert payload["mode"] == "plan"
     assert client.calls == []
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_run_cancel_uses_current_typed_contract_and_explicit_request_key(apply: bool) -> None:
+    client = _Client()
+    request_key = "11111111-1111-4111-8111-111111111111"
+    arguments = ["--json", "models", "run", "cancel", "run-1", "--reason", "Change of plan", "--request-key", request_key]
+    if apply:
+        arguments.append("--apply")
+    result, document = _invoke(client, *arguments)
+    assert result == 0
+    expected = {"schema_version": 2, "request_key": request_key, "reason": "Change of plan"}
+    if apply:
+        assert client.calls[-1][:3] == ("POST", "/api/v1/recipes/run-switches/run-1/cancel", expected)
+    else:
+        assert document["body"] == expected
+        assert client.calls == []
 
 
 def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
@@ -1520,9 +1579,9 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
                     "state": "running",
                     "progress": {
                         "phase": "downloading",
-                        "downloaded_bytes": 12,
-                        "expected_bytes": 34,
-                        "current_artifact_key": "weights.safetensors",
+                        "completed_bytes": 12,
+                        "total_bytes": 34,
+                        "checkpoint": {"key": "artifact-set", "sequence": 0, "cursor": "weights.safetensors"},
                     },
                 },
                 {
@@ -1530,9 +1589,9 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
                     "last_error": "source unavailable",
                     "progress": {
                         "phase": "failed",
-                        "downloaded_bytes": 12,
-                        "expected_bytes": 34,
-                        "current_artifact_key": "weights.safetensors",
+                        "completed_bytes": 12,
+                        "total_bytes": 34,
+                        "checkpoint": {"key": "artifact-set", "sequence": 0, "cursor": "weights.safetensors"},
                     },
                 },
             ],
@@ -2217,3 +2276,27 @@ def test_placement_apply_rejects_binding_fields_in_intent() -> None:
             "--plan-digest", "d" * 64, "--apply", "--json",
         ), control_client=client) != 0
     assert client.calls == []
+
+
+def test_progress_line_shows_canonical_aggregate_rates_eta_and_freshness():
+    from cluster_profiles.controller_cli import _operation_progress_line
+    line = _operation_progress_line({"progress": {"operation": {
+        "phase": "copying", "completed_bytes": 10, "total_bytes": 100,
+        "bytes_per_second": 20.0, "smoothed_bytes_per_second": 15.0,
+        "eta_seconds": 6.0, "elapsed_seconds": 2.0,
+        "last_progress_at": "2026-09-08T00:00:02Z", "activity": "possibly_stalled",
+    }}})
+    for value in ("bytes: 10/100", "smoothed: 15 bytes/s", "ETA: 6s", "elapsed: 2s", "last progress: 2026-09-08T00:00:02Z", "activity: possibly stalled"):
+        assert value in line
+
+
+def test_direct_cache_progress_formatter_uses_current_measurement():
+    from cluster_profiles.controller_cli import _operation_progress_line
+
+    text = _operation_progress_line({"kind": "download", "progress": {"measurement": {
+        "phase": "download", "completed_bytes": 10, "total_bytes": 100,
+        "total_bytes_known": True, "bytes_per_second": 5.0, "eta_seconds": 18.0,
+        "observed_at": "2026-09-08T12:00:00Z"}}})
+    assert "bytes: 10/100" in text
+    assert "current: 5 bytes/s" in text
+    assert "ETA: 18s" in text

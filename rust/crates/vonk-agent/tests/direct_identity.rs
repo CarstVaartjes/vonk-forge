@@ -35,6 +35,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         format!("sha256:{}", identity.binary_digest)
     );
     assert!(!identity.self_test_passed);
+    assert!(identity.package_activation.is_none());
     let fields = serde_json::to_value(&identity).unwrap();
     assert_eq!(
         fields
@@ -47,6 +48,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
             "architecture",
             "binary_digest",
             "build_digest",
+            "package_activation",
             "self_test_passed",
             "semantic_version",
         ])

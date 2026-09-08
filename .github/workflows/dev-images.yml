@@ -111,6 +111,7 @@ jobs:
               context: .
               file: control/Dockerfile
               target: api
+              build-args: VONK_SOURCE_COMMIT=${{ github.sha }}
               platforms: linux/amd64,linux/arm64
               outputs: |
                 type=oci,dest=${{ runner.temp }}/vonk-forge-api.oci.tar
@@ -130,6 +131,7 @@ jobs:
               context: .
               file: control/Dockerfile
               target: worker
+              build-args: VONK_SOURCE_COMMIT=${{ github.sha }}
               platforms: linux/amd64,linux/arm64
               outputs: |
                 type=oci,dest=${{ runner.temp }}/vonk-forge-worker.oci.tar

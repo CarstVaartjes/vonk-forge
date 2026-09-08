@@ -3,7 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -688,7 +688,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
     progress = operation_contract.OperationProgress.model_validate(first["progress"])
-    assert progress.phase == "prepare"
+    assert progress.phase == "queued"
     assert progress.completed_bytes == 0
     assert progress.total_bytes_known is True
     assert first_page.next_cursor
@@ -984,7 +984,8 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     def fail_final_replace(source_path, target_path):
         nonlocal calls
         calls += 1
-        if calls == 2:
+        assert target.read_bytes() == good
+        if target_path == target:
             raise OSError("simulated atomic publish failure")
         return replace(source_path, target_path)
 
@@ -1276,16 +1277,18 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    progress = ModelCacheOperationProvider._progress(
-        {"phase": "downloading", "downloaded_bytes": 12}
-    )
-    assert progress == {
-        "phase": "download",
-        "completed_bytes": 12,
-        "total_bytes_known": False,
-    }
-    assert "percent" not in progress
+    from vonk_control.model_cache_progress import cache_progress
+    value = cache_progress({"phase": "downloading", "completed_artifacts": 0,
+        "total_artifacts": 1, "downloaded_bytes": 12, "expected_bytes": None},
+        previous=None, now=NOW)
+    progress = ModelCacheOperationProvider._progress(value)
+    assert progress["phase"] == "download"
+    assert progress["completed_bytes"] == 12
+    assert progress["total_bytes_known"] is False
     assert "eta_seconds" not in progress
+    assert "bytes_per_second" not in progress
+    with pytest.raises(ValidationError):
+        ModelCacheOperationProvider._progress({"phase": "downloading", "downloaded_bytes": 12})
 
 
 def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, monkeypatch):
@@ -1335,3 +1338,185 @@ def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, 
         row.payload = {key: value for key, value in row.payload.items() if key != "result"}
     with pytest.raises(ValidationError, match="requires a result"):
         restarted.get_operation(downloaded.id)
+
+
+def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeypatch):
+    service, sessions = cache
+    data = b"x" * (2 * 1024 * 1024 + 3)
+    artifact = _artifact(tmp_path, data)
+    small = _artifact(tmp_path, b"config", artifact_id="tokenizer", path="config.json")
+    downloaded = _download(service, [small, artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001001")
+    digest = downloaded.artifact_set_sha256
+    preview = service.repair_preview(digest)
+    repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001002",
+                                  artifact_set_sha256=digest, plan_digest=preview["plan_digest"])
+    service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
+    assert service.get_operation(repair.id).state == "partial"
+    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    service.close()
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    offsets = []
+    original = restarted._open_source
+
+    def open_source(spec, offset):
+        offsets.append(offset)
+        return original(spec, offset)
+
+    monkeypatch.setattr(restarted, "_open_source", open_source)
+    restarted.run_pending()
+    assert restarted.get_operation(repair.id).state == "succeeded"
+    assert offsets == [1024 * 1024]
+    assert restarted.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    restarted.close()
+
+
+def test_atomic_repair_keeps_path_and_open_reader_available(cache, tmp_path, monkeypatch):
+    service, _ = cache
+    data = b"immutable model"
+    artifact = _artifact(tmp_path, data)
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001003")
+    digest = downloaded.artifact_set_sha256
+    target, _, _ = service.verified_artifact_file(digest, artifact["sha256"], "weights.bin")
+    original = __import__("os").replace
+    replacements = []
+    with target.open("rb") as reader:
+        def replace(source, destination):
+            assert target.read_bytes() == data
+            assert destination == target
+            original(source, destination)
+            assert target.read_bytes() == data
+            assert reader.read() == data
+            replacements.append(destination)
+        monkeypatch.setattr("vonk_control.model_cache.os.replace", replace)
+        repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001004",
+                                      artifact_set_sha256=digest,
+                                      plan_digest=service.repair_preview(digest)["plan_digest"])
+        service.run_pending()
+    assert service.get_operation(repair.id).state == "succeeded"
+    assert replacements == [target]
+
+
+def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(cache, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from vonk_control.cached_file_verification import CachedFileVerifier
+
+    service, _ = cache
+    artifact = _artifact(tmp_path, b"good")
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001005")
+    monkeypatch.setattr("vonk_control.model_cache.verified_files", CachedFileVerifier())
+    calls = []
+    original = hashlib.sha256
+    def sha256():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr("vonk_control.cached_file_verification.hashlib", SimpleNamespace(sha256=sha256))
+    service.reconcile_storage()
+    service.reconcile_storage()
+    service.get_entry(downloaded.artifact_set_sha256)
+    assert len(calls) == 1
+    service._object_path(artifact["sha256"]).write_bytes(b"evil")
+    service.reconcile_storage()
+    assert service.get_entry(downloaded.artifact_set_sha256)["state"] == "needs-repair"
+
+
+def test_repair_capacity_admission_preserves_verified_object(cache, tmp_path, monkeypatch):
+    from collections import namedtuple
+    service, _ = cache
+    artifact = _artifact(tmp_path, b"model")
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001006")
+    digest = downloaded.artifact_set_sha256
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0))
+    with pytest.raises(ModelCacheConflict, match="insufficient-reserved-storage"):
+        service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001007",
+                             artifact_set_sha256=digest,
+                             plan_digest=service.repair_preview(digest)["plan_digest"])
+    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == b"model"
+
+
+def test_repair_checkpoint_requires_exact_nested_contract():
+    from vonk_control.model_cache_contract import ModelCacheRepairCheckpoint
+    valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
+    assert ModelCacheRepairCheckpoint.model_validate(valid).model_dump(mode="json") == valid
+    for invalid in ({"transfer_id": "a" * 32}, dict(valid, transfer_id="../object"),
+                    dict(valid, completed_objects=[7]), dict(valid, legacy=True)):
+        with pytest.raises(ValidationError):
+            ModelCacheRepairCheckpoint.model_validate(invalid)
+
+
+def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cache, tmp_path):
+    from vonk_control.model_cache_progress import project_cache_progress
+    service, sessions = cache
+    clock = [datetime.now(UTC)]
+    service._clock = lambda: clock[0]
+    raw = _artifact(tmp_path, b"x" * 100)
+    preview = service.download_preview(artifacts=[raw])
+    operation = service.start_download(actor="test", request_key="00000000-0000-4000-8000-000000000991",
+        plan_digest=preview["plan_digest"], artifacts=[raw])
+    with sessions() as session:
+        manifest = ArtifactSetManifest.from_document(session.get(ModelCacheOperation, operation.id).payload["manifest"])
+    spec = manifest.artifacts[0]
+    def checkpoint(owner, count, state="partial", force=False):
+        owner._checkpoint_artifact(spec, operation_id=operation.id, set_digest=manifest.digest,
+            actual_bytes=count, state=state, force_progress=force)
+    checkpoint(service, 10)
+    clock[0] += timedelta(seconds=0.1)
+    checkpoint(service, 20)
+    assert service.get_operation(operation.id).progress["downloaded_bytes"] == 10
+    clock[0] += timedelta(seconds=0.9)
+    checkpoint(service, 30)
+    measured = service.get_operation(operation.id).progress["measurement"]
+    assert measured["bytes_per_second"] == 20
+    assert measured["members"][0]["bytes_per_second"] == 20
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True, clock=lambda: clock[0])
+    clock[0] += timedelta(seconds=1)
+    checkpoint(restarted, 40)
+    current = restarted.get_operation(operation.id).progress
+    assert current["measurement"]["bytes_per_second"] == 10
+    assert 10 < current["measurement"]["smoothed_bytes_per_second"] < 20
+    assert project_cache_progress(current, clock[0])["members"][0]["observed_at"] == clock[0].isoformat()
+    clock[0] += timedelta(seconds=0.1)
+    checkpoint(restarted, 100, state="verifying", force=True)
+    verifying = restarted.get_operation(operation.id).progress["measurement"]
+    assert verifying["completed_bytes"] == 100
+    assert verifying["phase"] == "verify"
+    assert "eta_seconds" not in verifying
+    assert "bytes_per_second" not in verifying
+    restarted.close()
+
+
+def test_cache_measurements_handle_unknown_total_and_observation_gap():
+    from vonk_control.model_cache_progress import cache_progress, project_cache_progress
+    def snapshot(count, total=100):
+        return {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1,
+            "downloaded_bytes": count, "expected_bytes": total}
+    first = cache_progress(snapshot(0), previous=None, now=NOW)
+    second = cache_progress(snapshot(10), previous=first, now=NOW + timedelta(seconds=1))
+    assert second["measurement"]["eta_seconds"] == 9
+    restarted = cache_progress(snapshot(20), previous=second, now=NOW + timedelta(seconds=60))
+    assert "bytes_per_second" not in restarted["measurement"]
+    unknown = cache_progress(snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61))
+    assert unknown["measurement"]["bytes_per_second"] == 10
+    assert "eta_seconds" not in unknown["measurement"]
+    stale = project_cache_progress(unknown, NOW + timedelta(seconds=200))
+    assert stale["activity"] == "possibly_stalled"
+    assert "bytes_per_second" not in stale
+
+
+def test_large_model_keeps_exact_aggregate_without_truncated_member_list(cache, tmp_path):
+    from dataclasses import replace
+    service, _ = cache
+    raw = _artifact(tmp_path, b"x")
+    manifest = service.resolve_artifact_set(artifacts=[raw])
+    specs = tuple(replace(manifest.artifacts[0], key=f"file-{i}", sha256=f"{i:064x}") for i in range(1025))
+    large = replace(manifest, artifacts=specs)
+    transfer = {"artifacts": {spec.sha256: {"baseline_bytes": 0, "received_bytes": 0} for spec in specs}}
+    progress = service._progress(large, phase="downloading", transfer=transfer)
+    assert progress["measurement"]["total_items"] == 1025
+    assert progress["measurement"]["total_bytes"] == 1025
+    assert "members" not in progress["measurement"]

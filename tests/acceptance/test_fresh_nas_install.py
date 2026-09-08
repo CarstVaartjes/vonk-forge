@@ -233,7 +233,6 @@ def nas_responses(
         "LiteLLM administrator key",
         "Grafana administrator password",
         "Internal agent proxy token",
-        "Internal worker API token",
         "Hermes API key",
     ):
         responses.append((f"{label} (leave blank to generate): ", ""))
@@ -1524,8 +1523,13 @@ def exercise_compose(
     configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
     if configured.stdout or configured.stderr:
         raise AcceptanceError("Compose validation emitted output")
-    if compose_services(bundle) != complete:
-        raise AcceptanceError("rendered Compose service topology is not canonical")
+    observed_services = compose_services(bundle)
+    if observed_services != complete:
+        raise AcceptanceError(
+            "rendered Compose service topology is not canonical: "
+            f"missing={sorted(complete - observed_services)}, "
+            f"unexpected={sorted(observed_services - complete)}"
+        )
     base_images = run([reference_compose()[0], "config", "--images"], cwd=bundle).stdout
     for image in base_images.splitlines():
         if not is_channel_image(

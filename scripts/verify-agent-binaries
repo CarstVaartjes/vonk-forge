@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         root = arguments.binaries_dir
         if not root.is_dir() or root.is_symlink():
             raise VerificationError("binary directory is unavailable or unsafe")
-        expected_names = {"vonk-agent", "vonk-agent-helper", "vonk-build-egress"}
+        expected_names = {"vonk-agent", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe"}
         actual_names = {path.name for path in root.iterdir()}
         if actual_names != expected_names:
             raise VerificationError("binary directory does not contain the exact file set")
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if any(marker not in raw for marker in required_markers):
                     raise VerificationError("agent embedded identity is invalid")
-            if name == "vonk-build-egress":
+            if name in {"vonk-build-egress", "vonk-runtime-probe"}:
                 program_offset = struct.unpack_from("<Q", raw, 32)[0]
                 program_size = struct.unpack_from("<H", raw, 54)[0]
                 program_count = struct.unpack_from("<H", raw, 56)[0]

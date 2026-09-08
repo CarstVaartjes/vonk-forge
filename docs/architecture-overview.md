@@ -203,7 +203,8 @@ Model files live under `/state/model-cache`; image archives live under
 reuse successful content verification while device, inode, size, timestamps,
 ownership, and mode remain unchanged. Changes trigger a new byte scan. The
 verification cache is bounded and process-local; authorization is still checked
-on every operation, and explicit storage reconciliation performs a full scan.
+on every operation. Storage reconciliation reuses unchanged verified files;
+changed filesystem identities trigger a new byte scan.
 Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric

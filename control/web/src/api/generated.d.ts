@@ -378,6 +378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment-provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Deployment Provenance */
+        get: operations["getDeploymentProvenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/endpoints/{alias}": {
         parameters: {
             query?: never;
@@ -1266,6 +1283,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/operations/{operation_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Evidence */
+        get: operations["getOperationEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/proposals": {
         parameters: {
             query?: never;
@@ -1589,6 +1623,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Run Switch */
+        post: operations["cancelRecipeRunSwitchOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recipes/run-switches/{operation_id}/retry": {
         parameters: {
             query?: never;
@@ -1730,10 +1781,41 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentDeploymentEvidence */
+        AgentDeploymentEvidence: {
+            /** Binary Sha256 */
+            binary_sha256?: string | null;
+            /**
+             * Boundary
+             * @default agent_deployment
+             * @constant
+             */
+            boundary: "agent_deployment";
+            /** Build Digest */
+            build_digest?: string | null;
+            /**
+             * Connectivity
+             * @enum {string}
+             */
+            connectivity: "recent" | "offline" | "unknown";
+            /** Display Name */
+            display_name: string;
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Node Id */
+            node_id: string;
+            package_evidence: components["schemas"]["EvidenceAge"];
+            /** Package Sha256 */
+            package_sha256?: string | null;
+            /** Semantic Version */
+            semantic_version?: string | null;
+            /** State */
+            state: string;
+        };
         /** AgentFailureResult */
         AgentFailureResult: {
             /** Diagnostic */
             diagnostic?: string | null;
+            diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             /** Error Code */
             error_code?: string | null;
             /** Helper Error Code */
@@ -1741,6 +1823,7 @@ export interface components {
             /** Helper Exit Code */
             helper_exit_code?: number | null;
             operation?: components["schemas"]["AgentOperation"] | null;
+            package_activation?: components["schemas"]["PackageActivationReceipt"] | null;
             /** Reason */
             reason?: string | null;
             /** Recovery */
@@ -1763,7 +1846,7 @@ export interface components {
          * AgentOperation
          * @enum {string}
          */
-        AgentOperation: "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.model-uninstall.v1";
+        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.model-uninstall.v1";
         /** AgentRepairManifestRequest */
         AgentRepairManifestRequest: {
             /** Authority Sha256 */
@@ -2743,6 +2826,44 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
+        /** DeploymentModelIdentity */
+        DeploymentModelIdentity: {
+            /** Artifact Key */
+            artifact_key?: string | null;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Publisher */
+            publisher: string;
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+            /** Selection Id */
+            selection_id: string;
+            /** Slug */
+            slug: string;
+        };
+        /** DeploymentProvenance */
+        DeploymentProvenance: {
+            /** Agents */
+            agents: components["schemas"]["AgentDeploymentEvidence"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Platform */
+            platform: components["schemas"]["PlatformBoundary"][];
+            recipe_library: components["schemas"]["RecipeLibraryEvidence"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Workloads */
+            workloads: components["schemas"]["WorkloadProvenance"][];
+        };
         /**
          * DistributionAssignment
          * @description Controller authorization for one node, generation and object set.
@@ -2949,6 +3070,52 @@ export interface components {
              */
             type: "enum";
         };
+        /** EvidenceAge */
+        EvidenceAge: {
+            /** Age Seconds */
+            age_seconds?: number | null;
+            /**
+             * Freshness
+             * @default unknown
+             * @enum {string}
+             */
+            freshness: "current" | "stale" | "unknown";
+            /** Observed At */
+            observed_at?: string | null;
+            /** Source */
+            source: string;
+        };
+        /** EvidenceContext */
+        EvidenceContext: {
+            /** Attempt */
+            attempt: number;
+            /** Authority Revision */
+            authority_revision?: string | null;
+            /** Kind */
+            kind: string;
+            /** Node Ids */
+            node_ids: string[];
+            /**
+             * Omitted Node Count
+             * @default 0
+             */
+            omitted_node_count: number;
+            /** Operation Id */
+            operation_id: string;
+            /** Payload Digest */
+            payload_digest?: string | null;
+            /** Plan Digest */
+            plan_digest?: string | null;
+            /** Rank */
+            rank?: number | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "agent" | "controller";
+            /** Updated At */
+            updated_at: string;
+        };
         /**
          * ExecutionMount
          * @description The platform-owned mount used by one selected model file.
@@ -2960,6 +3127,72 @@ export interface components {
             source: string;
             /** Target */
             target: string;
+        };
+        /** FailureDiagnostics */
+        FailureDiagnostics: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "platform-policy" | "capacity" | "network" | "digest" | "timeout" | "runtime" | "unknown";
+            /** Collected At */
+            collected_at: string;
+            /** Collector Errors */
+            collector_errors: string[];
+            /** Phase */
+            phase: string;
+            /** Preflight */
+            preflight: components["schemas"]["FailureProperty"][];
+            /** Sandbox */
+            sandbox: components["schemas"]["FailureProperty"][];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            stderr: components["schemas"]["FailureLogTail"];
+            stdout: components["schemas"]["FailureLogTail"];
+            /** Storage */
+            storage: components["schemas"]["FailureProperty"][];
+            /** Versions */
+            versions: components["schemas"]["FailureProperty"][];
+        };
+        /** FailureEvidenceBundle */
+        FailureEvidenceBundle: {
+            /** Collected At */
+            collected_at: string;
+            /** Collector Errors */
+            collector_errors: string[];
+            context: components["schemas"]["EvidenceContext"];
+            diagnostics: components["schemas"]["FailureDiagnostics"];
+            receipt: components["schemas"]["OperationFailureEvidence"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Summary */
+            summary: string;
+        };
+        /** FailureLogTail */
+        FailureLogTail: {
+            /** Dropped Bytes */
+            dropped_bytes: number | null;
+            /** Dropped Lines */
+            dropped_lines: number | null;
+            /** Text */
+            text: string;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** FailureProperty */
+        FailureProperty: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
         };
         /** FleetNode */
         FleetNode: {
@@ -3223,6 +3456,7 @@ export interface components {
             bytes?: number | null;
             /** Node Ids */
             node_ids?: string[];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /**
              * Phase
              * @enum {string}
@@ -4061,6 +4295,7 @@ export interface components {
             completed: number;
             /** Failed */
             failed: number;
+            operation?: components["schemas"]["OperationProgress"] | null;
             /** Running */
             running: number;
             /** Total */
@@ -4603,6 +4838,23 @@ export interface components {
             /** Detail */
             detail?: string | null;
         };
+        /** LifecyclePreflightCheckpoint */
+        LifecyclePreflightCheckpoint: {
+            /** Attempts */
+            attempts?: {
+                [key: string]: number;
+            };
+            /** Pending Job Id */
+            pending_job_id?: string | null;
+            /** Pending Node Id */
+            pending_node_id?: string | null;
+            /** Phase Index */
+            phase_index: number;
+            /** Receipts */
+            receipts?: {
+                [key: string]: components["schemas"]["RuntimePreflightResult"];
+            };
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
@@ -5075,20 +5327,15 @@ export interface components {
         };
         /** ModelCacheOperationProgress */
         ModelCacheOperationProgress: {
-            /** Bytes Per Second */
-            bytes_per_second?: number | null;
             /** Completed Artifacts */
             completed_artifacts: number;
             /** Current Artifact Key */
             current_artifact_key?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes: number;
-            /** Eta Seconds */
-            eta_seconds?: number | null;
             /** Expected Bytes */
             expected_bytes?: number | null;
-            /** Members */
-            members?: components["schemas"]["OperationMemberProgress"][];
+            measurement: components["schemas"]["OperationProgress"];
             /**
              * Phase
              * @enum {string}
@@ -5268,6 +5515,8 @@ export interface components {
             schema_version: 2;
             /** Updated At */
             updated_at?: string | null;
+            /** Upstream Revisions */
+            upstream_revisions?: components["schemas"]["ModelCacheUpstreamRevision"][];
         };
         /** ModelCacheUpdatesResponse */
         ModelCacheUpdatesResponse: {
@@ -5289,6 +5538,24 @@ export interface components {
             total: number;
             /** Updates */
             updates: components["schemas"]["ModelCacheUpdateResponse"][];
+        };
+        /** ModelCacheUpstreamRevision */
+        ModelCacheUpstreamRevision: {
+            /** Checked At */
+            checked_at: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Latest Revision */
+            latest_revision?: string | null;
+            /** Pinned Revision */
+            pinned_revision: string;
+            /** Repository */
+            repository: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "update-available" | "check-failed";
         };
         /** ModelCapabilities */
         ModelCapabilities: {
@@ -5736,6 +6003,8 @@ export interface components {
          * @description Progress for one node, rank, shard, or other operation member.
          */
         OperationMemberProgress: {
+            /** Activity */
+            activity?: ("active" | "waiting" | "possibly_stalled") | null;
             /** Bytes Per Second */
             bytes_per_second?: number | null;
             /**
@@ -5743,16 +6012,26 @@ export interface components {
              * @default 0
              */
             completed_bytes: number;
+            /** Completed Items */
+            completed_items?: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
             /** Eta Seconds */
             eta_seconds?: number | null;
             /** Kind */
             kind?: string | null;
+            /** Last Progress At */
+            last_progress_at?: string | null;
             /** Member Id */
             member_id: string;
             /** Object Sha256 */
             object_sha256?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
             /** Phase */
             phase: string;
+            /** Smoothed Bytes Per Second */
+            smoothed_bytes_per_second?: number | null;
             /**
              * State
              * @default running
@@ -5760,12 +6039,16 @@ export interface components {
             state: string;
             /** Total Bytes */
             total_bytes?: number | null;
+            /** Total Items */
+            total_items?: number | null;
         };
         /**
          * OperationProgress
          * @description Canonical durable progress payload shared by Controller and agents.
          */
         OperationProgress: {
+            /** Activity */
+            activity?: ("active" | "waiting" | "possibly_stalled") | null;
             /** Bytes Per Second */
             bytes_per_second?: number | null;
             checkpoint?: components["schemas"]["OperationCheckpoint"] | null;
@@ -5774,16 +6057,26 @@ export interface components {
              * @default 0
              */
             completed_bytes: number;
+            /** Completed Items */
+            completed_items?: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
             /** Eta Seconds */
             eta_seconds?: number | null;
             /** Kind */
             kind?: string | null;
+            /** Last Progress At */
+            last_progress_at?: string | null;
             /** Members */
             members?: components["schemas"]["OperationMemberProgress"][];
             /** Object Sha256 */
             object_sha256?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
             /** Phase */
             phase: string;
+            /** Smoothed Bytes Per Second */
+            smoothed_bytes_per_second?: number | null;
             /** Total Bytes */
             total_bytes?: number | null;
             /**
@@ -5791,6 +6084,8 @@ export interface components {
              * @default false
              */
             total_bytes_known: boolean;
+            /** Total Items */
+            total_items?: number | null;
         };
         /** OperationRecovery */
         OperationRecovery: {
@@ -5949,8 +6244,60 @@ export interface components {
             /** Max Total Bytes */
             max_total_bytes: number;
         };
+        /** PackageActivationReceipt */
+        PackageActivationReceipt: {
+            /** Attempt Nonce */
+            attempt_nonce: string;
+            /** Candidate Binary Sha256 */
+            candidate_binary_sha256: string;
+            /** Candidate Package Sha256 */
+            candidate_package_sha256: string;
+            /** Candidate Version */
+            candidate_version: string;
+            /** Created At */
+            created_at: number;
+            /** Node Id */
+            node_id: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "armed" | "activation_failed" | "acknowledged" | "rolling_back" | "rolled_back" | "rollback_failed";
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /** Source Binary Sha256 */
+            source_binary_sha256: string;
+            /** Source Package Sha256 */
+            source_package_sha256: string;
+            /** Source Version */
+            source_version: string;
+            /** Updated At */
+            updated_at: number;
+        };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
+        /** PhysicalAcceptanceEvidence */
+        PhysicalAcceptanceEvidence: {
+            /**
+             * Boundary
+             * @default physical_acceptance
+             * @constant
+             */
+            boundary: "physical_acceptance";
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Evidence Sha256 */
+            evidence_sha256?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "accepted" | "failed" | "not_qualified" | "identity_mismatch";
+        };
         /** PlacementEvidenceCounts */
         PlacementEvidenceCounts: {
             /** Builds */
@@ -6145,6 +6492,26 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** PlatformBoundary */
+        PlatformBoundary: {
+            /**
+             * Boundary
+             * @enum {string}
+             */
+            boundary: "repository" | "publication" | "controller_deployment";
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Image Digest */
+            image_digest?: string | null;
+            /** Manifest Sha256 */
+            manifest_sha256?: string | null;
+            /** Source Commit */
+            source_commit?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "observed" | "unknown" | "repository_not_published" | "publication_not_deployed";
+        };
         /** PreparationReason */
         PreparationReason: {
             /** Code */
@@ -6187,6 +6554,38 @@ export interface components {
             base_revision: string;
             /** Changes */
             changes: components["schemas"]["ProposalChangeRequest"][];
+        };
+        /** RankProvenance */
+        RankProvenance: {
+            /**
+             * Identity Agreement
+             * @enum {string}
+             */
+            identity_agreement: "match" | "mismatch" | "unknown";
+            installation_evidence: components["schemas"]["EvidenceAge"];
+            /** Installation Evidence Sha256 */
+            installation_evidence_sha256?: string | null;
+            /** Installation State */
+            installation_state: string;
+            /** Node Id */
+            node_id: string;
+            /** Observation Receipt Sha256 */
+            observation_receipt_sha256?: string | null;
+            /** Observed Artifact Set Sha256 */
+            observed_artifact_set_sha256?: string | null;
+            /** Observed Image Digest */
+            observed_image_digest?: string | null;
+            /** Observed Recipe Sha256 */
+            observed_recipe_sha256?: string | null;
+            /** Observed Run Generation */
+            observed_run_generation?: number | null;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            runtime_evidence: components["schemas"]["EvidenceAge"];
+            /** Runtime State */
+            runtime_state: string;
         };
         /** RecipeBenchmark */
         RecipeBenchmark: {
@@ -6695,6 +7094,7 @@ export interface components {
         };
         /** RecipeJobRunResult */
         RecipeJobRunResult: {
+            diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             evidence: components["schemas"]["RecipeJobEvidence"];
             /** Exit Code */
             exit_code: number;
@@ -6746,6 +7146,16 @@ export interface components {
             knobs?: {
                 [key: string]: components["schemas"]["RecipeSetting"];
             };
+        };
+        /** RecipeLibraryEvidence */
+        RecipeLibraryEvidence: {
+            evidence: components["schemas"]["EvidenceAge"];
+            /** Repository */
+            repository?: string | null;
+            /** Source Commit */
+            source_commit?: string | null;
+            /** State */
+            state: string;
         };
         /** RecipeLifecycle */
         RecipeLifecycle: {
@@ -7684,6 +8094,33 @@ export interface components {
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256: string;
         };
+        /** RunSwitchCancelRequest */
+        RunSwitchCancelRequest: {
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** RunSwitchCancellation */
+        RunSwitchCancellation: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+        };
         /**
          * RunSwitchChildProgress
          * @description Progress nested in a durable child receipt.
@@ -7696,6 +8133,7 @@ export interface components {
             completed_bytes: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /** Phase */
             phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify" | "container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
@@ -7959,6 +8397,7 @@ export interface components {
          * @description Exact durable result tree stored in ``Job.result``.
          */
         RunSwitchOperationResult: {
+            cancellation?: components["schemas"]["RunSwitchCancellation"] | null;
             /** Child Operation Id */
             child_operation_id?: string | null;
             /**
@@ -7981,6 +8420,9 @@ export interface components {
             item_index: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
+            /** Operation Phase Index */
+            operation_phase_index?: number | null;
             /** Phase */
             phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
             /**
@@ -7990,6 +8432,7 @@ export interface components {
             phase_index: number;
             /** Phase Results */
             phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"])[];
+            preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Retry Attempt */
             retry_attempt?: number | null;
             /** Retry Reason */
@@ -8170,6 +8613,7 @@ export interface components {
             completed_bytes: number;
             /** Members */
             members: components["schemas"]["RunSwitchMemberProgress"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
             /** Phase */
             phase: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
             /** Phase Count */
@@ -8180,7 +8624,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "succeeded" | "failed" | "unknown";
+            state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
@@ -8587,6 +9031,38 @@ export interface components {
              * @enum {string}
              */
             spark_coverage: "complete" | "partial" | "unknown";
+        };
+        /** RuntimePreflightFinding */
+        RuntimePreflightFinding: {
+            /** Capability */
+            capability: string;
+            /** Code */
+            code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "unknown";
+        };
+        /** RuntimePreflightResult */
+        RuntimePreflightResult: {
+            /** Cached */
+            cached: boolean;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Findings */
+            findings: components["schemas"]["RuntimePreflightFinding"][];
+            /** Fingerprint */
+            fingerprint: string;
+            /** Observed At */
+            observed_at: number;
+            /** Request Sha256 */
+            request_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
         };
         /** SourceBundleResponse */
         SourceBundleResponse: {
@@ -9497,6 +9973,58 @@ export interface components {
             plan_digest: string;
             /** Request Key */
             request_key: string;
+        };
+        /** WorkloadProvenance */
+        WorkloadProvenance: {
+            /** Build Id */
+            build_id?: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Current Mapping Generation */
+            current_mapping_generation?: number | null;
+            /** Image Digest */
+            image_digest: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Installation State */
+            installation_state: string;
+            /**
+             * Mapping Agreement
+             * @enum {string}
+             */
+            mapping_agreement: "match" | "mismatch" | "unknown";
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Models */
+            models: components["schemas"]["DeploymentModelIdentity"][];
+            physical_acceptance: components["schemas"]["PhysicalAcceptanceEvidence"];
+            /**
+             * Rank Agreement
+             * @enum {string}
+             */
+            rank_agreement: "match" | "mismatch" | "unknown";
+            /** Ranks */
+            ranks: components["schemas"]["RankProvenance"][];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Publisher */
+            recipe_publisher: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Recipe Revision Number */
+            recipe_revision_number: number;
+            /** Recipe Slug */
+            recipe_slug: string;
+            /** Run Generation */
+            run_generation?: number | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Run State */
+            run_state?: string | null;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256?: string | null;
         };
         /**
          * CompiledExecutionPlan
@@ -10899,6 +11427,53 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getDeploymentProvenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentProvenance"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14081,6 +14656,7 @@ export interface operations {
             query?: {
                 artifact_set_sha256?: string | null;
                 limit?: number;
+                check_upstream?: boolean;
                 cursor?: string | null;
             };
             header?: never;
@@ -14522,6 +15098,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getOperationEvidence: {
+        parameters: {
+            query: {
+                attempt: number;
+            };
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailureEvidenceBundle"];
                 };
             };
             /** @description Unauthorized */
@@ -15401,6 +16037,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelRecipeRunSwitchOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */

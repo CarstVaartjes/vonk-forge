@@ -256,6 +256,10 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
+    async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
+        self.client.set_progress_phase(claim.operation_id, phase);
+    }
+
     pub async fn report_exact_recipe_run_observations(
         &self,
     ) -> Result<usize, RecipeObservationError>
@@ -351,6 +355,16 @@ impl<R> RecipeExecutor<'_, R> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError> {
+        self.report_phase(
+            claim,
+            match action {
+                HostRuntimeAction::ImageImport => "extracting",
+                HostRuntimeAction::Start => "starting",
+                HostRuntimeAction::Stop => "stopping",
+                _ => "verifying",
+            },
+        )
+        .await;
         let request_root = self.runtime_root.join("runtime-requests");
         HostRuntimeBoundary {
             client: self.client,
@@ -659,6 +673,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if request.validate().is_err() || request.plan_digest != claim.authority_revision {
                 return failed("artifact distribution plan identity is invalid");
             }
+            self.report_phase(claim, "preparing").await;
             let destination = self.runtime.data_root.join("distribution");
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
@@ -669,6 +684,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 // Progress is a snapshot, not an event log. Coalesce fast
                 // transfer updates instead of accumulating an unbounded queue
                 // of heartbeat requests before image import can begin.
+                let mut completed_bytes = 0_u64;
+                let mut completed_items = 0_u64;
                 let mut cadence = tokio::time::interval(Duration::from_secs(1));
                 cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 while progress_receiver.changed().await.is_ok() {
@@ -676,6 +693,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let Some(item) = progress_receiver.borrow_and_update().clone() else {
                         continue;
                     };
+                    // Retries rescan durable objects from the beginning. Keep the
+                    // operation-wide high-water mark while those objects replay.
+                    progress_client.set_progress_phase(progress_claim.operation_id, item.phase);
+                    completed_bytes = completed_bytes.max(item.bytes);
+                    completed_items = completed_items.max(item.completed_items);
                     let progress = AgentProgress {
                         attempt: progress_claim.attempt,
                         deadline: *progress_deadline.borrow(),
@@ -684,10 +706,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         node_id: progress_claim.node_id.clone(),
                         operation_id: progress_claim.operation_id,
                         progress: json!({
-                            "phase": "copying",
+                            "phase": item.phase,
+                            "completed_items": completed_items,
+                            "total_items": item.total_items,
                             "object_sha256": item.object_sha256,
                             "kind": item.kind,
-                            "completed_bytes": item.bytes,
+                            "completed_bytes": completed_bytes,
                             "total_bytes": item.total_bytes,
                             "total_bytes_known": item.total_bytes.is_some(),
                         }),
@@ -785,7 +809,88 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             Err(_) => return failed("recipe operation payload is invalid"),
         };
         match request {
+            RecipeOperationRequest::RuntimePreflight(request) => {
+                use crate::runtime_preflight::{
+                    PROBE_BINARY, RuntimePreflight, finding, host_fingerprint,
+                };
+                let started = std::time::Instant::now();
+                let fingerprint = match host_fingerprint(
+                    self.runtime.runner,
+                    env!("VONK_AGENT_BUILD_DIGEST"),
+                    self.runtime.data_root,
+                    self.runtime_root,
+                ) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return failed("runtime preflight host policy fingerprint is unavailable");
+                    }
+                };
+                // Fabric bandwidth is declared inventory, not measured NCCL acceptance.
+                // The configured fabric address must actually be bindable on this host.
+                let fabric =
+                    crate::config::AgentConfig::load(Path::new(crate::config::DEFAULT_CONFIG_PATH))
+                        .ok()
+                        .and_then(|config| {
+                            let address = config.fabric_address?;
+                            let speed = config.fabric_bandwidth_mbps?;
+                            std::net::TcpListener::bind((address, 0))
+                                .ok()
+                                .map(|_| ("connected", speed))
+                        });
+                let probe = RuntimePreflight {
+                    runner: self.runtime.runner,
+                    data_root: self.runtime.data_root,
+                    runtime_root: self.runtime_root,
+                    probe_binary: Path::new(PROBE_BINARY),
+                };
+                let mut result =
+                    match probe.run(&request, fingerprint, fabric, &|| *cancellation.borrow()) {
+                        Ok(result) => result,
+                        Err(_) => {
+                            return failed(
+                                "runtime preflight could not inspect the agent service environment",
+                            );
+                        }
+                    };
+                let outcome = self
+                    .execute_host_runtime_outcome(
+                        claim,
+                        HostRuntimeAction::RuntimePreflight,
+                        vec![],
+                    )
+                    .await;
+                let (passed, code) = match outcome {
+                    Ok(outcome) => match outcome.exit_code {
+                        Some(0) => (true, "available"),
+                        Some(21) => (false, "helper_proc_unavailable"),
+                        Some(22) => (false, "helper_capabilities_not_zero"),
+                        Some(23) => (false, "helper_no_new_privileges_unavailable"),
+                        Some(24) => (false, "helper_mount_namespace_unavailable"),
+                        Some(25) => (false, "helper_temporary_directory_unavailable"),
+                        Some(30) => (false, "helper_image_import_failed"),
+                        Some(31) => (false, "helper_sandbox_run_failed"),
+                        Some(32) => (false, "helper_probe_cleanup_failed"),
+                        _ => (false, "helper_probe_invalid_result"),
+                    },
+                    Err(_) => (false, "helper_probe_unavailable"),
+                };
+                result
+                    .findings
+                    .retain(|value| value.capability != "signed_helper_run");
+                result
+                    .findings
+                    .push(finding("signed_helper_run", passed, code));
+                result.duration_ms = started.elapsed().as_millis() as u64;
+                if result.validate().is_err() {
+                    return failed("runtime preflight exceeded the bounded deadline");
+                }
+                ExecutionResult {
+                    state: "succeeded",
+                    body: serde_json::to_value(result).expect("typed preflight serializes"),
+                }
+            }
             RecipeOperationRequest::Build(request) => {
+                self.report_phase(claim, "downloading").await;
                 let archive = match self
                     .client
                     .source_bundle(&request.source_bundle_sha256, request.source_bundle_bytes)
@@ -800,10 +905,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     runtime_root: self.runtime_root,
                     egress_binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 };
+                self.report_phase(claim, "building").await;
                 let cancelled = || *cancellation.borrow();
                 match builder.build_cancellable(&request, claim.operation_id, &archive, &cancelled)
                 {
                     Ok(evidence) => {
+                        self.report_phase(claim, "uploading").await;
                         if self
                             .client
                             .upload_recipe_image(
@@ -832,6 +939,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::ImageImport(request) => {
+                self.report_phase(claim, "downloading").await;
                 if self
                     .runtime
                     .ensure_disk_available(request.image_bytes)
@@ -885,6 +993,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     Err(_) => return failed("OCI image archive cache is invalid"),
                 };
+                self.report_phase(claim, "verifying").await;
                 match importer.verify(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(
@@ -932,6 +1041,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::JobRun(request) => {
+                self.report_phase(claim, "preparing").await;
                 let started = Instant::now();
                 let installation_id = request.installation_id.to_string();
                 let job_scope = request.job_id.to_string();
@@ -1317,6 +1427,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Install(request) => {
+                self.report_phase(claim, "installing").await;
                 let inline_spec =
                     match parse_compiled_execution_plan(&request.compiled_execution_plan) {
                         Ok(spec) => spec,
@@ -1393,6 +1504,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Start(request) => {
+                self.report_phase(claim, "starting").await;
                 let installation_id = request.installation_id.to_string();
                 let spec = match parse_compiled_execution_plan(&request.compiled_execution_plan) {
                     Ok(spec) => spec,
@@ -1740,6 +1852,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Stop(request) => {
+                self.report_phase(claim, "stopping").await;
                 let run_id = request.run_id.to_string();
                 let plan = match self.runtime.prepare_stop(&run_id) {
                     Ok(plan) => plan,
@@ -1790,6 +1903,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Uninstall(request) => {
+                self.report_phase(claim, "uninstalling").await;
                 let installation_id = request.installation_id.to_string();
                 match self.runtime.recipe_digest_if_present(&installation_id) {
                     Ok(None) => {
@@ -1826,6 +1940,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::ModelCleanup(request) => {
+                self.report_phase(claim, "cleanup").await;
                 let installations = request
                     .installations
                     .into_iter()
@@ -1991,6 +2106,7 @@ fn job_result_body(
             peak_memory_bytes: None,
         },
         reason: reason.map(str::to_owned),
+        diagnostics: None,
     };
     debug_assert!(result.validate().is_ok());
     serde_json::to_value(result).unwrap_or_default()
@@ -2255,6 +2371,14 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         return executed;
     }
     if claim.operation == "recipe.job.run.v1" {
+        let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
+        let mut executed = executed;
+        if let Some(reason) = executed.body.get("reason").and_then(Value::as_str) {
+            executed.body["reason"] = Value::String(crate::failure_evidence::sanitize_text(reason));
+        }
+        if let Ok(value) = serde_json::to_value(diagnostics) {
+            executed.body["diagnostics"] = value;
+        }
         return executed;
     }
     let reason = executed
@@ -2262,6 +2386,10 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("agent operation failed");
+    let reason: String = crate::failure_evidence::sanitize_text(reason)
+        .chars()
+        .take(1024)
+        .collect();
     let error_code = match claim.operation.as_str() {
         "agent.upgrade.v1" => "agent_upgrade_failed",
         "artifact.distribution.v1" => "artifact_distribution_failed",
@@ -2282,7 +2410,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
     });
     for field in ["stage", "diagnostic"] {
         if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
-            body[field] = Value::String(value.to_owned());
+            body[field] = Value::String(crate::failure_evidence::sanitize_text(value));
         }
     }
     if claim.operation == "agent.upgrade.v1" {
@@ -2320,6 +2448,10 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             .filter(|code| stable_runtime_helper_error_code(code))
     {
         body["helper_error_code"] = Value::String(code.to_owned());
+    }
+    let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
+    if let Ok(value) = serde_json::to_value(diagnostics) {
+        body["diagnostics"] = value;
     }
     ExecutionResult {
         state: "failed",
@@ -2373,7 +2505,11 @@ async fn run_heartbeats<C: LoopClient>(
             progress: json!({"phase": "executing"}),
             schema_version: claim.schema_version,
         };
-        let directive = client.heartbeat(&progress).await?;
+        let directive = match client.heartbeat(&progress).await {
+            Ok(directive) => directive,
+            Err(error) if error.retryable() && Utc::now() < deadline => continue,
+            Err(error) => return Err(error.into()),
+        };
         state.apply_heartbeat(&progress, &directive)?;
         lease_deadline.send_replace(directive.deadline);
         deadline = directive.deadline;
@@ -2567,7 +2703,7 @@ mod tests {
         );
 
         assert_eq!(
-            result.body,
+            checked_failure_body(result.body),
             json!({
                 "diagnostic": "temporary-storage-exhausted",
                 "error_code": "recipe_build_failed",
@@ -2883,7 +3019,7 @@ mod tests {
 
         async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
             self.heartbeats.lock().unwrap().push(progress.clone());
-            if self.fail_heartbeat {
+            if self.fail_heartbeat && self.heartbeats.lock().unwrap().len() == 1 {
                 return Err(ClientError::Retryable);
             }
             Ok(AgentDirective {
@@ -2991,6 +3127,15 @@ mod tests {
         }
     }
 
+    fn checked_failure_body(mut body: serde_json::Value) -> serde_json::Value {
+        let diagnostics = body.as_object_mut().unwrap().remove("diagnostics").unwrap();
+        serde_json::from_value::<crate::failure_evidence::FailureDiagnostics>(diagnostics)
+            .unwrap()
+            .validate()
+            .unwrap();
+        body
+    }
+
     fn claim() -> AgentClaim {
         let plan: Value = serde_json::from_str(include_str!(
             "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
@@ -3021,6 +3166,31 @@ mod tests {
         };
         RecipeOperationRequest::parse(&claim).unwrap();
         claim
+    }
+
+    #[test]
+    fn artifact_job_failure_keeps_current_result_and_typed_diagnostics() {
+        let mut job_claim = claim();
+        job_claim.operation = "recipe.job.run.v1".to_owned();
+        let envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+        ))
+        .unwrap();
+        let mut body = envelope["result"].clone();
+        body["exit_code"] = json!(1);
+        body["reason"] = json!("runtime failed");
+        let result = normalize_execution_result(
+            &job_claim,
+            ExecutionResult {
+                state: "failed",
+                body,
+            },
+        );
+        let typed: vonk_agent_protocol::RecipeJobRunResult =
+            serde_json::from_value(result.body).unwrap();
+        typed.validate().unwrap();
+        assert_eq!(typed.exit_code, 1);
+        assert!(typed.diagnostics.is_some());
     }
 
     #[tokio::test]
@@ -3104,7 +3274,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn heartbeat_failure_leaves_a_durable_terminal_result_not_a_busy_attempt() {
+    async fn transient_heartbeat_failure_does_not_terminate_healthy_execution() {
         let directory = tempdir().unwrap();
         let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let client = RecordingClient {
@@ -3116,12 +3286,12 @@ mod tests {
         };
         let executor = HeartbeatGatedExecutor {
             heartbeats,
-            minimum: 1,
+            minimum: 2,
             observed_deadline: Arc::new(Mutex::new(None)),
         };
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
-        let error = run_once_with_heartbeat_interval(
+        run_once_with_heartbeat_interval(
             &client,
             &mut state,
             &executor,
@@ -3134,13 +3304,11 @@ mod tests {
             || Ok(()),
         )
         .await
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(
-            error,
-            super::LoopError::Client(ClientError::Retryable)
-        ));
-        assert_eq!(state.pending_results().unwrap().len(), 1);
+        assert!(client.heartbeats.lock().unwrap().len() >= 2);
+        assert_eq!(client.results.lock().unwrap().len(), 1);
+        assert!(state.pending_results().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -3171,7 +3339,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            client.results.lock().unwrap()[0].result,
+            checked_failure_body(client.results.lock().unwrap()[0].result.clone()),
             json!({
                 "error_code": "recipe_install_failed",
                 "reason": "rootless image build failed",
@@ -3198,7 +3366,7 @@ mod tests {
         );
 
         assert_eq!(
-            result.body,
+            checked_failure_body(result.body),
             json!({
                 "error_code": "agent_upgrade_failed",
                 "reason": "agent upgrade helper rejected the request: package_install_failed",

@@ -267,6 +267,10 @@ def add_controller_commands(
     """Add the web-controller-equivalent command hierarchy."""
     fleet = commands.add_parser("fleet", help="Fleet nodes, health, and enrollment")
     fleet_commands = _subcommands(fleet, "fleet_command")
+    provenance = fleet_commands.add_parser(
+        "provenance", help="Show deployed code, artifacts, and evidence boundaries"
+    )
+    _add_json(provenance)
 
     fleet_list = fleet_commands.add_parser("list", help="List the visual Fleet")
     fleet_list.add_argument("--search", default="")
@@ -731,6 +735,12 @@ def add_controller_commands(
     model_run_apply.add_argument("--request-key", required=True)
     _apply(model_run_apply)
     _add_json(model_run_apply)
+    model_run_cancel = model_run_commands.add_parser("cancel", help="Cancel pending preparation at a safe phase boundary")
+    model_run_cancel.add_argument("operation_id")
+    model_run_cancel.add_argument("--reason", default="Cancelled by operator")
+    _request_key(model_run_cancel)
+    _apply(model_run_cancel)
+    _add_json(model_run_cancel)
     model_run_stop = model_run_commands.add_parser("stop")
     stop_variants = _subcommands(model_run_stop, "model_run_stop_command")
     stop_preview = stop_variants.add_parser("preview")
@@ -869,6 +879,11 @@ def add_controller_commands(
         _add_json(watch_parser)
     evidence = operation_commands.add_parser("evidence")
     evidence.add_argument("operation_id")
+    evidence.add_argument(
+        "--attempt",
+        type=int,
+        help="Exact failed attempt; defaults to the current attempt",
+    )
     evidence.add_argument("--file", type=Path)
     _add_json(evidence)
 
@@ -1588,6 +1603,8 @@ def _load_recipe_list(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    if command == "provenance":
+        return client.request("GET", "/api/v1/deployment-provenance")
     def fleet_snapshot() -> dict[str, object]:
         payload = client.fleet().to_dict()
         if not isinstance(payload, dict):
@@ -2655,6 +2672,18 @@ def _run_model_run(
                 "body": payload,
             }
         return client.request("POST", "/api/v1/recipes/run-switches", payload)
+    if command == "cancel":
+        from .generated_control.models.run_switch_cancel_request import RunSwitchCancelRequest
+
+        payload = RunSwitchCancelRequest.from_dict({
+            "schema_version": 2,
+            "request_key": _explicit_request_key(args.request_key or request_id_factory()),
+            "reason": args.reason,
+        }).to_dict()
+        path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}/cancel"
+        if not args.apply:
+            return {"mode": "plan", "apply": False, "method": "POST", "path": path, "body": payload}
+        return client.request("POST", path, payload)
     variant = args.model_run_stop_command
     payload: dict[str, object] = {"run_id": args.run_id}
     if variant == "preview":
@@ -2680,6 +2709,12 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     progress = observed.get("progress")
     if not isinstance(progress, Mapping):
         return None
+    if observed.get("kind") in {"download", "repair", "evict"}:
+        from .generated_control.models.operation_progress import OperationProgress
+
+        progress = OperationProgress.from_dict(dict(progress["measurement"])).to_dict()
+    if isinstance(progress.get("operation"), Mapping):
+        progress = progress["operation"]
     phase = progress.get("phase")
     pieces: list[str] = []
     if isinstance(phase, str) and phase:
@@ -2687,14 +2722,32 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     subphase = progress.get("subphase")
     if isinstance(subphase, str) and subphase:
         pieces.append(f"subphase: {subphase}")
-    completed = progress.get("completed_bytes", progress.get("downloaded_bytes"))
-    total = progress.get("total_bytes", progress.get("expected_bytes"))
+    completed = progress.get("completed_bytes")
+    total = progress.get("total_bytes")
     if isinstance(completed, int) and not isinstance(completed, bool):
         if isinstance(total, int) and not isinstance(total, bool):
             pieces.append(f"bytes: {completed}/{total}")
         else:
             pieces.append(f"bytes: {completed}")
-    artifact = progress.get("current_artifact_key")
+    for field, label, suffix in (
+        ("smoothed_bytes_per_second", "smoothed", " bytes/s"),
+        ("bytes_per_second", "current", " bytes/s"),
+        ("eta_seconds", "ETA", "s"),
+        ("elapsed_seconds", "elapsed", "s"),
+    ):
+        value = progress.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            pieces.append(f"{label}: {value:.0f}{suffix}")
+    for field, label in (("activity", "activity"), ("last_progress_at", "last progress")):
+        value = progress.get(field)
+        if isinstance(value, str) and value:
+            pieces.append(f"{label}: {value.replace('_', ' ')}")
+    completed_items = progress.get("completed_items")
+    total_items = progress.get("total_items")
+    if type(completed_items) is int:
+        pieces.append(f"items: {completed_items}/{total_items}" if type(total_items) is int else f"items: {completed_items}")
+    checkpoint = progress.get("checkpoint")
+    artifact = checkpoint.get("cursor") if isinstance(checkpoint, Mapping) else None
     if isinstance(artifact, str) and artifact:
         pieces.append(f"artifact: {artifact}")
     members = progress.get("members")
@@ -2880,7 +2933,7 @@ def _run_cache(
         return client.request(
             "GET",
             "/api/v1/model-cache/updates",
-            query=_query(artifact_set_sha256=artifact_set_sha256),
+            query=_query(artifact_set_sha256=artifact_set_sha256, check_upstream=True),
         )
     if command == "operations":
         if args.cache_operations_command == "list":
@@ -3058,7 +3111,15 @@ def _run_operations(
     if command == "show":
         return client.request("GET", f"{base}/{operation_id}")
     if command == "evidence":
-        result = client.request("GET", f"{base}/{operation_id}")
+        attempt = args.attempt
+        if attempt is None:
+            current = client.request("GET", f"{base}/{operation_id}")
+            attempt = current["attempt"]
+        if type(attempt) is not int or attempt < 0:
+            raise ValueError("evidence attempt must be a nonnegative integer")
+        result = client.request(
+            "GET", f"{base}/{operation_id}/evidence", query={"attempt": attempt}
+        )
         if args.file is not None:
             args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
             return {"operation_id": args.operation_id, "file": str(args.file)}

@@ -1210,7 +1210,7 @@ class ModelCacheOperation(Base):
             name="ck_model_cache_operations_plan_digest",
         ),
         CheckConstraint(
-            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 65536",
+            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 1048576",
             name="ck_model_cache_operations_progress_size",
         ),
         CheckConstraint(
@@ -2513,3 +2513,7 @@ class ResourceReservation(Base):
         DateTime(timezone=True), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Register the current evidence tables for both application and Alembic metadata.
+from . import failure_evidence_models as _failure_evidence_models  # noqa: F401

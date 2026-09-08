@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
-ARG SKOPEO_IMAGE=quay.io/skopeo/stable@sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c
-ARG SKOPEO_INDEX_DIGEST=sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c
-ARG SKOPEO_AMD64_DIGEST=sha256:abded792af33493f9aaa08132f564d3f9c12818193c0adc0a62f44ed84a04eda
-ARG SKOPEO_ARM64_DIGEST=sha256:8ec3bf7d7bc514b7178db838b2e289ea5eca7bd065ce6a67b9f04cef3c85eba9
+ARG SKOPEO_IMAGE=quay.io/skopeo/stable@sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded
+ARG SKOPEO_INDEX_DIGEST=sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded
+ARG SKOPEO_AMD64_DIGEST=sha256:227e130acec26a8f8d6aba1c48d30d6adaf8bc927f268fbca381b3dea9cb4257
+ARG SKOPEO_ARM64_DIGEST=sha256:51ce9cbe66da10ffd7f9f2f5fbdf9e9e603b7dac3ade9ada2b5da28d94bfa92a
 
 FROM ${SKOPEO_IMAGE} AS skopeo
 ARG TARGETARCH
@@ -87,7 +87,7 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "36ca88c09bec8389f5c43ac4becca32a326232be28d19e2e6aac545e0ff857e5" \
+    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "c69ddc6b05b6a756d1072ef0781daa41d0e9a9c3e7ede8f2f07578befec3797c" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --prefix=/install \
@@ -97,6 +97,7 @@ RUN python -m pip install --no-cache-dir --prefix=/install \
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 ARG TARGETARCH
+ARG VONK_SOURCE_COMMIT
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
@@ -106,6 +107,10 @@ RUN groupadd --gid 10001 control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp
 COPY --from=build /install /usr/local
+RUN if [ -n "$VONK_SOURCE_COMMIT" ]; then \
+        install -d -m 0755 /usr/local/share/vonk-forge \
+        && VONK_BUILD_SOURCE="$VONK_SOURCE_COMMIT" python -c 'import os; from pathlib import Path; from vonk_control.deployment_provenance_contract import ControllerBuildMetadata; value = ControllerBuildMetadata(source_commit=os.environ["VONK_BUILD_SOURCE"]); Path("/usr/local/share/vonk-forge/controller-build.json").write_text(value.model_dump_json() + "\n")'; \
+    fi
 COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers

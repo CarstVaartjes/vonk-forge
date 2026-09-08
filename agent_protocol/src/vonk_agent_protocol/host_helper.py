@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from .contracts import AgentProtocolError, canonical_message
+from .package_upgrade import PackageRollbackAuthority
 from .wire_model import WireModel
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
@@ -47,6 +48,7 @@ class RestartUnit(StrEnum):
 
 
 class ContainerRuntimeAction(StrEnum):
+    RUNTIME_PREFLIGHT = "runtime-preflight"
     IMAGE_IMPORT = "image-import"
     IMAGE_INSPECT = "image-inspect"
     RUN_INSPECT = "run-inspect"
@@ -57,6 +59,7 @@ class ContainerRuntimeAction(StrEnum):
 class HostOperationKind(StrEnum):
     CREATE_MANAGED_DIRECTORY = "create-managed-directory"
     INSTALL_VONK_DEB = "install-vonk-deb"
+    CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
     RESTART_VONK_UNIT = "restart-vonk-unit"
     SCHEDULE_REBOOT = "schedule-reboot"
     EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
@@ -80,10 +83,19 @@ class CreateManagedDirectoryOperation(_HostOperation):
         return value
 
 
+
+
 class InstallVonkDebOperation(_HostOperation):
     type: Literal["install-vonk-deb"]
     package_sha256: Digest
     package_signature: Signature
+    rollback: PackageRollbackAuthority
+
+
+class ConfirmPackageActivationOperation(_HostOperation):
+    type: Literal["confirm-package-activation"]
+    package_sha256: Digest
+    attempt_nonce: Digest
 
 
 class RestartVonkUnitOperation(_HostOperation):
@@ -98,7 +110,7 @@ class ScheduleRebootOperation(_HostOperation):
 
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
-    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
     job_id: Uuid4Text
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
@@ -123,6 +135,7 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 type HostOperation = Annotated[
     CreateManagedDirectoryOperation
     | InstallVonkDebOperation
+    | ConfirmPackageActivationOperation
     | RestartVonkUnitOperation
     | ScheduleRebootOperation
     | ExecuteContainerRuntimeRequestOperation,

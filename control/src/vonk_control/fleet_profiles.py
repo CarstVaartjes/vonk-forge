@@ -60,6 +60,7 @@ from .models import (
     RunNode,
 )
 from .operation_contract import OperationFailureEvidence
+from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import (
@@ -569,6 +570,7 @@ class RunSwitchFleetProfileAdapter:
         run_phase = child.current_phase or child.progress.phase or "prepare"
         phase = _PROFILE_PHASE_BY_RUN_PHASE.get(run_phase, run_phase)
         progress = FleetProfileChildProgress(
+            operation=child.progress.operation,
             phase=phase,
             node_ids=list(state.get("scope_node_ids", [])),
             bytes=child.progress.completed_bytes,
@@ -2767,6 +2769,9 @@ class FleetProfileService:
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
         plan = _persisted_profile_plan(row)
+        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        if row.state in {"queued", "running"} and progress.child_progress and progress.child_progress.operation:
+            progress.child_progress.operation = project_progress(progress.child_progress.operation, _aware(self._clock()))
         return FleetProfileApplicationView(
             id=row.id,
             profile_id=row.profile_id,
@@ -2779,7 +2784,7 @@ class FleetProfileService:
             total_steps=len(plan.steps),
             current_operation_id=row.current_operation_id,
             status_reason=row.status_reason,
-            progress=FleetProfileApplicationProgress.model_validate(row.progress),
+            progress=progress,
             result=_persisted_profile_result(row),
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),

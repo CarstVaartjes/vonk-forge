@@ -13,9 +13,12 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
+    ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     CreateManagedDirectoryOperation,
     ExecuteContainerRuntimeRequestOperation,
@@ -30,6 +33,7 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .models import (
@@ -45,6 +49,7 @@ from .models import (
     RunNode,
 )
 from .models import AgentOperation as StoredAgentOperation
+from .package_activation import matches_receipt
 from .workload_helper_authority import _load_private_key
 
 
@@ -117,6 +122,7 @@ class HostHelperGrantIssuer:
                 CreateManagedDirectoryOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
+    ConfirmPackageActivationOperation,
                 RestartVonkUnitOperation,
                 ScheduleRebootOperation,
             ),
@@ -179,6 +185,7 @@ class HostRuntimeAuthorityService:
     """Bind a narrow host-runtime grant to one live agent attempt."""
 
     _ACTION_KINDS: ClassVar[dict[ContainerRuntimeAction, frozenset[str]]] = {
+        ContainerRuntimeAction.RUNTIME_PREFLIGHT: frozenset({"runtime.preflight.v1"}),
         ContainerRuntimeAction.IMAGE_IMPORT: frozenset(
             {"recipe.image.import.v1", "artifact.distribution.v1"}
         ),
@@ -614,12 +621,16 @@ class HostRuntimeAuthorityService:
                 or lease_deadline <= now
             ):
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
+            payload = AgentUpgradePayload.model_validate(operation.payload)
+            if payload.rollback.activation_deadline <= int(now.timestamp()) + expires_in_seconds:
+                raise HostHelperAuthorityError("package activation deadline has expired")
         grant = self._issuer.issue_grant(
             node_id=node_id,
             operation=InstallVonkDebOperation(
                 type=HostOperationKind.INSTALL_VONK_DEB.value,
                 package_sha256=package_sha256,
                 package_signature=package_signature,
+                rollback=payload.rollback,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -628,6 +639,33 @@ class HostRuntimeAuthorityService:
                 "agent upgrade grant exceeds the active attempt lease"
             )
         return grant
+
+    def issue_package_activation_grant(self, *, node_id: str, receipt: PackageActivationReceipt,
+        runtime_identity: AgentRuntimeIdentity, certificate_serial: str) -> SignedHostHelperGrant:
+        now = self._clock()
+        with self._sessions() as session:
+            node = session.get(AgentNode, node_id)
+            certificate = session.get(AgentCertificate, certificate_serial)
+            if node is None or node.state != "active" or node.revoked_at is not None or certificate is None or certificate.node_id != node_id or certificate.revoked_at is not None:
+                raise HostHelperAuthorityError("activation node identity is invalid")
+            operations = session.scalars(select(StoredAgentOperation).where(
+                StoredAgentOperation.node_id == node_id,
+                StoredAgentOperation.kind == "agent.upgrade.v1",
+                StoredAgentOperation.state.in_({"running", "waiting-for-operator"})))
+            matching = []
+            for operation in operations:
+                payload = AgentUpgradePayload.model_validate(operation.payload)
+                if matches_receipt(receipt, payload, node_id):
+                    matching.append(payload)
+            if len(matching) != 1:
+                raise HostHelperAuthorityError("activation receipt has no unique upgrade authority")
+            payload = matching[0]
+            if receipt.phase != "armed" or payload.rollback.activation_deadline <= int(now.timestamp()) + 30 or runtime_identity.binary_digest != payload.target_binary_digest or runtime_identity.build_digest != payload.target_build_digest or runtime_identity.architecture != payload.architecture or runtime_identity.self_test_passed is not True:
+                raise HostHelperAuthorityError("candidate activation identity is invalid")
+        return self._issuer.issue_grant(node_id=node_id,
+            operation=ConfirmPackageActivationOperation(type="confirm-package-activation",
+                package_sha256=payload.package_sha256, attempt_nonce=payload.rollback.attempt_nonce),
+            expires_in_seconds=30)
 
     def _check_attempt(
         self,

@@ -30,6 +30,7 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
+from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
@@ -194,7 +195,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             state="succeeded",
             # The heartbeat is intentionally stale and partial; terminal
             # evidence below is the authoritative aggregate.
-            progress={"bytes": 3, "total_bytes": 26},
+            progress={"phase": "copying", "completed_bytes": 3, "total_bytes": 26, "total_bytes_known": True},
             result={
                 "downloaded_bytes": 26,
                 "verified": True,
@@ -400,7 +401,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
         operation.current_attempt = 1
         session.add(AgentOperationAttempt(
             operation_id=operation.id, attempt=1, fence=str(uuid4()), lease_deadline=clock.now,
-            agent_certificate_serial="serial-a", state="failed", progress={"bytes": 2, "total_bytes": 26},
+            agent_certificate_serial="serial-a", state="failed", progress={"phase": "copying", "completed_bytes": 2, "total_bytes": 26, "total_bytes_known": True},
             result={"reason": "digest mismatch"},
         ))
         child_id = child.id
@@ -417,7 +418,8 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
         id=str(uuid4()),
         state="queued",
         artifact_set_sha256="d" * 64,
-        progress={"downloaded_bytes": 3, "expected_bytes": 15},
+        progress=cache_progress(
+            {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1, "downloaded_bytes": 3, "expected_bytes": 15}, previous=None, now=datetime.now(UTC)),
         last_error=None,
         result=None,
     )
@@ -922,7 +924,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     state="succeeded",
                     # Keep the heartbeat partial to prove terminal
                     # downloaded_bytes is the authoritative total.
-                    progress={"bytes": 1, "total_bytes": target_bytes},
+                    progress={"phase": "copying", "completed_bytes": 1, "total_bytes": target_bytes, "total_bytes_known": True},
                     result={
                         "downloaded_bytes": target_bytes,
                         "verified": True,

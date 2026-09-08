@@ -1,3 +1,4 @@
+import {availabilityProgress, LibraryAvailabilityProgress} from "../components/library-availability-progress";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
 import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
@@ -210,6 +211,10 @@ function CopyableValue({label, value}: {label: string; value?: string | null}) {
   </div>;
 }
 
+function DiagnosticDownload({id, attempt}: {id: string; attempt: number}) {
+  return <a className="button secondary" href={`/api/v1/operations/${encodeURIComponent(id)}/evidence?attempt=${attempt}`} download>Download diagnostics</a>;
+}
+
 function TechnicalDetails({event}: {event: ActivityRecord}) {
   return <details className="activity-technical">
     <summary>Technical details</summary>
@@ -387,7 +392,8 @@ function JobProgressDetails({
         {detail.kind !== "agent-upgrade" && <p className="activity-job-attempt">Current attempt <strong>{detail.current_attempt}</strong></p>}
         <AgentUpgradeDiagnostics detail={detail} targetNames={targetNames}/>
         {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
-        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{titleCase(operation.state)}</StatusPill>{operation.progress?.phase && <small>Phase: {operation.progress.phase}</small>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
+        {"operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
+        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{titleCase(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
         {detail.state === "waiting-for-operator" && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
@@ -517,16 +523,19 @@ function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
     }
   }, [api, detail.id, onUpdate]);
   const active = ["queued", "running", "pending", "planned"].includes(detail.state);
+  const awaitingEvidence = ["failed", "waiting-for-operator"].includes(detail.state) && !detail.evidence_download;
   useEffect(() => {
-    if (!active) return;
+    if (!active && !awaitingEvidence) return;
     let loading = false;
+    let checks = 0;
     const timer = window.setInterval(() => {
       if (loading) return;
+      if (!active && checks++ >= 6) { window.clearInterval(timer); return; }
       loading = true;
       void refresh().finally(() => { loading = false; });
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [active, refresh]);
+  }, [active, awaitingEvidence, refresh]);
   const placement = detail.kind === "library.placement";
   const supported = placement || detail.kind.startsWith("fleet-profile.");
   const retryable = supported && detail.recovery?.actions?.includes("retry");
@@ -563,6 +572,8 @@ function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
   }
   return <div className="activity-job-reason" style={{gap: ".5rem"}}>
     {detail.failure && <><strong>{detail.failure.summary}</strong>{detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
+    {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={detail.attempt}/>}
+    {detail.progress && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)}/>}
     <p className="activity-job-attempt" style={{margin: 0}}>Attempt {detail.attempt}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
     {(detail.recovery?.uncertain || detail.failure?.uncertain)
       ? <p style={{margin: 0}}>Outcome uncertain. {detail.recovery?.explanation ?? "Inspect the observed state before recovery."}</p>

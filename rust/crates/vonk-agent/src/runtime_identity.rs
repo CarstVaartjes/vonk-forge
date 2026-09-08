@@ -39,6 +39,8 @@ pub struct AgentRuntimeIdentity {
     pub binary_digest: String,
     pub architecture: String,
     pub self_test_passed: bool,
+    #[serde(default)]
+    pub package_activation: Option<vonk_agent_protocol::PackageActivationReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation_receipt_public_key: Option<String>,
 }
@@ -79,6 +81,7 @@ impl AgentRuntimeIdentity {
                 "linux-amd64".to_owned()
             },
             self_test_passed: false,
+            package_activation: None,
             observation_receipt_public_key: None,
         })
     }

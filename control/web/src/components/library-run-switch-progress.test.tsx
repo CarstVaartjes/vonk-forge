@@ -56,12 +56,36 @@ const storage = {copied_bytes: 0, nas_coverage: "unknown" as const, reclaimable_
 const runtimeStorage = {build_id: null, copied_bytes: 0, image_digest: null, nas_coverage: "unknown" as const, reclaimable_bytes: 0, reused_bytes: 0, running_coverage: "unknown" as const, spark_coverage: "unknown" as const};
 const build = {build_id: null, compatibility: {expected_architecture: "linux/arm64", state: "unknown" as const}, image_digest: null, runtime: runtimeStorage, source: {state: "unknown" as const}, state: "unknown" as const};
 
+test("cancellation reuses its request identity after a lost response and retains shared work", async () => {
+  const next = operation({result: {...result(false), cancellation: {
+    request_key: "44444444-4444-4444-8444-444444444444", actor: "admin",
+    reason: "Cancelled by operator", requested_at: "2026-09-08T12:00:00Z",
+  }}});
+  const cancelRecipeRunSwitchOperation = vi.fn().mockRejectedValueOnce(new Error("Connection interrupted")).mockResolvedValue(next);
+  const api = {getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn(), cancelRecipeRunSwitchOperation};
+  const onChange = vi.fn();
+  const props = {api, nodeNames: {[nodeA]: "Spark One"}, onChange, title: "Qwen Chat"};
+  vi.spyOn(crypto, "randomUUID").mockReturnValue("44444444-4444-4444-8444-444444444444");
+  const view = render(<LibraryRunSwitchProgress {...props} operation={operation()}/>);
+  fireEvent.click(screen.getByRole("button", {name: "Cancel preparation"}));
+  await screen.findByText("Connection interrupted");
+  fireEvent.click(screen.getByRole("button", {name: "Cancel preparation"}));
+  await waitFor(() => expect(onChange).toHaveBeenCalledWith(next));
+  expect(cancelRecipeRunSwitchOperation.mock.calls[0]).toEqual(cancelRecipeRunSwitchOperation.mock.calls[1]);
+  view.rerender(<LibraryRunSwitchProgress {...props} operation={next}/>);
+  expect(screen.getByText(/current shared transfer or build may finish/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "Cancel preparation"})).not.toBeInTheDocument();
+  view.rerender(<LibraryRunSwitchProgress {...props} operation={operation({progress: {...operation().progress, phase: "start"}})}/>);
+  expect(screen.getByText(/Use Stop to end the run/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "Cancel preparation"})).not.toBeInTheDocument();
+});
+
 test("keeps unknown byte progress indeterminate and polls the durable operation", async () => {
   vi.useFakeTimers();
   const next = operation({state: "succeeded", current_phase: "final_verify", progress: {...operation().progress, phase: "final_verify", state: "succeeded", completed_bytes: 0, members: [{node_id: nodeA, phase: "final_verify", state: "succeeded", completed_bytes: 0, total_bytes: null}]}});
   const getOperation = vi.fn(async () => next);
-  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: getOperation, retryRecipeRunSwitch: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={operation()} title="Qwen Chat"/>);
-  expect(screen.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
+  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: getOperation, retryRecipeRunSwitch: vi.fn(), cancelRecipeRunSwitchOperation: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={operation()} title="Qwen Chat"/>);
+  expect(screen.getByRole("progressbar", {name: "Transfer transfer"})).not.toHaveAttribute("aria-valuenow");
   expect(screen.getAllByText("Total bytes unavailable").length).toBeGreaterThan(0);
   await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
   expect(getOperation).toHaveBeenCalledWith(operation().operation_id, expect.any(AbortSignal));
@@ -74,7 +98,7 @@ test("retries a transient Run through the durable endpoint and adopts its new op
   const retryRecipeRunSwitch = vi.fn(async () => replacement);
   const onChange = vi.fn();
   vi.spyOn(crypto, "randomUUID").mockReturnValue("44444444-4444-4444-8444-444444444444");
-  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch}} nodeNames={{[nodeA]: "Spark One"}} onChange={onChange} operation={failed} title="Qwen Chat"/>);
+  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch, cancelRecipeRunSwitchOperation: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={onChange} operation={failed} title="Qwen Chat"/>);
 
   fireEvent.click(screen.getByRole("button", {name: "Retry run"}));
   await waitFor(() => expect(retryRecipeRunSwitch).toHaveBeenCalledWith(failed.operation_id, {schema_version: 2, request_key: "44444444-4444-4444-8444-444444444444"}));
@@ -83,7 +107,7 @@ test("retries a transient Run through the durable endpoint and adopts its new op
 
 test("does not offer Run recovery for terminal authorization or integrity failures", () => {
   const failed = operation({state: "failed", status_reason: "model artifact digest mismatch", result: result(false)});
-  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={failed} title="Qwen Chat"/>);
+  render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn(), cancelRecipeRunSwitchOperation: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={failed} title="Qwen Chat"/>);
   expect(screen.queryByRole("button", {name: "Retry run"})).not.toBeInTheDocument();
 });
 
@@ -152,7 +176,7 @@ test("one Run action previews and applies the exact model and selected Spark gro
       search_complete: true,
     }],
   };
-  const runApi = {previewRecipeRunSwitch, applyRecipeRunSwitch, getRecipeRunSwitchOperation: vi.fn(async () => started), retryRecipeRunSwitch: vi.fn()};
+  const runApi = {previewRecipeRunSwitch, applyRecipeRunSwitch, getRecipeRunSwitchOperation: vi.fn(async () => started), retryRecipeRunSwitch: vi.fn(), cancelRecipeRunSwitchOperation: vi.fn()};
   render(<LibraryNodeNamesProvider names={{[nodeA]: "Spark One"}}><LibraryRecipeAuthority api={runApi as never} detail={detail as unknown as LibraryRecipeDetail} snapshot={librarySnapshot}/></LibraryNodeNamesProvider>);
   await act(async () => {
     fireEvent.click(screen.getAllByRole("button", {name: "Run"})[0]!);
@@ -162,4 +186,18 @@ test("one Run action previews and applies the exact model and selected Spark gro
   expect(screen.queryByRole("button", {name: "Review Load"})).not.toBeInTheDocument();
   expect(await screen.findByText("Copying model to Spark One")).toBeVisible();
   expect(applyRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({plan_digest: digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)}));
+});
+
+
+test("shows measured phase transfer and keeps verification indeterminate", () => {
+  const current = operation();
+  Object.assign(current.progress, {operation: {phase: "transfer", completed_bytes: 1024, total_bytes: 2048, total_bytes_known: true, smoothed_bytes_per_second: 512, eta_seconds: 2, elapsed_seconds: 30, activity: "active"}});
+  const props = {api: {getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn(), cancelRecipeRunSwitchOperation: vi.fn()}, nodeNames: {[nodeA]: "Spark One"}, onChange: vi.fn(), title: "Qwen Chat"};
+  const {rerender} = render(<LibraryRunSwitchProgress {...props} operation={current}/>);
+  expect(screen.getByText(/512 B\/s.*2s left/)).toBeVisible();
+  Object.assign(current.progress, {phase: "verify", operation: {phase: "verify", completed_bytes: 2048, total_bytes: 2048, total_bytes_known: true}});
+  rerender(<LibraryRunSwitchProgress {...props} operation={{...current}}/>);
+  expect(screen.getAllByText("Verifying copied artifacts").length).toBeGreaterThan(0);
+  expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+  expect(screen.queryByText(/2s left/)).not.toBeInTheDocument();
 });

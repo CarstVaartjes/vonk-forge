@@ -14,6 +14,7 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_job_evidence import RecipeJobEvidence
+  from ..models.failure_diagnostics import FailureDiagnostics
   from ..models.recipe_job_output_manifest import RecipeJobOutputManifest
 
 
@@ -34,6 +35,7 @@ class RecipeJobRunResult:
             output_manifest (RecipeJobOutputManifest):
             run_id (str):
             schema_version (Literal[1]):
+            diagnostics (Union['FailureDiagnostics', None, Unset]):
             reason (Union[None, Unset, str]):
      """
 
@@ -43,6 +45,7 @@ class RecipeJobRunResult:
     output_manifest: 'RecipeJobOutputManifest'
     run_id: str
     schema_version: Literal[1]
+    diagnostics: Union['FailureDiagnostics', None, Unset] = UNSET
     reason: Union[None, Unset, str] = UNSET
 
 
@@ -51,6 +54,7 @@ class RecipeJobRunResult:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.recipe_job_evidence import RecipeJobEvidence
+        from ..models.failure_diagnostics import FailureDiagnostics
         from ..models.recipe_job_output_manifest import RecipeJobOutputManifest
         evidence = self.evidence.to_dict()
 
@@ -63,6 +67,14 @@ class RecipeJobRunResult:
         run_id = self.run_id
 
         schema_version = self.schema_version
+
+        diagnostics: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.diagnostics, Unset):
+            diagnostics = UNSET
+        elif isinstance(self.diagnostics, FailureDiagnostics):
+            diagnostics = self.diagnostics.to_dict()
+        else:
+            diagnostics = self.diagnostics
 
         reason: Union[None, Unset, str]
         if isinstance(self.reason, Unset):
@@ -81,6 +93,8 @@ class RecipeJobRunResult:
             "run_id": run_id,
             "schema_version": schema_version,
         })
+        if diagnostics is not UNSET:
+            field_dict["diagnostics"] = diagnostics
         if reason is not UNSET:
             field_dict["reason"] = reason
 
@@ -91,6 +105,7 @@ class RecipeJobRunResult:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.recipe_job_evidence import RecipeJobEvidence
+        from ..models.failure_diagnostics import FailureDiagnostics
         from ..models.recipe_job_output_manifest import RecipeJobOutputManifest
         d = dict(src_dict)
         evidence = RecipeJobEvidence.from_dict(d.pop("evidence"))
@@ -113,6 +128,26 @@ class RecipeJobRunResult:
         if schema_version != 1:
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 
+        def _parse_diagnostics(data: object) -> Union['FailureDiagnostics', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                diagnostics_type_0 = FailureDiagnostics.from_dict(data)
+
+
+
+                return diagnostics_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FailureDiagnostics', None, Unset], data)
+
+        diagnostics = _parse_diagnostics(d.pop("diagnostics", UNSET))
+
+
         def _parse_reason(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -130,6 +165,7 @@ class RecipeJobRunResult:
             output_manifest=output_manifest,
             run_id=run_id,
             schema_version=schema_version,
+            diagnostics=diagnostics,
             reason=reason,
         )
 

@@ -70,7 +70,11 @@ from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
 )
+from .deployment_provenance import DeploymentProvenanceService
+from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
+from .failure_evidence import FailureEvidenceService
+from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
     FleetNodeIdentity,
@@ -497,6 +501,8 @@ def create_app(
     tokens: TokenCodec,
     audits: AuditSink,
     fleet_projection: Any | None = None,
+    deployment_provenance: DeploymentProvenanceService | None = None,
+    failure_evidence: FailureEvidenceService | None = None,
     fleet_stream: Any | None = None,
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
@@ -795,6 +801,16 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         audits=audits,
+    )
+    install_deployment_provenance_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        provenance=deployment_provenance,
+    )
+    install_failure_evidence_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=failure_evidence,
     )
     install_recipe_operation_routes(
         app,
@@ -1251,6 +1267,8 @@ def create_app(
 
     def activity_detail(item: Mapping[str, object]) -> OperationDetailResponse:
         """Expose recovery only when its family route is installed."""
+        if failure_evidence is not None:
+            item = failure_evidence.decorate(item)
         kind = item.get("kind")
         can_retry = (
             isinstance(kind, str)
@@ -1410,6 +1428,9 @@ def create_app(
                 ),
                 limit=limit,
                 cursors=cursor_codec,
+                evidence_decorator=failure_evidence.decorate
+                if failure_evidence is not None
+                else None,
             )
         except ValueError:
             raise HTTPException(
@@ -1910,6 +1931,8 @@ def production_app() -> FastAPI:
         run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
+        deployment_provenance=DeploymentProvenanceService(sessions),
+        failure_evidence=FailureEvidenceService(sessions),
         library_placements=library_placements,
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,

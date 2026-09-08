@@ -162,10 +162,12 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert worker._recipes._fleet_profiles is not None
     assert worker._recipes._fleet_profiles._recipe_operations is not None
     assert worker._recipes._run_switches._artifact_phase_executor is not None
-    assert len(worker._background_services) == 1
+    from vonk_control.failure_evidence import FailureEvidenceService
+    assert any(isinstance(callback.__self__, FailureEvidenceService) for callback in worker._background_services)
     image_production = worker._background_closers[0].__self__
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler
+    assert scheduler.tick in worker._background_services
     worker.close()
     assert scheduler.executor._shutdown is True
 

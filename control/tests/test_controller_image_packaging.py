@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "control/Dockerfile"
 
-SKOPEO_INDEX = "sha256:e5d9c4af8ec327785c7ca938d1e4f8452c6a05014850e58e2ff9456899ebd97c"
-SKOPEO_AMD64 = "sha256:abded792af33493f9aaa08132f564d3f9c12818193c0adc0a62f44ed84a04eda"
-SKOPEO_ARM64 = "sha256:8ec3bf7d7bc514b7178db838b2e289ea5eca7bd065ce6a67b9f04cef3c85eba9"
+SKOPEO_INDEX = "sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded"
+SKOPEO_AMD64 = "sha256:227e130acec26a8f8d6aba1c48d30d6adaf8bc927f268fbca381b3dea9cb4257"
+SKOPEO_ARM64 = "sha256:51ce9cbe66da10ffd7f9f2f5fbdf9e9e603b7dac3ade9ada2b5da28d94bfa92a"
 
 
 def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> None:

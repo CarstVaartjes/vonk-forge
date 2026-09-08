@@ -35,6 +35,19 @@ fn package() -> Value {
         "schema_version": 1,
         "target_binary_digest": "d".repeat(64),
         "target_build_digest": format!("sha256:{}", "e".repeat(64)),
+        "source_package_url": "https://install.vonkforge.ai/artifacts/dev/agent-builds/source/vonk-forge-agent.deb",
+        "source_package_bytes": 4_000_000,
+        "rollback": {
+            "source": {
+                "package_sha256": "1".repeat(64),
+                "package_signature": "2".repeat(128),
+                "package_version": "0.1.0~dev.329+g0123456789ab",
+                "binary_sha256": "3".repeat(64),
+                "helper_sha256": "4".repeat(64),
+            },
+            "attempt_nonce": "5".repeat(64),
+            "activation_deadline": 1_788_000_000,
+        },
     })
 }
 

@@ -1,4 +1,18 @@
 #![forbid(unsafe_code)]
+pub mod runtime_preflight;
+
+pub mod operation_progress;
+pub use operation_progress::{
+    OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
+};
+
+pub mod failure_evidence;
+
+pub mod package_upgrade;
+pub use package_upgrade::{
+    PackageActivationPhase, PackageActivationReceipt, PackageRollbackAuthority,
+    PackageRollbackSource,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,6 +52,7 @@ pub enum HostHelperRestartUnit {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostHelperContainerRuntimeAction {
+    RuntimePreflight,
     ImageImport,
     ImageInspect,
     RunInspect,
@@ -55,6 +70,11 @@ pub enum HostHelperOperation {
     InstallVonkDeb {
         package_sha256: String,
         package_signature: String,
+        rollback: PackageRollbackAuthority,
+    },
+    ConfirmPackageActivation {
+        package_sha256: String,
+        attempt_nonce: String,
     },
     RestartVonkUnit {
         unit: HostHelperRestartUnit,
@@ -83,7 +103,17 @@ impl HostHelperOperation {
             Self::InstallVonkDeb {
                 package_sha256,
                 package_signature,
-            } => lower_hex(package_sha256, 64) && lower_hex(package_signature, 128),
+                rollback,
+            } => {
+                lower_hex(package_sha256, 64)
+                    && lower_hex(package_signature, 128)
+                    && rollback.valid()
+                    && rollback.source.package_sha256 != *package_sha256
+            }
+            Self::ConfirmPackageActivation {
+                package_sha256,
+                attempt_nonce,
+            } => lower_hex(package_sha256, 64) && lower_hex(attempt_nonce, 64),
             Self::RestartVonkUnit { .. } => true,
             Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
             Self::ExecuteContainerRuntimeRequest {
@@ -191,6 +221,7 @@ where
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostRuntimeAction {
+    RuntimePreflight,
     ImageImport,
     ImageInspect,
     RunInspect,
@@ -216,7 +247,7 @@ impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
             || self.attempt == 0
-            || self.arguments.is_empty()
+            || (self.arguments.is_empty() != (self.action == HostRuntimeAction::RuntimePreflight))
             || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
             || self.arguments.iter().any(|value| {
                 value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
@@ -496,6 +527,7 @@ impl AgentClaim {
         if !matches!(
             self.operation.as_str(),
             "agent.upgrade.v1"
+                | "runtime.preflight.v1"
                 | "artifact.distribution.v1"
                 | "recipe.build.v1"
                 | "recipe.image.import.v1"
@@ -639,6 +671,9 @@ impl ArtifactDistributionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AgentUpgradeRequest {
+    pub rollback: PackageRollbackAuthority,
+    pub source_package_url: String,
+    pub source_package_bytes: u64,
     pub architecture: String,
     pub package_bytes: u64,
     pub package_sha256: String,
@@ -658,7 +693,19 @@ impl AgentUpgradeRequest {
         let value: Self = serde_json::from_value(claim.payload.clone())?;
         let url = url::Url::parse(&value.package_url)
             .map_err(|_| ProtocolError::Identity("agent upgrade URL"))?;
-        if value.schema_version != 1
+        let source_url = url::Url::parse(&value.source_package_url)
+            .map_err(|_| ProtocolError::Identity("rollback package URL"))?;
+        if !value.rollback.valid()
+            || !(1..=1024 * 1024 * 1024).contains(&value.source_package_bytes)
+            || source_url.scheme() != "https"
+            || source_url.host_str() != Some("install.vonkforge.ai")
+            || source_url.port().is_some()
+            || !source_url.username().is_empty()
+            || source_url.password().is_some()
+            || source_url.query().is_some()
+            || source_url.fragment().is_some()
+            || !source_url.path().ends_with("/vonk-forge-agent.deb")
+            || value.schema_version != 1
             || value.architecture != "linux-arm64"
             || !(1..=1024 * 1024 * 1024).contains(&value.package_bytes)
             || !lower_hex(&value.package_sha256, 64)
@@ -715,6 +762,9 @@ impl AgentProgress {
         {
             return Err(ProtocolError::Identity("progress document"));
         }
+        let progress: OperationProgress = serde_json::from_value(self.progress.clone())
+            .map_err(|_| ProtocolError::Identity("operation progress"))?;
+        progress.validate()?;
         Ok(())
     }
 }
@@ -890,6 +940,7 @@ impl EnrollmentEvidence {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
+    RuntimePreflight(runtime_preflight::RuntimePreflightRequest),
     Build(Box<RecipeBuildRequest>),
     ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
@@ -988,6 +1039,8 @@ pub struct RecipeJobRunResult {
     pub evidence: RecipeJobEvidence,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<failure_evidence::FailureDiagnostics>,
 }
 
 impl RecipeJobRunResult {
@@ -998,6 +1051,10 @@ impl RecipeJobRunResult {
             "files": self.output_manifest.files,
         });
         let valid = self.schema_version == 1
+            && self
+                .diagnostics
+                .as_ref()
+                .is_none_or(|value| value.validate().is_ok())
             && (0..=255).contains(&self.exit_code)
             && self.output_manifest.schema_version == 1
             && self.output_manifest.files.len() <= 32
@@ -1348,6 +1405,9 @@ impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match claim.operation.as_str() {
+            "runtime.preflight.v1" => {
+                Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?)
+            }
             "recipe.build.v1" => {
                 validate_build_wire(&claim.payload)?;
                 Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
@@ -1375,6 +1435,7 @@ impl RecipeOperationRequest {
     fn validate(&self) -> Result<(), ProtocolError> {
         let valid_common = |version: u8, plan: &str| version == 1 && lower_hex(plan, 64);
         let valid = match self {
+            Self::RuntimePreflight(value) => value.validate().is_ok(),
             Self::Build(value) => validate_build(value),
             Self::ImageImport(value) => {
                 value.schema_version == 1

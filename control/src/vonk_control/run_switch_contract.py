@@ -12,8 +12,9 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import DistributionAssignment
+from vonk_agent_protocol import DistributionAssignment, OperationProgress
 
+from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .model_cache_contract import ModelCacheDownloadResult
 from .preparation_contract import RolloutPreparation
 from .runtime_image_preparation import RuntimeImageReceipt
@@ -397,10 +398,11 @@ class RunSwitchMemberProgress(_StrictModel):
 
 
 class RunSwitchProgress(_StrictModel):
+    operation: OperationProgress | None = None
     phase_index: int = Field(ge=0, le=31)
     phase_count: int = Field(ge=1, le=32)
     phase: RunSwitchPhaseKind | None
-    state: Literal["queued", "running", "succeeded", "failed", "unknown"]
+    state: Literal["queued", "running", "succeeded", "failed", "cancelled", "unknown"]
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     total_bytes_known: bool
@@ -465,6 +467,8 @@ class RunSwitchRankReceipt(_StrictModel):
 
 class RunSwitchChildProgress(_StrictModel):
     """Progress nested in a durable child receipt."""
+
+    operation: OperationProgress | None = None
 
     phase: Literal[
         "transfer", "verify", "prepare", "cleanup", "stop", "start", "final_verify",
@@ -709,6 +713,13 @@ RunSwitchPhaseResult = (
 )
 
 
+class RunSwitchCancellation(_StrictModel):
+    request_key: UuidId
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    requested_at: datetime
+
+
 class RunSwitchOperationResult(_StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
@@ -722,6 +733,10 @@ class RunSwitchOperationResult(_StrictModel):
     completed_phases: list[RunSwitchPhaseKind] = Field(default_factory=list, max_length=16)
     child_operation_id: UuidId | None = None
     phase_results: list[RunSwitchPhaseResult] = Field(default_factory=list)
+    operation_phase_index: int | None = Field(default=None, ge=0, le=31)
+    preflight: LifecyclePreflightCheckpoint | None = None
+    cancellation: RunSwitchCancellation | None = None
+    operation: OperationProgress | None = None
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     total_bytes_known: bool = False
@@ -768,6 +783,12 @@ class RunSwitchOperation(_StrictModel):
         if self.state == "failed" and not (self.status_reason or "").strip():
             raise ValueError("failed run-switch requires a status reason")
         return self
+
+
+class RunSwitchCancelRequest(_StrictModel):
+    schema_version: Literal[2] = 2
+    request_key: UuidId
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
 
 
 class RunSwitchRetryRequest(_StrictModel):

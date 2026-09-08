@@ -1,0 +1,11 @@
+.library-availability-progress { display: grid; gap: .4rem; min-width: 0; width: 100%; }
+.library-availability-progress-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .25rem 1rem; }
+.library-availability-progress-heading span, .library-availability-progress-observation { color: var(--text-muted); font-size: .875rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.library-availability-progress-track { height: .25rem; overflow: hidden; background: var(--surface-base); border-radius: .25rem; }
+.library-availability-progress-track > span { display: block; height: 100%; background: var(--mint); }
+.library-availability-progress-track.is-indeterminate { background: var(--border-strong); }
+.library-availability-progress-observation { display: flex; flex-wrap: wrap; gap: .2rem 1rem; margin: 0; }
+.library-availability-progress pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
+.activity-job-steps li > .library-availability-progress { grid-column: 1 / -1; }
+.activity-job-steps li > div { min-width: 0; }
+.activity-job-steps li > div > strong { overflow-wrap: anywhere; }

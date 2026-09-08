@@ -1,5 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .agent_deployment_evidence import AgentDeploymentEvidence
+from .agent_deployment_evidence_connectivity import AgentDeploymentEvidenceConnectivity
 from .agent_failure_result import AgentFailureResult
 from .agent_install_result import AgentInstallResult
 from .agent_operation import AgentOperation
@@ -91,6 +93,8 @@ from .compiled_runtime_image_source import CompiledRuntimeImageSource
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
+from .deployment_model_identity import DeploymentModelIdentity
+from .deployment_provenance import DeploymentProvenance
 from .distribution_assignment import DistributionAssignment
 from .distribution_object import DistributionObject
 from .distribution_object_kind import DistributionObjectKind
@@ -109,7 +113,16 @@ from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .enum_parameter import EnumParameter
+from .evidence_age import EvidenceAge
+from .evidence_age_freshness import EvidenceAgeFreshness
+from .evidence_context import EvidenceContext
+from .evidence_context_source import EvidenceContextSource
 from .execution_mount import ExecutionMount
+from .failure_diagnostics import FailureDiagnostics
+from .failure_diagnostics_category import FailureDiagnosticsCategory
+from .failure_evidence_bundle import FailureEvidenceBundle
+from .failure_log_tail import FailureLogTail
+from .failure_property import FailureProperty
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -251,6 +264,9 @@ from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
 from .lifecycle_code_failure_result import LifecycleCodeFailureResult
+from .lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
+from .lifecycle_preflight_checkpoint_attempts import LifecyclePreflightCheckpointAttempts
+from .lifecycle_preflight_checkpoint_receipts import LifecyclePreflightCheckpointReceipts
 from .list_recipe_image_availability_state_type_0 import ListRecipeImageAvailabilityStateType0
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
@@ -302,6 +318,8 @@ from .model_cache_repair_request import ModelCacheRepairRequest
 from .model_cache_retry_request import ModelCacheRetryRequest
 from .model_cache_update_response import ModelCacheUpdateResponse
 from .model_cache_updates_response import ModelCacheUpdatesResponse
+from .model_cache_upstream_revision import ModelCacheUpstreamRevision
+from .model_cache_upstream_revision_status import ModelCacheUpstreamRevisionStatus
 from .model_capabilities import ModelCapabilities
 from .model_capability_fact import ModelCapabilityFact
 from .model_capability_fact_capability import ModelCapabilityFactCapability
@@ -344,7 +362,9 @@ from .operation_evidence_download import OperationEvidenceDownload
 from .operation_evidence_provenance import OperationEvidenceProvenance
 from .operation_failure_evidence import OperationFailureEvidence
 from .operation_member_progress import OperationMemberProgress
+from .operation_member_progress_activity_type_0 import OperationMemberProgressActivityType0
 from .operation_progress import OperationProgress
+from .operation_progress_activity_type_0 import OperationProgressActivityType0
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operation_response import OperationResponse
@@ -361,6 +381,10 @@ from .operational_run_state import OperationalRunState
 from .operational_state import OperationalState
 from .operations_response import OperationsResponse
 from .output_limits import OutputLimits
+from .package_activation_receipt import PackageActivationReceipt
+from .package_activation_receipt_phase import PackageActivationReceiptPhase
+from .physical_acceptance_evidence import PhysicalAcceptanceEvidence
+from .physical_acceptance_evidence_state import PhysicalAcceptanceEvidenceState
 from .placement_evidence_counts import PlacementEvidenceCounts
 from .placement_evidence_counts_truncated_collections_item import PlacementEvidenceCountsTruncatedCollectionsItem
 from .placement_limits import PlacementLimits
@@ -371,6 +395,9 @@ from .placement_recommendation_install_state import PlacementRecommendationInsta
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
 from .plan_reason import PlanReason
+from .platform_boundary import PlatformBoundary
+from .platform_boundary_boundary import PlatformBoundaryBoundary
+from .platform_boundary_state import PlatformBoundaryState
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
 from .projection_reason import ProjectionReason
@@ -380,6 +407,8 @@ from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_preview_response import ProposalPreviewResponse
 from .proposal_request import ProposalRequest
+from .rank_provenance import RankProvenance
+from .rank_provenance_identity_agreement import RankProvenanceIdentityAgreement
 from .recipe_benchmark import RecipeBenchmark
 from .recipe_benchmark_configuration import RecipeBenchmarkConfiguration
 from .recipe_build_definition import RecipeBuildDefinition
@@ -432,6 +461,7 @@ from .recipe_job_serving_request import RecipeJobServingRequest
 from .recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
 from .recipe_job_settings import RecipeJobSettings
 from .recipe_job_settings_knobs import RecipeJobSettingsKnobs
+from .recipe_library_evidence import RecipeLibraryEvidence
 from .recipe_lifecycle import RecipeLifecycle
 from .recipe_memory_resources import RecipeMemoryResources
 from .recipe_memory_resources_kind import RecipeMemoryResourcesKind
@@ -515,6 +545,8 @@ from .run_switch_build_evidence import RunSwitchBuildEvidence
 from .run_switch_build_evidence_state import RunSwitchBuildEvidenceState
 from .run_switch_cached_transfer_result import RunSwitchCachedTransferResult
 from .run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals
+from .run_switch_cancel_request import RunSwitchCancelRequest
+from .run_switch_cancellation import RunSwitchCancellation
 from .run_switch_child_progress import RunSwitchChildProgress
 from .run_switch_child_progress_phase_type_0 import RunSwitchChildProgressPhaseType0
 from .run_switch_cleanup_result import RunSwitchCleanupResult
@@ -582,6 +614,9 @@ from .runtime_image_storage_impact import RuntimeImageStorageImpact
 from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
 from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageImpactRunningCoverage
 from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
+from .runtime_preflight_finding import RuntimePreflightFinding
+from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
+from .runtime_preflight_result import RuntimePreflightResult
 from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
@@ -640,8 +675,13 @@ from .uninstall_node_impact_response import UninstallNodeImpactResponse
 from .uninstall_plan_response import UninstallPlanResponse
 from .uninstall_preview_request import UninstallPreviewRequest
 from .uninstall_request import UninstallRequest
+from .workload_provenance import WorkloadProvenance
+from .workload_provenance_mapping_agreement import WorkloadProvenanceMappingAgreement
+from .workload_provenance_rank_agreement import WorkloadProvenanceRankAgreement
 
 __all__ = (
+    "AgentDeploymentEvidence",
+    "AgentDeploymentEvidenceConnectivity",
     "AgentFailureResult",
     "AgentInstallResult",
     "AgentOperation",
@@ -733,6 +773,8 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
+    "DeploymentModelIdentity",
+    "DeploymentProvenance",
     "DistributionAssignment",
     "DistributionObject",
     "DistributionObjectKind",
@@ -751,7 +793,16 @@ __all__ = (
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "EnumParameter",
+    "EvidenceAge",
+    "EvidenceAgeFreshness",
+    "EvidenceContext",
+    "EvidenceContextSource",
     "ExecutionMount",
+    "FailureDiagnostics",
+    "FailureDiagnosticsCategory",
+    "FailureEvidenceBundle",
+    "FailureLogTail",
+    "FailureProperty",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -893,6 +944,9 @@ __all__ = (
     "LibraryRunSummaryState",
     "LibrarySnapshot",
     "LifecycleCodeFailureResult",
+    "LifecyclePreflightCheckpoint",
+    "LifecyclePreflightCheckpointAttempts",
+    "LifecyclePreflightCheckpointReceipts",
     "ListRecipeImageAvailabilityStateType0",
     "ManagedCatalogStaleRecipe",
     "ManagedCatalogSyncProblem",
@@ -944,6 +998,8 @@ __all__ = (
     "ModelCacheRetryRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
+    "ModelCacheUpstreamRevision",
+    "ModelCacheUpstreamRevisionStatus",
     "ModelCapabilities",
     "ModelCapabilityFact",
     "ModelCapabilityFactCapability",
@@ -997,12 +1053,18 @@ __all__ = (
     "OperationEvidenceProvenance",
     "OperationFailureEvidence",
     "OperationMemberProgress",
+    "OperationMemberProgressActivityType0",
     "OperationProgress",
+    "OperationProgressActivityType0",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationResponse",
     "OperationsResponse",
     "OutputLimits",
+    "PackageActivationReceipt",
+    "PackageActivationReceiptPhase",
+    "PhysicalAcceptanceEvidence",
+    "PhysicalAcceptanceEvidenceState",
     "PlacementEvidenceCounts",
     "PlacementEvidenceCountsTruncatedCollectionsItem",
     "PlacementLimits",
@@ -1013,6 +1075,9 @@ __all__ = (
     "PlacementRecommendationLoadState",
     "PlacementScore",
     "PlanReason",
+    "PlatformBoundary",
+    "PlatformBoundaryBoundary",
+    "PlatformBoundaryState",
     "PreparationReason",
     "PreparationReasonSeverity",
     "ProjectionReason",
@@ -1022,6 +1087,8 @@ __all__ = (
     "ProposalChangeRequestDocument",
     "ProposalPreviewResponse",
     "ProposalRequest",
+    "RankProvenance",
+    "RankProvenanceIdentityAgreement",
     "RecipeBenchmark",
     "RecipeBenchmarkConfiguration",
     "RecipeBuildDefinition",
@@ -1074,6 +1141,7 @@ __all__ = (
     "RecipeJobServingRequestInputSlots",
     "RecipeJobSettings",
     "RecipeJobSettingsKnobs",
+    "RecipeLibraryEvidence",
     "RecipeLifecycle",
     "RecipeMemoryResources",
     "RecipeMemoryResourcesKind",
@@ -1157,6 +1225,8 @@ __all__ = (
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
     "RunSwitchCachedTransferResultCachedTargetTotals",
+    "RunSwitchCancellation",
+    "RunSwitchCancelRequest",
     "RunSwitchChildProgress",
     "RunSwitchChildProgressPhaseType0",
     "RunSwitchCleanupResult",
@@ -1224,6 +1294,9 @@ __all__ = (
     "RuntimeImageStorageImpactNasCoverage",
     "RuntimeImageStorageImpactRunningCoverage",
     "RuntimeImageStorageImpactSparkCoverage",
+    "RuntimePreflightFinding",
+    "RuntimePreflightFindingStatus",
+    "RuntimePreflightResult",
     "SourceBundleResponse",
     "SourceCheckRequest",
     "SourcePolicyFindingResponse",
@@ -1282,4 +1355,7 @@ __all__ = (
     "UninstallPlanResponse",
     "UninstallPreviewRequest",
     "UninstallRequest",
+    "WorkloadProvenance",
+    "WorkloadProvenanceMappingAgreement",
+    "WorkloadProvenanceRankAgreement",
 )

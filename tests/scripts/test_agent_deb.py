@@ -26,7 +26,7 @@ POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 RECOVERY_LIFECYCLE = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
-PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras")
+PACKAGE_BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras")
 BUILD_DIGEST = "sha256:" + "b" * 64
 REPAIR_NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 REPAIR_BINARY_REVISION = "e" * 40
@@ -542,7 +542,7 @@ def _elf_fixture(path: Path, marker: bytes, architecture: str = "linux-arm64") -
     raw[128 : 128 + len(identity_marker)] = identity_marker
     semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
     raw[256 : 256 + len(semantic_marker)] = semantic_marker
-    if path.name == "vonk-build-egress":
+    if path.name in {"vonk-build-egress", "vonk-runtime-probe"}:
         struct.pack_into("<Q", raw, 32, 320)
         struct.pack_into("<H", raw, 54, 56)
         struct.pack_into("<H", raw, 56, 1)
@@ -836,14 +836,7 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert '"$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg' in preinst
     assert "= --install" in preinst
     assert "= --force-confold" in preinst
-    # A still-running pre-509 helper can dispatch from the agent-owned
-    # incoming directory; the maintainer script must immediately re-home that
-    # exact candidate into the current root-only custody protocol.
-    assert "/var/lib/vonk-forge/incoming/[0-9a-f]*.deb" in preinst
-    assert "inside_package_helper proved the root helper ancestry" in preinst
-    assert "incoming-copy-changed" in preinst
-    assert "helper_legacy_incoming=1" in preinst
-    assert "controller recovery preflight below immediately re-homes it" in preinst
+    assert "helper_legacy_incoming" not in preinst
     assert "custody_root=/run/vonk-forge-package-candidates" in preinst
     assert '[ "${#invocation}" -eq 32 ]' in preinst
     assert '= 0:0:600:1 ]' in preinst

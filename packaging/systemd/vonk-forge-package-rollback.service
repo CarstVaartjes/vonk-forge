@@ -1,0 +1,26 @@
+[Unit]
+Description=Restore captured signed Spark package after failed activation
+After=local-fs.target
+ConditionPathExists=/var/lib/vonk-forge/package-rollback/transaction.json
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/var/lib/vonk-forge/package-rollback/runner --package-rollback-watchdog
+Restart=on-failure
+RestartSec=10s
+KillMode=control-group
+TimeoutStopSec=15s
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/vonk-forge /var/lib/vonk-forge-agent /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
+ReadWritePaths=/etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/subuid /etc/subgid
+ReadWritePaths=/etc/systemd/system /etc/sudoers.d /usr/share/keyrings /usr/share/doc/vonk-forge-agent
+ReadWritePaths=-/var/lib/systemd/linger
+ReadWritePaths=/run
+
+[Install]
+WantedBy=multi-user.target

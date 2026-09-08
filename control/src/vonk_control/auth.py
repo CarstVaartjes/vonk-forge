@@ -107,6 +107,9 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/run-switches/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),
+    ("POST", "/api/v1/recipes/run-switches/{operation_id}/cancel"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
         {"administrator"}
     ),

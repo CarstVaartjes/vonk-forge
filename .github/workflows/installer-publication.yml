@@ -368,7 +368,7 @@ jobs:
 
           output=$RUNNER_TEMP/installer-publication
           assemble=(
-            scripts/install-release-publication assemble
+            uv run --no-project --with-editable agent_protocol --with cryptography==46.0.7 python scripts/install-release-publication assemble
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"

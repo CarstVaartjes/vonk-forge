@@ -252,9 +252,10 @@ cp -- "$test_root/target-bin/vonk-agent-helper" \
 for binary_dir in "$test_root/target-bin" "$test_root/baseline-bin"; do
   cp -- "$binary_dir/vonk-agent-helper" "$binary_dir/oras"
   cp -- "$build_egress_fixture" "$binary_dir/vonk-build-egress"
+  cp -- "$(dirname "$build_egress_fixture")/vonk-runtime-probe" "$binary_dir/vonk-runtime-probe"
   printf '%s\n' 'ORAS recovery fixture license' > "$binary_dir/oras.LICENSE"
   chmod 0555 "$binary_dir/vonk-agent" "$binary_dir/vonk-agent-helper" \
-    "$binary_dir/vonk-build-egress" "$binary_dir/oras"
+    "$binary_dir/vonk-build-egress" "$binary_dir/vonk-runtime-probe" "$binary_dir/oras"
 done
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
 chmod 0600 "$test_root/release.pem"

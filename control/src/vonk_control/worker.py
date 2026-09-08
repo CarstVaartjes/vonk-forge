@@ -269,6 +269,7 @@ def assemble_production_worker(
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
     from .distribution_executor import CompositeDistributionPhaseExecutor
+    from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
@@ -362,7 +363,8 @@ def assemble_production_worker(
             clock=clock,
         ),
     )
-    worker_background_services = tuple(background_services)
+    failure_evidence = FailureEvidenceService(sessions, clock=clock)
+    worker_background_services = (*background_services, failure_evidence.tick)
     worker_background_closers = tuple(background_closers)
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
@@ -584,6 +586,10 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
+    from .deployment_observer import DeploymentObserver
+    deployment_observer = DeploymentObserver(
+        sessions, channel=os.environ.get("VONK_INSTALL_CHANNEL", "stable"), clock=clock,
+    )
     worker = assemble_production_worker(
         jobs=jobs,
         sessions=sessions,
@@ -600,6 +606,8 @@ if __name__ == "__main__":
         ),
         artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
         model_cache=model_cache,
+        background_services=(deployment_observer.tick,),
+        background_closers=(deployment_observer.close,),
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=(

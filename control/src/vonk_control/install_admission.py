@@ -36,6 +36,13 @@ from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from .runtime_preflight import (
+    admission_blockers,
+    latest_result,
+    node_fingerprint,
+    recipe_requirements,
+    request_digest,
+)
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -189,6 +196,15 @@ class InstallAdmissionService:
                     )
                 )
             )
+            preflight_request = recipe_requirements(revision.document, source_build=False, minimum_free_bytes=self._disk_floor)
+            runtime_blockers_by_node = {
+                node.node_id: admission_blockers(
+                    preflight_request, latest_result(session, node.node_id, requirements_sha256=request_digest(preflight_request)),
+                    current_fingerprint=node_fingerprint(node.capabilities),
+                    now=int(now.timestamp()),
+                )
+                for node in nodes
+            }
             inventory_by_node: dict[str, InventorySnapshotView | None] = {}
             for mapping_node in mapping_nodes:
                 try:
@@ -305,7 +321,10 @@ class InstallAdmissionService:
         }
         plans: list[InstallNodePlan] = []
         for mapping_node in mapping_nodes:
-            blockers: list[AdmissionReason] = []
+            blockers: list[AdmissionReason] = [
+                AdmissionReason(reason.code, reason.detail)
+                for reason in runtime_blockers_by_node.get(mapping_node.node_id, ())
+            ]
             warnings: list[AdmissionReason] = []
             if topology_reason is not None:
                 blockers.append(topology_reason)

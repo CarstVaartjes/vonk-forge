@@ -1,9 +1,4 @@
-"""Shared, bounded contracts for durable Controller operations.
-
-The agent wire protocol intentionally keeps progress as a bounded JSON object.
-This module gives the Controller that object a stable meaning without making
-the older ``{"phase": ...}`` heartbeat shape invalid.
-"""
+"""Current nested contracts for durable Controller operations and progress."""
 
 from __future__ import annotations
 
@@ -183,6 +178,9 @@ def validate_progress_update(
     if not previous:
         return normalized
     old = normalize_operation_progress(previous)
+    # Lease renewal is independent of the executor's more specific progress.
+    if normalized["phase"] == "executing" and old["phase"] != "executing":
+        normalized["phase"] = old["phase"]
     # A phase-only heartbeat may report only a new phase. Keep the last durable
     # counters/checkpoint instead of treating omitted fields as zero/reset.
     for key in (
@@ -191,17 +189,30 @@ def validate_progress_update(
         "completed_bytes",
         "total_bytes",
         "total_bytes_known",
-        "bytes_per_second",
-        "eta_seconds",
+        "completed_items",
+        "total_items",
         "checkpoint",
         "members",
     ):
-        if key not in normalized and key in old:
+        if key not in old:
+            continue
+        if key == "total_bytes" and (
+            "total_bytes" in current or current.get("total_bytes_known") is False
+        ):
+            continue
+        omitted_total = (
+            key == "total_bytes_known"
+            and "total_bytes_known" not in current
+            and "total_bytes" not in current
+        )
+        if key not in normalized or omitted_total:
             normalized[key] = old[key]
     old_bytes = int(old.get("completed_bytes", 0))
     new_bytes = int(normalized.get("completed_bytes", 0))
     if new_bytes < old_bytes:
         raise ValueError("operation progress bytes cannot move backwards")
+    if int(normalized.get("completed_items") or 0) < int(old.get("completed_items") or 0):
+        raise ValueError("operation progress items cannot move backwards")
     old_checkpoint = old.get("checkpoint")
     new_checkpoint = normalized.get("checkpoint")
     if isinstance(old_checkpoint, Mapping) and isinstance(new_checkpoint, Mapping):
@@ -227,7 +238,7 @@ def validate_progress_update(
             prior.get("completed_bytes", 0)
         ):
             raise ValueError("operation member progress bytes cannot move backwards")
-    return normalized
+    return normalize_operation_progress(normalized)
 
 
 def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
