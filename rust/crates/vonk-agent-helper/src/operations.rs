@@ -4655,4 +4655,63 @@ mod tests {
         ));
         assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
     }
+
+    #[test]
+    fn installation_cleanup_treats_each_missing_private_cache_level_as_complete() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let executor = |roots: &ManagedRoots| {
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap()
+        };
+
+        fs::create_dir_all(&roots.agent_data).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        fs::create_dir(roots.agent_data.join("installations")).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        fs::create_dir(roots.agent_data.join("installations").join(installation_id)).unwrap();
+        executor(&roots)
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+    }
+
+    #[test]
+    fn installation_cleanup_rejects_symlinked_installation_path_components() {
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        for linked_component in ["installations", "installation", "runtime-cache"] {
+            let temp = tempfile::tempdir().unwrap();
+            let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+            let outside = temp.path().join("outside");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(outside.join("sentinel"), b"outside").unwrap();
+            fs::create_dir_all(&roots.agent_data).unwrap();
+
+            let installations = roots.agent_data.join("installations");
+            if linked_component == "installations" {
+                std::os::unix::fs::symlink(&outside, &installations).unwrap();
+            } else {
+                fs::create_dir(&installations).unwrap();
+                let installation = installations.join(installation_id);
+                if linked_component == "installation" {
+                    std::os::unix::fs::symlink(&outside, &installation).unwrap();
+                } else {
+                    fs::create_dir(&installation).unwrap();
+                    std::os::unix::fs::symlink(&outside, installation.join("runtime-cache"))
+                        .unwrap();
+                }
+            }
+
+            let executor =
+                OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+            assert!(matches!(
+                executor.runtime_installation_cleanup(installation_id),
+                Err(OperationError::Io(_))
+            ));
+            assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        }
+    }
 }
