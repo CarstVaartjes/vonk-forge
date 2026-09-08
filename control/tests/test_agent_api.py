@@ -81,6 +81,10 @@ from vonk_control.models import (
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.recipe_execution_contract import (
+    installation_plan_document,
+    run_plan_document,
+)
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_control.workload_helper_authority import (
@@ -2827,7 +2831,41 @@ def test_reenrollment_submission_reconciles_observation_receipt_key_through_api(
                 run_generation=1,
                 alias="receipt-rotation",
                 plan_digest="1" * 64,
-                plan={"schema_version": 1, "observation_schema_version": 2},
+                plan=run_plan_document(
+                    {
+                        "schema_version": 1,
+                        "observation_schema_version": 2,
+                        "run_generation": 1,
+                        "installation_id": "80000000-0000-4000-8000-000000000080",
+                        "alias": "receipt-rotation",
+                        "mapping_id": "90000000-0000-4000-8000-000000000090",
+                        "mapping_generation": 1,
+                        "recipe_revision_id": "a0000000-0000-4000-8000-0000000000aa",
+                        "plan_digest": "1" * 64,
+                        "nodes": [
+                            {
+                                "node_id": NODE_A,
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                                "port": 8888,
+                                "allowed": True,
+                                "inventory_observed_at": None,
+                                "memory_kind": "unified",
+                                "required_memory_bytes": 1,
+                                "available_memory_bytes": 1,
+                                "active_reserved_bytes": 0,
+                                "free_after_bytes": 0,
+                                "memory_floor_bytes": 0,
+                                "fabric_address": None,
+                                "fabric_bandwidth_mbps": None,
+                                "rendezvous_port": None,
+                                "blockers": [],
+                                "warnings": [],
+                            }
+                        ],
+                    }
+                ),
                 state="running",
                 route_state="published",
                 actor="admin",
@@ -3045,7 +3083,38 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                 recipe_build_id=build_id,
                 image_digest=image_digest,
                 plan_digest="b" * 64,
-                plan={"compiled_execution_plans": {NODE_A: payload}},
+                plan=installation_plan_document(
+                    {
+                        "schema_version": 1,
+                        "mapping_id": mapping_id,
+                        "mapping_generation": 1,
+                        "recipe_build_id": build_id,
+                        "image_digest": image_digest,
+                        "recipe_revision_id": revision_id,
+                        "recipe_content_sha256": digest,
+                        "allowed": True,
+                        "plan_digest": "b" * 64,
+                        "nodes": [
+                            {
+                                "node_id": NODE_A,
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "allowed": True,
+                                "inventory_observed_at": None,
+                                "free_bytes": 1024,
+                                "active_reserved_bytes": 0,
+                                "reused_bytes": 0,
+                                "required_download_bytes": 0,
+                                "required_bytes": 1024,
+                                "disk_floor_bytes": 0,
+                                "free_after_bytes": 0,
+                                "blockers": [],
+                                "warnings": [],
+                            }
+                        ],
+                        "compiled_execution_plans": {NODE_A: payload},
+                    }
+                ),
                 state="installing",
                 actor="administrator",
                 created_at=clock.now,
@@ -3143,7 +3212,12 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     with services.sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None
-        installation.plan = {"compiled_execution_plans": {NODE_A: tampered}}
+        persisted_plan = copy.deepcopy(installation.plan)
+        assert isinstance(persisted_plan, dict)
+        compiled_plans = persisted_plan.get("compiled_execution_plans")
+        assert isinstance(compiled_plans, dict)
+        compiled_plans[NODE_A] = tampered
+        installation.plan = persisted_plan
     rejected = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
     assert rejected.status_code == 409
     assert (
@@ -3153,7 +3227,12 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     with services.sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None
-        installation.plan = {"compiled_execution_plans": {NODE_A: payload}}
+        persisted_plan = copy.deepcopy(installation.plan)
+        assert isinstance(persisted_plan, dict)
+        compiled_plans = persisted_plan.get("compiled_execution_plans")
+        assert isinstance(compiled_plans, dict)
+        compiled_plans[NODE_A] = payload
+        installation.plan = persisted_plan
         if build_id is not None:
             build = session.get(RecipeBuild, build_id)
             assert build is not None
