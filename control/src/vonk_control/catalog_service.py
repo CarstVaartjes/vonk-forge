@@ -18,17 +18,17 @@ from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
-from .catalog_revision_contract import (
-    read_catalog_document,
-    read_catalog_projection,
-    write_catalog_projection,
-)
 from .catalog_entities import (
     CatalogConflict,
     CatalogDocumentRevision,
     CatalogEntityService,
     CatalogError,
     CatalogValidationError,
+)
+from .catalog_revision_contract import (
+    read_catalog_document,
+    read_catalog_projection,
+    write_catalog_projection,
 )
 from .models import (
     CatalogDocument,

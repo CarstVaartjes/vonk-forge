@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ConfigDict, Field, ValidationError
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.recipe import RecipeTopology
 
-from .strict_json import StrictJSONModel, serialize_json_value
 from .schema_resources import read_runtime_schema
+from .strict_json import StrictJSONModel, serialize_json_value
 
 if TYPE_CHECKING:
     from .models import CatalogDocumentRevision
@@ -22,6 +23,22 @@ if TYPE_CHECKING:
 
 class CatalogRevisionContractError(ValueError):
     """A persisted catalog document or projection is not current contract JSON."""
+
+
+class RecipePackageHandleProjection(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    publication_commit: str
+    source_commit: str
+    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_size: int = Field(gt=0)
+    package_path: str
+    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    archive_path: str
+    closure_path: str
+
+
+ModelModalities = ModelDefinition.model_fields["modalities"].annotation
 
 
 class _CatalogRevisionProjection(StrictJSONModel):
@@ -32,7 +49,7 @@ class _CatalogRevisionProjection(StrictJSONModel):
     source_path: str | None = None
     package_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source_bundle_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    package_handle: "RecipePackageHandleProjection" | None = None
+    package_handle: RecipePackageHandleProjection | None = None
     release_version: str | None = None
     release_released_at: str | None = None
     test_report: dict[str, object] | None = None
@@ -55,33 +72,6 @@ class BuildSecurityProjection(StrictJSONModel):
     capabilities: list[str]
 
 
-class BuildOptionsProjection(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-    additional_contexts: list[object]
-    annotations: list[object]
-    environment: list[object]
-    format: str
-    identity_label: bool
-    ignorefile: str | None
-    jobs: int = Field(ge=0)
-    labels: list[object]
-    layer_compression: str
-    layer_labels: list[object]
-    layers: bool
-    no_hostname: bool
-    no_hosts: bool
-    omit_history: bool
-    os_features: list[object]
-    os_version: str | None
-    shm_bytes: int = Field(ge=0)
-    skip_unused_stages: bool
-    squash: str
-    timestamp: str | None
-    unset_environment: list[str]
-    unset_labels: list[str]
-
-
 class BuildModelArtifactProjection(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
@@ -97,22 +87,9 @@ class ArtifactInputProjection(StrictJSONModel):
     artifact_key: str
 
 
-class RecipePackageHandleProjection(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-    publication_commit: str
-    source_commit: str
-    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    package_size: int = Field(gt=0)
-    package_path: str
-    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    archive_path: str
-    closure_path: str
-
-
 class ModelRevisionProjection(_CatalogRevisionProjection):
     identity: ModelIdentity
-    modalities: list[Literal["text", "image", "audio", "video", "3d", "embeddings"]]
+    modalities: ModelModalities
     artifact_count: int = Field(ge=0)
     download_bytes: int = Field(ge=0)
     installed_bytes: int = Field(ge=0)
@@ -126,7 +103,7 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     topology: RecipeTopology
     build_resources: BuildResourcesProjection | None = None
     build_security: BuildSecurityProjection | None = None
-    build_options: BuildOptionsProjection | None = None
+    build_options: RecipeBuildOptions | None = None
     build_model_artifacts: list[BuildModelArtifactProjection] | None = None
     build_topology_inputs: dict[str, object] | None = None
     artifact_inputs: list[ArtifactInputProjection] | None = None

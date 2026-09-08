@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts.model import ModelReference
 
@@ -26,6 +32,30 @@ class StrictModel(StrictJSONModel):
     model_config = ConfigDict(
         extra="forbid", strict=True, str_strip_whitespace=True
     )
+
+
+class CacheManifestArtifact(StrictModel):
+    key: str
+    id: str
+    path: str
+    kind: str
+    repository: str | None
+    source: str
+    revision: str | None
+    sha256: str
+    download_bytes: int
+    roles: list[str]
+    model_content_sha256: str | None
+
+
+class CacheManifest(StrictModel):
+    schema_version: Literal[2]
+    source_policy: Literal["nas-first"]
+    model_content_sha256: str | None
+    recipe_revision_sha256: str | None
+    model_definition_ref: ModelReference | None
+    model_content_digests: list[str]
+    artifacts: list[CacheManifestArtifact]
 
 
 class ModelCacheRepairCheckpoint(StrictModel):
@@ -63,23 +93,35 @@ class ModelCacheAccessRecheck(StrictModel):
     authorized: bool
 
 
+class ModelCacheDownloadResult(StrictModel):
+    schema_version: Literal[2]
+    artifact_set_sha256: Digest
+    coverage: Literal["complete"]
+
+
+class ModelCacheEvictionResult(StrictModel):
+    schema_version: Literal[2]
+    removed_entries: list[Digest]
+    reclaimed_bytes: int = Field(ge=0)
+
+
 class _ModelCacheOperationPayload(StrictModel):
     schema_version: Literal[2]
     source_policy: Literal["nas-first"]
     claim: ModelCacheClaim | None = None
     access_recheck: ModelCacheAccessRecheck | None = None
     failure: AvailabilityOperationFailure | None = None
-    result: dict[str, object] | None = None
     retry_of: str | None = Field(default=None, pattern=UUID_PATTERN)
     resume_of: str | None = Field(default=None, pattern=UUID_PATTERN)
 
 
 class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
     artifact_set_sha256: Digest
-    manifest: dict[str, object]
+    manifest: CacheManifest
     plan_digest: Digest
     transfer: ModelCacheTransfer
     retry: ModelCacheRetry
+    result: ModelCacheDownloadResult | None = None
 
 
 class ModelCacheRepairPayload(ModelCacheDownloadPayload):
@@ -91,6 +133,7 @@ class ModelCacheEvictionPayload(_ModelCacheOperationPayload):
     selected: list[Digest]
     selected_objects: list[Digest]
     before_unique_used_bytes: int = Field(ge=0)
+    result: ModelCacheEvictionResult | None = None
 
 
 ModelCacheOperationPayload = (
@@ -113,9 +156,9 @@ def parse_model_cache_payload(
             parsed = ModelCacheEvictionPayload.model_validate_json(raw)
         else:
             raise ValueError(f"unknown model cache operation kind: {kind}")
-        if parsed.result is not None:
-            parse_model_cache_result(kind, parsed.result)
         return parsed
+    except ValidationError:
+        raise
     except (TypeError, ValueError) as error:
         raise ValueError(f"invalid {kind} model cache operation payload") from error
 
@@ -282,18 +325,6 @@ class ModelCacheOperationProgress(StrictModel):
         return self
 
 
-class ModelCacheDownloadResult(StrictModel):
-    schema_version: Literal[2]
-    artifact_set_sha256: Digest
-    coverage: Literal["complete"]
-
-
-class ModelCacheEvictionResult(StrictModel):
-    schema_version: Literal[2]
-    removed_entries: list[Digest]
-    reclaimed_bytes: int = Field(ge=0)
-
-
 ModelCacheOperationResult = ModelCacheDownloadResult | ModelCacheEvictionResult
 
 
@@ -431,33 +462,37 @@ class ModelCacheUpdatesResponse(StrictModel):
 __all__ = [
     "CacheArtifactResponse",
     "CacheEntryResponse",
+    "CacheManifest",
+    "CacheManifestArtifact",
     "CacheStorageResponse",
+    "ModelCacheAccessRecheck",
     "ModelCacheAccessResumeRequest",
+    "ModelCacheClaim",
+    "ModelCacheDownloadPayload",
     "ModelCacheDownloadPreviewRequest",
     "ModelCacheDownloadPreviewResponse",
     "ModelCacheDownloadRequest",
+    "ModelCacheDownloadResult",
     "ModelCacheEvictRequest",
     "ModelCacheEvictionEntry",
+    "ModelCacheEvictionPayload",
     "ModelCacheEvictionPreviewRequest",
     "ModelCacheEvictionPreviewResponse",
+    "ModelCacheEvictionResult",
     "ModelCacheInventoryResponse",
-    "ModelCacheOperationProgress",
     "ModelCacheOperationPayload",
+    "ModelCacheOperationProgress",
     "ModelCacheOperationResponse",
     "ModelCacheOperationsResponse",
-    "ModelCacheDownloadPayload",
-    "ModelCacheEvictionPayload",
     "ModelCacheRepairPayload",
-    "ModelCacheTransfer",
-    "ModelCacheTransferArtifact",
-    "ModelCacheRetry",
-    "ModelCacheClaim",
-    "ModelCacheAccessRecheck",
-    "parse_model_cache_payload",
     "ModelCacheRepairPreviewRequest",
     "ModelCacheRepairPreviewResponse",
     "ModelCacheRepairRequest",
+    "ModelCacheRetry",
     "ModelCacheRetryRequest",
+    "ModelCacheTransfer",
+    "ModelCacheTransferArtifact",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
+    "parse_model_cache_payload",
 ]

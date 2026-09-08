@@ -63,10 +63,19 @@ def test_model_cache_operation_payload_round_trips_through_database_and_rejects_
         parsed = parse_model_cache_payload("download", stored.payload)
         assert parsed.schema_version == 2
         assert parsed.source_policy == "nas-first"
-        assert parsed.manifest["model_content_sha256"] is not None
+        assert parsed.manifest.model_content_sha256 is not None
+        valid_payload = dict(stored.payload)
         stored.payload = {"schema_version": 2, "source_policy": "nas-first"}
         session.commit()
 
     with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
+        cache.get_operation(operation.id)
+
+    with sessions.begin() as session:
+        stored = session.get(ModelCacheOperation, operation.id)
+        assert stored is not None
+        stored.payload = valid_payload
+        stored.progress = {"schema_version": 2, "phase": "queued"}
+    with pytest.raises(ModelCacheStorageError, match="progress is invalid"):
         cache.get_operation(operation.id)
     cache.close()
