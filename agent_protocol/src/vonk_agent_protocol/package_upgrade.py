@@ -20,7 +20,7 @@ class PackageRollbackSource(WireModel):
 class PackageRollbackAuthority(WireModel):
     source: PackageRollbackSource
     attempt_nonce: Digest
-    activation_deadline: int = Field(strict=True, ge=1)
+    activation_deadline: int = Field(strict=True, ge=1, le=2**63 - 1, json_schema_extra={"format": "int64"})
 
 
 class PackageActivationReceipt(WireModel):
@@ -45,8 +45,8 @@ class PackageActivationReceipt(WireModel):
         "rolled_back",
         "rollback_failed",
     ]
-    created_at: int = Field(strict=True, ge=1)
-    updated_at: int = Field(strict=True, ge=1)
+    created_at: int = Field(strict=True, ge=1, le=2**63 - 1, json_schema_extra={"format": "int64"})
+    updated_at: int = Field(strict=True, ge=1, le=2**63 - 1, json_schema_extra={"format": "int64"})
     outcome: Annotated[str, Field(pattern=r"^[a-z_]{1,128}$")]
 
     @model_validator(mode="after")

@@ -394,7 +394,7 @@ vllm_inter_token_latency_seconds_count 100
         .find(|series| series.key == "runtime.ttft_p95_ms")
         .unwrap();
     assert_eq!(ttft.unit, "ms");
-    assert_eq!(ttft.measurement_kind, "derived");
+    assert_eq!(&*ttft.measurement_kind, "derived");
     assert_eq!(ttft.aggregation, "p95");
     assert_eq!(ttft.source, "runtime-adapter:managed-local");
     assert_eq!(
@@ -482,7 +482,7 @@ vllm_time_to_first_token_seconds 0.2
     assert_eq!(rich_number(&sample, "runtime.ttft_p95_ms"), None);
     assert!(sample.metrics.series.iter().all(|series| {
         series.key != "runtime.ttft_p95_ms"
-            || (series.aggregation == "p95" && series.measurement_kind == "derived")
+            || (series.aggregation == "p95" && &*series.measurement_kind == "derived")
     }));
     assert!(sample.metrics.capabilities.iter().any(|capability| {
         capability.key == "runtime.ttft_p95_ms"
@@ -623,7 +623,8 @@ fn comfy_runtime_adapter_reports_queue_and_explicitly_unsupported_token_metrics(
 fn runtime_writer_handoff_uses_published_host_port_and_retains_engine_identity() {
     let fixtures = Fixtures::new();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-    let plan = runtime_plan("vllm");
+    let mut plan = runtime_plan("vllm");
+    plan.runtime.telemetry.engine_version = Some("v".repeat(100));
     assert_ne!(plan.endpoint.as_ref().unwrap().port, 8101);
     write_runtime_plan(&fixtures, run_id, &plan);
     let output = runner(b"vllm_num_requests_running 2\n");
@@ -646,7 +647,8 @@ fn runtime_writer_handoff_uses_published_host_port_and_retains_engine_identity()
     let runtime = &sample.metrics.runtimes[0];
     assert_eq!(runtime.run_id, run_id);
     assert_eq!(runtime.backend, "vllm");
-    assert_eq!(runtime.version, None);
+    assert_eq!(runtime.version.as_deref(), Some("v".repeat(100).as_str()));
+    assert_eq!(runtime.adapter_version, None);
     assert_eq!(rich_number(&sample, "runtime.requests_running"), Some(2.0));
     let calls = output.calls.lock().unwrap();
     let scrape: Vec<_> = calls
@@ -699,7 +701,7 @@ fn distributed_worker_has_runtime_identity_without_a_public_metrics_scrape() {
     let runtime = &sample.metrics.runtimes[0];
     assert_eq!(runtime.run_id, run_id);
     assert_eq!(runtime.ranks, vec![1]);
-    assert_eq!(runtime.readiness, "unknown");
+    assert_eq!(&*runtime.readiness, "unknown");
     assert!(!runtime.adapter_supported);
     assert_eq!(rich_number(&sample, "runtime.requests_running"), None);
     assert!(
@@ -740,7 +742,7 @@ fn unsupported_canonical_engine_keeps_run_and_reports_unavailable_metrics() {
     assert_eq!(runtime.run_id, run_id);
     assert_eq!(runtime.backend, "future-engine");
     assert!(!runtime.adapter_supported);
-    assert_eq!(runtime.readiness, "unknown");
+    assert_eq!(&*runtime.readiness, "unknown");
     assert!(
         sample
             .metrics
@@ -802,6 +804,40 @@ fn telemetry_rejects_runtime_plan_that_disagrees_with_retained_start_identity() 
             .iter()
             .any(|(program, _, _)| *program == Program::Curl)
     );
+}
+
+#[test]
+fn out_of_range_optional_process_and_uptime_evidence_does_not_break_wire_report() {
+    let fixtures = Fixtures::new();
+    fs::write(&fixtures.uptime, "18446744073709551616.0 0.0\n").unwrap();
+    let mut collector = TelemetryCollector::new(
+        runner(b"0, 4294967295, invalid-native-pid, 1\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+    assert_eq!(sample.metrics.provenance.host_uptime_seconds, None);
+    assert!(
+        sample
+            .metrics
+            .series
+            .iter()
+            .all(|series| series.process_id.is_none())
+    );
+    assert!(vonk_agent::telemetry::valid_report_batch(
+        std::slice::from_ref(&sample)
+    ));
+    let encoded = serde_json::to_vec(sample.wire()).unwrap();
+    serde_json::from_slice::<vonk_agent_protocol::generated::TelemetrySample>(&encoded).unwrap();
 }
 
 #[test]
@@ -883,7 +919,7 @@ fn throttle_state_preserves_mixed_device_scopes() {
         .unwrap();
     assert_eq!(active.value, json!(true));
     assert_eq!(active.unit, "boolean");
-    assert_eq!(active.measurement_kind, "derived");
+    assert_eq!(&*active.measurement_kind, "derived");
     assert!(sample.metrics.series.iter().all(|series| {
         !(series.key == "gpu.throttle_active" && series.device_id.as_deref() == Some("1"))
     }));
@@ -1002,7 +1038,7 @@ fn sequence_reservation_crosses_from_63_to_64() {
         let sample = collector
             .sample_at(None, observed_at + chrono::Duration::milliseconds(expected))
             .unwrap();
-        assert_eq!(sample.sequence, expected);
+        assert_eq!(sample.sequence, u64::try_from(expected).unwrap());
     }
 }
 
@@ -1021,7 +1057,7 @@ fn final_sequence_reservation_uses_a_partial_block() {
                 observed_at + chrono::Duration::milliseconds(offset as i64),
             )
             .unwrap();
-        assert_eq!(sample.sequence, (first + offset) as i64);
+        assert_eq!(sample.sequence, first + offset);
     }
     assert!(matches!(
         collector.sample_at(None, observed_at),
@@ -1038,7 +1074,7 @@ fn maximum_signed_sequence_is_emitted_once_then_exhausted() {
 
     assert_eq!(
         collector.sample_at(None, observed_at).unwrap().sequence,
-        i64::MAX
+        i64::MAX as u64
     );
     assert!(matches!(
         collector.sample_at(None, observed_at),
@@ -1310,7 +1346,7 @@ fn queue_sends_large_unicode_sample_alone_without_truncation() {
             series.key = format!("test.metric_{index}");
             series.process_name = Some("測".repeat(128));
             series.value = json!("測".repeat(256));
-            series.support_status = "unavailable".into();
+            series.support_status = "unavailable".parse().unwrap();
             series.reason = Some("測".repeat(256));
             series
         })

@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .artifact_blob_store import (
@@ -47,8 +48,8 @@ from .models import (
     ArtifactJobFile,
     CatalogDocumentRevision,
     Job,
-    RecipeInstallation,
     RecipeBuild,
+    RecipeInstallation,
     RecipeRun,
     RunNode,
 )
@@ -653,7 +654,9 @@ class ArtifactJobService:
         supplied_parameters = _json_copy(parameters)
         if not isinstance(supplied_parameters, dict):
             raise ArtifactJobError("artifact job parameters must be an object")
-        manifest = recipe_job_manifest_document(parsed_inputs)
+        manifest = RecipeJobInputManifest(
+            schema_version=1, total_bytes=total, files=list(parsed_inputs)
+        ).model_dump(mode="json")
         manifest_digest = recipe_job_manifest_sha256(parsed_inputs)
         now = self._clock()
         try:

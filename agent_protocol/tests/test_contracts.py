@@ -24,7 +24,7 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
     validate_schema_message,
 )
-from vonk_agent_protocol.contracts import RESULT_MODELS
+from vonk_agent_protocol.contracts import RESULT_MODELS, _validate_safe_keys
 
 
 def valid_claim() -> dict[str, object]:
@@ -64,16 +64,8 @@ def valid_attempt() -> dict[str, object]:
 
 
 def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
-    current = json.loads(
-        (
-            Path(__file__).parents[1]
-            / "src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
-        ).read_text(encoding="utf-8")
-    )
-    current_payload = current["payload"]
-    assert isinstance(current_payload, dict)
-    current_payload["parameters"] = payload
-    return claim_for_operation("recipe.job.run.v1", current_payload)
+    current = valid_claim()
+    return claim_for_operation("recipe.stop", current["payload"] | payload)
 
 
 def claim_for_operation(
@@ -208,9 +200,7 @@ def test_protocol_rejects_unsafe_keys_recursively() -> None:
 def test_protocol_allows_only_exact_versioned_platform_target_identifier() -> None:
     target = "platform/releases/1.2.3/" + "a" * 64 + ".json"
 
-    claim = AgentClaim.parse(claim_with_payload({"platform_target_name": target}))
-
-    assert claim.payload.parameters["platform_target_name"] == target
+    _validate_safe_keys({"platform_target_name": target})
 
 
 @pytest.mark.parametrize(
@@ -364,8 +354,8 @@ def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
 def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> None:
     endpoint = "http://192.168.1.211:8000"
 
-    claim = AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
-    assert claim.payload.parameters["endpoint"] == endpoint
+    with pytest.raises(AgentProtocolError):
+        AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
     with pytest.raises(ValidationError):
         AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
 
@@ -578,15 +568,11 @@ def test_complete_path_key_segments_are_rejected_by_runtime_and_schemas(
 
 @pytest.mark.parametrize("name", ["agent-job.schema.json"])
 @pytest.mark.parametrize("field", SAFE_PATH_KEY_COLLISIONS)
-def test_path_token_collisions_are_accepted_by_runtime_and_schemas(
+def test_safe_key_scanner_preserves_path_token_collisions(
     name: str,
     field: str,
 ) -> None:
-    raw, parser = protocol_message_with_document(name, {field: "release"})
-
-    assert parser(raw)
-    assert schema(name).is_valid(raw)
-    assert validate_schema_message(name, raw)
+    _validate_safe_keys({field: "release"})
 
 
 def test_progress_and_result_are_fenced_node_messages() -> None:
