@@ -68,6 +68,83 @@ fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
 }
 
 #[test]
+fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
+    let root = tempdir().unwrap();
+    let mut installed = schema2_dual_plan();
+    installed.topology.name = "solo".into();
+    installed.topology.mode = "single".into();
+    installed.topology.backend = "local".into();
+    installed.topology.node_count = 1;
+    installed.topology.world_size = 1;
+    installed.topology.rank = 0;
+    installed.topology.role = "entrypoint".into();
+    installed.runtime.placement.rank = 0;
+    installed.runtime.placement.role = "entrypoint".into();
+    installed.runtime.placement.world_size = 1;
+    installed.runtime.placement.endpoint_address = None;
+    installed.runtime.placement.local_address = None;
+    installed.runtime.placement.master_address = None;
+    installed.runtime.placement.master_port = None;
+    installed.security.network_mode = "none".into();
+    installed.validate().unwrap();
+    persist_plan(root.path(), &installed);
+
+    let mut started = installed.clone();
+    started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    started.runtime.placement.reserved_memory_bytes += 1024;
+    started.security.network_mode = "bridge".into();
+    started.validate().unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    let launched = runtime
+        .prepare_start_with_inspection_identity(
+            &started,
+            INSTALLATION,
+            RUN,
+            &placement(&started),
+            &identity(&started),
+        )
+        .unwrap();
+    let inspections = runtime.recipe_run_inspection_plans().unwrap();
+    assert_eq!(inspections.len(), 1);
+    assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
+    assert_eq!(runtime.load_spec(INSTALLATION).unwrap(), installed);
+
+    let retained_path = root
+        .path()
+        .join("run-metadata")
+        .join(RUN)
+        .join("runtime.json");
+    let mut changed_workload = started.clone();
+    changed_workload
+        .runtime
+        .argv
+        .push("--different-workload".into());
+    let mut changed_placement = started.clone();
+    changed_placement.runtime.placement.endpoint_address = Some("192.168.1.213".parse().unwrap());
+    for tampered in [changed_workload, changed_placement] {
+        fs::write(&retained_path, serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(runtime.recipe_run_inspection_plans().is_err());
+    }
+    fs::write(&retained_path, b"{}").unwrap();
+    assert!(runtime.recipe_run_inspection_plans().is_err());
+    fs::remove_file(&retained_path).unwrap();
+    assert!(runtime.recipe_run_inspection_plans().is_err());
+    std::os::unix::fs::symlink(
+        root.path()
+            .join("installations")
+            .join(INSTALLATION)
+            .join("spec.json"),
+        &retained_path,
+    )
+    .unwrap();
+    assert!(runtime.recipe_run_inspection_plans().is_err());
+}
+
+#[test]
 fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp() {
     let root = tempdir().unwrap();
     let plan = schema2_dual_plan();
@@ -149,4 +226,15 @@ fn real_751_artifact_spec_json_round_trips_through_persisted_loader() {
     };
     let loaded = runtime.load_spec(INSTALLATION).unwrap();
     assert_eq!(loaded.artifacts.len(), 751);
+}
+
+#[test]
+fn observation_errors_preserve_safe_category_without_storage_details() {
+    let error = vonk_agent::executor::RecipeObservationError::from(vonk_agent::oci::OciError::Io(
+        std::io::Error::other("private path and credential"),
+    ));
+    assert_eq!(
+        error.to_string(),
+        "managed recipe run observation failed (storage)"
+    );
 }
