@@ -98,6 +98,64 @@ def _setup(tmp_path, *, node_count=1):
     return sessions, queue, clock, nodes[0], service, arguments
 
 
+def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from vonk_agent_protocol import (
+        ContainerRuntimeAction,
+        host_helper_grant_signing_bytes,
+    )
+    from vonk_control.agent_api import HostRuntimeGrantRequest
+    from vonk_control.agent_jobs import _NEXT_CAPABILITIES, AgentJobService
+    from vonk_control.host_helper_authority import (
+        HostHelperGrantIssuer,
+        HostRuntimeAuthorityService,
+    )
+
+    from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+
+    sessions, _, clock, node_id, _, arguments = _setup(tmp_path)
+    queue = AgentJobService(sessions, clock=lambda: clock.now)
+    service = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
+    pending, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    claim = claim_agent(
+        queue,
+        node_id,
+        "serial-0",
+        60,
+        capabilities=sorted(_NEXT_CAPABILITIES | {"runtime.preflight.v1"}),
+        runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
+    )
+    assert claim is not None and claim.job_id == pending.pending_job_id
+    # Exercise the HTTP request contract against IDs from the real dispatcher.
+    request = HostRuntimeGrantRequest.model_validate({
+        "node_id": claim.node_id,
+        "job_id": claim.job_id,
+        "operation_id": claim.operation_id,
+        "attempt": claim.attempt,
+        "fence": claim.fence,
+        "action": "runtime-preflight",
+        "request_sha256": "e" * 64,
+        "expires_in_seconds": 10,
+    })
+    issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.from_private_bytes(b"m" * 32),
+        clock=lambda: clock.now,
+    )
+    authority = HostRuntimeAuthorityService(sessions, issuer, clock=lambda: clock.now)
+    grant = authority.issue_grant(
+        **{**request.model_dump(), "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT},
+        certificate_serial="serial-0",
+    )
+    assert grant.claims.operation.job_id == claim.job_id
+    assert grant.claims.operation.operation_id == claim.operation_id
+    assert grant.claims.operation.fence == claim.fence
+    issuer.public_key.verify(
+        bytes.fromhex(grant.signature.value),
+        host_helper_grant_signing_bytes(grant.claims),
+    )
+
+
 def test_probe_restart_and_duplicate_dispatch_converge_without_advancing_work(tmp_path):
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     first, error = service.ensure(**arguments, previous=None)

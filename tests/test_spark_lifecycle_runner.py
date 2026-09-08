@@ -700,10 +700,11 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
 
     def diagnostics(command):
         observed.append(command)
+        message = "helper request rejected" if "journalctl" in command else "control enrollment failed"
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout=f"control enrollment failed for {secret}\n",
+            stdout=f"{message} for {secret}\n",
             stderr="",
         )
 
@@ -716,6 +717,7 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
     assert secret not in str(failure)
     assert "Error: Status(500)" in str(failure)
     assert "control enrollment failed for <redacted>" in str(failure)
+    assert "helper request rejected for <redacted>" in str(failure)
     assert observed == [
         [
             "docker",
@@ -730,7 +732,12 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
             "control-worker",
             "step-ca",
             "caddy",
-        ]
+        ],
+        [
+            "sudo", "journalctl", "--no-pager", "--lines=60",
+            "--unit=vonk-forge-agent.service",
+            "--unit=vonk-forge-package-helper.service",
+        ],
     ]
 
 

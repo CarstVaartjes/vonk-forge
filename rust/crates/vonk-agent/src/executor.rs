@@ -860,26 +860,29 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     )
                     .await;
                 let (passed, code) = match outcome {
-                    Ok(outcome) => match outcome.exit_code {
-                        Some(0) => (true, "available"),
-                        Some(21) => (false, "helper_proc_unavailable"),
-                        Some(22) => (false, "helper_capabilities_not_zero"),
-                        Some(23) => (false, "helper_no_new_privileges_unavailable"),
-                        Some(24) => (false, "helper_mount_namespace_unavailable"),
-                        Some(25) => (false, "helper_temporary_directory_unavailable"),
-                        Some(30) => (false, "helper_image_import_failed"),
-                        Some(31) => (false, "helper_sandbox_run_failed"),
-                        Some(32) => (false, "helper_probe_cleanup_failed"),
-                        _ => (false, "helper_probe_invalid_result"),
-                    },
-                    Err(_) => (false, "helper_probe_unavailable"),
+                    Ok(outcome) => {
+                        let (passed, code) = match outcome.exit_code {
+                            Some(0) => (true, "available"),
+                            Some(21) => (false, "helper_proc_unavailable"),
+                            Some(22) => (false, "helper_capabilities_not_zero"),
+                            Some(23) => (false, "helper_no_new_privileges_unavailable"),
+                            Some(24) => (false, "helper_mount_namespace_unavailable"),
+                            Some(25) => (false, "helper_temporary_directory_unavailable"),
+                            Some(30) => (false, "helper_image_import_failed"),
+                            Some(31) => (false, "helper_sandbox_run_failed"),
+                            Some(32) => (false, "helper_probe_cleanup_failed"),
+                            _ => (false, "helper_probe_invalid_result"),
+                        };
+                        (passed, code.to_owned())
+                    }
+                    Err(error) => (false, error.preflight_code()),
                 };
                 result
                     .findings
                     .retain(|value| value.capability != "signed_helper_run");
                 result
                     .findings
-                    .push(finding("signed_helper_run", passed, code));
+                    .push(finding("signed_helper_run", passed, &code));
                 result.duration_ms = started.elapsed().as_millis() as u64;
                 if result.validate().is_err() {
                     return failed("runtime preflight exceeded the bounded deadline");

@@ -17,6 +17,7 @@ from vonk_control.fleet_projection import (
     RecipePresence,
     TelemetryDetails,
     TelemetryPoint,
+    telemetry_point,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -39,6 +40,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_control.telemetry import TelemetryRepository
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .telemetry_fixtures import telemetry_metrics_document
@@ -1649,6 +1651,71 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
             maximum_points=2,
             resolution="raw",
         )
+
+
+@pytest.mark.parametrize("producer_node_id", [None, NODE_B])
+def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
+    producer_node_id: str | None,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    sample = _telemetry(
+        NODE_A,
+        "00000000-0000-4000-8000-000000000299",
+        NOW - timedelta(seconds=1),
+        sequence=1,
+        cpu=1.0,
+    )
+    metric = {
+        "node_id": producer_node_id,
+        "key": "cpu.utilization_percent",
+        "scope": "node",
+        "unit": "%",
+        "source": "procfs",
+        "measurement_kind": "measured",
+        "freshness_threshold_seconds": 30.0,
+    }
+    sample.metrics["series"] = [
+        {
+            **metric,
+            "value": 12.5,
+            "observed_at": sample.observed_at.isoformat(),
+            "received_at": NOW.isoformat(),
+            "support_status": "available",
+            "aggregation": "mean",
+        }
+    ]
+    sample.metrics["capabilities"] = [{**metric, "supported": True}]
+    source_document = json.loads(json.dumps(sample.metrics))
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(sample)
+        session.flush()
+        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
+
+    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+    source = TelemetryRepository(sessions).latest([NODE_A])[NODE_A]
+    source_metrics = source.metrics.model_dump()
+    direct_point = telemetry_point(source)
+    assert source.metrics.model_dump() == source_metrics
+    point = projection.read().nodes[0].telemetry.sample
+    history = projection.telemetry_history(
+        NODE_A,
+        start=NOW - timedelta(minutes=1),
+        end=NOW,
+        maximum_points=1,
+        resolution="raw",
+    )
+    for projected in (direct_point, point, history.points[0]):
+        series = projected.metrics.series[0]
+        assert series.node_id == NODE_A
+        assert series.received_at == sample.received_at
+        assert series.observed_at == sample.observed_at
+        assert series.value == 12.5
+        assert projected.metrics.capabilities[0].node_id == NODE_A
+    with sessions() as session:
+        assert session.get(NodeTelemetrySample, sample.id).metrics == source_document
 
 
 def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
