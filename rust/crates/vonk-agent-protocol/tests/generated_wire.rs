@@ -115,3 +115,47 @@ fn inherited_observation_identity_is_generated_from_the_canonical_base() {
         serde_json::from_value::<vonk_agent_protocol::RecipeRunObservationWire>(value).is_err()
     );
 }
+
+#[test]
+fn optional_nulls_normalize_without_erasing_required_nulls_or_empty_defaults() {
+    use vonk_agent_protocol::{canonical_generated_json, generated::CompiledJobInput};
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+    ))
+    .unwrap();
+    let mut missing = fixture["payload"]["compiled_execution_plan"]["job"]["input"].clone();
+    missing.as_object_mut().unwrap().remove("slots");
+    let mut explicit = missing.clone();
+    explicit["slots"] = Value::Null;
+    let left: CompiledJobInput = serde_json::from_value(missing).unwrap();
+    let right: CompiledJobInput = serde_json::from_value(explicit).unwrap();
+    assert_eq!(
+        canonical_generated_json(&left).unwrap(),
+        canonical_generated_json(&right).unwrap()
+    );
+    let progress: OperationProgress = serde_json::from_value(json!({"phase":"transfer"})).unwrap();
+    let encoded: Value =
+        serde_json::from_slice(&canonical_generated_json(&progress).unwrap()).unwrap();
+    assert_eq!(encoded["completed_bytes"], json!(0));
+    assert_eq!(encoded["total_bytes_known"], json!(false));
+    assert_eq!(encoded["members"], json!([]));
+    assert!(encoded.get("kind").is_none());
+    let engine: Value = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+    ))
+    .unwrap();
+    let plan: vonk_agent_protocol::generated::CompiledExecutionPlan =
+        serde_json::from_value(engine.clone()).unwrap();
+    let output: Value = serde_json::from_slice(&canonical_generated_json(&plan).unwrap()).unwrap();
+    let extension =
+        json!({"engine_null":null,"engine_false":false,"engine_zero":0,"engine_empty":[]});
+    assert_eq!(
+        serde_json::from_slice::<Value>(&vonk_agent_protocol::canonical_json(&extension).unwrap())
+            .unwrap(),
+        extension
+    );
+    assert_eq!(
+        output["runtime"]["telemetry"]["engine_version"],
+        Value::Null
+    );
+}

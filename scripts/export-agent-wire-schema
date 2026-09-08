@@ -9,6 +9,7 @@ import json
 import pkgutil
 import sys
 from pathlib import Path
+from typing import get_args
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
@@ -52,10 +53,27 @@ def export_schema() -> dict[str, object]:
         [(model, "validation") for model in ordered],
         title="Vonk Agent Wire",
     )
+    # A validation format on a string does not authorize normalizing its bytes
+    # into a timestamp type: these values may be inside digest-bound payloads.
+    for model in ordered:
+        definition = schema["$defs"][
+            references[model, "validation"]["$ref"].rsplit("/", 1)[-1]
+        ]
+        for name, field in model.model_fields.items():
+            property_schema = definition.get("properties", {}).get(name, {})
+            if field.default_factory is list:
+                property_schema["default"] = []
+            elif field.default_factory is not None:
+                raise ValueError(
+                    f"Unsupported dynamic wire default: {model.__name__}.{name}"
+                )
+            if (
+                field.annotation is str or str in get_args(field.annotation)
+            ) and property_schema.get("format") == "date-time":
+                property_schema["x-vonk-source-type"] = "string"
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["x-vonk-models"] = {
-        model.__name__: references[model, "validation"]["$ref"]
-        for model in ordered
+        model.__name__: references[model, "validation"]["$ref"] for model in ordered
     }
     schema["x-vonk-model-bases"] = {
         model.__name__: [base.__name__ for base in model.__mro__[1:] if base in models]

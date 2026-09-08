@@ -8,6 +8,9 @@ use syn::{Item, parse_quote};
 fn prepare(value: &mut Value) {
     match value {
         Value::Object(object) => {
+            if object.get("x-vonk-source-type").and_then(Value::as_str) == Some("string") {
+                object.remove("format");
+            }
             if let Some(format) = object.get("format").cloned() {
                 if let Some(Value::Array(variants)) = object.get_mut("anyOf") {
                     for variant in variants {
@@ -213,6 +216,19 @@ fn strip_docs(item: &mut Item) {
         _ => return,
     };
     attrs.retain(|attr| !attr.path().is_ident("doc"));
+    if let Item::Struct(item) = item {
+        for field in &mut item.fields {
+            for attr in &mut field.attrs {
+                if attr.path().is_ident("serde") {
+                    let options = attr.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated).unwrap();
+                    let kept: Vec<_> = options.into_iter().filter(|option| {
+                        !matches!(option, syn::Meta::NameValue(value) if value.path.is_ident("skip_serializing_if") && value.value.to_token_stream().to_string().contains("is_empty"))
+                    }).collect();
+                    *attr = parse_quote!(#[serde(#(#kept),*)]);
+                }
+            }
+        }
+    }
 }
 
 fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
