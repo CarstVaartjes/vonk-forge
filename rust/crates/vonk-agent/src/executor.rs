@@ -1051,7 +1051,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
-                let Some(job) = spec.job.as_ref() else {
+                let invocation = match prepare_job_invocation(&spec, &request) {
+                    Ok(plan) => plan,
+                    Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
+                };
+                let Some(job) = invocation.job.as_ref() else {
                     return failed_job(
                         &request,
                         1,
@@ -1061,9 +1065,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 };
                 if job.interface != request.interface
                     || request.timeout_seconds == 0
-                    || request.timeout_seconds > job.timeout_seconds
-                    || spec.endpoint.is_some()
-                    || spec.runtime.image_digest != request.image_digest
+                    || request.timeout_seconds != job.timeout_seconds
+                    || invocation.endpoint.is_some()
+                    || invocation.runtime.image_digest != request.image_digest
+                    || invocation.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                    || !crate::workloads::same_job_workload(&spec, &invocation)
                 {
                     return failed_job(
                         &request,
@@ -1177,7 +1183,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job input staging is not same-run exact",
                     );
                 }
-                let placement = match job_placement(&spec, &request) {
+                let placement = match job_placement(&invocation, &request) {
                     Ok(placement) => placement,
                     Err(_) => {
                         return failed_job(
@@ -1193,8 +1199,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     &installation_id,
                     &job_scope,
                     &placement,
-                    &request.parameters,
-                    request.timeout_seconds,
+                    &invocation,
                 ) {
                     Ok(plan) => plan,
                     Err(_) => {
@@ -2029,6 +2034,27 @@ fn job_placement(
     Ok(placement.clone())
 }
 
+pub fn prepare_job_invocation(
+    installed: &CompiledExecutionPlan,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<CompiledExecutionPlan, WorkloadError> {
+    let plan = parse_compiled_execution_plan(&request.compiled_execution_plan)
+        .map_err(|_| WorkloadError::Invalid("job invocation"))?;
+    let Some(job) = plan.job.as_ref() else {
+        return Err(WorkloadError::Invalid("job interface"));
+    };
+    if job.interface != request.interface
+        || job.timeout_seconds != request.timeout_seconds
+        || plan.runtime.image_digest != request.image_digest
+        || plan.identity.recipe_revision_sha256 != request.recipe_content_sha256
+        || !crate::workloads::same_job_workload(installed, &plan)
+    {
+        return Err(WorkloadError::Invalid("job invocation authority"));
+    }
+    job_placement(&plan, request)?;
+    Ok(plan)
+}
+
 fn failed_job(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
     exit_code: i32,
@@ -2651,8 +2677,7 @@ mod tests {
                 &request.installation_id.to_string(),
                 &run_id,
                 &placement,
-                &request.parameters,
-                request.timeout_seconds,
+                &spec,
             )
             .unwrap();
         assert!(!start.main.iter().any(|argument| argument == "--publish"));

@@ -131,6 +131,19 @@ pub struct CompiledRuntime {
     pub env: Vec<CompiledEnvironmentEntry>,
     pub image_digest: String,
     pub placement: CompiledRuntimePlacement,
+    pub telemetry: CompiledRuntimeTelemetry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledRuntimeTelemetry {
+    pub engine: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub engine_version: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub metrics_format: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub metrics_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -302,6 +315,7 @@ pub(crate) fn same_installed_workload(
         && installed.runtime.executable == requested.runtime.executable
         && installed.runtime.argv == requested.runtime.argv
         && installed.runtime.env == requested.runtime.env
+        && installed.runtime.telemetry == requested.runtime.telemetry
         && installed.runtime.image_digest == requested.runtime.image_digest
         && installed.runtime_image == requested.runtime_image
         && installed.security.devices == requested.security.devices
@@ -319,6 +333,27 @@ pub(crate) fn same_installed_workload(
         && installed.topology.mode == requested.topology.mode
         && installed.topology.backend == requested.topology.backend
         && installed.topology.node_count == requested.topology.node_count
+}
+
+/// A signed job invocation may bind different settings and a shorter timeout,
+/// while retaining every installed filesystem, image and process authority.
+pub(crate) fn same_job_workload(
+    installed: &CompiledExecutionPlan,
+    invocation: &CompiledExecutionPlan,
+) -> bool {
+    let (Some(installed_job), Some(job)) = (&installed.job, &invocation.job) else {
+        return false;
+    };
+    if job.timeout_seconds == 0 || job.timeout_seconds > installed_job.timeout_seconds {
+        return false;
+    }
+    let mut identity = invocation.clone();
+    identity.identity.execution_sha256 = installed.identity.execution_sha256.clone();
+    identity.runtime.argv = installed.runtime.argv.clone();
+    identity.job.as_mut().unwrap().timeout_seconds = installed_job.timeout_seconds;
+    same_installed_workload(installed, &identity)
+        && installed.runtime.placement == invocation.runtime.placement
+        && installed.security.network_mode == invocation.security.network_mode
 }
 
 impl CompiledExecutionPlan {
@@ -455,6 +490,28 @@ impl CompiledModelArtifact {
 
 impl CompiledRuntime {
     fn validate(&self) -> Result<(), WorkloadError> {
+        let telemetry = &self.telemetry;
+        if telemetry.engine.is_empty()
+            || telemetry.engine.len() > 64
+            || telemetry.engine.contains('\0')
+            || telemetry
+                .engine_version
+                .as_ref()
+                .is_some_and(|v| v.is_empty() || v.len() > 128 || v.contains('\0'))
+            || telemetry.metrics_format.is_some() != telemetry.metrics_path.is_some()
+            || telemetry
+                .metrics_format
+                .as_deref()
+                .is_some_and(|v| !matches!(v, "prometheus" | "comfyui-queue"))
+            || telemetry.metrics_path.as_ref().is_some_and(|v| {
+                v.len() > 256
+                    || !v.starts_with('/')
+                    || (v != "/" && !valid_model_path(&v[1..]))
+                    || v.contains(['?', '#', '\r', '\n'])
+            })
+        {
+            return Err(WorkloadError::Invalid("compiled telemetry"));
+        }
         if self.executable.is_empty()
             || !self.executable.starts_with('/')
             || self.executable.len() > MAX_ARGV_ITEM_BYTES
