@@ -18,6 +18,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.compiled_execution_plan import validate_compiled_launch_payload
 from vonk_control.distribution import DistributionService
@@ -33,8 +34,6 @@ from vonk_control.models import (
     AgentNode,
     AgentPresence,
     Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
     Job,
     RecipeBuild,
     RecipeInstallation,
@@ -284,64 +283,15 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_document))
     model_digest = content_sha256(ModelDefinition.model_validate(model_document))
     assert model_digest == "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
-    revision_id = str(uuid.uuid4())
-    model_root_id = str(uuid.uuid4())
-    recipe_root_id = str(uuid.uuid4())
     with sessions.begin() as session:
+        entities = CatalogEntityService(session, clock=lambda: NOW)
+        model_revision = entities.create_draft(model_document, actor="test")
+        entities.resolve(model_revision.id, actor="test")
+        recipe_revision = entities.create_draft(recipe_document, actor="test")
+        entities.resolve(recipe_revision.id, actor="test")
+        revision_id = recipe_revision.id
         session.add_all(
             [
-                CatalogDocument(
-                    id=recipe_root_id,
-                    kind="recipe",
-                    publisher="vonk-forge",
-                    slug="synthetic-tiny-image",
-                    title="Synthetic Tiny image",
-                    created_by="test",
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
-                CatalogDocument(
-                    id=model_root_id,
-                    kind="model",
-                    publisher="vonk-forge",
-                    slug="synthetic-tiny-fp16",
-                    title="Synthetic Tiny",
-                    created_by="test",
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
-                CatalogDocumentRevision(
-                    id=revision_id,
-                    document_id=recipe_root_id,
-                    kind="recipe",
-                    publisher="vonk-forge",
-                    slug="synthetic-tiny-image",
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=recipe_document,
-                    content_digest=recipe_digest,
-                    artifact_key="b" * 64,
-                    execution_key="a" * 64,
-                    projected={},
-                    created_by="test",
-                    created_at=NOW,
-                ),
-                CatalogDocumentRevision(
-                    id=str(uuid.uuid4()),
-                    document_id=model_root_id,
-                    kind="model",
-                    publisher="vonk-forge",
-                    slug="synthetic-tiny-fp16",
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=model_document,
-                    content_digest=model_digest,
-                    projected={},
-                    created_by="test",
-                    created_at=NOW,
-                ),
                 AgentNode(
                     node_id=NODE_ID,
                     state="active",
