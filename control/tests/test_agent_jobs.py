@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1190,3 +1192,33 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(service
         assert attempt.progress["completed_bytes"] == 200
         assert attempt.progress["completed_items"] == 2
         assert attempt.progress["phase"] == "completed"
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_queue_stores_and_claims_the_canonical_payload_hash(service, explicit_null: bool) -> None:
+    from vonk_agent_protocol import canonical_message, canonical_payload
+
+    jobs, sessions, clock = service
+    vector = json.loads((Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json").read_text())
+    payload = vector["payload"]
+    job_input = payload["compiled_execution_plan"]["job"]["input"]
+    if explicit_null:
+        job_input["slots"] = None
+    else:
+        job_input.pop("slots", None)
+    expected = canonical_payload(vector["operation"], payload)
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, vector["operation"], COMMIT, payload)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored.payload == json.loads(expected)
+        assert stored.payload_digest == hashlib.sha256(expected).hexdigest()
+        assert "slots" not in stored.payload["compiled_execution_plan"]["job"]["input"]
+        assert stored.payload["compiled_execution_plan"]["endpoint"] is None
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    assert canonical_message(claim.payload) == expected
+    assert claim.payload_digest == hashlib.sha256(expected).hexdigest()
+    executable = os.environ.get("VONK_CANONICAL_WIRE_PROBE")
+    if executable:
+        parsed = subprocess.run([executable, "AgentClaim"], input=canonical_message(claim), capture_output=True, check=True)
+        assert parsed.stdout == canonical_message(claim)
