@@ -26,6 +26,7 @@ from vonk_control.models import (
     ModelCacheOperation,
 )
 from vonk_control.operation_api import durable_operation_services
+from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.strict_json import serialize_json_value
 
 from .runtime_identity_support import claim_agent
@@ -186,7 +187,9 @@ def test_cache_failure_is_identical_in_persistence_family_api_and_activity(
         family.text,
         activity.text,
     )
-    assert family.json()["failure"] == activity.json()["failure"] == persisted
+    assert family.json()["failure"] == activity.json()["failure"] == serialize_json_value(
+        AvailabilityOperationFailure.model_validate(persisted)
+    )
     if status == 429:
         assert persisted["retry_after_seconds"] == 30
         assert persisted["retry_time"] is not None
