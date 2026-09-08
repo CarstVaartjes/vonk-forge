@@ -4582,4 +4582,77 @@ mod tests {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).unwrap();
         }
     }
+
+    #[test]
+    fn installation_cleanup_removes_only_private_runtime_cache_and_is_retryable() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("agent-data"));
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let installation = roots.agent_data.join("installations").join(installation_id);
+        let cache = installation.join("runtime-cache");
+        let private = cache.join("home/private/nested");
+        let models = installation.join("models/primary");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&private).unwrap();
+        fs::create_dir_all(&models).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(private.join("engine-owned.bin"), b"private").unwrap();
+        fs::write(models.join("model.bin"), b"model").unwrap();
+        fs::write(outside.join("sentinel"), b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, cache.join("outside-link")).unwrap();
+        fs::set_permissions(cache.join("home"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            cache.join("home/private"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        if rustix::process::geteuid().is_root() {
+            for path in [cache.join("home"), cache.join("home/private"), private] {
+                rustix::fs::chown(
+                    path,
+                    Some(rustix::process::Uid::from_raw(10001)),
+                    Some(rustix::process::Gid::from_raw(10001)),
+                )
+                .unwrap();
+            }
+        }
+        let executor =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+
+        executor
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+        executor
+            .runtime_installation_cleanup(installation_id)
+            .unwrap();
+
+        assert!(!cache.exists());
+        assert_eq!(fs::read(models.join("model.bin")).unwrap(), b"model");
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn installation_cleanup_rejects_symlinked_managed_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside");
+        let linked = temp.path().join("agent-data");
+        let installation_id = "10000000-0000-4000-8000-000000000001";
+        let cache = outside
+            .join("installations")
+            .join(installation_id)
+            .join("runtime-cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("sentinel"), b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, &linked).unwrap();
+        let roots = ManagedRoots::under(&linked);
+        let executor =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+
+        assert!(matches!(
+            executor.runtime_installation_cleanup(installation_id),
+            Err(OperationError::Io(_))
+        ));
+        assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
+    }
 }

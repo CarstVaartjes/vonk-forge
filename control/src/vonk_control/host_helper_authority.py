@@ -10,6 +10,7 @@ from typing import ClassVar
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, canonical_message
@@ -33,12 +34,11 @@ from vonk_agent_protocol.host_helper import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
 from vonk_agent_protocol.recipe_operations import (
     RecipeModelCleanupPayload,
     RecipeUninstallPayload,
 )
-from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
-from pydantic import ValidationError
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .models import (
@@ -715,15 +715,15 @@ class HostRuntimeAuthorityService:
                 try:
                     if operation.kind == "recipe.uninstall":
                         authorized = {
-                            RecipeUninstallPayload.model_validate(
-                                operation.payload
+                            RecipeUninstallPayload.model_validate_json(
+                                canonical_message(operation.payload)
                             ).installation_id
                         }
                     else:
                         authorized = {
                             item.installation_id
-                            for item in RecipeModelCleanupPayload.model_validate(
-                                operation.payload
+                            for item in RecipeModelCleanupPayload.model_validate_json(
+                                canonical_message(operation.payload)
                             ).installations
                         }
                 except (TypeError, ValueError) as error:
