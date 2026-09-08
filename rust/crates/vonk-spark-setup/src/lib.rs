@@ -209,6 +209,16 @@ impl ReleaseAuthority {
         self.verify_bounded(manifest, encoded_signature, MAX_RELEASE_BYTES)
     }
 
+    /// Authenticate the exact publication bytes before parsing the complete canonical graph.
+    pub fn verify_manifest(
+        &self,
+        manifest: &[u8],
+        encoded_signature: &[u8],
+    ) -> Result<InstallerReleaseManifest, SetupError> {
+        self.verify(manifest, encoded_signature)?;
+        serde_json::from_slice(manifest).map_err(|_| SetupError::ReleaseSignature)
+    }
+
     fn verify_setup(&self, setup: &[u8], encoded_signature: &[u8]) -> Result<(), SetupError> {
         self.verify_bounded(setup, encoded_signature, 64 * 1024 * 1024)
     }
@@ -411,33 +421,9 @@ struct ApplyEnvelope {
     plan: ApplyOperation,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReleaseDocument {
-    #[serde(default)]
-    acceptance_only: bool,
-    artifacts: BTreeMap<String, ReleaseArtifact>,
-    bootstraps: BTreeMap<String, ReleaseArtifact>,
-    channel: String,
-    generation: String,
-    images: BTreeMap<String, String>,
-    schema_version: u8,
-    source_sha: String,
-    version: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReleaseArtifact {
-    architecture: Option<String>,
-    host_signature: Option<String>,
-    package_version: Option<String>,
-    path: String,
-    sha256: String,
-    size: u64,
-    target_binary_digest: Option<String>,
-    target_build_digest: Option<String>,
-}
+use vonk_agent_protocol::generated::{
+    InstallerPackageArtifact, InstallerReleaseManifest, InstallerReleaseObject as ReleaseArtifact,
+};
 
 struct VerifiedRelease {
     raw: Vec<u8>,
@@ -706,6 +692,7 @@ pub fn handoff_to_root(
     prepared: &PreparedSetup,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    validate_native_architecture(std::env::consts::ARCH)?;
     handoff_to_root_with_authority(prepared, runner, &ReleaseAuthority::canonical())
 }
 
@@ -856,7 +843,7 @@ pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
         &os_release,
         Path::new("/run/systemd/system").is_dir(),
         architecture,
-        architecture,
+        "arm64",
     )?;
     for executable in [
         "/bin/rm",
@@ -901,6 +888,13 @@ fn validate_host_description(
     Ok(())
 }
 
+fn validate_native_architecture(architecture: &str) -> Result<(), SetupError> {
+    if architecture != "aarch64" {
+        return Err(SetupError::UnsupportedHost);
+    }
+    Ok(())
+}
+
 pub fn prepare_setup(
     request: &SetupRequest,
     paths: &InstallPaths,
@@ -908,6 +902,7 @@ pub fn prepare_setup(
     runner: &mut dyn CommandRunner,
     caller: CallerIdentity,
 ) -> Result<PreparedSetup, SetupError> {
+    validate_native_architecture(std::env::consts::ARCH)?;
     prepare_setup_with_authority(
         request,
         paths,
@@ -929,9 +924,9 @@ pub fn prepare_setup_with_authority(
     caller.authenticate_for(paths)?;
     let caller_uid = caller.require_unprivileged()?;
     let release = verified_release_from_files(request, authority)?;
-    verify_release_artifact_size(&request.executable, release.setup.size)?;
+    verify_release_artifact_size(&request.executable, u64::from(release.setup.size))?;
     verify_regular_file_digest(&request.executable, &release.setup.sha256, 64 * 1024 * 1024)?;
-    verify_release_artifact_size(&request.package, release.package.size)?;
+    verify_release_artifact_size(&request.package, u64::from(release.package.size))?;
     let staged = stage_verified_package_from(
         &request.package,
         &release.package.sha256,
@@ -1118,7 +1113,10 @@ fn verified_release_from_files(
     let release = verified_release(manifest, signature, authority)?;
     let setup_signature =
         read_bounded_regular(&request.setup_signature, MAX_RELEASE_SIGNATURE_BYTES)?;
-    verify_release_artifact_size(&request.setup_signature, release.setup_signature.size)?;
+    verify_release_artifact_size(
+        &request.setup_signature,
+        u64::from(release.setup_signature.size),
+    )?;
     verify_regular_file_digest(
         &request.setup_signature,
         &release.setup_signature.sha256,
@@ -1135,69 +1133,53 @@ fn verified_release(
     signature: Vec<u8>,
     authority: &ReleaseAuthority,
 ) -> Result<VerifiedRelease, SetupError> {
-    authority.verify(&raw, &signature)?;
-    let document: ReleaseDocument =
-        serde_json::from_slice(&raw).map_err(|_| SetupError::ReleaseSignature)?;
-    let (platform, architecture) = match std::env::consts::ARCH {
-        "x86_64" => ("linux-amd64", "amd64"),
-        "aarch64" => ("linux-arm64", "arm64"),
-        _ => return Err(SetupError::ReleaseSignature),
-    };
-    if document.schema_version != 2
-        || !matches!(document.channel.as_str(), "dev" | "stable")
-        || !valid_sha256(&document.generation)
-        || document.source_sha.len() != 40
-        || !document
-            .source_sha
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        || !valid_package_version(&document.version)
-        || document.images.is_empty()
-        || document.bootstraps.is_empty()
-    {
-        return Err(SetupError::ReleaseSignature);
-    }
-    let package = document
-        .artifacts
-        .get(&format!("agent-package-{platform}"))
-        .cloned()
-        .ok_or(SetupError::ReleaseSignature)?;
-    let setup = document
-        .artifacts
-        .get(&format!("spark-setup-{platform}"))
-        .cloned()
-        .ok_or(SetupError::ReleaseSignature)?;
-    let setup_signature = document
-        .artifacts
-        .get(&format!("spark-setup-signature-{platform}"))
-        .cloned()
-        .ok_or(SetupError::ReleaseSignature)?;
-    let prefix = release_artifact_prefix(
-        &document.channel,
-        &document.generation,
-        platform,
-        document.acceptance_only,
-    );
+    let document = authority.verify_manifest(&raw, &signature)?;
+    // The canonical publication graph declares its target independently of
+    // the reader host; actual system entry points enforce native execution.
+    let (platform, architecture) = ("linux-arm64", "arm64");
+    let (package, setup, setup_signature, channel, generation, version, acceptance_only) =
+        match document {
+            InstallerReleaseManifest::CandidateRelease(document) => {
+                if !valid_package_release_identity(
+                    &document.artifacts.agent_package_linux_arm64,
+                    platform,
+                    &document.version,
+                ) {
+                    return Err(SetupError::ReleaseSignature);
+                }
+                (
+                    ReleaseArtifact::from(&document.artifacts.agent_package_linux_arm64),
+                    document.artifacts.spark_setup_linux_arm64,
+                    document.artifacts.spark_setup_signature_linux_arm64,
+                    document.channel.to_string(),
+                    document.generation,
+                    document.version,
+                    false,
+                )
+            }
+            InstallerReleaseManifest::AcceptanceBaselineRelease(document) => (
+                document.artifacts.agent_package_linux_arm64,
+                document.artifacts.spark_setup_linux_arm64,
+                document.artifacts.spark_setup_signature_linux_arm64,
+                document.channel.to_string(),
+                document.generation,
+                document.version,
+                true,
+            ),
+        };
+    let prefix = release_artifact_prefix(&channel, &generation, platform, acceptance_only);
     if package.path != format!("{prefix}vonk-forge-agent.deb")
         || setup.path != format!("{prefix}vonk-spark-setup")
         || setup_signature.path != format!("{prefix}vonk-spark-setup.sig")
-        || !valid_package_release_identity(
-            &package,
-            platform,
-            &document.version,
-            document.acceptance_only,
-        )
-        || has_package_release_identity(&setup)
-        || has_package_release_identity(&setup_signature)
         || !valid_sha256(&package.sha256)
         || !valid_sha256(&setup.sha256)
         || !valid_sha256(&setup_signature.sha256)
         || package.size < 68
-        || package.size > MAX_PACKAGE_BYTES
+        || u64::from(package.size) > MAX_PACKAGE_BYTES
         || setup.size == 0
         || setup.size > 64 * 1024 * 1024
         || setup_signature.size == 0
-        || setup_signature.size > MAX_RELEASE_SIGNATURE_BYTES as u64
+        || setup_signature.size as usize > MAX_RELEASE_SIGNATURE_BYTES
     {
         return Err(SetupError::ReleaseSignature);
     }
@@ -1207,55 +1189,19 @@ fn verified_release(
         package,
         setup,
         setup_signature,
-        version: document.version,
+        version,
         architecture: architecture.to_owned(),
     })
 }
 
-fn has_package_release_identity(artifact: &ReleaseArtifact) -> bool {
-    artifact.architecture.is_some()
-        || artifact.host_signature.is_some()
-        || artifact.package_version.is_some()
-        || artifact.target_binary_digest.is_some()
-        || artifact.target_build_digest.is_some()
-}
-
 fn valid_package_release_identity(
-    artifact: &ReleaseArtifact,
+    artifact: &InstallerPackageArtifact,
     platform: &str,
     version: &str,
-    acceptance_only: bool,
 ) -> bool {
-    match (
-        artifact.architecture.as_deref(),
-        artifact.host_signature.as_deref(),
-        artifact.package_version.as_deref(),
-        artifact.target_binary_digest.as_deref(),
-        artifact.target_build_digest.as_deref(),
-    ) {
-        (None, None, None, None, None) => acceptance_only,
-        (
-            Some(architecture),
-            Some(host_signature),
-            Some(package_version),
-            Some(target_binary_digest),
-            Some(target_build_digest),
-        ) => {
-            !acceptance_only
-                && architecture == platform
-                && host_signature.len() == 128
-                && host_signature
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                && package_version == version
-                && valid_package_version(package_version)
-                && valid_sha256(target_binary_digest)
-                && target_build_digest
-                    .strip_prefix("sha256:")
-                    .is_some_and(valid_sha256)
-        }
-        _ => false,
-    }
+    artifact.architecture == platform
+        && artifact.package_version == version
+        && valid_package_version(&artifact.package_version)
 }
 
 fn release_artifact_prefix(
@@ -1279,6 +1225,9 @@ pub fn apply_setup_from(
     runner: &mut dyn CommandRunner,
     caller: CallerIdentity,
 ) -> Result<(), SetupError> {
+    caller.authenticate_for(paths)?;
+    caller.require_sudo_root(caller.sudo_uid.ok_or(SetupError::CallerPhase)?)?;
+    validate_native_architecture(std::env::consts::ARCH)?;
     apply_setup_from_with_authority(
         input,
         executable_path,
@@ -1322,11 +1271,11 @@ pub fn apply_setup_from_with_authority(
     }
     validate_plan_against_installation(&envelope.plan, paths)?;
     let package_path = validated_staging_session(executable_path, paths)?;
-    verify_release_artifact_size(executable_path, release.setup.size)
+    verify_release_artifact_size(executable_path, u64::from(release.setup.size))
         .map_err(|_| SetupError::PrivilegedInput)?;
     verify_regular_file_digest(executable_path, &release.setup.sha256, 64 * 1024 * 1024)
         .map_err(|_| SetupError::PrivilegedInput)?;
-    verify_release_artifact_size(&package_path, release.package.size)
+    verify_release_artifact_size(&package_path, u64::from(release.package.size))
         .map_err(|_| SetupError::PrivilegedInput)?;
     let staged = stage_verified_package_from(
         &package_path,
@@ -3080,6 +3029,11 @@ mod tests {
     #[test]
     fn host_validation_rejects_a_release_for_another_architecture() {
         assert!(matches!(
+            validate_native_architecture("x86_64"),
+            Err(SetupError::UnsupportedHost)
+        ));
+        assert!(validate_native_architecture("aarch64").is_ok());
+        assert!(matches!(
             validate_host_description("ID=ubuntu\n", true, "amd64", "arm64"),
             Err(SetupError::UnsupportedHost)
         ));
@@ -3218,53 +3172,28 @@ mod tests {
     }
 
     #[test]
-    fn package_release_identity_is_complete_and_bound_to_platform_and_version() {
-        let mut artifact = ReleaseArtifact {
-            architecture: Some("linux-arm64".to_owned()),
-            host_signature: Some("a".repeat(128)),
-            package_version: Some("1.0.0".to_owned()),
-            path: "immutable".to_owned(),
-            sha256: "b".repeat(64),
-            size: 1,
-            target_binary_digest: Some("c".repeat(64)),
-            target_build_digest: Some(format!("sha256:{}", "d".repeat(64))),
-        };
-
+    fn package_release_identity_is_bound_to_platform_and_version() {
+        let artifact: InstallerPackageArtifact = serde_json::from_value(serde_json::json!({
+            "architecture": "linux-arm64", "host_signature": "a".repeat(128),
+            "package_version": "1.0.0", "path": "immutable", "sha256": "b".repeat(64),
+            "size": 1, "target_binary_digest": "c".repeat(64),
+            "target_build_digest": format!("sha256:{}", "d".repeat(64)),
+        }))
+        .unwrap();
         assert!(valid_package_release_identity(
             &artifact,
             "linux-arm64",
-            "1.0.0",
-            false,
+            "1.0.0"
         ));
         assert!(!valid_package_release_identity(
             &artifact,
             "linux-amd64",
-            "1.0.0",
-            false,
-        ));
-        artifact.target_build_digest = None;
-        assert!(!valid_package_release_identity(
-            &artifact,
-            "linux-arm64",
-            "1.0.0",
-            false,
-        ));
-
-        artifact.architecture = None;
-        artifact.host_signature = None;
-        artifact.package_version = None;
-        artifact.target_binary_digest = None;
-        assert!(valid_package_release_identity(
-            &artifact,
-            "linux-arm64",
-            "0.9.0",
-            true,
+            "1.0.0"
         ));
         assert!(!valid_package_release_identity(
             &artifact,
             "linux-arm64",
-            "1.0.0",
-            false,
+            "1.0.1"
         ));
     }
 

@@ -10,7 +10,10 @@ import sys
 from pathlib import Path
 
 PROBES = {
-    "VONK_INSTALLER_RELEASE_WIRE_PROBE": ("vonk-spark-setup", "installer_release_wire_probe"),
+    "VONK_INSTALLER_RELEASE_WIRE_PROBE": (
+        "vonk-spark-setup",
+        "installer_release_wire_probe",
+    ),
     "VONK_SOURCE_BUNDLE_WIRE_PROBE": ("vonk-agent", "source_bundle_wire_probe"),
     "VONK_JOB_INVOCATION_WIRE_PROBE": ("vonk-agent", "job_invocation_wire_probe"),
     "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
@@ -22,7 +25,10 @@ PROBES = {
     "VONK_INVENTORY_WIRE_PROBE": ("vonk-agent-protocol", "inventory_wire_probe"),
     "VONK_TELEMETRY_WIRE_PROBE": ("vonk-agent", "telemetry_wire_probe"),
     "VONK_HOST_HELPER_WIRE_PROBE": ("vonk-agent-helper", "host_helper_wire_probe"),
-    "VONK_RECIPE_OBSERVATION_WIRE_PROBE": ("vonk-agent", "recipe_observation_wire_probe"),
+    "VONK_RECIPE_OBSERVATION_WIRE_PROBE": (
+        "vonk-agent",
+        "recipe_observation_wire_probe",
+    ),
     "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
 }
 
@@ -75,20 +81,27 @@ def main() -> int:
     pytest_args = list(args.pytest_args)
     if pytest_args[:1] == ["--"]:
         pytest_args.pop(0)
-    return subprocess.run(
+    # Root and Controller tests use the same Python package name. Keep their
+    # collection isolated while sharing the exact native probe environment.
+    selections = [
         [
-            sys.executable,
-            "-m",
-            "pytest",
             "agent_protocol/tests",
-            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
             *[str(path.relative_to(repository)) for path in bridges],
-            *pytest_args,
         ],
-        cwd=repository,
-        env=environment,
-        check=False,
-    ).returncode
+        [
+            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary"
+        ],
+    ]
+    for selection in selections:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", *selection, *pytest_args],
+            cwd=repository,
+            env=environment,
+            check=False,
+        )
+        if result.returncode:
+            return result.returncode
+    return 0
 
 
 if __name__ == "__main__":

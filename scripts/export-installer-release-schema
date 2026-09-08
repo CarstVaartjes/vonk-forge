@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Export the complete current installer manifest from its canonical models."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+
+from vonk_agent_protocol.installer_release import InstallerReleaseManifest
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    schema = InstallerReleaseManifest.model_json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = "https://vonkforge.ai/schemas/install-release-manifest.schema.json"
+    content = json.dumps(schema, sort_keys=True, indent=2) + "\n"
+    output = ROOT / "schemas/install-release-manifest.schema.json"
+    if args.check:
+        if output.read_text() != content:
+            raise SystemExit(f"Stale installer manifest schema: {output}")
+    else:
+        output.write_text(content)
+
+
+if __name__ == "__main__":
+    main()
