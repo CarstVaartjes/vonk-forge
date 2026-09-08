@@ -6,7 +6,6 @@ import hashlib
 import io
 import json
 import tarfile
-from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -169,7 +168,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
             archive_bytes=len(bundle.archive), total_bytes=bundle.manifest.total_bytes,
             file_count=len(bundle.manifest.files),
             storage_key=f"{bundle.sha256[:2]}/{bundle.sha256}.tar",
-            manifest={"files": [asdict(entry) for entry in bundle.manifest.files]},
+            manifest=bundle.manifest.model_dump(mode="json"),
             verified_at=now,
         ))
         revision = session.scalar(select(CatalogDocumentRevision).where(

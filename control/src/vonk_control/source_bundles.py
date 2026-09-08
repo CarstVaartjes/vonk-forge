@@ -7,11 +7,18 @@ import os
 import tarfile
 import tempfile
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, BinaryIO
+
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.source_bundles import (
+    SourceBundleDigestManifest,
+    SourceBundleFile,
+    SourceBundleManifest,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
@@ -33,24 +40,9 @@ class BundleLimits:
 
 
 @dataclass(frozen=True, slots=True)
-class BundleFile:
-    path: str
-    mode: int
-    size: int
-    sha256: str
-
-
-@dataclass(frozen=True, slots=True)
-class BundleManifest:
-    files: tuple[BundleFile, ...]
-    total_bytes: int
-    sha256: str
-
-
-@dataclass(frozen=True, slots=True)
 class StoredBundle:
     path: Path
-    manifest: BundleManifest
+    manifest: SourceBundleManifest
     archive_bytes: int
 
 
@@ -58,7 +50,7 @@ class StoredBundle:
 class GeneratedSourceBundle:
     files: Mapping[str, bytes]
     archive: bytes
-    manifest: BundleManifest
+    manifest: SourceBundleManifest
 
     @property
     def sha256(self) -> str:
@@ -97,7 +89,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
 
 def inspect_source_bundle(
     payload: BinaryIO, limits: BundleLimits | None = None
-) -> BundleManifest:
+) -> SourceBundleManifest:
     active = limits or BundleLimits()
     return _inspect_archive(_read_archive(payload, active), active)
 
@@ -200,6 +192,8 @@ class DatabaseSourceBundleStore:
         with self._sessions.begin() as session:
             metadata = session.get(RecipeSourceBundle, expected_sha256)
             stored = session.get(SourceBundleArchive, expected_sha256)
+            if metadata is not None and parse_source_bundle_manifest(metadata.manifest) != manifest:
+                raise SourceBundleError("bundle.storage_collision", "stored source manifest is inconsistent")
             if stored is not None and stored.archive != archive:
                 raise SourceBundleError(
                     "bundle.storage_collision", "stored source bundle is inconsistent"
@@ -213,12 +207,7 @@ class DatabaseSourceBundleStore:
                         total_bytes=manifest.total_bytes,
                         file_count=len(manifest.files),
                         storage_key=f"postgres:{manifest.sha256}",
-                        manifest={
-                            "schema_version": 1,
-                            "files": [asdict(item) for item in manifest.files],
-                            "total_bytes": manifest.total_bytes,
-                            "sha256": manifest.sha256,
-                        },
+                        manifest=json.loads(canonical_message(manifest)),
                         verified_at=datetime.now(UTC),
                     )
                     session.add(metadata)
@@ -227,7 +216,7 @@ class DatabaseSourceBundleStore:
 
     def get(self, sha256: str) -> GeneratedSourceBundle:
         _validate_digest(sha256, "bundle.digest_invalid")
-        from .models import SourceBundleArchive
+        from .models import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             stored = session.get(SourceBundleArchive, sha256)
@@ -235,13 +224,26 @@ class DatabaseSourceBundleStore:
                 raise SourceBundleError(
                     "bundle.not_found", "source bundle is unavailable"
                 )
+            metadata = session.get(RecipeSourceBundle, sha256)
+            if metadata is None:
+                raise SourceBundleError("bundle.manifest_invalid", "stored source manifest is unavailable")
+            persisted = parse_source_bundle_manifest(metadata.manifest)
             archive = stored.archive
         manifest = _inspect_archive(archive, self._limits)
+        if manifest != persisted:
+            raise SourceBundleError("bundle.storage_collision", "stored source manifest is inconsistent")
         if manifest.sha256 != sha256:
             raise SourceBundleError(
                 "bundle.storage_collision", "stored source bundle is inconsistent"
             )
         return _generated_bundle(archive, manifest, self._limits)
+
+
+def parse_source_bundle_manifest(value: object) -> SourceBundleManifest:
+    try:
+        return SourceBundleManifest.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise SourceBundleError("bundle.manifest_invalid", "stored source manifest is invalid") from error
 
 
 def _validate_digest(value: str, code: str) -> None:
@@ -253,7 +255,7 @@ def _validate_digest(value: str, code: str) -> None:
 
 def _generated_bundle(
     archive: bytes,
-    manifest: BundleManifest,
+    manifest: SourceBundleManifest,
     limits: BundleLimits,
 ) -> GeneratedSourceBundle:
     files: dict[str, bytes] = {}
@@ -283,8 +285,8 @@ def _read_archive(payload: BinaryIO, limits: BundleLimits) -> bytes:
     return archive
 
 
-def _inspect_archive(archive: bytes, limits: BundleLimits) -> BundleManifest:
-    files: list[BundleFile] = []
+def _inspect_archive(archive: bytes, limits: BundleLimits) -> SourceBundleManifest:
+    files: list[SourceBundleFile] = []
     seen: set[str] = set()
     total = 0
     try:
@@ -332,7 +334,7 @@ def _inspect_archive(archive: bytes, limits: BundleLimits) -> BundleManifest:
                     "bundle.size_mismatch", "source bundle file size is inconsistent"
                 )
             files.append(
-                BundleFile(
+                SourceBundleFile(
                     path=path,
                     mode=0o755 if member.mode & 0o111 else 0o644,
                     size=member.size,
@@ -340,22 +342,12 @@ def _inspect_archive(archive: bytes, limits: BundleLimits) -> BundleManifest:
                 )
             )
     files.sort(key=lambda item: item.path.encode("utf-8"))
-    canonical = json.dumps(
-        {
-            "schema_version": 1,
-            "files": [asdict(item) for item in files],
-            "total_bytes": total,
-        },
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return BundleManifest(
-        files=tuple(files),
-        total_bytes=total,
-        sha256=hashlib.sha256(canonical).hexdigest(),
+    identity = SourceBundleDigestManifest(
+        schema_version=1, files=tuple(files), total_bytes=total,
     )
+    return SourceBundleManifest.model_validate_json(canonical_message(
+        identity.model_dump(mode="json") | {"sha256": identity.digest()}
+    ))
 
 
 def _safe_path(value: str) -> str:

@@ -6,7 +6,7 @@ import copy
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import BinaryIO
 
@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
@@ -30,7 +31,11 @@ from .models import (
     RecipeSourceBundle,
 )
 from .schema_resources import read_runtime_schema
-from .source_bundles import SourceBundleError, SourceBundleStore
+from .source_bundles import (
+    SourceBundleError,
+    SourceBundleStore,
+    parse_source_bundle_manifest,
+)
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
@@ -118,12 +123,7 @@ class CatalogService:
             total_bytes=manifest.total_bytes,
             file_count=len(manifest.files),
             storage_key=f"{manifest.sha256[:2]}/{manifest.sha256}.tar",
-            manifest={
-                "schema_version": 1,
-                "files": [asdict(item) for item in manifest.files],
-                "total_bytes": manifest.total_bytes,
-                "sha256": manifest.sha256,
-            },
+            manifest=json.loads(canonical_message(manifest)),
             verified_at=self._clock(),
         )
         try:
@@ -132,9 +132,13 @@ class CatalogService:
                 if existing is None:
                     session.add(row)
                 else:
+                    if parse_source_bundle_manifest(existing.manifest) != manifest:
+                        raise CatalogValidationError("bundle.metadata_mismatch", "stored source manifest differs from verified bundle")
                     row = existing
         except IntegrityError as error:
             raise CatalogConflict("bundle.storage_conflict", "source bundle metadata conflicts") from error
+        except SourceBundleError as error:
+            raise CatalogValidationError(error.code, error.detail) from error
         return SourceBundleView(
             sha256=row.sha256,
             archive_bytes=row.archive_bytes,
@@ -151,12 +155,16 @@ class CatalogService:
             if row is None:
                 raise KeyError(sha256)
             expected = (row.archive_bytes, row.total_bytes, row.file_count)
+            try:
+                manifest = parse_source_bundle_manifest(row.manifest)
+            except SourceBundleError as error:
+                raise CatalogValidationError(error.code, error.detail) from error
         try:
             stored = self._source_bundles.get(sha256)
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
         observed = (len(stored.archive), stored.manifest.total_bytes, len(stored.manifest.files))
-        if observed != expected:
+        if observed != expected or stored.manifest != manifest:
             raise CatalogValidationError("bundle.metadata_mismatch", "source bundle storage does not match its database metadata")
         return stored.archive
 
