@@ -304,9 +304,7 @@ ensure_subid_range /etc/subgid "$sub_gid_min" "$sub_gid_max" "$sub_gid_count" gi
 
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent
-install -d -o vonk-agent -g vonk-agent -m 0750 \
-    /var/lib/vonk-forge-agent/models /var/lib/vonk-forge-agent/containers \
-    /var/lib/vonk-forge-agent/state /var/lib/vonk-forge-agent/workloads
+install -d -o vonk-agent -g vonk-agent -m 0750 /var/lib/vonk-forge-agent/containers
 install -d -o vonk-agent -g vonk-agent -m 0700 \
     /var/lib/vonk-forge-agent/image-imports \
     /var/lib/vonk-forge-agent/installations \

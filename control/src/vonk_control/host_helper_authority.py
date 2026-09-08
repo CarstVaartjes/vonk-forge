@@ -20,7 +20,6 @@ from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
-    CreateManagedDirectoryOperation,
     ExecuteContainerRuntimeRequestOperation,
     HostHelperGrantClaims,
     HostHelperSignature,
@@ -119,7 +118,6 @@ class HostHelperGrantIssuer:
         if not isinstance(
             operation,
             (
-                CreateManagedDirectoryOperation,
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
     ConfirmPackageActivationOperation,

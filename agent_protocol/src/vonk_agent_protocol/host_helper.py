@@ -10,7 +10,6 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
-    field_validator,
     model_validator,
 )
 
@@ -36,12 +35,6 @@ Uuid4Text = Annotated[
 ]
 
 
-class ManagedArea(StrEnum):
-    MODELS = "models"
-    STATE = "state"
-    WORKLOADS = "workloads"
-
-
 class RestartUnit(StrEnum):
     AGENT = "agent"
     HELPER = "helper"
@@ -57,7 +50,6 @@ class ContainerRuntimeAction(StrEnum):
 
 
 class HostOperationKind(StrEnum):
-    CREATE_MANAGED_DIRECTORY = "create-managed-directory"
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
     RESTART_VONK_UNIT = "restart-vonk-unit"
@@ -68,21 +60,6 @@ class HostOperationKind(StrEnum):
 class _HostOperation(WireModel):
     def to_mapping(self) -> dict[str, object]:
         return self.model_dump(mode="json")
-
-
-class CreateManagedDirectoryOperation(_HostOperation):
-    type: Literal["create-managed-directory"]
-    area: Literal["models", "state", "workloads"]
-    relative_path: str = Field(min_length=1, max_length=512, strict=True)
-
-    @field_validator("relative_path")
-    @classmethod
-    def safe_relative_path(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 512 or not _relative_path(value):
-            raise ValueError("managed relative path is invalid")
-        return value
-
-
 
 
 class InstallVonkDebOperation(_HostOperation):
@@ -133,8 +110,7 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 
 
 type HostOperation = Annotated[
-    CreateManagedDirectoryOperation
-    | InstallVonkDebOperation
+    InstallVonkDebOperation
     | ConfirmPackageActivationOperation
     | RestartVonkUnitOperation
     | ScheduleRebootOperation
@@ -259,14 +235,6 @@ def host_artifact_signing_bytes(kind: str, digest: str) -> bytes:
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_COMPONENT = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
-
-
-def _relative_path(value: object) -> bool:
-    return isinstance(value, str) and all(
-        component not in {"", ".", ".."} and _COMPONENT.fullmatch(component) is not None
-        for component in value.split("/")
-    )
 
 
 def _parse_model(cls: type[WireModel], value: Any, name: str) -> Any:
