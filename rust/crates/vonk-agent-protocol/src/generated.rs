@@ -4671,6 +4671,66 @@ impl ::std::convert::TryFrom<::std::string::String> for SimpleMaterializationMet
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct SourceBundleDigestManifest {
+    pub files: ::std::vec::Vec<SourceBundleFile>,
+    pub schema_version: u8,
+    pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SourceBundleFile {
+    pub mode: SourceBundleFileMode,
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+#[derive(Eq)]
+pub struct SourceBundleFileMode(i64);
+impl ::std::ops::Deref for SourceBundleFileMode {
+    type Target = i64;
+    fn deref(&self) -> &i64 {
+        &self.0
+    }
+}
+impl ::std::convert::From<SourceBundleFileMode> for i64 {
+    fn from(value: SourceBundleFileMode) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::TryFrom<i64> for SourceBundleFileMode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: i64) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if ![420_i64, 493_i64].contains(&value) {
+            Err("invalid value".into())
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleFileMode {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        Self::try_from(<i64>::deserialize(deserializer)?)
+            .map_err(|e| <D::Error as ::serde::de::Error>::custom(e.to_string()))
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SourceBundleManifest {
+    pub files: ::std::vec::Vec<SourceBundleFile>,
+    pub schema_version: u8,
+    pub sha256: ::std::string::String,
+    pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct SupervisorAcknowledgement {
     pub acknowledged_at: ::std::string::String,
     pub activation_sha256: ::std::string::String,
@@ -10922,6 +10982,73 @@ impl ::std::cmp::PartialEq<&str> for SimpleMaterializationMethod {
         self.as_str() == *other
     }
 }
+impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleDigestManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub files: ::std::vec::Vec<SourceBundleFile>,
+            pub schema_version: u8,
+            pub total_bytes: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            files: raw.files,
+            schema_version: raw.schema_version,
+            total_bytes: raw.total_bytes,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleFile {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleFile", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub mode: SourceBundleFileMode,
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            mode: raw.mode,
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleManifest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub files: ::std::vec::Vec<SourceBundleFile>,
+            pub schema_version: u8,
+            pub sha256: ::std::string::String,
+            pub total_bytes: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            files: raw.files,
+            schema_version: raw.schema_version,
+            sha256: raw.sha256,
+            total_bytes: raw.total_bytes,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -11806,6 +11933,15 @@ impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
             run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
             world_size: value.world_size,
+        }
+    }
+}
+impl From<&SourceBundleManifest> for SourceBundleDigestManifest {
+    fn from(value: &SourceBundleManifest) -> Self {
+        Self {
+            files: value.files.clone(),
+            schema_version: value.schema_version,
+            total_bytes: value.total_bytes,
         }
     }
 }

@@ -68,10 +68,7 @@ def _models(value: object) -> tuple[ModelDefinition, ...]:
 def _package(value: object, resolved: Mapping[str, object]) -> object:
     if value is not None:
         return value
-    for name in ("package_handle", "build_receipt", "package"):
-        if name in resolved:
-            return resolved[name]
-    return None
+    return resolved.get("package_handle")
 
 
 def _artifact_inputs(package: object) -> dict[str, str]:
@@ -92,8 +89,8 @@ def _artifact_inputs(package: object) -> dict[str, str]:
 
 def _package_paths(package: object) -> Sequence[str] | None:
     raw = package.get("paths") if isinstance(package, Mapping) else getattr(package, "paths", None)
-    if raw is None and isinstance(package, Mapping):
-        raw = package.get("member_paths")
+    if isinstance(package, Mapping) and "member_paths" in package:
+        raise RecipeRuntimeSpecError("package contains retired member_paths authority")
     if raw is None:
         return None
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or any(type(path) is not str for path in raw):
@@ -108,7 +105,7 @@ def _resolved_inputs(
     parsed: RecipeDefinition,
 ) -> tuple[tuple[ModelDefinition, ...], object]:
     resolved = {} if resolved_entities is None else dict(resolved_entities)
-    allowed = {"recipe", "models", "model_projections", "package_handle", "build_receipt", "package"}
+    allowed = {"recipe", "models", "package_handle"}
     unknown = set(resolved) - allowed
     if unknown:
         raise RecipeRuntimeSpecError("resolved inputs contain retired authorities")
@@ -117,7 +114,7 @@ def _resolved_inputs(
         candidate = _recipe(resolved_recipe)
         if content_sha256(candidate) != content_sha256(parsed):
             raise RecipeRuntimeSpecError("resolved recipe projection does not match the candidate")
-    supplied_models = models if models is not None else resolved.get("models", resolved.get("model_projections"))
+    supplied_models = models if models is not None else resolved.get("models")
     return _models(supplied_models), _package(package_handle, resolved)
 
 
