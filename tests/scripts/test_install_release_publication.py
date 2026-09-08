@@ -2384,6 +2384,7 @@ def test_refresh_extends_signed_manifest_after_verifying_all_release_objects(
     refreshed = subprocess.run(
         [
             sys.executable,
+            "-S",  # Scheduled refresh has only system Python, without site packages.
             str(SCRIPT),
             "refresh",
             "--channel",
