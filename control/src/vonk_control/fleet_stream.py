@@ -17,6 +17,7 @@ from .fleet_stream_contract import (
     FleetSnapshotEvent,
     FleetTelemetryEvent,
 )
+from .strict_json import serialize_json_value
 from .telemetry import TelemetryRepository, TelemetrySampleView
 
 MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -80,9 +81,7 @@ def _keepalive_frame(now: datetime, *, retry: bool) -> str:
 
 
 def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> dict[str, object]:
-    return FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot).model_dump(
-        mode="json"
-    )
+    return serialize_json_value(FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot))
 
 
 class FleetStream:
@@ -234,10 +233,10 @@ class FleetStream:
             sample = samples.get(sample_id) if isinstance(sample_id, str) else None
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
-            return FleetTelemetryEvent(
+            return serialize_json_value(FleetTelemetryEvent(
                 node_id=sample.node_id,
                 sample=telemetry_point(sample),
-            ).model_dump(mode="json")
+            ))
         if event.event_type not in {"node-profile", "recipe-state", "operation-state"}:
             raise RuntimeError("Fleet stream event type is invalid")
         fields = validate_fleet_event_payload(
@@ -247,7 +246,7 @@ class FleetStream:
             event.node_id,
             event.payload,
         )
-        return FleetChangeEvent(
+        return serialize_json_value(FleetChangeEvent(
             change=FleetChangeAdapter.validate_python(
                 {
                     "entity_kind": event.entity_kind,
@@ -257,4 +256,4 @@ class FleetStream:
                     "fields": fields,
                 }
             )
-        ).model_dump(mode="json")
+        ))

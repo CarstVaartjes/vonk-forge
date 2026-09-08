@@ -19,7 +19,11 @@ from vonk_control.library_contract import (
 from vonk_control.model_cache_contract import ModelCacheEvictionPreviewRequest
 from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability_api import RecipeImageAvailabilityStart
-from vonk_control.strict_json import StrictJSONModel
+from vonk_control.strict_json import (
+    ControllerAPIRoute,
+    StrictJSONModel,
+    serialize_json_value,
+)
 
 
 class _LiteralSemanticsProbe(StrictJSONModel):
@@ -34,6 +38,21 @@ class _LiteralSemanticsProbe(StrictJSONModel):
 class _AliasedLiteralProbe(StrictJSONModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     tag: Literal[1] = Field(alias="wire_tag")
+
+
+class _PresenceNestedProbe(StrictJSONModel):
+    required_nullable: str | None
+    optional_nullable: str | None = None
+    enabled: bool = False
+
+
+class _PresenceResponseProbe(StrictJSONModel):
+    nested: _PresenceNestedProbe
+    required_nullable: str | None
+    optional_nullable: str | None = None
+    retries: int = 0
+    labels: list[str] = Field(default_factory=list)
+    engine: dict[str, object] | None = None
 
 
 def test_numeric_literal_check_preserves_union_semantics() -> None:
@@ -72,6 +91,48 @@ def test_numeric_literal_check_honors_alias_input_names() -> None:
         _AliasedLiteralProbe.model_validate({"wire_tag": True})
     with pytest.raises(ValidationError):
         _AliasedLiteralProbe.model_validate({"tag": 1})
+
+
+def test_model_dump_omits_only_optional_none_values_recursively() -> None:
+    value = _PresenceResponseProbe(
+        nested=_PresenceNestedProbe(required_nullable=None),
+        required_nullable=None,
+        engine={"future_option": None},
+    )
+
+    assert serialize_json_value(value) == {
+        "nested": {"required_nullable": None, "enabled": False},
+        "required_nullable": None,
+        "retries": 0,
+        "labels": [],
+        "engine": {"future_option": None},
+    }
+
+
+def test_fastapi_response_uses_presence_policy_for_nested_contracts() -> None:
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+
+    @app.get("/presence", response_model=_PresenceResponseProbe, status_code=202)
+    def presence() -> _PresenceResponseProbe:
+        return _PresenceResponseProbe(
+            nested=_PresenceNestedProbe(required_nullable=None),
+            required_nullable=None,
+            engine={"future_option": None},
+        )
+
+    with TestClient(app) as client:
+        response = client.get("/presence")
+
+    assert response.status_code == 202
+    assert response.headers["content-type"] == "application/json"
+    assert response.json() == {
+        "nested": {"required_nullable": None, "enabled": False},
+        "required_nullable": None,
+        "retries": 0,
+        "labels": [],
+        "engine": {"future_option": None},
+    }
 
 
 def test_library_snapshot_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
