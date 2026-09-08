@@ -12,6 +12,7 @@ from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import (
     AgentNode,
@@ -363,8 +364,16 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
 
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
-    details = TelemetryDetails.model_validate(row.details)
-    metrics = TelemetryMetrics.model_validate(row.metrics)
+    try:
+        details_document = canonical_message(row.details)
+    except (TypeError, ValueError) as error:
+        raise ValueError("telemetry details are invalid") from error
+    details = TelemetryDetails.model_validate_json(details_document)
+    try:
+        metrics_document = canonical_message(row.metrics)
+    except (TypeError, ValueError) as error:
+        raise ValueError("telemetry metrics are invalid") from error
+    metrics = TelemetryMetrics.model_validate_json(metrics_document)
     return TelemetrySampleView(
         id=row.id,
         node_id=row.node_id,

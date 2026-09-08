@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import AgentCertificate, AgentEnrollment, AgentNode, AuditEvent
 
@@ -15,8 +16,8 @@ _TARGETS = TypeAdapter(list[str], config=ConfigDict(strict=True))
 
 def _stored_targets(value: object) -> tuple[str, ...]:
     try:
-        return tuple(_TARGETS.validate_python(value))
-    except ValidationError as error:
+        return tuple(_TARGETS.validate_json(canonical_message(value)))
+    except (TypeError, ValueError) as error:
         raise ValueError("audit targets are invalid") from error
 
 

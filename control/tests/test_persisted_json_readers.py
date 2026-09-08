@@ -4,13 +4,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.route_activation import ActivationMarker
-
 from vonk_control.audit import AuditRecord, SqlAuditStore
 from vonk_control.database_authority import (
-    AuthorityChange,
     AuthorityPolicyError,
     DatabaseAuthorityService,
     DatabaseProposalService,
+    ProposalChangeRequest,
 )
 from vonk_control.models import (
     AuditEvent,
@@ -19,7 +18,6 @@ from vonk_control.models import (
     ControlAuthorityRevision,
 )
 from vonk_control.operation_api import _stored_activation_marker
-
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 
@@ -48,7 +46,11 @@ def test_authority_proposal_reader_rejects_malformed_json_fields(sessions) -> No
     preview = proposals.preview(
         "admin",
         base,
-        [AuthorityChange("docs/audits/authority.json", {"status": "draft"})],
+        [
+            ProposalChangeRequest(
+                path="docs/audits/authority.json", document={"status": "draft"}
+            )
+        ],
     )
 
     with sessions.begin() as session:

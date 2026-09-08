@@ -10,9 +10,10 @@ from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import Capability
 
 from .models import NodeInventorySnapshot
@@ -22,8 +23,8 @@ _CAPABILITIES = TypeAdapter(list[Capability], config=ConfigDict(strict=True))
 
 def _stored_capabilities(value: object) -> tuple[str, ...]:
     try:
-        capabilities = _CAPABILITIES.validate_python(value)
-    except ValidationError as error:
+        capabilities = _CAPABILITIES.validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
         raise ValueError("inventory capabilities are invalid") from error
     if len(capabilities) > 64 or len(capabilities) != len(set(capabilities)):
         raise ValueError("inventory capabilities are invalid")

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -25,6 +25,9 @@ from .serializers import serialize_document
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _DEPENDENCIES = TypeAdapter(dict[str, list[str]], config=ConfigDict(strict=True))
+_DOCUMENTS = TypeAdapter(
+    dict[str, dict[str, JsonValue]], config=ConfigDict(strict=True)
+)
 _STRING_LIST = TypeAdapter(list[str], config=ConfigDict(strict=True))
 _ALLOWED_ROOTS = ("inventory/", "locks/", "manifests/", "docs/audits/")
 
@@ -53,10 +56,17 @@ class AuthoritySnapshot:
     dependencies: Mapping[str, tuple[str, ...]]
 
 
-@dataclass(frozen=True)
-class AuthorityChange:
-    path: str
-    document: Mapping[str, object]
+class ProposalChangeRequest(BaseModel):
+    """Canonical persisted and API proposal change envelope."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    path: str = Field(min_length=1, max_length=512)
+    document: dict[str, object]
+
+
+_PROPOSAL_CHANGES = TypeAdapter(
+    list[ProposalChangeRequest], config=ConfigDict(strict=True)
+)
 
 
 @dataclass(frozen=True)
@@ -86,18 +96,18 @@ def _revision(documents: Mapping[str, object], dependencies: Mapping[str, object
 
 
 def _document_map(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise AuthorityPolicyError("authority documents are invalid")
-    documents: dict[str, object] = {}
-    for path, document in value.items():
-        if not isinstance(path, str) or not isinstance(document, Mapping):
-            raise AuthorityPolicyError("authority documents are invalid")
+    try:
+        documents = _DOCUMENTS.validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError("authority documents are invalid") from error
+    normalized: dict[str, object] = {}
+    for path, document in documents.items():
         try:
             serialize_document(path, document)
         except (AssertionError, TypeError, ValueError) as error:
             raise AuthorityPolicyError("authority documents are invalid") from error
-        documents[path] = dict(document)
-    return documents
+        normalized[path] = document
+    return normalized
 
 
 def _dependency_map(value: object) -> dict[str, list[str]]:
@@ -109,36 +119,32 @@ def _dependency_map(value: object) -> dict[str, list[str]]:
 
 def _proposal_changes(
     value: object, validate_path: Callable[[str], str]
-) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        raise AuthorityPolicyError("authority proposal changes are invalid")
-    normalized: list[dict[str, object]] = []
+) -> tuple[ProposalChangeRequest, ...]:
+    try:
+        changes = tuple(
+            _PROPOSAL_CHANGES.validate_json(canonical_message(value))
+        )
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError("authority proposal changes are invalid") from error
+    normalized: list[ProposalChangeRequest] = []
     seen: set[str] = set()
-    for change in value:
-        if not isinstance(change, Mapping):
-            raise AuthorityPolicyError("authority proposal changes are invalid")
-        if set(change) != {"path", "document"}:
-            raise AuthorityPolicyError("authority proposal changes are invalid")
-        path = change.get("path")
-        document = change.get("document")
-        if not isinstance(path, str) or not isinstance(document, Mapping):
-            raise AuthorityPolicyError("authority proposal changes are invalid")
+    for change in changes:
         try:
-            path = validate_path(path)
-            serialize_document(path, document)
+            path = validate_path(change.path)
+            serialize_document(path, change.document)
         except (AssertionError, TypeError, ValueError) as error:
             raise AuthorityPolicyError("authority proposal changes are invalid") from error
         if path in seen:
             raise AuthorityPolicyError("authority proposal changes are invalid")
         seen.add(path)
-        normalized.append({"path": path, "document": dict(document)})
-    return normalized
+        normalized.append(ProposalChangeRequest(path=path, document=change.document))
+    return tuple(normalized)
 
 
 def _stored_string_list(value: object, label: str) -> tuple[str, ...]:
     try:
-        return tuple(_STRING_LIST.validate_python(value))
-    except ValidationError as error:
+        return tuple(_STRING_LIST.validate_json(canonical_message(value)))
+    except (TypeError, ValueError) as error:
         raise AuthorityPolicyError(f"authority {label} are invalid") from error
 
 
@@ -287,7 +293,7 @@ class DatabaseAuthorityService:
             documents = _document_map(parent.documents)
             changes = _proposal_changes(proposal.changes, self.validate_path)
             for change in changes:
-                documents[change["path"]] = change["document"]
+                documents[change.path] = change.document
             dependencies = _dependency_map(parent.dependencies)
             revision_id = _revision(documents, dependencies)
             existing = session.get(ControlAuthorityRevision, revision_id)
@@ -320,7 +326,7 @@ class DatabaseProposalService:
         self,
         actor: str,
         base_revision: str,
-        changes: Sequence[AuthorityChange],
+        changes: Sequence[ProposalChangeRequest],
     ) -> AuthorityProposalPreview:
         if not actor.strip() or not changes:
             raise ValueError("proposal actor and changes are required")
@@ -376,7 +382,7 @@ class DatabaseProposalService:
             validation_results = _stored_string_list(
                 row.validation_results, "proposal validation results"
             )
-            if tuple(change["path"] for change in changes) != affected_documents:
+            if tuple(change.path for change in changes) != affected_documents:
                 raise AuthorityPolicyError("authority proposal fields are inconsistent")
             return AuthorityProposalPreview(
                 row.actor,

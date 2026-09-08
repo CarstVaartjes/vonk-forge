@@ -13,13 +13,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, ValidationError, field_validator, model_serializer
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_serializer,
+)
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
@@ -146,7 +153,11 @@ _ADMIN_OPERATION_IDS = {
 
 def _stored_activation_marker(value: object) -> ActivationMarker:
     try:
-        return ActivationMarker.model_validate(value)
+        document = canonical_message(value)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("durable activation marker is invalid") from error
+    try:
+        return ActivationMarker.model_validate_json(document)
     except ValidationError as error:
         raise RuntimeError("durable activation marker is invalid") from error
 
