@@ -636,23 +636,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fleet Event Stream */
-        get: operations["streamFleetEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/identity-history": {
         parameters: {
             query?: never;
@@ -1847,6 +1830,50 @@ export interface components {
          * @enum {string}
          */
         AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.model-uninstall.v1";
+        /** AgentOperationChange */
+        AgentOperationChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "agent-operation";
+            fields: components["schemas"]["AgentOperationPayload"];
+            /** Node Id */
+            node_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** AgentOperationPayload */
+        AgentOperationPayload: {
+            /** Attempt */
+            attempt: number;
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "agent-operation";
+            /** Kind */
+            kind: string;
+            /** Node Id */
+            node_id: string;
+            /** Parent Job Id */
+            parent_job_id: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
+        };
         /** AgentRepairManifestRequest */
         AgentRepairManifestRequest: {
             /** Authority Sha256 */
@@ -2360,6 +2387,8 @@ export interface components {
          * @description Shared failure wire contract for model and image availability.
          */
         AvailabilityOperationFailure: {
+            /** Artifact Key */
+            artifact_key?: string | null;
             /** Code */
             code: string;
             /** Detail */
@@ -2869,7 +2898,10 @@ export interface components {
          * @description Controller authorization for one node, generation and object set.
          */
         DistributionAssignment: {
-            /** Assignment Id */
+            /**
+             * Assignment Id
+             * Format: uuid
+             */
             assignment_id: string;
             /** Expires At */
             expires_at: string;
@@ -3193,6 +3225,23 @@ export interface components {
             name: string;
             /** Value */
             value: string;
+        };
+        FleetChange: components["schemas"]["NodeProfileChange"] | components["schemas"]["RecipeInstallationChange"] | components["schemas"]["InstallationNodeChange"] | components["schemas"]["RecipeRunChange"] | components["schemas"]["RunNodeChange"] | components["schemas"]["JobChange"] | components["schemas"]["AgentOperationChange"];
+        /** FleetChangeEvent */
+        FleetChangeEvent: {
+            change: components["schemas"]["FleetChange"];
+            /**
+             * Projection Refresh Required
+             * @default true
+             * @constant
+             */
+            projection_refresh_required: true;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
         };
         /** FleetNode */
         FleetNode: {
@@ -3912,6 +3961,35 @@ export interface components {
              */
             schema_version: 1;
         };
+        /** FleetSnapshotEvent */
+        FleetSnapshotEvent: {
+            /** Reset Reason */
+            reset_reason: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            snapshot: components["schemas"]["FleetSnapshot"];
+        };
+        /**
+         * FleetStreamEvent
+         * @description OpenAPI union for the JSON payload carried by one SSE frame.
+         */
+        FleetStreamEvent: components["schemas"]["FleetSnapshotEvent"] | components["schemas"]["FleetTelemetryEvent"] | components["schemas"]["FleetChangeEvent"];
+        /** FleetTelemetryEvent */
+        FleetTelemetryEvent: {
+            /** Node Id */
+            node_id: string;
+            sample: components["schemas"]["TelemetryPoint"];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** FloatParameter */
         FloatParameter: {
             /** Allowed Values */
@@ -4148,6 +4226,54 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** InstallationNodeChange */
+        InstallationNodeChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "installation-node";
+            fields: components["schemas"]["InstallationNodePayload"];
+            /** Node Id */
+            node_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** InstallationNodePayload */
+        InstallationNodePayload: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "installation-node";
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Required Bytes */
+            required_bytes: number;
+            /** Role */
+            role: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
+        };
         /** IntegerParameter */
         IntegerParameter: {
             /** Allowed Values */
@@ -4233,6 +4359,24 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** JobChange */
+        JobChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "job";
+            fields: components["schemas"]["JobPayload"];
+            /** Node Id */
+            node_id?: null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
         /** JobDetailResponse */
         JobDetailResponse: {
             agent_upgrade_diagnostics?: components["schemas"]["AgentUpgradeDiagnosticsResponse"] | null;
@@ -4274,7 +4418,8 @@ export interface components {
             /** Attempt */
             attempt: number;
             evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
-            failure?: components["schemas"]["OperationFailureEvidence"] | null;
+            /** Failure */
+            failure?: components["schemas"]["AgentFailureResult"] | components["schemas"]["AvailabilityOperationFailure"] | components["schemas"]["OperationFailureEvidence"] | null;
             /** Id */
             id: string;
             /** Kind */
@@ -4288,6 +4433,28 @@ export interface components {
             state: string;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** JobPayload */
+        JobPayload: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "job";
+            /** Kind */
+            kind: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
+            /** Target Count */
+            target_count: number;
         };
         /** JobProgress */
         JobProgress: {
@@ -5905,6 +6072,39 @@ export interface components {
              */
             online_state: "online" | "offline" | "unregistered";
         };
+        /** NodeProfileChange */
+        NodeProfileChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "node-profile";
+            fields: components["schemas"]["NodeProfilePayload"];
+            /** Node Id */
+            node_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** NodeProfilePayload */
+        NodeProfilePayload: {
+            /** Display Name Changed */
+            display_name_changed?: boolean | null;
+            /** Node Id */
+            node_id: string;
+            /** Profile Changed */
+            profile_changed?: boolean | null;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** NodeProfileUpdateRequest */
         NodeProfileUpdateRequest: {
             /** Display Name */
@@ -5931,7 +6131,8 @@ export interface components {
             /** Created At */
             created_at: string;
             evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
-            failure?: components["schemas"]["OperationFailureEvidence"] | null;
+            /** Failure */
+            failure?: components["schemas"]["AgentFailureResult"] | components["schemas"]["AvailabilityOperationFailure"] | components["schemas"]["OperationFailureEvidence"] | null;
             /** Id */
             id: string;
             /** Kind */
@@ -6254,7 +6455,10 @@ export interface components {
             candidate_package_sha256: string;
             /** Candidate Version */
             candidate_version: string;
-            /** Created At */
+            /**
+             * Created At
+             * Format: int64
+             */
             created_at: number;
             /** Node Id */
             node_id: string;
@@ -6276,7 +6480,10 @@ export interface components {
             source_package_sha256: string;
             /** Source Version */
             source_version: string;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: int64
+             */
             updated_at: number;
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
@@ -7007,6 +7214,48 @@ export interface components {
             /** Min Files */
             min_files: number;
         };
+        /** RecipeInstallationChange */
+        RecipeInstallationChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "recipe-installation";
+            fields: components["schemas"]["RecipeInstallationPayload"];
+            /** Node Id */
+            node_id?: null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** RecipeInstallationPayload */
+        RecipeInstallationPayload: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "recipe-installation";
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
+        };
         /** RecipeIntegerSetting */
         RecipeIntegerSetting: {
             /**
@@ -7449,6 +7698,52 @@ export interface components {
             disk: components["schemas"]["RecipeDiskResources"];
             memory: components["schemas"]["RecipeMemoryResources"];
         };
+        /** RecipeRunChange */
+        RecipeRunChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "recipe-run";
+            fields: components["schemas"]["RecipeRunPayload"];
+            /** Node Id */
+            node_id?: null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** RecipeRunPayload */
+        RecipeRunPayload: {
+            /** Alias */
+            alias: string;
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "recipe-run";
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Route State */
+            route_state: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
+        };
         /** RecipeRuntime */
         RecipeRuntime: {
             /** Arguments */
@@ -7820,6 +8115,54 @@ export interface components {
             target_node_ids: string[];
             /** Targets Ready */
             targets_ready: boolean;
+        };
+        /** RunNodeChange */
+        RunNodeChange: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            entity_kind: "run-node";
+            fields: components["schemas"]["RunNodePayload"];
+            /** Node Id */
+            node_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+        };
+        /** RunNodePayload */
+        RunNodePayload: {
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Entity Kind
+             * @constant
+             */
+            entity_kind: "run-node";
+            /** Node Id */
+            node_id: string;
+            /** Observed Memory Bytes */
+            observed_memory_bytes?: number | null;
+            /** Rank */
+            rank: number;
+            /** Reserved Memory Bytes */
+            reserved_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** State */
+            state: string;
         };
         /** RunNodePlanResponse */
         RunNodePlanResponse: {
@@ -12652,65 +12995,6 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    streamFleetEvents: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list. */
-                "Last-Event-ID"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Durable Fleet event stream */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };

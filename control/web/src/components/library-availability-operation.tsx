@@ -1,6 +1,6 @@
 import {availabilityFailure, availabilityRetryable, LibraryAvailabilityFeedback} from "./library-availability-feedback";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
-import type {RecipeImageAvailabilityOperation} from "../api/types";
+import type {AvailabilityOperationFailure, RecipeImageAvailabilityOperation} from "../api/types";
 
 export type AvailabilityMemberPresentation = {
   key: "model-cache" | "runtime-image";
@@ -10,7 +10,7 @@ export type AvailabilityMemberPresentation = {
   label?: string;
   state: string;
   progress: unknown;
-  failure?: unknown;
+  failure?: AvailabilityOperationFailure;
 };
 
 /** UI-only view model. The generated Controller response is adapted at the API boundary. */
@@ -22,7 +22,7 @@ export type AvailabilityOperationPresentation = {
   attempt: number;
   progress: unknown;
   members: readonly AvailabilityMemberPresentation[];
-  failure?: unknown;
+  failure?: AvailabilityOperationFailure;
   result?: unknown;
   runtimeMode: "image" | "build";
   updatedAt?: string;
@@ -84,15 +84,15 @@ export function LibraryAvailabilityOperation({modelAccessUrl, onCheckAccessAndRe
   operation: AvailabilityOperationPresentation;
 }) {
   const active = !terminalStates.has(operation.state);
-  const failure = operation.failure ? availabilityFailure(operation, "Recipe availability failed.") : undefined;
-  const retryable = Boolean(failure && availabilityRetryable(operation));
+  const failure = operation.failure ? availabilityFailure(operation.failure, {operationId: operation.id, preservedBytes: availabilityProgress(operation.progress).completedBytes}) : undefined;
+  const retryable = Boolean(failure && availabilityRetryable(operation.failure));
   const forceLabel = operation.runtimeMode === "build" ? "Rebuild image" : "Download image again";
   const resultDetails = digestSummary(operation.result);
   return <section className="library-availability-operation" aria-label="Recipe availability operation">
     <header className="library-availability-operation-heading"><div><strong>{operation.state === "succeeded" ? "Available on NAS" : active ? "Preparing exact Recipe on NAS" : "Recipe availability needs attention"}</strong><small>Revision {operation.recipeRevisionId} · attempt {operation.attempt}</small></div><span>{stateLabel(operation.state)}</span></header>
     <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>
     <ol className="library-availability-members" aria-label="Availability members">
-      {operation.members.map(member => <li key={member.key} className={`library-availability-member state-${member.state}`} data-member-kind={member.key}><div><strong>{member.label ?? (member.key === "model-cache" ? "Model files" : "Runtime image")}</strong><span>{stateLabel(member.state)}</span></div><LibraryAvailabilityProgress progress={availabilityProgress(member.progress)}/>{member.failure !== undefined && <LibraryAvailabilityFeedback failure={availabilityFailure(member.failure, `${member.label ?? "Availability member"} failed.`)} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={onCheckAccessAndResume ? () => onCheckAccessAndResume(member) : undefined} onRetry={onRetry && availabilityRetryable(member.failure) ? onRetry : undefined} retryLabel="Retry member"/>}</li>)}
+      {operation.members.map(member => <li key={member.key} className={`library-availability-member state-${member.state}`} data-member-kind={member.key}><div><strong>{member.label ?? (member.key === "model-cache" ? "Model files" : "Runtime image")}</strong><span>{stateLabel(member.state)}</span></div><LibraryAvailabilityProgress progress={availabilityProgress(member.progress)}/>{member.failure !== undefined && <LibraryAvailabilityFeedback failure={availabilityFailure(member.failure, {operationId: member.id, preservedBytes: availabilityProgress(member.progress).completedBytes})} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={onCheckAccessAndResume ? () => onCheckAccessAndResume(member) : undefined} onRetry={onRetry && availabilityRetryable(member.failure) ? onRetry : undefined} retryLabel="Retry member"/>}</li>)}
     </ol>
     {failure !== undefined && <LibraryAvailabilityFeedback failure={failure} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={onCheckAccessAndResume && operation.members.find(member => member.key === "model-cache") ? () => onCheckAccessAndResume(operation.members.find(member => member.key === "model-cache")!) : undefined} onRetry={retryable ? onRetry : undefined} retryLabel="Retry availability"/>}
     {resultDetails.length > 0 && <details className="library-availability-receipt"><summary>Verified receipt</summary><ul>{resultDetails.map(detail => <li key={detail}><code>{detail}</code></li>)}</ul></details>}

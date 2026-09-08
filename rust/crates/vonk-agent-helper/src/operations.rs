@@ -12,6 +12,10 @@ use ring::signature;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::{
+    ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
+    InstallVonkDebOperation, RestartVonkUnitOperation, ScheduleRebootOperation,
+};
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
     canonical_json, hex_sha256, parse_strict,
@@ -553,11 +557,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
         let (status, evidence, exit_code, recipe_run_observation) = match operation {
-            HostOperation::InstallVonkDeb {
+            HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
                 rollback,
-            } => {
+                ..
+            }) => {
                 self.install_package(
                     package_sha256,
                     package_signature,
@@ -566,10 +571,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 )?;
                 ("package-installed", package_sha256.clone(), None, None)
             }
-            HostOperation::ConfirmPackageActivation {
-                package_sha256,
-                attempt_nonce,
-            } => {
+            HostOperation::ConfirmPackageActivationOperation(
+                ConfirmPackageActivationOperation {
+                    package_sha256,
+                    attempt_nonce,
+                    ..
+                },
+            ) => {
                 crate::package_rollback::Store::system()
                     .acknowledge(
                         observation_node_id.ok_or(OperationError::InvalidOperation)?,
@@ -584,23 +592,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     None,
                 )
             }
-            HostOperation::RestartVonkUnit { unit } => {
+            HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation { unit, .. }) => {
                 let unit_name = self.restart_unit(unit)?;
                 ("unit-restarted", unit_name.to_owned(), None, None)
             }
-            HostOperation::ScheduleReboot { delay_seconds } => {
+            HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
+                delay_seconds,
+                ..
+            }) => {
                 self.schedule_reboot(*delay_seconds)?;
                 ("reboot-scheduled", delay_seconds.to_string(), None, None)
             }
-            HostOperation::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256,
-                observation_identity_sha256,
-            } => {
+            HostOperation::ExecuteContainerRuntimeRequestOperation(
+                ExecuteContainerRuntimeRequestOperation {
+                    action,
+                    job_id,
+                    operation_id,
+                    attempt,
+                    fence,
+                    request_sha256,
+                    observation_identity_sha256,
+                    ..
+                },
+            ) => {
                 let outcome = self.execute_runtime_request(
                     action,
                     RuntimeRequestGrantBinding {
@@ -841,7 +855,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(unit)
     }
 
-    fn schedule_reboot(&self, delay_seconds: u16) -> Result<(), OperationError> {
+    fn schedule_reboot(&self, delay_seconds: u32) -> Result<(), OperationError> {
         if !(60..=3600).contains(&delay_seconds) {
             return Err(OperationError::InvalidOperation);
         }
@@ -3626,23 +3640,17 @@ mod tests {
 
     #[test]
     fn compiled_workload_fixture_reaches_helper_validation_with_scoped_receipts() {
-        let plan: serde_json::Value =
+        let plan: vonk_agent_protocol::compiled_execution_plan::CompiledExecutionPlan =
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
                 .unwrap();
-        assert_eq!(plan["schema_version"], 2);
-        assert_eq!(plan["runtime"]["executable"], "/opt/vonk/bin/vllm");
-        assert_eq!(
-            plan["runtime_image"]["distribution_object"]["kind"],
-            "oci-archive"
-        );
-        assert_eq!(plan["security"]["host_network"], false);
+        plan.validate().unwrap();
+        assert_eq!(plan.schema_version, 2);
+        assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
+        assert_eq!(plan.runtime_image.distribution_object.kind, "oci-archive");
+        assert!(!plan.security.host_network);
 
         let (_temp, roots) = runtime_fixture();
-        let model_set = runtime_models(&roots).join(
-            plan["identity"]["model_artifact_set_sha256"]
-                .as_str()
-                .unwrap(),
-        );
+        let model_set = runtime_models(&roots).join(&plan.identity.model_artifact_set_sha256);
         let primary = model_set.join("primary");
         let draft = model_set.join("draft");
         fs::create_dir_all(&primary).unwrap();
@@ -3664,14 +3672,13 @@ mod tests {
             .unwrap();
         *image = format!(
             "localhost/vonk/compiled-runtime-{}@{}",
-            plan["runtime_image"]["oci_layout_sha256"].as_str().unwrap(),
-            plan["runtime_image"]["image_digest"].as_str().unwrap(),
+            plan.runtime_image.oci_layout_sha256, plan.runtime_image.image_digest,
         );
         let validated = validate_docker_run(&arguments, &roots, None).unwrap();
         assert_eq!(validated.models.len(), 2);
         assert_eq!(
             validated.platform_manifest_digest,
-            plan["runtime"]["image_digest"].as_str().unwrap()
+            plan.runtime.image_digest
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
     }

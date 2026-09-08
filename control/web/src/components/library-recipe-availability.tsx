@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from "react";
 import type {ControlApi, LibraryRecipeDetail, RecipeImageAvailabilityOperation} from "../api/types";
-import {availabilityFailure} from "./library-availability-feedback";
+import {LibraryRequestError} from "./library-request-error";
 import {LibraryAvailabilityOperation, recipeAvailabilityPresentation, selectAvailabilityOperation, type AvailabilityMemberPresentation} from "./library-availability-operation";
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
@@ -88,7 +88,7 @@ export function LibraryRecipeAvailability({api, detail, onBusyChange}: {api: Con
   return <section className="library-recipe-availability" aria-label="Make Recipe available">
     <header className="library-section"><div><h3>Make available</h3><p>Local Recipe means its verified runtime image is prepared on NAS. It does not mean running on Sparks.</p></div><span>Exact revision {revisionId}</span></header>
     {loading && !presentation && <p role="status">Checking durable availability…</p>}
-    {Boolean(error) && <div role="alert"><LibraryAvailabilityOperation operation={{id: "error", requestId: "error", recipeRevisionId: revisionId, state: "failed", attempt: 0, progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false}, members: [], runtimeMode: "image", failure: availabilityFailure(error instanceof Error ? error.message : error, "Availability status could not be loaded.")}}/><button type="button" className="button secondary" onClick={() => void load()}>Refresh availability status</button></div>}
+    {Boolean(error) && <LibraryRequestError error={error} title="Availability status could not be loaded." onRetry={() => void load()} retryLabel="Refresh availability status"/>}
     {!presentation && !loading && !error && <button type="button" className="button" onClick={() => void start(false)}>Make available</button>}
     {presentation && <LibraryAvailabilityOperation operation={presentation} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={member => void checkAccess(member)} onForce={() => void start(true)} onMakeAvailable={() => void start(false)} onRetry={() => void retry()}/>} 
   </section>;

@@ -292,6 +292,104 @@
         "title": "AgentOperation",
         "type": "string"
       },
+      "AgentOperationChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "agent-operation",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/AgentOperationPayload"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "node_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "AgentOperationChange",
+        "type": "object"
+      },
+      "AgentOperationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 0.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "agent-operation",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "parent_job_id": {
+            "minLength": 1,
+            "title": "Parent Job Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "parent_job_id",
+          "node_id",
+          "kind",
+          "state",
+          "attempt"
+        ],
+        "title": "AgentOperationPayload",
+        "type": "object"
+      },
       "AgentRepairManifestRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1925,6 +2023,19 @@
         "additionalProperties": false,
         "description": "Shared failure wire contract for model and image availability.",
         "properties": {
+          "artifact_key": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Key"
+          },
           "code": {
             "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
             "title": "Code",
@@ -3453,6 +3564,7 @@
         "description": "Controller authorization for one node, generation and object set.",
         "properties": {
           "assignment_id": {
+            "format": "uuid",
             "title": "Assignment Id",
             "type": "string"
           },
@@ -4449,6 +4561,68 @@
           "value"
         ],
         "title": "FailureProperty",
+        "type": "object"
+      },
+      "FleetChange": {
+        "discriminator": {
+          "mapping": {
+            "agent-operation": "#/components/schemas/AgentOperationChange",
+            "installation-node": "#/components/schemas/InstallationNodeChange",
+            "job": "#/components/schemas/JobChange",
+            "node-profile": "#/components/schemas/NodeProfileChange",
+            "recipe-installation": "#/components/schemas/RecipeInstallationChange",
+            "recipe-run": "#/components/schemas/RecipeRunChange",
+            "run-node": "#/components/schemas/RunNodeChange"
+          },
+          "propertyName": "entity_kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/NodeProfileChange"
+          },
+          {
+            "$ref": "#/components/schemas/RecipeInstallationChange"
+          },
+          {
+            "$ref": "#/components/schemas/InstallationNodeChange"
+          },
+          {
+            "$ref": "#/components/schemas/RecipeRunChange"
+          },
+          {
+            "$ref": "#/components/schemas/RunNodeChange"
+          },
+          {
+            "$ref": "#/components/schemas/JobChange"
+          },
+          {
+            "$ref": "#/components/schemas/AgentOperationChange"
+          }
+        ]
+      },
+      "FleetChangeEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/FleetChange"
+          },
+          "projection_refresh_required": {
+            "const": true,
+            "default": true,
+            "title": "Projection Refresh Required",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "change"
+        ],
+        "title": "FleetChangeEvent",
         "type": "object"
       },
       "FleetNode": {
@@ -6565,6 +6739,73 @@
         "title": "FleetSnapshot",
         "type": "object"
       },
+      "FleetSnapshotEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "reset_reason": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reset Reason",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/FleetSnapshot"
+          }
+        },
+        "required": [
+          "reset_reason",
+          "snapshot"
+        ],
+        "title": "FleetSnapshotEvent",
+        "type": "object"
+      },
+      "FleetStreamEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/FleetSnapshotEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetTelemetryEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetChangeEvent"
+          }
+        ],
+        "description": "OpenAPI union for the JSON payload carried by one SSE frame.",
+        "title": "FleetStreamEvent"
+      },
+      "FleetTelemetryEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "sample": {
+            "$ref": "#/components/schemas/TelemetryPoint"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "sample"
+        ],
+        "title": "FleetTelemetryEvent",
+        "type": "object"
+      },
       "FloatParameter": {
         "additionalProperties": false,
         "properties": {
@@ -7345,6 +7586,116 @@
         "title": "InstallRequest",
         "type": "object"
       },
+      "InstallationNodeChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "installation-node",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/InstallationNodePayload"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "node_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "InstallationNodeChange",
+        "type": "object"
+      },
+      "InstallationNodePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "installation-node",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "installation_id": {
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "minimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "required_bytes": {
+            "minimum": 0.0,
+            "title": "Required Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "installation_id",
+          "node_id",
+          "rank",
+          "role",
+          "state",
+          "installed_bytes",
+          "required_bytes"
+        ],
+        "title": "InstallationNodePayload",
+        "type": "object"
+      },
       "IntegerParameter": {
         "additionalProperties": false,
         "properties": {
@@ -7607,6 +7958,42 @@
         "title": "InvocationMetadata",
         "type": "object"
       },
+      "JobChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "job",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/JobPayload"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "null"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "JobChange",
+        "type": "object"
+      },
       "JobDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7779,12 +8166,19 @@
           "failure": {
             "anyOf": [
               {
+                "$ref": "#/components/schemas/AgentFailureResult"
+              },
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
                 "$ref": "#/components/schemas/OperationFailureEvidence"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Failure"
           },
           "id": {
             "maxLength": 128,
@@ -7859,6 +8253,52 @@
           "attempt"
         ],
         "title": "JobOperationResponse",
+        "type": "object"
+      },
+      "JobPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "job",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          },
+          "target_count": {
+            "minimum": 0.0,
+            "title": "Target Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "kind",
+          "state",
+          "target_count"
+        ],
+        "title": "JobPayload",
         "type": "object"
       },
       "JobProgress": {
@@ -12689,6 +13129,89 @@
         "title": "NodeConnection",
         "type": "object"
       },
+      "NodeProfileChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "node-profile",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/NodeProfilePayload"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "node_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "NodeProfileChange",
+        "type": "object"
+      },
+      "NodeProfilePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name_changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name Changed"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "profile_changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Changed"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "NodeProfilePayload",
+        "type": "object"
+      },
       "NodeProfileUpdateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12780,12 +13303,19 @@
           "failure": {
             "anyOf": [
               {
+                "$ref": "#/components/schemas/AgentFailureResult"
+              },
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
                 "$ref": "#/components/schemas/OperationFailureEvidence"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Failure"
           },
           "id": {
             "maxLength": 128,
@@ -13939,6 +14469,8 @@
             "type": "string"
           },
           "created_at": {
+            "format": "int64",
+            "maximum": 9.223372036854776e+18,
             "minimum": 1.0,
             "title": "Created At",
             "type": "integer"
@@ -13986,6 +14518,8 @@
             "type": "string"
           },
           "updated_at": {
+            "format": "int64",
+            "maximum": 9.223372036854776e+18,
             "minimum": 1.0,
             "title": "Updated At",
             "type": "integer"
@@ -16325,6 +16859,94 @@
         "title": "RecipeInputSlot",
         "type": "object"
       },
+      "RecipeInstallationChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "recipe-installation",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RecipeInstallationPayload"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "null"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "RecipeInstallationChange",
+        "type": "object"
+      },
+      "RecipeInstallationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "recipe-installation",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "minLength": 1,
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "mapping_generation",
+          "state"
+        ],
+        "title": "RecipeInstallationPayload",
+        "type": "object"
+      },
       "RecipeIntegerSetting": {
         "additionalProperties": false,
         "properties": {
@@ -18022,6 +18644,106 @@
         "title": "RecipeRoleResources",
         "type": "object"
       },
+      "RecipeRunChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "recipe-run",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RecipeRunPayload"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "null"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "RecipeRunChange",
+        "type": "object"
+      },
+      "RecipeRunPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "minLength": 1,
+            "title": "Alias",
+            "type": "string"
+          },
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "recipe-run",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "installation_id": {
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "minLength": 1,
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "route_state": {
+            "minLength": 1,
+            "title": "Route State",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "installation_id",
+          "mapping_id",
+          "mapping_generation",
+          "alias",
+          "state",
+          "route_state"
+        ],
+        "title": "RecipeRunPayload",
+        "type": "object"
+      },
       "RecipeRuntime": {
         "additionalProperties": false,
         "properties": {
@@ -19182,6 +19904,122 @@
           "ready"
         ],
         "title": "RolloutPreparation",
+        "type": "object"
+      },
+      "RunNodeChange": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "run-node",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/RunNodePayload"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "node_id",
+          "occurred_at",
+          "entity_kind",
+          "fields"
+        ],
+        "title": "RunNodeChange",
+        "type": "object"
+      },
+      "RunNodePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "const": "run-node",
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_memory_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Memory Bytes"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "reserved_memory_bytes": {
+            "minimum": 0.0,
+            "title": "Reserved Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "run_id",
+          "node_id",
+          "rank",
+          "role",
+          "state",
+          "reserved_memory_bytes"
+        ],
+        "title": "RunNodePayload",
         "type": "object"
       },
       "RunNodePlanResponse": {
@@ -24952,6 +25790,8 @@
           },
           "ranks": {
             "items": {
+              "maximum": 4294967295.0,
+              "minimum": 0.0,
               "type": "integer"
             },
             "maxItems": 64,
@@ -29935,15 +30775,16 @@
             "content": {
               "text/event-stream": {
                 "schema": {
+                  "$ref": "#/components/schemas/FleetStreamEvent",
                   "type": "string"
                 }
               }
             },
-            "description": "Durable Fleet event stream"
+            "description": "Durable Fleet event stream. The schema describes the JSON data in each snapshot, telemetry, or change SSE frame."
           },
           "400": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -29953,7 +30794,7 @@
           },
           "401": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -29963,7 +30804,7 @@
           },
           "422": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
                   "$ref": "#/components/schemas/RequestValidationProblem"
                 }
@@ -29973,7 +30814,7 @@
           },
           "503": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -29987,7 +30828,8 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Fleet Event Stream"
+        "summary": "Fleet Event Stream",
+        "x-vonk-streaming-transport": true
       }
     },
     "/api/v1/identity-history": {
@@ -30361,11 +31203,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Exact file bytes"
           },
           "401": {
             "content": {

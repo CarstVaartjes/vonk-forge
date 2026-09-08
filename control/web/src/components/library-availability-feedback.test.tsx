@@ -2,17 +2,16 @@ import {fireEvent, render, screen} from "@testing-library/react";
 import {expect, test, vi} from "vitest";
 import {availabilityFailure, LibraryAvailabilityFeedback} from "./library-availability-feedback";
 
-test("normalizes the shared failure fields and redacts secret-bearing log text", () => {
+test("presents the canonical failure fields and redacts secret-bearing log text", () => {
   const failure = availabilityFailure({
-    id: "op-1",
-    failure: {
-      code: "model_cache.auth_required",
-      detail: "Hugging Face access is required",
-      recovery_actions: ["open_model_access", "check_access_and_resume"],
-      retry_after_seconds: 4,
-      log_excerpt: "Authorization: Bearer super-secret https://cdn.example.test/file?token=secret",
-    },
-  });
+    code: "model_cache.auth_required",
+    retryable: true,
+    retry_time: "2026-09-08T10:00:04Z",
+    detail: "Hugging Face access is required",
+    recovery_actions: ["open_model_access", "check_access_and_resume"],
+    retry_after_seconds: 4,
+    log_excerpt: "Authorization: Bearer super-secret https://cdn.example.test/file?token=secret",
+  }, {operationId: "op-1"});
   expect(failure).toMatchObject({
     code: "model_cache.auth_required",
     detail: "Hugging Face access is required",
@@ -28,15 +27,11 @@ test("normalizes the shared failure fields and redacts secret-bearing log text",
 test("renders preserved progress, recovery, and a retryable terminal action", () => {
   const retry = vi.fn();
   render(<LibraryAvailabilityFeedback failure={availabilityFailure({
-    id: "op-2",
-    failure: {
-      code: "model_cache.digest_mismatch",
-      detail: "Downloaded bytes failed verification.",
-      recovery_actions: ["download_again"],
-      retryable: true,
-    },
-    progress: {completed_bytes: 12},
-  })} onRetry={retry} retryLabel="Download again"/>);
+    code: "model_cache.digest_mismatch",
+    detail: "Downloaded bytes failed verification.",
+    recovery_actions: ["download_again"],
+    retryable: true,
+  }, {operationId: "op-2", preservedBytes: 12})} onRetry={retry} retryLabel="Download again"/>);
   expect(screen.getByRole("alert")).toHaveTextContent("Downloaded bytes failed verification.");
   expect(screen.getByText(/12 bytes of progress retained/)).toBeInTheDocument();
   expect(screen.getByRole("list", {name: "Recovery steps"})).toHaveTextContent("Download the exact selected bytes again");
@@ -50,6 +45,7 @@ test("renders preserved progress, recovery, and a retryable terminal action", ()
 test("keeps model access and token-file recovery actionable without exposing secrets", () => {
   render(<LibraryAvailabilityFeedback modelAccessUrl="https://huggingface.co/acme/model" failure={availabilityFailure({
     code: "access_required",
+    retryable: false,
     detail: "Hugging Face access is required.",
     recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"],
   })}/>);
@@ -61,6 +57,7 @@ test("keeps model access and token-file recovery actionable without exposing sec
 test("shows known NAS capacity shortfall without turning unknown values into zero", () => {
   const failure = availabilityFailure({
     code: "model_cache.capacity_insufficient",
+    retryable: false,
     detail: "Not enough NAS space.",
     recovery_actions: ["free_space"],
     required_bytes: 200,
@@ -72,4 +69,21 @@ test("shows known NAS capacity shortfall without turning unknown values into zer
   expect(screen.getByText("Required")).toBeInTheDocument();
   expect(screen.getByText("200 bytes")).toBeInTheDocument();
   expect(screen.getByText("Shortfall")).toBeInTheDocument();
+});
+
+test("keeps canonical cooldowns and unknown capacity values intact", () => {
+  const failure = availabilityFailure({
+    code: "provider_rate_limited",
+    detail: "Provider requested a cooldown.",
+    retryable: true,
+    retry_after_seconds: 172_800,
+    retry_time: "2026-09-10T10:00:00Z",
+    required_bytes: null,
+    free_bytes: null,
+    shortfall_bytes: null,
+  });
+  expect(failure.retryAfterSeconds).toBe(172_800);
+  expect(failure.requiredBytes).toBeUndefined();
+  expect(failure.freeBytes).toBeUndefined();
+  expect(failure.shortfallBytes).toBeUndefined();
 });

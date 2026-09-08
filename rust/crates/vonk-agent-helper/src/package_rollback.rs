@@ -896,10 +896,10 @@ mod tests {
         let mut value = serde_json::to_value(transaction()).unwrap();
         value["command"] = serde_json::json!("sh -c arbitrary");
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
-        value.as_object_mut().unwrap().remove("command");
+        let mut value = serde_json::to_value(transaction()).unwrap();
         value["rollback"]["source"]["package_sha256"] = serde_json::json!("../../source.deb");
-        let parsed: Transaction = parse_strict(&serde_json::to_vec(&value).unwrap()).unwrap();
-        assert!(!parsed.rollback.valid());
+        assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut value = serde_json::to_value(transaction()).unwrap();
         value["schema_version"] = serde_json::json!(2.0);
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
     }
