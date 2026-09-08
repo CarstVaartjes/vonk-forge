@@ -502,7 +502,7 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
     )
 
 
-def test_stream_resume_header_is_in_openapi_python_and_typescript_clients() -> None:
+def test_stream_resume_header_is_in_openapi_custom_transport_contract() -> None:
     schema = json.loads(OPENAPI.read_text())
     operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
     assert operation["parameters"] == [
@@ -525,13 +525,11 @@ def test_stream_resume_header_is_in_openapi_python_and_typescript_clients() -> N
         }
     ]
 
-    from cluster_profiles.generated_control.api.default import stream_fleet_events
-
-    assert stream_fleet_events._get_kwargs(last_event_id="17")["headers"] == {
-        "Last-Event-ID": "17"
-    }
+    # Streaming transports are intentionally excluded from generated clients;
+    # the browser hook owns native EventSource reconnect behavior.
+    assert not (PYTHON_CLIENT / "api/default/stream_fleet_events.py").exists()
     typescript = TYPESCRIPT_CLIENT.read_text()
-    assert '"Last-Event-ID"?: string | null;' in typescript
+    assert "streamFleetEvents" not in typescript
 
 
 def test_generated_fleet_projection_vocabulary_is_finite() -> None:
