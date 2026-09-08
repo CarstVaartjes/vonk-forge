@@ -1,9 +1,14 @@
 """Current cache counters with one canonical, durable progress measurement."""
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 
 from .model_cache_contract import ModelCacheOperationProgress
 from .operation_progress import STALE_AFTER_SECONDS, observe_progress, project_progress
@@ -31,6 +36,23 @@ def _sample(
             previous = dict(previous, observed_at=now.isoformat())
             previous.pop("smoothed_bytes_per_second", None)
     return observe_progress(previous, current, now)
+
+
+def _member_progress(
+    measurement: OperationProgress, identity: OperationMemberProgress
+) -> OperationMemberProgress:
+    """Project a validated operation sample into its canonical member fields."""
+    shared_fields = (
+        OperationProgress.model_fields.keys()
+        & OperationMemberProgress.model_fields.keys()
+    )
+    return OperationMemberProgress.model_validate(
+        {
+            **measurement.model_dump(mode="json", include=shared_fields),
+            "member_id": identity.member_id,
+            "state": identity.state,
+        }
+    )
 
 
 def cache_progress(
@@ -74,7 +96,8 @@ def cache_progress(
     for member in members or []:
         prior = prior_members.get(member.member_id)
         data = member.model_dump(mode="json", exclude_none=True)
-        identity = {key: data.pop(key) for key in ("member_id", "state")}
+        for key in ("member_id", "state"):
+            data.pop(key)
         data["total_bytes_known"] = member.total_bytes is not None
         prior_data = None
         if prior is not None:
@@ -82,15 +105,16 @@ def cache_progress(
                 mode="json", exclude={"member_id", "state"}, exclude_none=True
             )
         sample = _sample(prior_data, data, now)
-        sample.pop("total_bytes_known", None)
         sampled_members.append(
-            OperationMemberProgress.model_validate(sample | identity)
+            _member_progress(OperationProgress.model_validate(sample), member)
         )
     sampled["members"] = [
         member.model_dump(mode="json", exclude_none=True) for member in sampled_members
     ]
     value["measurement"] = sampled
-    return ModelCacheOperationProgress.model_validate(value).model_dump(mode="json")
+    return json.loads(
+        canonical_message(ModelCacheOperationProgress.model_validate(value))
+    )
 
 
 def cache_phase(
@@ -108,7 +132,9 @@ def cache_phase(
         result["measurement"] = observe_progress(
             result["measurement"], dict(result["measurement"], phase="waiting"), now
         )
-    return ModelCacheOperationProgress.model_validate(result).model_dump(mode="json")
+    return json.loads(
+        canonical_message(ModelCacheOperationProgress.model_validate(result))
+    )
 
 
 def project_cache_progress(
@@ -122,15 +148,8 @@ def project_cache_progress(
             mode="json", exclude={"member_id", "state"}, exclude_none=True
         )
         raw["total_bytes_known"] = member.total_bytes is not None
-        projected = project_progress(
-            OperationProgress.model_validate(raw), now
-        ).model_dump(mode="json", exclude_none=True)
-        projected.pop("total_bytes_known", None)
-        members.append(
-            OperationMemberProgress.model_validate(
-                projected | {"member_id": member.member_id, "state": member.state}
-            )
-        )
-    return measurement.model_copy(update={"members": members}).model_dump(
-        mode="json", exclude_none=True
+        projected = project_progress(OperationProgress.model_validate(raw), now)
+        members.append(_member_progress(projected, member))
+    return json.loads(
+        canonical_message(measurement.model_copy(update={"members": members}))
     )
