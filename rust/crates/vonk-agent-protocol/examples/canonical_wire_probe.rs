@@ -19,6 +19,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             canonical_generated_json(&value)?
         }
+        "InventoryRequest" => {
+            let value: vonk_agent_protocol::InventoryRequest = serde_json::from_slice(&input)?;
+            value.validate()?;
+            canonical_generated_json(&value)?
+        }
+        "DistributionAssignment" => {
+            let value: vonk_agent_protocol::DistributionAssignment =
+                serde_json::from_slice(&input)?;
+            value.validate()?;
+            canonical_generated_json(&value)?
+        }
+        "RecipeRunObservationsWire" => {
+            let value: vonk_agent_protocol::RecipeRunObservationsWire =
+                serde_json::from_slice(&input)?;
+            for run in &value.runs {
+                run.validate()?;
+            }
+            canonical_generated_json(&value)?
+        }
+        "TelemetrySeries" => {
+            let value: generated::TelemetrySeries = serde_json::from_slice(&input)?;
+            canonical_generated_json(&value)?
+        }
+        "RecipeStartPayload" => {
+            let value: generated::RecipeStartPayload = serde_json::from_slice(&input)?;
+            canonical_generated_json(&value)?
+        }
         "SignedHostHelperGrant" => {
             let value: SignedHostHelperGrant = serde_json::from_slice(&input)?;
             value.validate()?;

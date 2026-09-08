@@ -3,6 +3,7 @@
 pub mod compiled_execution_plan;
 pub mod generated;
 pub mod runtime_preflight;
+mod wire_datetime;
 mod wire_schema;
 pub use generated::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult,
@@ -1211,6 +1212,29 @@ mod recipe_start_tests {
             Value::String("2026-09-01T14:00:00+02:00".to_owned()),
         );
         assert!(parsed_start(non_utc_deadline).is_err());
+    }
+
+    #[test]
+    fn formatted_start_deadlines_preserve_lexical_bytes() {
+        for deadline in [
+            "2026-09-01T12:00:00.123000+00:00",
+            "2026-09-01T12:00:00.123Z",
+        ] {
+            let mut payload = start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("rank-launch"),
+            );
+            payload["start_deadline"] = Value::String(deadline.into());
+            let request = parsed_start(payload).unwrap();
+            assert_eq!(request.start_deadline.as_deref(), Some(deadline));
+            assert_eq!(
+                serde_json::to_value(request).unwrap()["start_deadline"],
+                deadline
+            );
+        }
     }
 
     #[test]

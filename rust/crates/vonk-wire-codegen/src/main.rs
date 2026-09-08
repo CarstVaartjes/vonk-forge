@@ -218,6 +218,16 @@ fn strip_docs(item: &mut Item) {
     attrs.retain(|attr| !attr.path().is_ident("doc"));
     if let Item::Struct(item) = item {
         for field in &mut item.fields {
+            if let syn::Type::Path(path) = &field.ty {
+                let leaf = path.path.segments.last().unwrap();
+                if leaf.ident == "DateTime" {
+                    field.attrs.push(parse_quote!(#[serde(serialize_with = "crate::wire_datetime::serialize", deserialize_with = "crate::wire_datetime::deserialize")]));
+                } else if leaf.ident == "Option"
+                    && field.ty.to_token_stream().to_string().contains("DateTime")
+                {
+                    field.attrs.push(parse_quote!(#[serde(serialize_with = "crate::wire_datetime::serialize_optional", deserialize_with = "crate::wire_datetime::deserialize_optional")]));
+                }
+            }
             for attr in &mut field.attrs {
                 if attr.path().is_ident("serde") {
                     let options = attr.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated).unwrap();

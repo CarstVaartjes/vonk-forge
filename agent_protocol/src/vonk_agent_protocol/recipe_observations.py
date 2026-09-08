@@ -11,7 +11,7 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .contracts import AgentProtocolError, canonical_message
 from .host_helper import (
@@ -188,10 +188,6 @@ class RecipeRunObservationsWire(WireModel):
         if len(ids) != len(set(ids)):
             raise ValueError("recipe run observation is duplicated")
         return self
-
-    @field_serializer("observed_at")
-    def serialize_observed_at(self, value: datetime) -> str:
-        return value.isoformat()
 
     @classmethod
     def parse(cls, value: Any) -> RecipeRunObservationsWire:
