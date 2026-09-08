@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,6 +23,7 @@ from .models import AgentOperation, Job, JobAttempt
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536
+_TARGETS = TypeAdapter(list[str])
 
 
 class StaleAttempt(RuntimeError):
@@ -125,8 +127,20 @@ def _canonical_payload(
                 inspect(child, path)
 
     inspect(payload)
-    copied = json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    encoded = json.dumps(copied, sort_keys=True, separators=(",", ":")).encode()
+    copied = json.loads(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    )
+    encoded = json.dumps(
+        copied,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
     maximum = (
         MAX_COMPILED_EXECUTION_PLAN_BYTES
         if kind in {"recipe.install", "recipe.start"}
@@ -135,6 +149,21 @@ def _canonical_payload(
     if len(encoded) > maximum:
         raise ValueError("job payload is too large")
     return copied, encoded
+
+
+def _canonical_targets(value: object) -> list[str]:
+    """Validate one target sequence through the JSON contract."""
+
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        return _TARGETS.validate_json(encoded, strict=True)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ValueError("job targets must be a JSON array of strings") from error
 
 
 class JobService:
@@ -162,6 +191,7 @@ class JobService:
     ) -> Job:
         if not all(value.strip() for value in (kind, actor, authority_revision)):
             raise ValueError("job kind, actor, and authority revision are required")
+        clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
         job = Job(
@@ -170,7 +200,7 @@ class JobService:
             state="queued",
             actor=actor,
             authority_revision=authority_revision,
-            targets=list(targets),
+            targets=clean_targets,
             payload_digest=hashlib.sha256(encoded).hexdigest(),
             payload=clean,
             current_attempt=0,
@@ -183,6 +213,7 @@ class JobService:
                     select(Job).where(Job.request_id == job.request_id)
                 )
                 if existing is not None:
+                    _canonical_targets(existing.targets)
                     if not self._same_request(existing, job):
                         raise ValueError("request key was already used differently")
                     session.expunge(existing)
@@ -206,6 +237,7 @@ class JobService:
             job = session.get(Job, job_id)
             if job is None:
                 raise KeyError(job_id)
+            job.targets = _canonical_targets(job.targets)
             session.expunge(job)
             return job
 
@@ -283,6 +315,7 @@ class JobService:
             has_more = len(jobs) > limit
             jobs = jobs[:limit]
             for job in jobs:
+                job.targets = _canonical_targets(job.targets)
                 session.expunge(job)
         next_cursor = None
         if has_more and jobs:
@@ -314,6 +347,7 @@ class JobService:
             raise TypeError("job enqueue authority check is invalid")
         if not all(value.strip() for value in (kind, actor, authority_revision)):
             raise ValueError("job kind, actor, and authority revision are required")
+        clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
         job = Job(
@@ -322,7 +356,7 @@ class JobService:
             state="queued",
             actor=actor,
             authority_revision=authority_revision,
-            targets=list(targets),
+            targets=clean_targets,
             payload_digest=hashlib.sha256(encoded).hexdigest(),
             payload=clean,
             current_attempt=0,
@@ -335,6 +369,7 @@ class JobService:
                     select(Job).where(Job.request_id == job.request_id)
                 )
                 if existing is not None:
+                    _canonical_targets(existing.targets)
                     if not self._same_request(existing, job):
                         raise ValueError("request key was already used differently")
                     session.expunge(existing)
@@ -409,6 +444,7 @@ class JobService:
             job = session.scalars(statement).first()
             if job is None:
                 return None
+            clean_targets = _canonical_targets(job.targets)
             if job.current_attempt:
                 old = session.scalar(
                     select(JobAttempt).where(
@@ -442,7 +478,7 @@ class JobService:
                 job.kind,
                 dict(job.payload),
                 job.authority_revision,
-                tuple(job.targets),
+                tuple(clean_targets),
             )
 
     def _active(self, session: Session, fence: AttemptFence) -> tuple[Job, JobAttempt]:
@@ -459,6 +495,7 @@ class JobService:
             or _aware(attempt.lease_deadline) <= _aware(self._clock())
         ):
             raise StaleAttempt("job attempt lease or fence is stale")
+        _canonical_targets(job.targets)
         return job, attempt
 
     def heartbeat(self, fence: AttemptFence, lease_seconds: int) -> AttemptFence:
