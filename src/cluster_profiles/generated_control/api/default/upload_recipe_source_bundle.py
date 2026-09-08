@@ -9,14 +9,19 @@ from ... import errors
 
 from ...models.catalog_problem import CatalogProblem
 from ...models.source_bundle_response import SourceBundleResponse
+from ...types import File, FileTypes
+from io import BytesIO
 from typing import cast
 
 
 
 def _get_kwargs(
     sha256: str,
+    *,
+    body: File,
 
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
 
 
 
@@ -28,7 +33,11 @@ def _get_kwargs(
         "url": "/api/v1/catalog/source-bundles/{sha256}".format(sha256=sha256,),
     }
 
+    _kwargs["content"] = body.payload
 
+    headers["Content-Type"] = "application/octet-stream"
+
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -88,12 +97,14 @@ def sync_detailed(
     sha256: str,
     *,
     client: AuthenticatedClient,
+    body: File,
 
 ) -> Response[Union[CatalogProblem, SourceBundleResponse]]:
     """ Upload Source Bundle
 
     Args:
         sha256 (str):
+        body (File):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -106,6 +117,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         sha256=sha256,
+body=body,
 
     )
 
@@ -119,12 +131,14 @@ def sync(
     sha256: str,
     *,
     client: AuthenticatedClient,
+    body: File,
 
 ) -> Optional[Union[CatalogProblem, SourceBundleResponse]]:
     """ Upload Source Bundle
 
     Args:
         sha256 (str):
+        body (File):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -138,6 +152,7 @@ def sync(
     return sync_detailed(
         sha256=sha256,
 client=client,
+body=body,
 
     ).parsed
 
@@ -145,12 +160,14 @@ async def asyncio_detailed(
     sha256: str,
     *,
     client: AuthenticatedClient,
+    body: File,
 
 ) -> Response[Union[CatalogProblem, SourceBundleResponse]]:
     """ Upload Source Bundle
 
     Args:
         sha256 (str):
+        body (File):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -163,6 +180,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         sha256=sha256,
+body=body,
 
     )
 
@@ -176,12 +194,14 @@ async def asyncio(
     sha256: str,
     *,
     client: AuthenticatedClient,
+    body: File,
 
 ) -> Optional[Union[CatalogProblem, SourceBundleResponse]]:
     """ Upload Source Bundle
 
     Args:
         sha256 (str):
+        body (File):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -195,5 +215,6 @@ async def asyncio(
     return (await asyncio_detailed(
         sha256=sha256,
 client=client,
+body=body,
 
     )).parsed

@@ -286,9 +286,7 @@ def install_catalog_routes(
             422: {"model": CatalogProblem},
         },
         operation_id="uploadRecipeSourceBundle",
-        openapi_extra=upload_request_body(
-            "application/vnd.vonk-forge.source-bundle.v1+tar"
-        ),
+        openapi_extra=upload_request_body("application/octet-stream"),
     )
     async def upload_source_bundle(
         request: Request,

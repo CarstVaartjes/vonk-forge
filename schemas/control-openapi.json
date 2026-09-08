@@ -27750,7 +27750,8 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Revoke"
+        "summary": "Revoke",
+        "x-vonk-request-body": "none"
       }
     },
     "/api/v1/agents/upgrades": {
@@ -28695,7 +28696,8 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Submit Job"
+        "summary": "Submit Job",
+        "x-vonk-request-body": "none"
       }
     },
     "/api/v1/audit": {
@@ -29048,6 +29050,17 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
