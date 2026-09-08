@@ -77,14 +77,14 @@ class RecipeStartPayload(_StrictPayload):
     role: Role
     port: Port
     reserved_memory_bytes: PositiveByteCount
-    endpoint_address: str
+    endpoint_address: str = Field(json_schema_extra={"format": "ip"})
     world_size: PositiveInt
     compiled_execution_plan: CompiledExecutionPlan
-    local_address: str | None
-    master_address: str | None
+    local_address: str | None = Field(json_schema_extra={"format": "ip"})
+    master_address: str | None = Field(json_schema_extra={"format": "ip"})
     master_port: Port | None
     phase: Literal["rank-launch", "collective-readiness"] | None = None
-    start_deadline: str | None = None
+    start_deadline: str | None = Field(default=None, json_schema_extra={"format": "date-time"})
     run_generation: PositiveInt | None = None
 
     @model_validator(mode="after")

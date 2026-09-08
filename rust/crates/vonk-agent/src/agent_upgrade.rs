@@ -80,14 +80,14 @@ impl AgentUpgradeExecutor<'_> {
             AgentUpgradeRequest::parse(claim).map_err(|_| AgentUpgradeError::InvalidClaim)?;
         self.download(
             &request.source_package_url,
-            request.source_package_bytes,
+            request.source_package_bytes.into(),
             &request.rollback.source.package_sha256,
         )
         .await?;
         let package = self
             .download(
                 &request.package_url,
-                request.package_bytes,
+                request.package_bytes.into(),
                 &request.package_sha256,
             )
             .await?;

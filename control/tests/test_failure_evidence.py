@@ -314,6 +314,10 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     from .test_api import Jobs
 
     value = dict(item(), state="failed", created_at=NOW.isoformat())
+    # The composed API consumes the same nested diagnostics as AgentResult.
+    diagnostics = collect_failure(value, now=NOW).diagnostics
+    value["result"].pop("stderr")
+    value["result"]["diagnostics"] = diagnostics.model_dump(mode="json")
     service.capture(value)
     codec = TokenCodec(b"k" * 32)
     operations = OperationApiServices(

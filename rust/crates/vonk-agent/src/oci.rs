@@ -23,7 +23,7 @@ use crate::{
     process::{ProcessError, ProcessRunner, Program},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
-        same_installed_workload,
+        same_installed_workload, same_job_workload,
     },
 };
 
@@ -579,7 +579,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
         let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
+        self.write_runtime_contract(spec, run_id)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let runtime_image_reference = spec.runtime_image.local_image_reference();
@@ -642,16 +642,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                         })
                         .ok_or(OciError::Artifact)?,
                     port: placement.port.ok_or(OciError::Artifact)?,
-                    rank: placement.rank,
+                    rank: u32::try_from(placement.rank).map_err(|_| OciError::Artifact)?,
                     recipe_content_sha256: identity.recipe_content_sha256.clone(),
                     recipe_revision_id: identity.recipe_revision_id,
                     role: placement.role.clone(),
                     run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
-                    run_generation: identity.run_generation,
+                    run_generation: u32::try_from(identity.run_generation)
+                        .map_err(|_| OciError::Artifact)?,
                     runtime_arguments_sha256: protocol_sha256(
                         &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
                     ),
-                    world_size: placement.world_size,
+                    world_size: u32::try_from(placement.world_size)
+                        .map_err(|_| OciError::Artifact)?,
                 };
                 binding.validate().map_err(|_| OciError::Artifact)?;
                 Ok(binding)
@@ -740,7 +742,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             || binding.mapping_generation != identity.mapping_generation
             || binding.recipe_revision_id != identity.recipe_revision_id
             || binding.recipe_content_sha256 != identity.recipe_content_sha256
-            || binding.run_generation != identity.run_generation
+            || u64::from(binding.run_generation) != identity.run_generation
         {
             return Err(OciError::Runtime);
         }
@@ -753,30 +755,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         run_id: &str,
         placement: &CompiledRuntimePlacement,
-        parameters: &serde_json::Value,
-        timeout_seconds: u16,
+        invocation: &CompiledExecutionPlan,
     ) -> Result<RuntimeStartPlan, OciError> {
-        let Some(installed_job) = spec.job.as_ref() else {
-            return Err(OciError::Runtime);
-        };
-        if timeout_seconds == 0 || timeout_seconds > installed_job.timeout_seconds {
+        invocation.validate()?;
+        if !same_job_workload(spec, invocation) {
             return Err(OciError::Runtime);
         }
-        let mut effective = spec.clone();
-        effective
-            .job
-            .as_mut()
-            .ok_or(OciError::Runtime)?
-            .timeout_seconds = timeout_seconds;
-        let plan = self.prepare_start(&effective, installation_id, run_id, placement)?;
-        self.write_runtime_contract(
-            &effective,
-            installation_id,
-            run_id,
-            placement,
-            Some(parameters),
-        )?;
-        Ok(plan)
+        self.prepare_start(invocation, installation_id, run_id, placement)
     }
 
     pub fn prepare_stop(&self, run_id: &str) -> Result<RuntimeStopPlan, OciError> {
@@ -882,9 +867,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             binding.validate().map_err(|_| OciError::Artifact)?;
             if binding.run_id.to_string() != run_id
                 || binding.installation_id.to_string() != installation_id
-                || binding.rank != placement.rank
+                || u64::from(binding.rank) != placement.rank
                 || binding.role != placement.role
-                || binding.world_size != placement.world_size
+                || u64::from(binding.world_size) != placement.world_size
                 || binding.local_address
                     != if placement.world_size == 1 {
                         None
@@ -999,6 +984,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .is_some_and(|status| (200..300).contains(&status))
     }
 
+    pub(crate) fn retained_telemetry_plan(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<CompiledExecutionPlan>, OciError> {
+        Ok(self.load_run_lifecycle(run_id)?.map(|(plan, _, _, _)| plan))
+    }
+
     fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let path = metadata.join("lifecycle.json");
@@ -1015,15 +1007,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
         )?)?;
         spec.validate()?;
-        let mut installed = self.load_spec(&record.installation_id)?;
-        // A job may select a shorter timeout at start, within its installed limit.
-        if let (Some(installed_job), Some(retained_job)) = (&mut installed.job, &spec.job)
-            && retained_job.timeout_seconds <= installed_job.timeout_seconds
-        {
-            installed_job.timeout_seconds = retained_job.timeout_seconds;
-        }
-        if !same_installed_workload(&installed, &spec) || spec.runtime.placement != record.placement
-        {
+        let installed = self.load_spec(&record.installation_id)?;
+        let matches = if spec.job.is_some() {
+            same_job_workload(&installed, &spec)
+        } else {
+            same_installed_workload(&installed, &spec)
+        };
+        if !matches || spec.runtime.placement != record.placement {
             return Err(OciError::Artifact);
         }
         Ok(Some((
@@ -1362,12 +1352,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     fn write_runtime_contract(
         &self,
         spec: &CompiledExecutionPlan,
-        _installation_id: &str,
-        _run_id: &str,
-        _placement: &CompiledRuntimePlacement,
-        _parameters: Option<&serde_json::Value>,
+        run_id: &str,
     ) -> Result<(), OciError> {
-        let metadata = self.run_metadata_path(_run_id)?;
+        let metadata = self.run_metadata_path(run_id)?;
         atomic_write(&metadata, "runtime.json", &serde_json::to_vec(spec)?)?;
         Ok(())
     }
@@ -1743,7 +1730,7 @@ fn materialize_compiled_models(
             artifact.distribution_object.name.clone(),
             artifact.distribution_object.sha256.clone(),
             artifact.distribution_object.bytes,
-            artifact.distribution_object.kind.clone(),
+            artifact.distribution_object.kind.as_str().to_owned(),
         );
         if let Some((_, previous)) = physical_by_path.get(&physical_key) {
             if previous != &physical {
@@ -2019,6 +2006,10 @@ mod tests {
     }
 
     fn compiled_plan() -> Value {
+        let canonical: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
         let primary = digest(b"primary");
         let secondary = digest(b"secondary");
         json!({
@@ -2032,6 +2023,7 @@ mod tests {
                 "model_artifact_bytes": 16
             },
             "runtime": {
+                "telemetry": canonical["runtime"]["telemetry"],
                 "executable": "/opt/vonk/bin/vllm",
                 "argv": ["serve", "/models"],
                 "env": [],

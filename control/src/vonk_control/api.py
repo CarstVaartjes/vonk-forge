@@ -73,6 +73,7 @@ from .database_authority import (
 from .deployment_provenance import DeploymentProvenanceService
 from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
+from .download_contract import download_responses
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -85,6 +86,7 @@ from .fleet_projection import (
     TelemetryWorkloadsResponse,
 )
 from .fleet_stream import parse_last_event_id
+from .fleet_stream_contract import FleetStreamEvent
 from .library_api import install_library_routes
 from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
@@ -168,7 +170,8 @@ def _bounded_error_content(detail: object, *, validation: bool = False) -> bytes
         detail = "request failed"
     response = (
         RequestValidationProblem(detail=detail[:256], issues=[])
-        if validation else BoundedErrorResponse(detail=detail[:256])
+        if validation
+        else BoundedErrorResponse(detail=detail[:256])
     )
     return canonical_message(response.model_dump(mode="json"))
 
@@ -191,6 +194,12 @@ def _catalog_error_content(request: Request, error: StarletteHTTPException) -> b
         request_id=request.state.request_id,
     )
     return canonical_message(response.model_dump(mode="json"))
+
+
+class _FleetEventStreamResponse(StreamingResponse):
+    """Keep the response's actual media type in FastAPI's generated schema."""
+
+    media_type = "text/event-stream"
 
 
 class _DuplicateJsonKey(ValueError):
@@ -485,9 +494,7 @@ class ChangeRequest(BaseModel):
 
 
 class NodeProfileUpdateRequest(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid", strict=True, str_strip_whitespace=True
-    )
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     display_name: str = Field(
         min_length=1,
         max_length=80,
@@ -529,7 +536,10 @@ def create_app(
     recipe_image_availability: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
-        title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None,
+        title="Vonk Forge Control",
+        version="1.0",
+        docs_url=None,
+        redoc_url=None,
         responses={422: {"model": RequestValidationProblem}},
     )
     cursor_codec = tokens.cursor_codec()
@@ -548,14 +558,18 @@ def create_app(
         if not request.url.path.startswith("/agent/v1/"):
             if request.url.path.startswith("/api/v1/"):
                 return Response(
-                    content=_bounded_error_content(error.detail, validation=error.status_code == 422),
+                    content=_bounded_error_content(
+                        error.detail, validation=error.status_code == 422
+                    ),
                     status_code=error.status_code,
                     headers=error.headers,
                     media_type="application/json",
                 )
             return await http_exception_handler(request, error)
         return Response(
-            content=_bounded_error_content(error.detail, validation=error.status_code == 422),
+            content=_bounded_error_content(
+                error.detail, validation=error.status_code == 422
+            ),
             status_code=error.status_code,
             headers=error.headers,
             media_type="application/json",
@@ -616,7 +630,9 @@ def create_app(
             return Response(status_code=413)
         except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
             return Response(
-                content=_bounded_error_content("telemetry request is invalid", validation=True),
+                content=_bounded_error_content(
+                    "telemetry request is invalid", validation=True
+                ),
                 status_code=422,
                 media_type="application/json",
             )
@@ -885,14 +901,18 @@ def create_app(
 
     @app.get(
         "/api/v1/fleet/stream",
-        response_class=StreamingResponse,
+        response_class=_FleetEventStreamResponse,
         responses={
             200: {
-                "content": {"text/event-stream": {"schema": {"type": "string"}}},
-                "description": "Durable Fleet event stream",
+                "model": FleetStreamEvent,
+                "description": (
+                    "Durable Fleet event stream. The schema describes the JSON "
+                    "data in each snapshot, telemetry, or change SSE frame."
+                ),
             },
             **bounded_error_responses(400, 401, 503),
         },
+        openapi_extra={"x-vonk-streaming-transport": True},
         operation_id="streamFleetEvents",
     )
     async def fleet_event_stream(
@@ -917,9 +937,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from None
         if fleet_stream is None:
             raise HTTPException(status_code=503, detail="Fleet stream unavailable")
-        return StreamingResponse(
+        return _FleetEventStreamResponse(
             fleet_stream.events(last_event_id),
-            media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
@@ -977,7 +996,9 @@ def create_app(
         maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
         key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
         device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryHistoryResponse:
@@ -1023,7 +1044,9 @@ def create_app(
         node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
         key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
         device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryCurrentResponse:
@@ -1042,9 +1065,13 @@ def create_app(
             }
             return fleet_projection.telemetry_current(node_id, **filters)
         except KeyError:
-            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+            raise HTTPException(
+                status_code=404, detail="Telemetry sample not found"
+            ) from None
         except (OSError, RuntimeError, TypeError):
-            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Telemetry unavailable"
+            ) from None
 
     @app.get(
         "/api/v1/nodes/{node_id}/telemetry/capabilities",
@@ -1056,7 +1083,9 @@ def create_app(
         node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
         key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
         device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryCapabilitiesResponse:
@@ -1075,9 +1104,13 @@ def create_app(
             }
             return fleet_projection.telemetry_capabilities(node_id, **filters)
         except KeyError:
-            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+            raise HTTPException(
+                status_code=404, detail="Telemetry sample not found"
+            ) from None
         except (OSError, RuntimeError, TypeError):
-            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Telemetry unavailable"
+            ) from None
 
     @app.get(
         "/api/v1/nodes/{node_id}/telemetry/workloads",
@@ -1100,11 +1133,15 @@ def create_app(
                 state=state,
             )
         except KeyError:
-            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+            raise HTTPException(
+                status_code=404, detail="Telemetry sample not found"
+            ) from None
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         except (OSError, RuntimeError, TypeError):
-            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Telemetry unavailable"
+            ) from None
 
     @app.get(
         "/api/v1/endpoints/{alias}",
@@ -1270,12 +1307,9 @@ def create_app(
         if failure_evidence is not None:
             item = failure_evidence.decorate(item)
         kind = item.get("kind")
-        can_retry = (
-            isinstance(kind, str)
-            and (
-                (kind.startswith("fleet-profile.") and fleet_profiles is not None)
-                or (kind == "library.placement" and library_placements is not None)
-            )
+        can_retry = isinstance(kind, str) and (
+            (kind.startswith("fleet-profile.") and fleet_profiles is not None)
+            or (kind == "library.placement" and library_placements is not None)
         )
         return operation_detail_response(
             item, available_actions=("retry",) if can_retry else ()
@@ -1495,7 +1529,11 @@ def create_app(
 
     @app.get(
         "/api/v1/jobs/{job_id}/logs/{digest}",
-        responses=bounded_error_responses(401, 403, 404, 503),
+        response_class=Response,
+        responses={
+            **bounded_error_responses(401, 403, 404, 503),
+            **download_responses("text/plain"),
+        },
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def job_log_content(
@@ -1558,8 +1596,10 @@ def production_app() -> FastAPI:
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
+
     def clock() -> datetime:
         return datetime.now(UTC)
+
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
@@ -1608,8 +1648,10 @@ def production_app() -> FastAPI:
         huggingface_token_path=settings.huggingface_token_path,
     )
     model_cache.resume_operations()
+
     def revision_eligible(revision: str) -> bool:
         return revision == authority.head()
+
     current_revision = authority.head
     agent_services = build_agent_services(
         settings,
@@ -1635,9 +1677,7 @@ def production_app() -> FastAPI:
             raise TypeError("compiled runtime projection is unavailable")
         identity = runtime_spec.get("identity")
         effective_execution_key = (
-            identity.get("execution_sha256")
-            if isinstance(identity, Mapping)
-            else None
+            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
         )
         if not isinstance(effective_execution_key, str):
             raise TypeError("compiled runtime execution identity is unavailable")
@@ -1665,7 +1705,9 @@ def production_app() -> FastAPI:
                     )
                 )
                 if revision is None or revision.content_digest is None:
-                    raise ValueError("active recipe revision for runtime receipt is unavailable")
+                    raise ValueError(
+                        "active recipe revision for runtime receipt is unavailable"
+                    )
                 persist_runtime_image_receipt(
                     session,
                     recipe_revision_id=revision.id,
@@ -1690,13 +1732,19 @@ def production_app() -> FastAPI:
     ) -> RuntimeImageReceipt:
         """Read an already prepared OCI receipt without pulling or exporting."""
 
-        runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        runtime = (
+            runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        )
         if not isinstance(runtime, Mapping):
-            raise TypeError("runtime image preparation is required: runtime projection is unavailable")
+            raise TypeError(
+                "runtime image preparation is required: runtime projection is unavailable"
+            )
         architecture = runtime.get("architecture")
         interface = runtime.get("interface", runtime.get("runtime_interface"))
         if not isinstance(architecture, str) or not isinstance(interface, str):
-            raise TypeError("runtime image preparation is required: platform identity is unavailable")
+            raise TypeError(
+                "runtime image preparation is required: platform identity is unavailable"
+            )
         receipt = runtime_image_storage.find_verified(
             image_digest,
             expected_architecture=architecture,
@@ -1707,10 +1755,14 @@ def production_app() -> FastAPI:
                 "runtime image preparation is required before compile/install"
             )
         identity = runtime_spec.get("identity")
-        execution_key = identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        execution_key = (
+            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        )
         recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
         if not isinstance(execution_key, str):
-            raise TypeError("runtime image preparation execution identity is unavailable")
+            raise TypeError(
+                "runtime image preparation execution identity is unavailable"
+            )
         with sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -1720,7 +1772,9 @@ def production_app() -> FastAPI:
                 )
             )
             if revision is None:
-                raise ValueError("durable runtime image receipt is unavailable before compile/install")
+                raise ValueError(
+                    "durable runtime image receipt is unavailable before compile/install"
+                )
             resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
@@ -1729,7 +1783,9 @@ def production_app() -> FastAPI:
                 receipt=receipt,
             )
         if revision is None:
-            raise ValueError("durable runtime image receipt is unavailable before compile/install")
+            raise ValueError(
+                "durable runtime image receipt is unavailable before compile/install"
+            )
         return receipt
 
     execution_plans = ControllerExecutionPlanService(
@@ -1811,9 +1867,7 @@ def production_app() -> FastAPI:
         sessions,
         clock=clock,
         recipe_operations=recipe_operations,
-        switch_adapter=RunSwitchFleetProfileAdapter(
-            sessions, run_switch_operations
-        ),
+        switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch_operations),
     )
     from .library_placements import LibraryPlacementService
 

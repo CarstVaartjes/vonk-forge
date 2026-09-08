@@ -1,5 +1,11 @@
 # Contract handoff audit — 8 September 2026
 
+This is a historical snapshot of the revisions below. Current implementation
+decisions are in [the handoff plan](contract-handoff-implementation-plan-2026-09-08.md)
+and [API contracts](api-contracts.md): typify generates Rust wire structures;
+unused optional-null fields are omitted, while required nullable fields remain
+present. Both languages share canonical normalization before hashing/signing.
+
 The Pydantic chain exists, but the cutover is incomplete. Several consumers
 still interpret independently defined documents or reconstruct a narrower
 document after successful canonical validation. Generated schema checks do
@@ -151,8 +157,11 @@ bytes into a reconstructed JSON document.
 
 ## Boundaries not classified as defects
 
-- Consistent handwritten Rust serde definitions are explicitly permitted.
-  The removed duplicate `Placement` has no remaining active counterpart.
+- At audit time, consistent handwritten Rust serde definitions were allowed
+  by an earlier instruction. The user subsequently clarified the target:
+  typify-generated wire structures from Pydantic-derived schemas. Their
+  replacement is included in the implementation plan. The removed duplicate
+  `Placement` has no remaining active counterpart.
 - Install/start raw JSON is immediately parsed and validated through the
   canonical compiled model before runtime use; that alone is not a bypass.
 - No additional unconstrained fixed JSON component properties or untyped array

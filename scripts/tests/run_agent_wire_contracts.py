@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 PROBES = {
+    "VONK_JOB_INVOCATION_WIRE_PROBE": ("vonk-agent", "job_invocation_wire_probe"),
     "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
     "VONK_HEARTBEAT_WIRE_PROBE": ("vonk-agent", "heartbeat_wire_probe"),
     "VONK_ENROLLMENT_WIRE_PROBE": ("vonk-agent", "enrollment_wire_probe"),

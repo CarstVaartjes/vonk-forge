@@ -121,13 +121,13 @@ class CompiledEnvironmentEntry(_Strict):
 
 
 class CompiledPlacement(_Strict):
-    endpoint_address: str | None
+    endpoint_address: str | None = Field(json_schema_extra={"format": "ip"})
     rank: int = Field(ge=0)
     role: str = Field(min_length=1, max_length=64)
     world_size: int = Field(ge=1)
-    local_address: str | None
-    master_address: str | None
-    master_port: int | None
+    local_address: str | None = Field(json_schema_extra={"format": "ip"})
+    master_address: str | None = Field(json_schema_extra={"format": "ip"})
+    master_port: int | None = Field(ge=1024, le=65535)
     port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
 
@@ -136,12 +136,32 @@ class CompiledPlacement(_Strict):
     )(_validate_ip)
 
 
+class CompiledRuntimeTelemetry(_Strict):
+    engine: str = Field(min_length=1, max_length=64)
+    engine_version: str | None = Field(min_length=1, max_length=128)
+    metrics_format: Literal["prometheus", "comfyui-queue"] | None
+    metrics_path: str | None = Field(max_length=256)
+
+    @model_validator(mode="after")
+    def endpoint_is_canonical(self) -> CompiledRuntimeTelemetry:
+        if (self.metrics_format is None) != (self.metrics_path is None):
+            raise ValueError("metrics format and path must be declared together")
+        if self.metrics_path is not None:
+            _safe_path(self.metrics_path, absolute=True)
+            if any(char in self.metrics_path for char in "?#\r\n"):
+                raise ValueError("metrics path is invalid")
+        if "\x00" in self.engine or (self.engine_version and "\x00" in self.engine_version):
+            raise ValueError("engine identity is invalid")
+        return self
+
+
 class CompiledRuntime(_Strict):
     executable: str = Field(min_length=1, max_length=65536)
     argv: list[str] = Field(max_length=512)
     env: list[CompiledEnvironmentEntry] = Field(max_length=128)
     image_digest: ImageDigest
     placement: CompiledPlacement
+    telemetry: CompiledRuntimeTelemetry
 
     @field_validator("executable")
     @classmethod

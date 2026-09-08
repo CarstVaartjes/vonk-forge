@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
@@ -173,6 +174,15 @@ def compile_runtime_spec(
         "interface": "vonk.runtime.v1",
         "adapter": projection.slug,
         "adapter_version": projection.contract_version,
+        "telemetry": {
+            "engine": parsed.runtime.engine,
+            "engine_version": None,
+            "metrics_format": (
+                None if projection.telemetry.path is None else
+                "comfyui-queue" if projection.telemetry.adapter == "comfyui" else "prometheus"
+            ),
+            "metrics_path": projection.telemetry.path,
+        },
         "image": projection.image,
         "architecture": projection.architecture,
         "entrypoint": list(projection.command),
@@ -271,7 +281,7 @@ def compile_runtime_spec(
                 else interface.input.model_dump(mode="json")
             ),
             "output_path": interface.output.path,
-            "timeout_seconds": lifecycle.stop_timeout_seconds,
+            "timeout_seconds": MAX_TIMEOUT_SECONDS,
         }
     spec["identity"]["execution_sha256"] = _execution_digest(
         {

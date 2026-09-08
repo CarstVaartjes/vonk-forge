@@ -7,18 +7,24 @@ use std::{
 };
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
+use vonk_agent_protocol::generated::{
+    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
+    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
+    PackageActivationGrantRequest, RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire,
+    RenewRequest, TelemetryRequest,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
     InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
-    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
+    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_generated_json, canonical_json,
+    hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -26,7 +32,7 @@ use crate::{
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
     oci::MAX_MANAGED_RECIPE_RUNS,
-    pair::{IssuedResponse, verify_ca_pin},
+    pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
     workloads::CompiledExecutionPlan,
@@ -63,19 +69,6 @@ impl ClientError {
     }
 }
 
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ClaimRequest<'a> {
-    capabilities: &'a [&'a str],
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hostname: Option<&'a str>,
-    lease_seconds: u64,
-    node_id: &'a str,
-    protocol_version: u32,
-    runtime_identity: &'a AgentRuntimeIdentity,
-    wait_seconds: u64,
-}
-
 /// Serialize the current claim contract used by the HTTP transport.
 pub fn claim_request_document(
     node_id: &str,
@@ -90,14 +83,17 @@ pub fn claim_request_document(
     runtime_identity
         .observation_receipt_public_key()
         .map_err(|_| ClientError::Protocol)?;
-    canonical_json(&ClaimRequest {
-        capabilities,
-        hostname,
+    canonical_generated_json(&ClaimRequest {
+        capabilities: capabilities
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect(),
+        hostname: hostname.map(str::to_owned),
         lease_seconds: 60,
-        node_id,
+        node_id: node_id.to_owned(),
         protocol_version: 3,
-        runtime_identity,
-        wait_seconds: wait_seconds.min(60),
+        runtime_identity: runtime_identity.clone(),
+        wait_seconds: u32::try_from(wait_seconds.min(60)).expect("bounded claim wait"),
     })
     .map_err(|_| ClientError::Protocol)
 }
@@ -106,11 +102,11 @@ pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
 /// Validate and construct the one current snapshot envelope used by both the
 /// production executor and the Linux wire probe.
-pub fn build_exact_recipe_run_observations<'a>(
+pub fn build_exact_recipe_run_observations(
     node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
-    observations: &'a [ExactRecipeRunObservation],
-) -> Result<RecipeRunObservationsWire<'a>, ClientError> {
+    observations: &[ExactRecipeRunObservation],
+) -> Result<RecipeRunObservationsWire, ClientError> {
     if observations.len() > MAX_MANAGED_RECIPE_RUNS {
         return Err(ClientError::Protocol);
     }
@@ -120,16 +116,14 @@ pub fn build_exact_recipe_run_observations<'a>(
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
         observation.validate().map_err(|_| ClientError::Protocol)?;
-        if observation.node_id != node_id || !run_ids.insert(observation.binding.run_id) {
+        if observation.node_id != node_id || !run_ids.insert(observation.run_id) {
             return Err(ClientError::Protocol);
         }
         let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
         let (grant_job_id, grant_request_sha256) = match &observation.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequest {
-                job_id,
-                request_sha256,
-                ..
-            } => (job_id, request_sha256),
+            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
+                (&operation.job_id, &operation.request_sha256)
+            }
             _ => return Err(ClientError::Protocol),
         };
         if observation.schema_version != 1
@@ -146,11 +140,11 @@ pub fn build_exact_recipe_run_observations<'a>(
                 .filter(|key| key.len() == 32)
                 .map(|key| hex_sha256(&key))
                 != Some(observation.helper_receipt.signature.key_id.clone())
-            || *grant_job_id != observation.binding.run_id
+            || *grant_job_id != observation.run_id
             || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
             || observation.grant.claims.request_id.to_string() != receipt_request_id
             || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
-            || (observation.binding.local_address == observation.binding.master_address)
+            || (observation.local_address == observation.master_address)
                 != observation.endpoint_ready.is_some()
         {
             return Err(ClientError::Protocol);
@@ -158,84 +152,15 @@ pub fn build_exact_recipe_run_observations<'a>(
     }
     Ok(RecipeRunObservationsWire {
         schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-        observed_at,
-        runs: observations,
+        observed_at: observed_at.into(),
+        runs: observations.to_vec(),
     })
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RenewRequest<'a> {
-    csr: &'a str,
-    node_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ActivateRequest<'a> {
-    generation: u64,
-    node_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct HostRuntimeGrantRequest<'a> {
-    node_id: &'a str,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    action: HostRuntimeAction,
-    request_sha256: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunInspectionGrantRequest<'a> {
-    schema_version: u8,
-    node_id: &'a str,
-    #[serde(flatten)]
-    binding: &'a RecipeRunInspectionBinding,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    request_sha256: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct AgentUpgradeGrantRequest<'a> {
-    node_id: &'a str,
-    job_id: uuid::Uuid,
-    operation_id: uuid::Uuid,
-    attempt: u32,
-    fence: uuid::Uuid,
-    package_sha256: &'a str,
-    package_signature: &'a str,
-    expires_in_seconds: u16,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HostRuntimeGrantResponse {
-    grant: SignedHostHelperGrant,
 }
 
 #[derive(Debug)]
 pub struct RecipeRunInspectionGrant {
     pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunInspectionGrantResponse {
-    schema_version: u8,
-    observation_identity_sha256: String,
-    grant: SignedHostHelperGrant,
 }
 
 #[derive(Debug, Clone)]
@@ -378,11 +303,7 @@ impl AgentHttpClient {
 
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
-        if progress
-            .progress
-            .get("phase")
-            .and_then(serde_json::Value::as_str)
-            == Some("executing")
+        if progress.progress.phase == "executing"
             && let Some((operation_id, phase)) = self
                 .progress_phase
                 .lock()
@@ -390,7 +311,7 @@ impl AgentHttpClient {
                 .as_ref()
             && *operation_id == progress.operation_id
         {
-            progress.progress["phase"] = serde_json::json!(phase);
+            progress.progress.phase.clone_from(phase);
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
@@ -431,15 +352,15 @@ impl AgentHttpClient {
         if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&HostRuntimeGrantRequest {
-            node_id: &self.node_id,
+        let body = canonical_generated_json(&HostRuntimeGrantRequest {
+            node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
             attempt: claim.attempt,
             fence: claim.fence,
-            action,
-            request_sha256,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            action: host_runtime_grant_action(action),
+            request_sha256: request_sha256.to_owned(),
+            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -451,7 +372,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -476,16 +397,34 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&RecipeRunInspectionGrantRequest {
+        let body = canonical_generated_json(&RecipeRunObservationGrantRequest {
             schema_version: 1,
-            node_id: &self.node_id,
-            binding,
+            node_id: self.node_id.clone(),
+            run_id: binding.run_id,
+            installation_id: binding.installation_id,
+            recipe_revision_id: binding.recipe_revision_id,
+            recipe_content_sha256: binding.recipe_content_sha256.clone(),
+            mapping_id: binding.mapping_id,
+            mapping_generation: binding.mapping_generation,
+            run_generation: u32::try_from(binding.run_generation)
+                .map_err(|_| ClientError::Protocol)?,
+            image_digest: binding.image_digest.clone(),
+            artifact_set_digest: binding.artifact_set_digest.clone(),
+            model_identity: binding.model_identity.clone(),
+            rank: binding.rank,
+            role: binding.role.clone(),
+            world_size: binding.world_size,
+            local_address: binding.local_address,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            port: binding.port,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
             job_id: request.job_id,
             operation_id: request.operation_id,
             attempt: request.attempt,
             fence: request.fence,
-            request_sha256,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            request_sha256: request_sha256.to_owned(),
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS as u8,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -500,7 +439,7 @@ impl AgentHttpClient {
         }
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: RecipeRunInspectionGrantResponse =
+        let response: RecipeRunObservationGrantWire =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if response.schema_version != 1
             || !valid_sha256(&response.observation_identity_sha256)
@@ -510,22 +449,17 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let operation = match &response.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256: granted_request_sha256,
-                observation_identity_sha256: Some(observation_identity_sha256),
-            } => (
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                granted_request_sha256,
-                observation_identity_sha256,
+            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => (
+                &operation.action,
+                &operation.job_id,
+                &operation.operation_id,
+                &operation.attempt,
+                &operation.fence,
+                &operation.request_sha256,
+                operation
+                    .observation_identity_sha256
+                    .as_ref()
+                    .ok_or(ClientError::Protocol)?,
             ),
             _ => return Err(ClientError::Protocol),
         };
@@ -550,7 +484,12 @@ impl AgentHttpClient {
         receipt: &vonk_agent_protocol::PackageActivationReceipt,
         runtime_identity: &AgentRuntimeIdentity,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        let body = canonical_json(&serde_json::json!({"node_id": self.node_id, "receipt": receipt, "runtime_identity": runtime_identity})).map_err(|_| ClientError::Protocol)?;
+        let body = canonical_generated_json(&PackageActivationGrantRequest {
+            node_id: self.node_id.clone(),
+            receipt: receipt.clone(),
+            runtime_identity: runtime_identity.clone(),
+        })
+        .map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?)
@@ -560,7 +499,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -581,15 +520,15 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&AgentUpgradeGrantRequest {
-            node_id: &self.node_id,
+        let body = canonical_generated_json(&AgentUpgradeGrantRequest {
+            node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
             attempt: claim.attempt,
             fence: claim.fence,
-            package_sha256,
-            package_signature,
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+            package_sha256: package_sha256.to_owned(),
+            package_signature: package_signature.to_owned(),
+            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -601,7 +540,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse =
+        let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
@@ -925,7 +864,7 @@ impl AgentHttpClient {
                 tokio::fs::create_dir_all(parent).await?;
             }
             let object_digest = object.sha256.clone();
-            let kind = object.kind.clone();
+            let kind = object.kind.to_string();
             let base = downloaded_bytes;
             self.download_trusted_distribution_object_with_progress(
                 plan_digest,
@@ -952,7 +891,7 @@ impl AgentHttpClient {
                 completed_items: index as u64 + 1,
                 total_items: assignment.objects.len() as u64,
                 object_sha256: object.sha256.clone(),
-                kind: object.kind.clone(),
+                kind: object.kind.to_string(),
                 bytes: downloaded_bytes,
                 total_bytes: Some(total_bytes),
             });
@@ -1223,7 +1162,7 @@ impl AgentHttpClient {
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
         let request = InventoryRequest {
             schema_version: 1,
-            observed_at: chrono::Utc::now(),
+            observed_at: chrono::Utc::now().into(),
             disk_total_bytes: inventory.disk_total_bytes,
             disk_free_bytes: inventory.disk_available_bytes,
             host_memory_total_bytes: inventory.memory_total_bytes,
@@ -1233,16 +1172,21 @@ impl AgentHttpClient {
             gpu_count: inventory.gpu_count,
             artifact_store_read_only: inventory.artifact_store_read_only,
             capabilities: inventory.capabilities.clone(),
-            fabric_address: inventory.fabric_address,
-            fabric_bandwidth_mbps: inventory.fabric_bandwidth_mbps,
+            fabric_address: inventory.fabric_address.map(|value| value.to_string()),
+            fabric_bandwidth_mbps: inventory
+                .fabric_bandwidth_mbps
+                .map(|value| u32::try_from(value).map_err(|_| ClientError::Protocol))
+                .transpose()?,
             nvidia_driver_version: inventory.nvidia_driver_version.clone(),
             container_runtime_version: inventory.container_runtime_version.clone(),
         };
         request.validate().map_err(|_| ClientError::Protocol)?;
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/inventory")?)
-            .json(&request)
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1259,10 +1203,12 @@ impl AgentHttpClient {
     ) -> Result<(), ClientError> {
         let envelope =
             build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
+        let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&envelope)
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1277,14 +1223,17 @@ impl AgentHttpClient {
         if !valid_report_batch(samples) {
             return Err(ClientError::Protocol);
         }
+        let request = TelemetryRequest {
+            schema_version: 1,
+            samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
-            .json(&crate::telemetry::TelemetryRequest {
-                schema_version: 1,
-                samples,
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1295,24 +1244,27 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn renew(&self, csr: &[u8]) -> Result<IssuedResponse, ClientError> {
+    pub async fn renew(&self, csr: &[u8]) -> Result<IssuedCertificateResponse, ClientError> {
         let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
         if csr.is_empty() || csr.len() > 16 * 1024 {
             return Err(ClientError::Protocol);
         }
+        let request = RenewRequest {
+            csr: csr.to_owned(),
+            node_id: self.node_id.clone(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/renew")?)
-            .json(&RenewRequest {
-                csr,
-                node_id: &self.node_id,
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let issued: IssuedResponse =
-            serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
+        let issued: IssuedCertificateResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if issued.node_id != self.node_id || issued.generation == 0 {
             return Err(ClientError::Protocol);
         }
@@ -1323,13 +1275,16 @@ impl AgentHttpClient {
         if generation == 0 {
             return Err(ClientError::Protocol);
         }
+        let request = ActivateRequest {
+            generation,
+            node_id: self.node_id.clone(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/renew/activate")?)
-            .json(&ActivateRequest {
-                generation,
-                node_id: &self.node_id,
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() != StatusCode::NO_CONTENT {
@@ -1343,6 +1298,17 @@ impl AgentHttpClient {
         self.controller
             .join(path)
             .map_err(|_| ClientError::Protocol)
+    }
+}
+
+fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantRequestAction {
+    match action {
+        HostRuntimeAction::RuntimePreflight => HostRuntimeGrantRequestAction::RuntimePreflight,
+        HostRuntimeAction::ImageImport => HostRuntimeGrantRequestAction::ImageImport,
+        HostRuntimeAction::ImageInspect => HostRuntimeGrantRequestAction::ImageInspect,
+        HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
+        HostRuntimeAction::Start => HostRuntimeGrantRequestAction::Start,
+        HostRuntimeAction::Stop => HostRuntimeGrantRequestAction::Stop,
     }
 }
 
@@ -1617,6 +1583,10 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
+    use vonk_agent_protocol::generated::{
+        AgentClaimPayload, AgentOperation, DistributionObjectKind,
+        ExecuteContainerRuntimeRequestOperation, OperationProgress, RecipeImageImportRequest,
+    };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
         HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
@@ -1792,19 +1762,19 @@ mod tests {
                     name: "weights/model.bin".to_owned(),
                     sha256: model_digest.clone(),
                     bytes: model.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "config/tokenizer.json".to_owned(),
                     sha256: config_digest.clone(),
                     bytes: config.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "image.oci.tar".to_owned(),
                     sha256: archive_digest.clone(),
                     bytes: archive.len() as u64,
-                    kind: "oci-archive".to_owned(),
+                    kind: DistributionObjectKind::OciArchive,
                 },
             ],
             oci_image_digest: format!("sha256:{}", "d".repeat(64)),
@@ -1962,13 +1932,13 @@ mod tests {
             name: "weights/model.bin".to_owned(),
             sha256: hex_sha256(model),
             bytes: model.len() as u64,
-            kind: "model".to_owned(),
+            kind: DistributionObjectKind::Model,
         };
         let archive_object = vonk_agent_protocol::DistributionObject {
             name: "image.oci.tar".to_owned(),
             sha256: hex_sha256(archive),
             bytes: archive.len() as u64,
-            kind: "oci-archive".to_owned(),
+            kind: DistributionObjectKind::OciArchive,
         };
         vonk_agent_protocol::DistributionAssignment {
             schema_version: 2,
@@ -2674,7 +2644,25 @@ mod tests {
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-            progress: serde_json::json!({"phase": "executing"}),
+            progress: OperationProgress {
+                phase: "executing".to_owned(),
+                completed_bytes: 0,
+                total_bytes: None,
+                total_bytes_known: false,
+                completed_items: None,
+                total_items: None,
+                object_sha256: None,
+                kind: None,
+                activity: None,
+                observed_at: None,
+                last_progress_at: None,
+                bytes_per_second: None,
+                smoothed_bytes_per_second: None,
+                eta_seconds: None,
+                elapsed_seconds: None,
+                checkpoint: None,
+                members: Vec::new(),
+            },
             schema_version: 1,
         }
     }
@@ -2753,7 +2741,18 @@ mod tests {
 
     #[tokio::test]
     async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
-        let payload = serde_json::json!({});
+        let payload = RecipeImageImportRequest {
+            build_id: Uuid::new_v4(),
+            image_bytes: 1,
+            image_digest: format!("sha256:{}", "b".repeat(64)),
+            kind: "image.import".to_owned(),
+            mapping_generation: 1,
+            mapping_id: Uuid::new_v4(),
+            oci_layout_sha256: "c".repeat(64),
+            schema_version: 1,
+            source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        };
+        let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
         let claim = AgentClaim {
             schema_version: 1,
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
@@ -2761,10 +2760,10 @@ mod tests {
             attempt: 1,
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.image.import.v1".to_owned(),
+            operation: AgentOperation::RecipeImageImportV1,
             authority_revision: "a".repeat(64),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload_digest,
+            payload: AgentClaimPayload::RecipeImageImportRequest(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
         let (client, server) = host_runtime_grant_client();
@@ -2874,8 +2873,26 @@ mod tests {
             schema_version: 1,
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
-                .unwrap(),
-            binding: binding.clone(),
+                .unwrap()
+                .into(),
+            artifact_set_digest: binding.artifact_set_digest.clone(),
+            image_digest: binding.image_digest.clone(),
+            installation_id: binding.installation_id,
+            local_address: binding.local_address,
+            mapping_generation: binding.mapping_generation,
+            mapping_id: binding.mapping_id,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            model_identity: binding.model_identity.clone(),
+            port: binding.port,
+            rank: binding.rank,
+            recipe_content_sha256: binding.recipe_content_sha256.clone(),
+            recipe_revision_id: binding.recipe_revision_id,
+            role: binding.role.clone(),
+            run_generation: u32::try_from(binding.run_generation).unwrap(),
+            run_id: binding.run_id,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
+            world_size: binding.world_size,
             endpoint_ready: None,
             grant: SignedHostHelperGrant {
                 schema_version: 1,
@@ -2886,15 +2903,18 @@ mod tests {
                     node_id: helper_receipt.claims.node_id.clone(),
                     issued_at: helper_receipt.claims.observed_at - 1,
                     expires_at: helper_receipt.claims.observed_at + 60,
-                    operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
-                        action: HostHelperContainerRuntimeAction::RunInspect,
-                        job_id: binding.run_id,
-                        operation_id: Uuid::new_v4(),
-                        attempt: binding.run_generation as u32,
-                        fence: Uuid::new_v4(),
-                        request_sha256: helper_receipt.claims.request_sha256.clone(),
-                        observation_identity_sha256: Some("e".repeat(64)),
-                    },
+                    operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                        ExecuteContainerRuntimeRequestOperation {
+                            action: HostHelperContainerRuntimeAction::RunInspect,
+                            type_: "execute-container-runtime-request".to_owned(),
+                            job_id: binding.run_id,
+                            operation_id: Uuid::new_v4(),
+                            attempt: binding.run_generation as u32,
+                            fence: Uuid::new_v4(),
+                            request_sha256: helper_receipt.claims.request_sha256.clone(),
+                            observation_identity_sha256: Some("e".repeat(64)),
+                        },
+                    ),
                 },
                 signature: HostHelperGrantSignature {
                     algorithm: "ed25519".to_owned(),
@@ -2991,7 +3011,7 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>(),
-            ["schema_version", "samples"]
+            ["samples", "schema_version"]
         );
         assert_eq!(body["schema_version"], 1);
         assert_eq!(body["samples"].as_array().unwrap().len(), 1);

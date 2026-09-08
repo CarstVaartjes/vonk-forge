@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from vonk_agent_protocol import (
     AgentProtocolError,
     TelemetryRequest,
@@ -17,6 +18,7 @@ from vonk_agent_protocol.telemetry import (
     MAX_TELEMETRY_SCALAR_INTEGER,
     MAX_TELEMETRY_SCALAR_STRING_CHARS,
     MIN_TELEMETRY_SCALAR_INTEGER,
+    TelemetryRuntime,
     validate_telemetry_scalar,
 )
 
@@ -253,3 +255,27 @@ def test_report_rejects_malformed_collection_shapes(path: tuple[object, ...]) ->
 
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
         TelemetryRequest.parse(malformed)
+
+
+@pytest.mark.parametrize("rank", [-1, 2**32, True])
+def test_runtime_rank_rejects_values_outside_native_placement_identity(rank: int) -> None:
+
+    value = {
+        "run_id": "run-1", "engine_id": "run-1", "backend": "future-engine",
+        "serving_node_ids": [], "ranks": [rank], "readiness": "unknown",
+        "adapter": "future-engine", "adapter_supported": False,
+        "adapter_reason": "No supported metrics contract",
+    }
+    with pytest.raises(ValidationError):
+        TelemetryRuntime.model_validate(value)
+
+
+def test_runtime_rank_preserves_native_placement_upper_bound() -> None:
+
+    value = TelemetryRuntime.model_validate({
+        "run_id": "run-1", "engine_id": "run-1", "backend": "future-engine",
+        "serving_node_ids": [], "ranks": [0, 2**32 - 1], "readiness": "unknown",
+        "adapter": "future-engine", "adapter_supported": False,
+        "adapter_reason": "No supported metrics contract",
+    })
+    assert value.ranks == [0, 2**32 - 1]

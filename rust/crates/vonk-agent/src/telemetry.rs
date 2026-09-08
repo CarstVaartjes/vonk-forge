@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::process::{ProcessRunner, Program};
+use crate::{
+    oci::OciRuntime,
+    process::{ProcessRunner, Program},
+};
 
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
@@ -32,13 +35,11 @@ const MAX_GPU_PROCESSES: usize = 5;
 const MAX_METRIC_SERIES: usize = 512;
 const MAX_CAPABILITIES: usize = 128;
 
-/// The exact wire envelope shared by batching and HTTP serialization.
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryRequest<'a> {
-    pub schema_version: u8,
-    pub samples: &'a [TelemetrySample],
-}
+use vonk_agent_protocol::generated::TelemetrySample as WireTelemetrySample;
+pub use vonk_agent_protocol::generated::{
+    TelemetryCapability, TelemetryDetails, TelemetryMetrics, TelemetryProvenance, TelemetryRequest,
+    TelemetryRuntime, TelemetrySeries, TelemetryWorkload,
+};
 
 #[derive(Debug, Error)]
 pub enum TelemetryError {
@@ -54,187 +55,48 @@ pub enum TelemetryError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct TelemetryDetails {
-    pub accelerator_name: Option<String>,
-    pub accelerator_performance_state: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetrySeries {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
-    pub key: String,
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub process_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interface_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    pub value: serde_json::Value,
-    pub unit: String,
-    pub source: String,
-    pub measurement_kind: String,
-    pub observed_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub received_at: Option<DateTime<Utc>>,
-    pub freshness: String,
-    pub freshness_threshold_seconds: f64,
-    pub support_status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    pub aggregation: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryCapability {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
-    pub key: String,
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interface_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    pub unit: String,
-    pub source: String,
-    pub measurement_kind: String,
-    pub supported: bool,
-    pub freshness_threshold_seconds: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryProvenance {
-    pub collector: String,
-    pub collector_version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_uptime_seconds: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_observed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryRuntime {
-    pub run_id: String,
-    pub engine_id: String,
-    pub backend: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe_revision: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_limit_tokens: Option<u64>,
-    pub serving_node_ids: Vec<String>,
-    pub ranks: Vec<u32>,
-    pub readiness: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    pub adapter: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub adapter_version: Option<String>,
-    pub adapter_supported: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub adapter_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryWorkload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub job_id: Option<String>,
-    pub run_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe_revision: Option<String>,
-    pub engine_id: String,
-    pub state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin_node_id: Option<String>,
-    pub executor_node_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime<Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<DateTime<Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ended_at: Option<DateTime<Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub elapsed_seconds: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress_value: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress_max: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub eta_seconds: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub eta_source: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryMetrics {
-    pub schema_version: u8,
-    pub series: Vec<TelemetrySeries>,
-    pub capabilities: Vec<TelemetryCapability>,
-    pub runtimes: Vec<TelemetryRuntime>,
-    pub workloads: Vec<TelemetryWorkload>,
-    pub provenance: TelemetryProvenance,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// A collected observation plus local counters used to derive the next sample.
+/// Only the canonical generated sample crosses persistence and HTTP boundaries.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
-    pub boot_id: Uuid,
-    pub sequence: i64,
-    pub observed_at: DateTime<Utc>,
-    pub cpu_utilization_percent: Option<f64>,
-    pub load_average_1m: Option<f64>,
-    pub memory_total_bytes: Option<u64>,
-    pub memory_available_bytes: Option<u64>,
-    pub disk_total_bytes: Option<u64>,
-    pub disk_free_bytes: Option<u64>,
-    pub gpu_utilization_percent: Option<f64>,
-    pub gpu_memory_total_bytes: Option<u64>,
-    pub gpu_memory_free_bytes: Option<u64>,
-    pub temperature_c: Option<f64>,
-    pub power_watts: Option<f64>,
-    pub network_receive_bytes_per_second: Option<f64>,
-    pub network_transmit_bytes_per_second: Option<f64>,
-    pub gap_samples: i64,
-    pub details: TelemetryDetails,
-    pub metrics: TelemetryMetrics,
-    #[serde(skip)]
+    wire: WireTelemetrySample,
     cpu_counters: Option<CpuCounters>,
-    #[serde(skip)]
     network_counters: Option<NetworkCounters>,
+}
+
+impl TelemetrySample {
+    pub fn wire(&self) -> &WireTelemetrySample {
+        &self.wire
+    }
+}
+
+impl std::ops::Deref for TelemetrySample {
+    type Target = WireTelemetrySample;
+    fn deref(&self) -> &Self::Target {
+        &self.wire
+    }
+}
+
+impl std::ops::DerefMut for TelemetrySample {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.wire
+    }
+}
+
+impl Serialize for TelemetrySample {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.wire.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TelemetrySample {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            wire: WireTelemetrySample::deserialize(deserializer)?,
+            cpu_counters: None,
+            network_counters: None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -593,37 +455,45 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
 
         self.last_observed_at = Some(observed_at);
         Ok(TelemetrySample {
-            boot_id: self.boot_id,
-            sequence,
-            observed_at,
-            cpu_utilization_percent,
-            load_average_1m,
-            memory_total_bytes: memory.map(|value| value.0),
-            memory_available_bytes: memory.map(|value| value.1),
-            disk_total_bytes: disk.map(|value| value.total_bytes),
-            disk_free_bytes: disk.map(|value| value.free_bytes),
-            gpu_utilization_percent: accelerator.as_ref().and_then(|value| value.utilization),
-            // GB10 exposes one physical unified pool.  Keep that capacity in
-            // the memory fields and only retain GPU-attributed allocation in
-            // the rich series so consumers cannot sum RAM and VRAM twice.
-            gpu_memory_total_bytes: dedicated_accelerator.and_then(|value| value.memory_total),
-            gpu_memory_free_bytes: dedicated_accelerator.and_then(|value| value.memory_free),
-            temperature_c: accelerator.as_ref().and_then(|value| value.temperature),
-            power_watts: accelerator.as_ref().and_then(|value| value.power),
-            network_receive_bytes_per_second,
-            network_transmit_bytes_per_second,
-            gap_samples: network_counter_gaps
-                .saturating_add(disk_counter_gaps)
-                .saturating_add(cpu_power_gap)
-                .saturating_add(runtime_counter_gaps)
-                .saturating_add(i64::from(cpu_counter_gap)),
-            details: accelerator
-                .map(|value| TelemetryDetails {
-                    accelerator_name: value.name.clone(),
-                    accelerator_performance_state: value.performance_state.clone(),
-                })
-                .unwrap_or_default(),
-            metrics,
+            wire: WireTelemetrySample {
+                boot_id: self.boot_id,
+                sequence: u64::try_from(sequence).map_err(|_| TelemetryError::SequenceExhausted)?,
+                observed_at: observed_at.fixed_offset(),
+                cpu_utilization_percent,
+                load_average_1m,
+                memory_total_bytes: memory.map(|value| value.0),
+                memory_available_bytes: memory.map(|value| value.1),
+                disk_total_bytes: disk.map(|value| value.total_bytes),
+                disk_free_bytes: disk.map(|value| value.free_bytes),
+                gpu_utilization_percent: accelerator.as_ref().and_then(|value| value.utilization),
+                // GB10 exposes one physical unified pool.  Keep that capacity in
+                // the memory fields and only retain GPU-attributed allocation in
+                // the rich series so consumers cannot sum RAM and VRAM twice.
+                gpu_memory_total_bytes: dedicated_accelerator.and_then(|value| value.memory_total),
+                gpu_memory_free_bytes: dedicated_accelerator.and_then(|value| value.memory_free),
+                temperature_c: accelerator.as_ref().and_then(|value| value.temperature),
+                power_watts: accelerator.as_ref().and_then(|value| value.power),
+                network_receive_bytes_per_second,
+                network_transmit_bytes_per_second,
+                gap_samples: u64::try_from(
+                    network_counter_gaps
+                        .saturating_add(disk_counter_gaps)
+                        .saturating_add(cpu_power_gap)
+                        .saturating_add(runtime_counter_gaps)
+                        .saturating_add(i64::from(cpu_counter_gap)),
+                )
+                .map_err(|_| TelemetryError::SequenceExhausted)?,
+                details: accelerator
+                    .map(|value| TelemetryDetails {
+                        accelerator_name: value.name.clone(),
+                        accelerator_performance_state: value.performance_state.clone(),
+                    })
+                    .unwrap_or(TelemetryDetails {
+                        accelerator_name: None,
+                        accelerator_performance_state: None,
+                    }),
+                metrics,
+            },
             cpu_counters,
             network_counters,
         })
@@ -873,30 +743,38 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         let mut runtimes = Vec::new();
         let mut gaps = 0_i64;
         for run_id in run_ids {
-            let path = self
-                .paths
-                .store
-                .join("run-metadata")
-                .join(&run_id)
-                .join("runtime.json");
-            let Some(document) = read_bounded_text(&path) else {
+            let runtime = OciRuntime {
+                runner: &self.runner,
+                data_root: &self.paths.store,
+                huggingface_curl_config: None,
+            };
+            let Ok(Some(plan)) = runtime.retained_telemetry_plan(&run_id) else {
                 continue;
             };
-            let Ok(contract) = serde_json::from_str::<RuntimeTelemetryContract>(&document) else {
+            let metadata = &plan.runtime.telemetry;
+            let adapter = metadata.engine.clone();
+            let Ok(rank) = u32::try_from(plan.runtime.placement.rank) else {
                 continue;
             };
-            if contract.run_id != run_id {
-                continue;
-            }
-            let adapter = contract
-                .adapter
-                .clone()
-                .unwrap_or_else(|| "unknown".to_owned());
-            let rank = contract.placement.as_ref().map_or(0, |value| value.rank);
-            let endpoint = known_runtime_endpoint(&adapter, contract.endpoint.as_ref());
+            let endpoint = plan.endpoint.as_ref().and_then(|_| {
+                let address = plan.runtime.placement.endpoint_address?;
+                let port = plan.runtime.placement.port?;
+                let path = metadata.metrics_path.as_deref()?;
+                let _format = metadata.metrics_format.as_ref()?;
+                Some(format!(
+                    "http://{}{path}",
+                    std::net::SocketAddr::new(address, port)
+                ))
+            });
+            let unavailable_reason = if metadata.metrics_format.is_none() {
+                "engine has no supported metrics contract"
+            } else if endpoint.is_none() {
+                "this rank has no published metrics endpoint"
+            } else {
+                "managed runtime metrics were not observed"
+            };
             let mut body = None;
-            if let Some((port, path)) = endpoint.as_ref() {
-                let url = format!("http://127.0.0.1:{port}{path}");
+            if let Some(url) = endpoint.as_ref() {
                 let arguments = vec![
                     "--silent".to_owned(),
                     "--show-error".to_owned(),
@@ -921,38 +799,41 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                     })
                     .map(|output| output.stdout);
             }
-            let (runtime_series, runtime_caps, runtime_ok, runtime_gaps) =
-                match (body.as_deref(), adapter.as_str()) {
-                    (Some(body), "comfyui") => {
-                        parse_comfy_runtime(body, &contract, rank, observed_at)
-                    }
-                    (Some(body), "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3") => {
-                        parse_prometheus_runtime(
-                            body,
-                            &contract,
-                            rank,
-                            observed_at,
-                            elapsed,
-                            &mut self.runtime_counters,
-                        )
-                    }
-                    _ => (
-                        Vec::new(),
-                        runtime_capabilities_for_run(
-                            &contract.run_id,
-                            Some("managed runtime metrics endpoint unavailable"),
-                        ),
-                        false,
-                        0,
-                    ),
-                };
+            let (runtime_series, runtime_caps, runtime_ok, runtime_gaps) = match (
+                body.as_deref(),
+                metadata.metrics_format.as_deref(),
+                adapter.as_str(),
+            ) {
+                (Some(body), Some("comfyui-queue"), "comfyui") => {
+                    parse_comfy_runtime(body, &run_id, rank, observed_at)
+                }
+                (
+                    Some(body),
+                    Some("prometheus"),
+                    "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3",
+                ) => parse_prometheus_runtime(
+                    body,
+                    &run_id,
+                    &adapter,
+                    rank,
+                    observed_at,
+                    elapsed,
+                    &mut self.runtime_counters,
+                ),
+                _ => (
+                    Vec::new(),
+                    runtime_capabilities_for_run(&run_id, Some(unavailable_reason)),
+                    false,
+                    0,
+                ),
+            };
             runtimes.push(TelemetryRuntime {
-                run_id: contract.run_id.clone(),
-                engine_id: contract.run_id.clone(),
+                run_id: run_id.clone(),
+                engine_id: run_id.clone(),
                 backend: adapter.clone(),
-                version: contract.adapter_version.map(|value| value.to_string()),
+                version: metadata.engine_version.clone(),
                 // Endpoint and model identity are Controller-owned launch
-                // metadata.  The agent uses the allowlisted loopback endpoint
+                // metadata. The agent uses only the compiled published endpoint
                 // internally, but does not echo it or recipe data upstream.
                 endpoint: None,
                 model: None,
@@ -961,13 +842,15 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 context_limit_tokens: None,
                 serving_node_ids: Vec::new(),
                 ranks: vec![rank],
-                readiness: if runtime_ok { "running" } else { "unknown" }.to_owned(),
-                error: (!runtime_ok).then_some("managed runtime metrics unavailable".to_owned()),
+                readiness: if runtime_ok { "running" } else { "unknown" }
+                    .parse()
+                    .expect("internal readiness"),
+                error: (!runtime_ok).then_some(unavailable_reason.to_owned()),
                 adapter: adapter.clone(),
-                adapter_version: contract.adapter_version.map(|value| value.to_string()),
+                // Engine version is not a telemetry adapter version.
+                adapter_version: None,
                 adapter_supported: runtime_ok,
-                adapter_reason: (!runtime_ok)
-                    .then_some("known local managed-runtime metrics were not observed".to_owned()),
+                adapter_reason: (!runtime_ok).then_some(unavailable_reason.to_owned()),
             });
             series.extend(runtime_series);
             capabilities.extend(runtime_caps);
@@ -979,32 +862,6 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
 
 const MAX_MANAGED_RUNTIME_ENTRIES: usize = 64;
 
-/// Only the agent-owned runtime contract is read. It is written when the
-/// Controller-authorized run starts and never comes from an arbitrary URL.
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryContract {
-    run_id: String,
-    #[serde(default)]
-    adapter: Option<String>,
-    #[serde(default)]
-    adapter_version: Option<u32>,
-    #[serde(default)]
-    endpoint: Option<RuntimeTelemetryEndpoint>,
-    #[serde(default)]
-    placement: Option<RuntimeTelemetryPlacement>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryEndpoint {
-    listen_port: u16,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimeTelemetryPlacement {
-    #[serde(default)]
-    rank: u32,
-}
-
 #[derive(Debug, Clone)]
 struct PrometheusSample {
     name: String,
@@ -1014,21 +871,6 @@ struct PrometheusSample {
 
 fn canonical_runtime_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|uuid| !uuid.is_nil() && uuid.to_string() == value)
-}
-
-fn known_runtime_endpoint(
-    adapter: &str,
-    endpoint: Option<&RuntimeTelemetryEndpoint>,
-) -> Option<(u16, &'static str)> {
-    let path = match adapter {
-        "vllm" | "sglang" | "llama-cpp" | "ds4" | "exl3" => "/metrics",
-        // The managed Comfy adapter owns this endpoint and exposes queue
-        // identity without requiring a broad runtime or port scan.
-        "comfyui" => "/queue",
-        _ => return None,
-    };
-    let port = endpoint?.listen_port;
-    (1024..=65_535).contains(&port).then_some((port, path))
 }
 
 fn parse_prometheus_samples(value: &[u8]) -> Vec<PrometheusSample> {
@@ -1544,7 +1386,8 @@ fn normalize_percent(value: Option<f64>) -> Option<f64> {
 
 fn parse_prometheus_runtime(
     value: &[u8],
-    contract: &RuntimeTelemetryContract,
+    run_id: &str,
+    adapter: &str,
     rank: u32,
     observed_at: DateTime<Utc>,
     elapsed: Option<f64>,
@@ -1555,7 +1398,6 @@ fn parse_prometheus_runtime(
     let mut capabilities = Vec::new();
     let mut recognized = false;
     let mut gaps = 0_i64;
-    let adapter = contract.adapter.as_deref().unwrap_or("");
     for (key, _, _) in runtime_metric_capabilities() {
         let reading = runtime_metric_reading(adapter, key, &samples);
         let mut metric = reading.value;
@@ -1590,7 +1432,7 @@ fn parse_prometheus_runtime(
         }
         let raw_available = metric.is_some();
         if let Some(counter_key) = reading.counter_key {
-            let state_key = format!("{}:{rank}:{counter_key}", contract.run_id);
+            let state_key = format!("{}:{rank}:{counter_key}", run_id);
             metric = metric.and_then(|current| {
                 let previous = counters.insert(state_key, current);
                 let previous = previous?;
@@ -1609,7 +1451,7 @@ fn parse_prometheus_runtime(
         let reason = (!raw_available).then_some("metric was not exposed by the managed runtime");
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             reading.unit,
             reading.measurement_kind,
@@ -1619,7 +1461,7 @@ fn parse_prometheus_runtime(
         if let Some(metric) = metric {
             add_runtime_number(
                 &mut series,
-                &contract.run_id,
+                run_id,
                 rank,
                 key,
                 metric,
@@ -1652,17 +1494,14 @@ fn comfy_queue_value(value: &serde_json::Value, names: &[&str]) -> Option<f64> {
 
 fn parse_comfy_runtime(
     value: &[u8],
-    contract: &RuntimeTelemetryContract,
+    run_id: &str,
     rank: u32,
     observed_at: DateTime<Utc>,
 ) -> (Vec<TelemetrySeries>, Vec<TelemetryCapability>, bool, i64) {
     let Ok(document) = serde_json::from_slice::<serde_json::Value>(value) else {
         return (
             Vec::new(),
-            runtime_capabilities_for_run(
-                &contract.run_id,
-                Some("ComfyUI queue response was invalid"),
-            ),
+            runtime_capabilities_for_run(run_id, Some("ComfyUI queue response was invalid")),
             false,
             0,
         );
@@ -1684,7 +1523,7 @@ fn parse_comfy_runtime(
     for (key, value) in values {
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             "requests",
             "measured",
@@ -1694,7 +1533,7 @@ fn parse_comfy_runtime(
         if let Some(value) = value {
             add_runtime_number(
                 &mut series,
-                &contract.run_id,
+                run_id,
                 rank,
                 key,
                 value,
@@ -1711,7 +1550,7 @@ fn parse_comfy_runtime(
         }
         add_runtime_capability(
             &mut capabilities,
-            &contract.run_id,
+            run_id,
             key,
             unit,
             kind,
@@ -1758,7 +1597,7 @@ impl TelemetryQueue {
             batch.push(sample.clone());
             let request = TelemetryRequest {
                 schema_version: 1,
-                samples: &batch,
+                samples: batch.iter().map(|sample| sample.wire().clone()).collect(),
             };
             if batch.len() > 1
                 && serde_json::to_vec(&request)
@@ -1846,10 +1685,11 @@ pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
     let mut previous_observed_at = None;
     let mut boot_heads = std::collections::BTreeMap::new();
     for sample in samples {
+        let observed_at = sample.observed_at;
         if sample.boot_id.is_nil()
-            || sample.sequence < 0
-            || sample.gap_samples < 0
-            || previous_observed_at.is_some_and(|previous| sample.observed_at <= previous)
+            || sample.sequence > i64::MAX as u64
+            || sample.gap_samples > i64::MAX as u64
+            || previous_observed_at.is_some_and(|previous| observed_at <= previous)
             || !valid_optional_number(sample.cpu_utilization_percent, 0.0, 100.0)
             || !valid_optional_number(sample.load_average_1m, 0.0, 1_000_000.0)
             || !valid_optional_capacity_pair(
@@ -1886,7 +1726,7 @@ pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
         {
             return false;
         }
-        previous_observed_at = Some(sample.observed_at);
+        previous_observed_at = Some(observed_at);
     }
     true
 }
@@ -1920,7 +1760,7 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
     for series in &metrics.series {
         let identity = (
             series.key.as_str(),
-            series.scope.as_str(),
+            &*series.scope,
             series.device_id.as_deref(),
             series.process_id,
             series.interface_name.as_deref(),
@@ -1931,15 +1771,15 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         }
         if !valid_metric_identity(
             &series.key,
-            &series.scope,
+            &*series.scope,
             series.device_id.as_deref(),
             series.interface_name.as_deref(),
             series.run_id.as_deref(),
         ) || !valid_metric_text(&series.unit, 32)
             || !valid_metric_text(&series.source, 128)
-            || !valid_metric_text(&series.measurement_kind, 16)
-            || !valid_metric_text(&series.freshness, 16)
-            || !valid_metric_text(&series.support_status, 16)
+            || !valid_metric_text(&*series.measurement_kind, 16)
+            || !valid_metric_text(&*series.freshness, 16)
+            || !valid_metric_text(&*series.support_status, 16)
             || !valid_metric_text(&series.aggregation, 32)
             || !valid_optional_text(series.reason.as_deref(), 256)
             || !series.freshness_threshold_seconds.is_finite()
@@ -1949,14 +1789,14 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         {
             return false;
         }
-        let available = series.support_status == "available";
+        let available = &*series.support_status == "available";
         if (available && series.reason.is_some()) || (!available && series.reason.is_none()) {
             return false;
         }
-        if series.scope == "accelerator" && series.device_id.is_none()
-            || series.scope == "storage" && series.device_id.is_none()
-            || series.scope == "network" && series.interface_name.is_none()
-            || matches!(series.scope.as_str(), "runtime" | "workload" | "benchmark")
+        if &*series.scope == "accelerator" && series.device_id.is_none()
+            || &*series.scope == "storage" && series.device_id.is_none()
+            || &*series.scope == "network" && series.interface_name.is_none()
+            || matches!(&*series.scope, "runtime" | "workload" | "benchmark")
                 && series.run_id.is_none()
             || series.process_id == Some(0)
             || !valid_optional_text(series.process_name.as_deref(), 128)
@@ -1968,7 +1808,7 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
     for capability in &metrics.capabilities {
         let identity = (
             capability.key.as_str(),
-            capability.scope.as_str(),
+            &*capability.scope,
             capability.device_id.as_deref(),
             capability.process_id,
             capability.interface_name.as_deref(),
@@ -1979,13 +1819,13 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         }
         if !valid_metric_identity(
             &capability.key,
-            &capability.scope,
+            &*capability.scope,
             capability.device_id.as_deref(),
             capability.interface_name.as_deref(),
             capability.run_id.as_deref(),
         ) || !valid_metric_text(&capability.unit, 32)
             || !valid_metric_text(&capability.source, 128)
-            || !valid_metric_text(&capability.measurement_kind, 16)
+            || !valid_metric_text(&*capability.measurement_kind, 16)
             || !valid_optional_text(capability.reason.as_deref(), 256)
             || capability.process_id == Some(0)
             || !valid_optional_text(capability.process_name.as_deref(), 128)
@@ -1997,9 +1837,9 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         }
         if (capability.supported && capability.reason.is_some())
             || (!capability.supported && capability.reason.is_none())
-            || capability.scope == "accelerator" && capability.device_id.is_none()
-            || capability.scope == "storage" && capability.device_id.is_none()
-            || capability.scope == "network" && capability.interface_name.is_none()
+            || &*capability.scope == "accelerator" && capability.device_id.is_none()
+            || &*capability.scope == "storage" && capability.device_id.is_none()
+            || &*capability.scope == "network" && capability.interface_name.is_none()
         {
             return false;
         }
@@ -2238,7 +2078,8 @@ fn network_rates(
     let Some(current) = current else {
         return (None, None);
     };
-    let Ok(elapsed) = (observed_at - previous.observed_at).to_std() else {
+    let previous_at = previous.observed_at;
+    let Ok(elapsed) = (observed_at - previous_at.with_timezone(&Utc)).to_std() else {
         return (None, None);
     };
     let elapsed = elapsed.as_secs_f64();
@@ -2386,7 +2227,7 @@ fn series_base(
     TelemetrySeries {
         node_id: None,
         key: identity.key.to_owned(),
-        scope: identity.scope.to_owned(),
+        scope: identity.scope.parse().expect("internal metric scope"),
         device_id: identity.device_id.map(str::to_owned),
         process_id: None,
         process_name: None,
@@ -2395,12 +2236,15 @@ fn series_base(
         value,
         unit: context.unit.to_owned(),
         source: metric_source(identity.key, identity.scope).to_owned(),
-        measurement_kind: context.measurement_kind.to_owned(),
-        observed_at: context.observed_at,
+        measurement_kind: context
+            .measurement_kind
+            .parse()
+            .expect("internal measurement kind"),
+        observed_at: context.observed_at.fixed_offset(),
         received_at: None,
-        freshness: "fresh".to_owned(),
+        freshness: "fresh".parse().expect("internal freshness"),
         freshness_threshold_seconds: 6.0,
-        support_status: "available".to_owned(),
+        support_status: "available".parse().expect("internal support status"),
         reason: None,
         aggregation: context.aggregation.to_owned(),
     }
@@ -2439,7 +2283,7 @@ fn capability(
     TelemetryCapability {
         node_id: None,
         key: identity.key.to_owned(),
-        scope: identity.scope.to_owned(),
+        scope: identity.scope.parse().expect("internal metric scope"),
         device_id: identity.device_id.map(str::to_owned),
         process_id: None,
         process_name: None,
@@ -2447,7 +2291,10 @@ fn capability(
         run_id: identity.run_id.map(str::to_owned),
         unit: context.unit.to_owned(),
         source: metric_source(identity.key, identity.scope).to_owned(),
-        measurement_kind: context.measurement_kind.to_owned(),
+        measurement_kind: context
+            .measurement_kind
+            .parse()
+            .expect("internal measurement kind"),
         supported,
         freshness_threshold_seconds: 6.0,
         reason: reason.map(str::to_owned),
@@ -2509,6 +2356,7 @@ fn parse_gpu_processes(value: &[u8]) -> Vec<GpuProcessReading> {
             continue;
         };
         if pid == 0
+            || pid > i32::MAX as u32
             || device_id.is_empty()
             || device_id.chars().count() > 128
             || name_field.is_empty()
@@ -2734,7 +2582,7 @@ fn read_uptime_seconds(path: &Path) -> Option<u64> {
         .next()?
         .parse::<f64>()
         .ok()?;
-    (value.is_finite() && value >= 0.0).then_some(value as u64)
+    (value.is_finite() && (0.0..i64::MAX as f64).contains(&value)).then_some(value as u64)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3222,7 +3070,7 @@ fn build_metrics(
             collector: "vonk-native".to_owned(),
             collector_version: "2".to_owned(),
             host_uptime_seconds: uptime_seconds,
-            source_observed_at: Some(observed_at),
+            source_observed_at: Some(observed_at.fixed_offset()),
         },
     }
 }

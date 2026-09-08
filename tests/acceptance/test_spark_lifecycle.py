@@ -2273,8 +2273,20 @@ class SparkLifecycle:
             "ORDER BY o.updated_at DESC LIMIT 1) a ON true "
             f"WHERE j.id='{operation_id}' ORDER BY r.key LIMIT 2"
         )
+        pending_query = (
+            "SELECT json_build_object('node_id',j.result::jsonb->'preflight'->>'pending_node_id',"
+            "'pending_job_id',child.id,'child_state',child.state,"
+            "'attempt_state',t.state,'lease_deadline',t.lease_deadline,"
+            "'progress_phase',t.progress::jsonb->>'phase') FROM jobs j "
+            "JOIN jobs child ON child.id=j.result::jsonb->'preflight'->>'pending_job_id' "
+            "LEFT JOIN agent_operations o ON o.parent_job_id=child.id "
+            "LEFT JOIN agent_operation_attempts t ON t.operation_id=o.id "
+            "AND t.attempt=o.current_attempt "
+            f"WHERE j.id='{operation_id}' AND child.state!='succeeded' LIMIT 1"
+        )
         try:
-            return [json.loads(row[0]) for row in self._psql(query) if len(row) == 1]
+            rows = self._psql(query) + self._psql(pending_query)
+            return [json.loads(row[0]) for row in rows if len(row) == 1]
         except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
             return [{"diagnostic": "preflight evidence unavailable"}]
 

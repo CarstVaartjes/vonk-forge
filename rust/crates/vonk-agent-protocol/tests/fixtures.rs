@@ -60,8 +60,7 @@ fn enrollment_evidence_rejects_invalid_observation_receipt_public_key() {
         .remove("observation_receipt_public_key");
     assert!(parse_strict::<EnrollmentRequest>(&canonical_json(&missing).unwrap()).is_err());
     value["evidence"]["observation_receipt_public_key"] = Value::String("A".repeat(64));
-    let enrollment: EnrollmentRequest = parse_strict(&canonical_json(&value).unwrap()).unwrap();
-    assert!(enrollment.evidence.validate().is_err());
+    assert!(parse_strict::<EnrollmentRequest>(&canonical_json(&value).unwrap()).is_err());
 }
 
 #[test]

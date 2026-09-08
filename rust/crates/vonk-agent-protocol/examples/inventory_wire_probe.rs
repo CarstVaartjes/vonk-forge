@@ -1,12 +1,10 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use vonk_agent_protocol::InventoryRequest;
 
 fn main() {
     let request = InventoryRequest {
         schema_version: 1,
-        observed_at: DateTime::parse_from_rfc3339("2026-08-03T00:00:00Z")
-            .expect("probe timestamp")
-            .with_timezone(&Utc),
+        observed_at: DateTime::parse_from_rfc3339("2026-08-03T00:00:00Z").expect("probe timestamp"),
         disk_total_bytes: 16 * 1024 * 1024 * 1024,
         disk_free_bytes: 12 * 1024 * 1024 * 1024,
         host_memory_total_bytes: 64 * 1024 * 1024 * 1024,

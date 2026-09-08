@@ -72,7 +72,7 @@ fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
     let root = tempdir().unwrap();
     let mut installed = schema2_dual_plan();
     installed.topology.name = "solo".into();
-    installed.topology.mode = "single".into();
+    installed.topology.mode = "single".parse().unwrap();
     installed.topology.backend = "local".into();
     installed.topology.node_count = 1;
     installed.topology.world_size = 1;
@@ -85,14 +85,14 @@ fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
     installed.runtime.placement.local_address = None;
     installed.runtime.placement.master_address = None;
     installed.runtime.placement.master_port = None;
-    installed.security.network_mode = "none".into();
+    installed.security.network_mode = "none".parse().unwrap();
     installed.validate().unwrap();
     persist_plan(root.path(), &installed);
 
     let mut started = installed.clone();
     started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
     started.runtime.placement.reserved_memory_bytes += 1024;
-    started.security.network_mode = "bridge".into();
+    started.security.network_mode = "bridge".parse().unwrap();
     started.validate().unwrap();
     let runtime = OciRuntime {
         runner: &NoProcess,
@@ -352,7 +352,7 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
     plan.runtime.placement.local_address = None;
     plan.runtime.placement.master_address = None;
     plan.runtime.placement.master_port = None;
-    plan.security.network_mode = "none".to_owned();
+    plan.security.network_mode = "none".parse().unwrap();
     plan.validate().unwrap();
     assert!(plan.runtime.placement.validate_bound().is_err());
     let bound = schema2_dual_plan();

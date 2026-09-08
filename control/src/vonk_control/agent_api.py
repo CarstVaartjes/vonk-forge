@@ -79,6 +79,7 @@ from .compiled_execution_plan import (
     validate_compiled_launch_payload,
 )
 from .distribution import DistributionError, DistributionService
+from .download_contract import download_responses
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -1855,7 +1856,12 @@ def install_agent_routes(
             grant=SignedHostHelperGrant.parse(grant.to_mapping()),
         )
 
-    @agent.get("/source-bundles/{source_sha256}")
+    @agent.get(
+        "/source-bundles/{source_sha256}",
+        response_class=Response,
+        responses=download_responses("application/vnd.vonk-forge.source-bundle.v1+tar"),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def source_bundle(source_sha256: str, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2443,7 +2449,12 @@ def install_agent_routes(
             await asyncio.to_thread(_unlink_if_present, temporary)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.get("/artifacts/{sha256}")
+    @agent.get(
+        "/artifacts/{sha256}",
+        response_class=Response,
+        responses=download_responses("application/octet-stream", partial=True),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def artifact(sha256: str, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2536,6 +2547,9 @@ def install_agent_routes(
     @agent.get(
         "/distribution/objects/{sha256}",
         operation_id="downloadAgentDistributionObject",
+        response_class=Response,
+        responses=download_responses("application/octet-stream", partial=True),
+        openapi_extra={"x-vonk-streaming-transport": True},
     )
     def distribution_object(sha256: str, request: Request) -> Response:
         """Stream one assigned immutable object with safe single-range resume."""
@@ -2602,7 +2616,12 @@ def install_agent_routes(
             media_type="application/octet-stream",
         )
 
-    @agent.get("/workload-tuf/metadata/{name}")
+    @agent.get(
+        "/workload-tuf/metadata/{name}",
+        response_class=Response,
+        responses=download_responses("application/json"),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def workload_tuf_metadata(name: str, request: Request) -> Response:
         """Deliver only workload trust metadata over the node mTLS boundary."""
         _scope_identity(request)
@@ -2621,7 +2640,12 @@ def install_agent_routes(
             headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
         )
 
-    @agent.get("/workload-tuf/targets/{name:path}")
+    @agent.get(
+        "/workload-tuf/targets/{name:path}",
+        response_class=Response,
+        responses=download_responses("application/octet-stream"),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def workload_tuf_target(name: str, request: Request) -> Response:
         """Deliver one digest-addressed workload lock, never model payloads."""
         _scope_identity(request)

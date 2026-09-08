@@ -1,3 +1,4 @@
+import {ApiError} from "../api/client";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {expect, test, vi} from "vitest";
 import {minimalLibraryDetail} from "../test-fixtures/library";
@@ -60,10 +61,13 @@ test("starts one aggregate operation and uses the explicit Model access resume r
 
 test("offers a live status refresh after a durable status load error", async () => {
   const list = vi.fn()
-    .mockRejectedValueOnce(new Error("Controller temporarily unavailable"))
+    .mockRejectedValueOnce(new ApiError(503, "Controller temporarily unavailable; token=secret-value"))
     .mockResolvedValueOnce({schema_version: 2, operations: [], total: 0, next_cursor: null});
   render(<LibraryRecipeAvailability api={{recipeAvailabilityList: list, recipeAvailabilityStart: vi.fn(async () => operation()), recipeAvailabilityOperation: vi.fn(async () => operation())} as never} detail={minimalLibraryDetail}/>);
   await screen.findByRole("button", {name: "Refresh availability status"});
+  expect(screen.getByRole("alert")).toHaveTextContent("Controller temporarily unavailable; token=<redacted>");
+  expect(screen.queryByRole("region", {name: "Recipe availability operation"})).not.toBeInTheDocument();
+  expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "Refresh availability status"}));
   await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   expect(await screen.findByRole("button", {name: "Make available"})).toBeVisible();

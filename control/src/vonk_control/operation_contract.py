@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     normalize_operation_progress,
 )
+from vonk_agent_protocol.contracts import AgentFailureResult
 
 from .logging import redact_text
 
@@ -87,6 +88,7 @@ class AvailabilityOperationFailure(BaseModel):
     required_bytes: int | None = Field(default=None, ge=0)
     free_bytes: int | None = Field(default=None, ge=0)
     shortfall_bytes: int | None = Field(default=None, ge=0)
+    artifact_key: str | None = Field(default=None, min_length=1, max_length=256)
 
     @field_validator("recovery_actions", mode="before")
     @classmethod
@@ -141,6 +143,9 @@ class AvailabilityOperationFailure(BaseModel):
                     "shortfall_bytes does not match required and free bytes"
                 )
         return self
+
+
+OperationFailure = AgentFailureResult | AvailabilityOperationFailure | OperationFailureEvidence
 
 
 class OperationEvidenceProvenance(BaseModel):

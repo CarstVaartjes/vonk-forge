@@ -18,6 +18,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import (
     BaseModel,
     Field,
+    RootModel,
     TypeAdapter,
     ValidationError,
     model_validator,
@@ -327,9 +328,51 @@ def canonical_message(value: Any) -> bytes:
         raise AgentProtocolError("message must contain JSON values") from error
 
 
+def _model_field_to_wire(original: Any, serialized: Any) -> Any:
+    """Retain nested model metadata after Pydantic applies field serializers."""
+    if isinstance(original, RootModel):
+        return _model_field_to_wire(original.root, serialized)
+    if isinstance(original, BaseModel) and isinstance(serialized, Mapping):
+        return _model_to_wire(original, serialized)
+    if isinstance(original, Mapping) and isinstance(serialized, Mapping):
+        return {
+            str(key): _model_field_to_wire(original[key], item)
+            for key, item in serialized.items()
+        }
+    if isinstance(original, (tuple, list)) and isinstance(serialized, (tuple, list)):
+        return [
+            _model_field_to_wire(source, item)
+            for source, item in zip(original, serialized, strict=True)
+        ]
+    return _to_wire(serialized)
+
+
+def _model_to_wire(value: BaseModel, document: Mapping[str, Any]) -> dict[str, Any]:
+    fields = {
+        (field.serialization_alias or name)
+        if value.model_config.get("serialize_by_alias", False)
+        else name: (name, field)
+        for name, field in type(value).model_fields.items()
+    }
+    result = {}
+    for name, item in document.items():
+        declared = fields.get(name)
+        if declared is not None:
+            attribute, field = declared
+            if not field.is_required() and field.default is None and item is None:
+                continue
+            result[name] = _model_field_to_wire(getattr(value, attribute), item)
+        else:
+            # Declared extension data has its own meaning; null is not absence.
+            result[name] = _to_wire(item)
+    return result
+
+
 def _to_wire(value: Any) -> Any:
+    if isinstance(value, RootModel):
+        return _model_field_to_wire(value.root, value.model_dump(mode="json"))
     if isinstance(value, BaseModel):
-        return _to_wire(value.model_dump(mode="python", exclude_unset=True))
+        return _model_to_wire(value, value.model_dump(mode="json"))
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, datetime):
@@ -400,7 +443,7 @@ def _validate_safe_keys(
                 and key == "name"
             )
             typed_compiled_plan_key = (
-                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
                 and path[:1] == ("compiled_execution_plan",)
             )
             if _is_path_key(key) and not (
@@ -477,7 +520,7 @@ def _validate_safe_keys(
                 and _typed_result_string(path, value)
             )
         ) or (
-            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
             and path[:1] == ("compiled_execution_plan",)
         ):
             return
@@ -569,8 +612,6 @@ def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
                 value,
             )
         )
-    if path and path[0] == "parameters":
-        return len(value.encode("utf-8")) <= 4096 and "\x00" not in value
     return False
 
 
@@ -865,6 +906,19 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupPayload,
 }
 
+
+def canonical_payload(operation: AgentOperation | str, payload: Any) -> bytes:
+    """Validate the selected current payload model before canonical hashing."""
+    try:
+        kind = AgentOperation(operation)
+        model = PAYLOAD_MODELS[kind]
+        document = payload.model_dump(mode="python") if isinstance(payload, BaseModel) else payload
+        typed = model.model_validate(document)
+    except (KeyError, TypeError, ValueError) as error:
+        raise AgentProtocolError("operation protocol payload is invalid") from error
+    return canonical_message(typed)
+
+
 # Result validation is contextual because the result envelope deliberately
 # carries no operation discriminator.  Keep this registry alongside the
 # payload registry so Controller ingress can resolve the stored operation and
@@ -938,7 +992,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     operation: AgentOperation
@@ -982,7 +1036,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
-            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
             else MAX_DOCUMENT_BYTES
         )
         payload = _validate_bounded_document(
@@ -1013,7 +1067,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
                     maximum_bytes=(
                         MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
                         if operation_kind
-                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
                         else MAX_DOCUMENT_BYTES
                     ),
                 )
@@ -1028,7 +1082,7 @@ class AgentProgress(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
@@ -1080,7 +1134,7 @@ class AgentDirective(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
@@ -1120,7 +1174,7 @@ class AgentResult(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime

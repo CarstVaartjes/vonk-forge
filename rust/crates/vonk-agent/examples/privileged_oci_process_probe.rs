@@ -107,21 +107,26 @@ fn main() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    let operation = HostOperation::ExecuteContainerRuntimeRequest {
-        action: match action {
-            HostRuntimeAction::ImageImport => {
-                vonk_agent_helper::protocol::ContainerRuntimeAction::ImageImport
-            }
-            HostRuntimeAction::Start => vonk_agent_helper::protocol::ContainerRuntimeAction::Start,
-            _ => unreachable!(),
+    let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
+        vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+            type_: "execute-container-runtime-request".into(),
+            action: match action {
+                HostRuntimeAction::ImageImport => {
+                    vonk_agent_helper::protocol::ContainerRuntimeAction::ImageImport
+                }
+                HostRuntimeAction::Start => {
+                    vonk_agent_helper::protocol::ContainerRuntimeAction::Start
+                }
+                _ => unreachable!(),
+            },
+            job_id,
+            operation_id,
+            attempt: 1,
+            fence,
+            request_sha256: request_sha.clone(),
+            observation_identity_sha256: None,
         },
-        job_id,
-        operation_id,
-        attempt: 1,
-        fence,
-        request_sha256: request_sha.clone(),
-        observation_identity_sha256: None,
-    };
+    );
     let claims = GrantClaims {
         schema_version: 1,
         authority: AUTHORITY.to_owned(),
