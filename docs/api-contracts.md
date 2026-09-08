@@ -298,3 +298,37 @@ and semantic validation; schema equality alone does not prove runtime behavior.
 
 These checks establish source and interface consistency. Publication, Controller
 deployment and physical Spark execution remain separate verification steps.
+
+## Discovered HTTP completeness gate
+
+`scripts/tests/check_api_contract_completeness.py` constructs both supported
+browser-auth configurations and discovers mounted FastAPI routes, including
+child applications. Every operation must have an OpenAPI declaration; hidden
+or opaque transports fail rather than disappearing from the inventory. The
+report records canonical model owners, path/query/header/cookie parameters,
+request media and successful response media. Agent artifact streams and metrics
+belong to this full transport inventory; the admin client schema still excludes
+agent routes and metrics.
+
+Ordinary JSON bodies use FastAPI's typed bindings. A bounded raw JSON reader
+uses `raw_json_body` with its existing canonical model, and its declaration must
+match that model. Raw uploads declare bytes, without changing their runtime
+limits or parsing. Mutating handlers that accept a raw Request but no body
+explicitly declare `x-vonk-request-body: none`; this prevents a delegated reader
+from silently avoiding body classification. Exact-byte responses declare their
+streaming transport. No-content responses remain explicitly bodyless.
+
+The wire exporter derives API-owned models from these actual agent bindings,
+including declared error responses, instead of maintaining a separate model
+name list. Fully qualified owners and referenced definitions are checked against
+the generated export. Protocol module discovery still supplies internal models.
+The required Controller/Spark CI lane runs discovery, schema freshness and
+mutation tests that add hidden routes, omit exports and misdeclare raw bodies.
+
+This first gate proves declaration coverage and model ownership. It does not
+prove that every handler emitted a valid successful response, every client used
+its generated parser, or every database/file handoff preserved meaning. The
+next gate must collect real ASGI producer/consumer witnesses and join them back
+to this discovered operation inventory, then apply independent SQLAlchemy and
+runtime-I/O discovery to persistence. Engine-owned extension values and signed
+passthrough bytes keep their declared semantics.

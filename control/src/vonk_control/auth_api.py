@@ -153,6 +153,7 @@ def install_auth_routes(
         response_model=None,
         responses=bounded_error_responses(401, 403),
         operation_id="logoutBrowser",
+        openapi_extra={"x-vonk-request-body": "none"},
     )
     def logout(
         request: Request,

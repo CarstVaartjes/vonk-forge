@@ -18,6 +18,7 @@ from .catalog_service import (
     CatalogService,
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
+from .download_contract import upload_request_body
 from .library_contract import Digest, UuidId
 from .recipe_library_types import RecipeLibraryError
 from .strict_json import StrictJSONModel
@@ -285,6 +286,9 @@ def install_catalog_routes(
             422: {"model": CatalogProblem},
         },
         operation_id="uploadRecipeSourceBundle",
+        openapi_extra=upload_request_body(
+            "application/vnd.vonk-forge.source-bundle.v1+tar"
+        ),
     )
     async def upload_source_bundle(
         request: Request,

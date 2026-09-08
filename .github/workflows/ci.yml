@@ -256,6 +256,10 @@ jobs:
         run: >-
           uv run --project control --frozen --with-editable .
           python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Discover every mounted API contract and exported agent root
+        run: |
+          uv run --project control --frozen --with-editable . python scripts/tests/check_api_contract_completeness.py
+          uv run --project control --frozen --with-editable . pytest -q control/tests/test_api_contract_completeness.py control/tests/test_api_contract_graph.py
       - name: Check generated Rust wire contracts
         run: >-
           uv run --project control --frozen --with-editable .

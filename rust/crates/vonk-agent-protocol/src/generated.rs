@@ -666,6 +666,12 @@ pub struct ArtifactDistributionResult {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct BoundedErrorResponse {
+    pub detail: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct ClaimRequest {
     pub capabilities: ::std::vec::Vec<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -4381,6 +4387,22 @@ pub struct RenewRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RequestValidationIssue {
+    pub loc: ::std::vec::Vec<::serde_json::Value>,
+    pub msg: ::std::string::String,
+    #[serde(rename = "type")]
+    pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RequestValidationProblem {
+    pub detail: ::std::string::String,
+    pub issues: ::std::vec::Vec<RequestValidationIssue>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct Resolver {
     pub name: ::std::string::String,
     pub version: u32,
@@ -6587,6 +6609,21 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
             verified_image_digest: raw.verified_image_digest,
             verified_oci_layout_sha256: raw.verified_oci_layout_sha256,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("BoundedErrorResponse", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub detail: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self { detail: raw.detail })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
@@ -11098,6 +11135,47 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RequestValidationIssue", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub loc: ::std::vec::Vec<::serde_json::Value>,
+            pub msg: ::std::string::String,
+            #[serde(rename = "type")]
+            pub type_: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            loc: raw.loc,
+            msg: raw.msg,
+            type_: raw.type_,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RequestValidationProblem", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub detail: ::std::string::String,
+            pub issues: ::std::vec::Vec<RequestValidationIssue>,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            detail: raw.detail,
+            issues: raw.issues,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for Resolver {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -12617,6 +12695,13 @@ impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
             run_id: value.run_id,
             runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
             world_size: value.world_size,
+        }
+    }
+}
+impl From<&RequestValidationProblem> for BoundedErrorResponse {
+    fn from(value: &RequestValidationProblem) -> Self {
+        Self {
+            detail: value.detail.clone(),
         }
     }
 }
