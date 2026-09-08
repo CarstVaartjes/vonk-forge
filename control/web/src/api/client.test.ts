@@ -82,7 +82,7 @@ it("uses canonical Activity and linked application retry endpoints with stable r
     return new Response(JSON.stringify(result), {headers: {"Content-Type": "application/json"}});
   });
   const api = new ApiClient();
-  expect((await api.operations("next-page")).operations[0]?.failure?.detail).toBe("Spark is offline");
+  expect((await api.operations("next-page")).operations[0]?.failure).toEqual(operation.failure);
   expect((await api.operation(oldId)).id).toBe(oldId);
   expect((await api.retryFleetProfileApplication(oldId, {request_key: requestKey})).id).toBe(newId);
   const abort = new AbortController();
