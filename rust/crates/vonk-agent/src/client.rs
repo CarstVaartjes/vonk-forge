@@ -102,11 +102,11 @@ pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
 /// Validate and construct the one current snapshot envelope used by both the
 /// production executor and the Linux wire probe.
-pub fn build_exact_recipe_run_observations<'a>(
+pub fn build_exact_recipe_run_observations(
     node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
-    observations: &'a [ExactRecipeRunObservation],
-) -> Result<RecipeRunObservationsWire<'a>, ClientError> {
+    observations: &[ExactRecipeRunObservation],
+) -> Result<RecipeRunObservationsWire, ClientError> {
     if observations.len() > MAX_MANAGED_RECIPE_RUNS {
         return Err(ClientError::Protocol);
     }
@@ -116,7 +116,7 @@ pub fn build_exact_recipe_run_observations<'a>(
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
         observation.validate().map_err(|_| ClientError::Protocol)?;
-        if observation.node_id != node_id || !run_ids.insert(observation.binding.run_id) {
+        if observation.node_id != node_id || !run_ids.insert(observation.run_id) {
             return Err(ClientError::Protocol);
         }
         let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
@@ -140,11 +140,11 @@ pub fn build_exact_recipe_run_observations<'a>(
                 .filter(|key| key.len() == 32)
                 .map(|key| hex_sha256(&key))
                 != Some(observation.helper_receipt.signature.key_id.clone())
-            || *grant_job_id != observation.binding.run_id
+            || *grant_job_id != observation.run_id
             || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
             || observation.grant.claims.request_id.to_string() != receipt_request_id
             || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
-            || (observation.binding.local_address == observation.binding.master_address)
+            || (observation.local_address == observation.master_address)
                 != observation.endpoint_ready.is_some()
         {
             return Err(ClientError::Protocol);
@@ -152,8 +152,8 @@ pub fn build_exact_recipe_run_observations<'a>(
     }
     Ok(RecipeRunObservationsWire {
         schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-        observed_at,
-        runs: observations,
+        observed_at: observed_at.into(),
+        runs: observations.to_vec(),
     })
 }
 
@@ -1203,10 +1203,12 @@ impl AgentHttpClient {
     ) -> Result<(), ClientError> {
         let envelope =
             build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
+        let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&envelope)
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1581,6 +1583,10 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
+    use vonk_agent_protocol::generated::{
+        AgentClaimPayload, AgentOperation, DistributionObjectKind,
+        ExecuteContainerRuntimeRequestOperation, OperationProgress, RecipeImageImportRequest,
+    };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
         HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
@@ -1756,19 +1762,19 @@ mod tests {
                     name: "weights/model.bin".to_owned(),
                     sha256: model_digest.clone(),
                     bytes: model.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "config/tokenizer.json".to_owned(),
                     sha256: config_digest.clone(),
                     bytes: config.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "image.oci.tar".to_owned(),
                     sha256: archive_digest.clone(),
                     bytes: archive.len() as u64,
-                    kind: "oci-archive".to_owned(),
+                    kind: DistributionObjectKind::OciArchive,
                 },
             ],
             oci_image_digest: format!("sha256:{}", "d".repeat(64)),
@@ -1926,13 +1932,13 @@ mod tests {
             name: "weights/model.bin".to_owned(),
             sha256: hex_sha256(model),
             bytes: model.len() as u64,
-            kind: "model".to_owned(),
+            kind: DistributionObjectKind::Model,
         };
         let archive_object = vonk_agent_protocol::DistributionObject {
             name: "image.oci.tar".to_owned(),
             sha256: hex_sha256(archive),
             bytes: archive.len() as u64,
-            kind: "oci-archive".to_owned(),
+            kind: DistributionObjectKind::OciArchive,
         };
         vonk_agent_protocol::DistributionAssignment {
             schema_version: 2,
@@ -2638,7 +2644,25 @@ mod tests {
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-            progress: serde_json::json!({"phase": "executing"}),
+            progress: OperationProgress {
+                phase: "executing".to_owned(),
+                completed_bytes: 0,
+                total_bytes: None,
+                total_bytes_known: false,
+                completed_items: None,
+                total_items: None,
+                object_sha256: None,
+                kind: None,
+                activity: None,
+                observed_at: None,
+                last_progress_at: None,
+                bytes_per_second: None,
+                smoothed_bytes_per_second: None,
+                eta_seconds: None,
+                elapsed_seconds: None,
+                checkpoint: None,
+                members: Vec::new(),
+            },
             schema_version: 1,
         }
     }
@@ -2717,7 +2741,18 @@ mod tests {
 
     #[tokio::test]
     async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
-        let payload = serde_json::json!({});
+        let payload = RecipeImageImportRequest {
+            build_id: Uuid::new_v4(),
+            image_bytes: 1,
+            image_digest: format!("sha256:{}", "b".repeat(64)),
+            kind: "image.import".to_owned(),
+            mapping_generation: 1,
+            mapping_id: Uuid::new_v4(),
+            oci_layout_sha256: "c".repeat(64),
+            schema_version: 1,
+            source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        };
+        let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
         let claim = AgentClaim {
             schema_version: 1,
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
@@ -2725,10 +2760,10 @@ mod tests {
             attempt: 1,
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.image.import.v1".to_owned(),
+            operation: AgentOperation::RecipeImageImportV1,
             authority_revision: "a".repeat(64),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload_digest,
+            payload: AgentClaimPayload::RecipeImageImportRequest(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
         let (client, server) = host_runtime_grant_client();
@@ -2838,8 +2873,26 @@ mod tests {
             schema_version: 1,
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
-                .unwrap(),
-            binding: binding.clone(),
+                .unwrap()
+                .into(),
+            artifact_set_digest: binding.artifact_set_digest.clone(),
+            image_digest: binding.image_digest.clone(),
+            installation_id: binding.installation_id,
+            local_address: binding.local_address,
+            mapping_generation: binding.mapping_generation,
+            mapping_id: binding.mapping_id,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            model_identity: binding.model_identity.clone(),
+            port: binding.port,
+            rank: binding.rank,
+            recipe_content_sha256: binding.recipe_content_sha256.clone(),
+            recipe_revision_id: binding.recipe_revision_id,
+            role: binding.role.clone(),
+            run_generation: u32::try_from(binding.run_generation).unwrap(),
+            run_id: binding.run_id,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
+            world_size: binding.world_size,
             endpoint_ready: None,
             grant: SignedHostHelperGrant {
                 schema_version: 1,
@@ -2850,15 +2903,18 @@ mod tests {
                     node_id: helper_receipt.claims.node_id.clone(),
                     issued_at: helper_receipt.claims.observed_at - 1,
                     expires_at: helper_receipt.claims.observed_at + 60,
-                    operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
-                        action: HostHelperContainerRuntimeAction::RunInspect,
-                        job_id: binding.run_id,
-                        operation_id: Uuid::new_v4(),
-                        attempt: binding.run_generation as u32,
-                        fence: Uuid::new_v4(),
-                        request_sha256: helper_receipt.claims.request_sha256.clone(),
-                        observation_identity_sha256: Some("e".repeat(64)),
-                    },
+                    operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                        ExecuteContainerRuntimeRequestOperation {
+                            action: HostHelperContainerRuntimeAction::RunInspect,
+                            type_: "execute-container-runtime-request".to_owned(),
+                            job_id: binding.run_id,
+                            operation_id: Uuid::new_v4(),
+                            attempt: binding.run_generation as u32,
+                            fence: Uuid::new_v4(),
+                            request_sha256: helper_receipt.claims.request_sha256.clone(),
+                            observation_identity_sha256: Some("e".repeat(64)),
+                        },
+                    ),
                 },
                 signature: HostHelperGrantSignature {
                     algorithm: "ed25519".to_owned(),

@@ -102,16 +102,14 @@ or equality between two manually written fixtures is insufficient.
 
 ## Rust and generated clients
 
-Rust wire structs and enums must be generated with **typify** from JSON Schema
-exported from the authoritative Pydantic models. Do not maintain parallel
-handwritten payload fields. Rust keeps explicit semantic and execution/security
-validation where types and JSON Schema cannot express the rule.
-
-The generator is now present in `scripts/generate-agent-wire`; replacing all
-existing wire definitions and their consumers is in progress. The remaining
-adoption work and connected checks are tracked in
-`docs/contract-handoff-implementation-plan-2026-09-08.md`. Generated types sitting
-beside handwritten active DTOs do not complete this chain.
+Rust wire structs and enums are generated from the authoritative Pydantic
+models by `scripts/generate-agent-wire`, using pinned typify 0.7.0. The exporter
+checks in the exact validation schema; typify generates the declarations used
+by production protocol and HTTP consumers. Handwritten code retains semantic,
+execution, and signature validation rather than defining competing wire fields.
+Remaining adoption and connected checks are tracked in
+`docs/contract-handoff-implementation-plan-2026-09-08.md`; generated types beside
+handwritten active DTOs do not complete the chain.
 Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
@@ -146,6 +144,20 @@ semantic validation or connected wire tests: test the actual producers and
 consumers, including omitted required fields, explicit nulls, and numeric
 boundaries. Optional-field presence follows the canonical omission policy
 above; absent and explicit-null forms must not create different identities.
+
+Every generated model validates its input against the exact exported schema
+before Serde constructs the value, including direct nested deserialization.
+The deterministic adapter preserves required nullable fields, rejects unknown
+fields and incorrect integer tokens, materializes declared defaults, and checks
+bounded scalars. Primitive extension unions retain JSON values so integers do
+not silently pass through floating-point alternatives. Formatted Pydantic
+strings retain their bytes; a date-time validation format does not normalize a
+digest-bound string. Pydantic inheritance also generates identity projections.
+
+Outgoing directly constructed models use `canonical_generated_json` at HTTP
+boundaries. The generation check runs in the required Controller/Spark wire CI
+lane; stale schema or Rust output fails that check. Connected producer/consumer
+checks additionally verify semantic validation and signed or hashed bytes.
 
 ## Required launch checks
 

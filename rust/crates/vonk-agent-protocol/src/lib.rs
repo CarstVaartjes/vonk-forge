@@ -752,7 +752,8 @@ impl RecipeOperationRequest {
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
-                            && deadline.offset().local_minus_utc() == 0
+                            && chrono::DateTime::parse_from_rfc3339(deadline)
+                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
                     }
                     (
                         Some(RecipeStartPhase::CollectiveReadiness),
@@ -763,7 +764,8 @@ impl RecipeOperationRequest {
                             && value.world_size > 1
                             && value.local_address.is_some()
                             && value.local_address == value.master_address
-                            && deadline.offset().local_minus_utc() == 0
+                            && chrono::DateTime::parse_from_rfc3339(deadline)
+                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
                     }
                     _ => false,
                 };
@@ -879,20 +881,21 @@ mod inventory_tests {
 mod recipe_model_cleanup_tests {
     use super::*;
 
-    fn claim(payload: Value) -> AgentClaim {
-        AgentClaim {
+    fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
+        Ok(AgentClaim {
             attempt: 1,
             authority_revision: "a".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation: "recipe.model-uninstall.v1".parse().unwrap(),
             operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        })
     }
 
     #[test]
@@ -906,7 +909,7 @@ mod recipe_model_cleanup_tests {
                 "recipe_content_sha256": "c".repeat(64)
             }]
         });
-        let parsed = RecipeOperationRequest::parse(&claim(payload.clone())).unwrap();
+        let parsed = RecipeOperationRequest::parse(&claim(payload.clone()).unwrap()).unwrap();
         let RecipeOperationRequest::ModelCleanup(request) = parsed else {
             panic!("model cleanup payload parsed as the wrong operation");
         };
@@ -914,7 +917,7 @@ mod recipe_model_cleanup_tests {
 
         let mut retired = payload;
         retired["model_version_sha256"] = retired["model_content_sha256"].take();
-        assert!(RecipeOperationRequest::parse(&claim(retired)).is_err());
+        assert!(claim(retired).is_err());
     }
 
     #[test]
@@ -932,17 +935,15 @@ mod recipe_model_cleanup_tests {
             "plan_digest": "b".repeat(64),
             "recipe_content_sha256": "c".repeat(64),
             "cleanup_model_content_sha256": null,
-        }));
-        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        }))
+        .unwrap();
+        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
         assert!(RecipeOperationRequest::parse(&uninstall_claim).is_ok());
         payload
             .as_object_mut()
             .unwrap()
             .remove("cleanup_model_content_sha256");
-        uninstall_claim.payload = payload;
-        uninstall_claim.payload_digest =
-            hex_sha256(&canonical_json(&uninstall_claim.payload).unwrap());
-        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_err());
+        assert!(serde_json::from_value::<generated::RecipeUninstallPayload>(payload).is_err());
     }
 
     #[test]
@@ -961,11 +962,12 @@ mod recipe_model_cleanup_tests {
         )
         .unwrap();
         assert!(uninstall.validate().is_ok());
-        let oversized_uninstall: RecipeUninstallResult = serde_json::from_value(
-            serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64}),
-        )
-        .unwrap();
-        assert!(oversized_uninstall.validate().is_err());
+        assert!(
+            serde_json::from_value::<RecipeUninstallResult>(
+                serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64})
+            )
+            .is_err()
+        );
         let cleanup: RecipeModelCleanupResult = serde_json::from_value(
             serde_json::json!({"uninstalled_installations": 1, "removed_model_bytes": 0}),
         )
@@ -975,8 +977,6 @@ mod recipe_model_cleanup_tests {
             serde_json::from_value::<RecipeModelCleanupResult>(
                 serde_json::json!({"uninstalled_installations": 0, "removed_model_bytes": 0})
             )
-            .unwrap()
-            .validate()
             .is_err()
         );
     }
@@ -995,7 +995,7 @@ mod recipe_start_tests {
     ) -> Value {
         let mut payload = serde_json::json!({
             "alias": "distributed-model",
-            "compiled_execution_plan": {},
+            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json")).unwrap(),
             "endpoint_address": "100.100.20.30",
             "image_digest": format!("sha256:{}", "a".repeat(64)),
             "installation_id": "00000000-0000-4000-8000-000000000001",
@@ -1033,24 +1033,25 @@ mod recipe_start_tests {
         payload
     }
 
-    fn claim(payload: Value) -> AgentClaim {
-        AgentClaim {
+    fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
+        Ok(AgentClaim {
             attempt: 1,
             authority_revision: "d".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
             job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.start".to_owned(),
+            operation: "recipe.start".parse().unwrap(),
             operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        })
     }
 
     fn parsed_start(payload: Value) -> Result<RecipeStartRequest, ProtocolError> {
-        match RecipeOperationRequest::parse(&claim(payload))? {
+        match RecipeOperationRequest::parse(&claim(payload)?)? {
             RecipeOperationRequest::Start(request) => Ok(request),
             _ => unreachable!(),
         }
@@ -1215,20 +1216,13 @@ mod recipe_start_tests {
     #[test]
     fn authenticated_launch_claims_use_the_dedicated_document_ceiling() {
         let mut payload = start_payload(1, 0, None, None, None);
-        payload
-            .as_object_mut()
-            .unwrap()
-            .get_mut("compiled_execution_plan")
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .insert("artifact".to_owned(), Value::String("x".repeat(516 * 1024)));
-        assert!(claim(payload).validate().is_ok());
+        payload["compiled_execution_plan"]["runtime"]["argv"] =
+            serde_json::json!(["x".repeat(516 * 1024)]);
+        assert!(claim(payload.clone()).unwrap().validate().is_ok());
 
-        let oversized = serde_json::json!({
-            "value": "x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)
-        });
-        assert!(claim(oversized).validate().is_err());
+        payload["compiled_execution_plan"]["runtime"]["argv"] =
+            serde_json::json!(["x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)]);
+        assert!(claim(payload).unwrap().validate().is_err());
     }
 }
 
@@ -1239,7 +1233,7 @@ mod recipe_install_tests {
     #[test]
     fn schema_two_install_requires_the_inline_compiled_plan() {
         let payload = serde_json::json!({
-            "compiled_execution_plan": {},
+            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json")).unwrap(),
             "expected_bytes": 1024,
             "installation_id": "00000000-0000-4000-8000-000000000001",
             "plan_digest": "a".repeat(64),
@@ -1247,6 +1241,7 @@ mod recipe_install_tests {
             "role": "entrypoint",
             "schema_version": 2,
         });
+        let payload: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
         let claim = AgentClaim {
             attempt: 1,
             authority_revision: "b".repeat(64),
@@ -1254,7 +1249,7 @@ mod recipe_install_tests {
             fence: Uuid::new_v4(),
             job_id: Uuid::new_v4(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.install".to_owned(),
+            operation: "recipe.install".parse().unwrap(),
             operation_id: Uuid::new_v4(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
@@ -1266,7 +1261,7 @@ mod recipe_install_tests {
             panic!("expected install request");
         };
         assert_eq!(request.schema_version, 2);
-        assert!(request.compiled_execution_plan.is_object());
+        assert_eq!(request.compiled_execution_plan.schema_version, 2);
     }
 }
 
@@ -1813,14 +1808,14 @@ mod recipe_job_tests {
             recipe_content_sha256: "b".repeat(64),
             image_digest: format!("sha256:{}", "c".repeat(64)),
             plan_digest: "d".repeat(64),
-            interface: "video-job".to_owned(),
+            interface: "video-job".parse().unwrap(),
             rank: 0,
             role: "entrypoint".to_owned(),
             contract_sha256: "e".repeat(64),
             input_manifest_sha256: hex_sha256(&canonical_json(&manifest).unwrap()),
             input_total_bytes: 123,
             inputs,
-            compiled_execution_plan: serde_json::json!({}),
+            compiled_execution_plan: serde_json::from_value(serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json")).unwrap()["payload"]["compiled_execution_plan"].clone()).unwrap(),
             output_mappings: vec![RecipeJobOutputMapping {
                 slot: "video".to_owned(),
                 media_type: "video/mp4".to_owned(),
@@ -1864,9 +1859,9 @@ mod recipe_job_tests {
         reserved_manifest.input_manifest_sha256 = hex_sha256(&canonical_json(&manifest).unwrap());
         assert!(!validate_recipe_job(&reserved_manifest));
 
-        let mut command = valid;
-        command.compiled_execution_plan = serde_json::json!(null);
-        assert!(!validate_recipe_job(&command));
+        let mut command = serde_json::to_value(valid).unwrap();
+        command["compiled_execution_plan"] = Value::Null;
+        assert!(serde_json::from_value::<RecipeJobRunRequest>(command).is_err());
     }
 
     #[test]
@@ -1936,10 +1931,12 @@ mod recipe_job_tests {
         ))
         .unwrap();
         result.validate().unwrap();
-        let typed: RecipeJobRunResult = serde_json::from_value(result.result.clone()).unwrap();
+        let generated::AgentResultResult::RecipeJobRunResult(typed) = result.result else {
+            panic!("expected typed job result")
+        };
         typed.validate().unwrap();
         assert_eq!(
-            result.result["output_manifest"]["manifest_sha256"],
+            typed.output_manifest.manifest_sha256,
             "9f7781fb8415bc1cb9e835fe4bcc9c8dd8f45f6a6b333f0e0550e812db1da9cd"
         );
 
@@ -1961,9 +1958,12 @@ mod recipe_job_tests {
             job_id: Uuid::new_v4(),
             node_id: "spk_11111111111111111111111111111111".to_owned(),
             operation_id: Uuid::new_v4(),
-            result: serde_json::json!({"reason": "controller cancellation requested"}),
+            result: serde_json::from_value(
+                serde_json::json!({"reason": "controller cancellation requested"}),
+            )
+            .unwrap(),
             schema_version: 1,
-            state: "cancelled".to_owned(),
+            state: "cancelled".parse().unwrap(),
         };
 
         result.validate().unwrap();
@@ -2101,15 +2101,18 @@ mod recipe_run_inspection_tests {
                 node_id: receipt.claims.node_id.clone(),
                 issued_at: observed_at.timestamp(),
                 expires_at: observed_at.timestamp() + 60,
-                operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
-                    action: HostHelperContainerRuntimeAction::RunInspect,
-                    job_id: binding.run_id,
-                    operation_id: Uuid::new_v4(),
-                    attempt: binding.run_generation as u32,
-                    fence: Uuid::new_v4(),
-                    request_sha256: "b".repeat(64),
-                    observation_identity_sha256: Some(identity_sha256.clone()),
-                },
+                operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                    generated::ExecuteContainerRuntimeRequestOperation {
+                        type_: "execute-container-runtime-request".into(),
+                        action: HostHelperContainerRuntimeAction::RunInspect,
+                        job_id: binding.run_id,
+                        operation_id: Uuid::new_v4(),
+                        attempt: binding.run_generation as u32,
+                        fence: Uuid::new_v4(),
+                        request_sha256: "b".repeat(64),
+                        observation_identity_sha256: Some(identity_sha256.clone()),
+                    },
+                ),
             },
             signature: HostHelperGrantSignature {
                 algorithm: "ed25519".to_owned(),
@@ -2120,8 +2123,25 @@ mod recipe_run_inspection_tests {
         let observation = RecipeRunObservationWire {
             schema_version: 1,
             node_id: receipt.claims.node_id.clone(),
-            binding,
-            observed_at,
+            artifact_set_digest: binding.artifact_set_digest,
+            image_digest: binding.image_digest,
+            installation_id: binding.installation_id,
+            local_address: binding.local_address,
+            mapping_generation: binding.mapping_generation,
+            mapping_id: binding.mapping_id,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            model_identity: binding.model_identity,
+            port: binding.port,
+            rank: binding.rank,
+            recipe_content_sha256: binding.recipe_content_sha256,
+            recipe_revision_id: binding.recipe_revision_id,
+            role: binding.role,
+            run_generation: binding.run_generation,
+            run_id: binding.run_id,
+            runtime_arguments_sha256: binding.runtime_arguments_sha256,
+            world_size: binding.world_size,
+            observed_at: observed_at.into(),
             endpoint_ready: Some(true),
             observation_identity_sha256: identity_sha256,
             grant,
@@ -2130,12 +2150,14 @@ mod recipe_run_inspection_tests {
         };
         observation.validate().unwrap();
         let mut wrong_operation = observation.clone();
-        wrong_operation.grant.claims.operation = HostHelperOperation::RestartVonkUnit {
-            unit: HostHelperRestartUnit::Agent,
-        };
+        wrong_operation.grant.claims.operation =
+            HostHelperOperation::RestartVonkUnitOperation(generated::RestartVonkUnitOperation {
+                type_: "restart-vonk-unit".into(),
+                unit: HostHelperRestartUnit::Agent,
+            });
         assert!(wrong_operation.validate().is_err());
 
-        let mut partial_rendezvous = observation.binding.clone();
+        let mut partial_rendezvous = RecipeRunInspectionBinding::from(&observation);
         partial_rendezvous.world_size = 2;
         partial_rendezvous.master_address = Some("10.0.0.2".parse().unwrap());
         assert!(partial_rendezvous.validate().is_err());
@@ -2164,13 +2186,13 @@ mod distribution_tests {
                     name: "weights/model.bin".to_owned(),
                     sha256: "d".repeat(64),
                     bytes: 13,
-                    kind: "model".to_owned(),
+                    kind: "model".parse().unwrap(),
                 },
                 DistributionObject {
                     name: "image.oci.tar".to_owned(),
                     sha256: "e".repeat(64),
                     bytes: 11,
-                    kind: "oci-archive".to_owned(),
+                    kind: "oci-archive".parse().unwrap(),
                 },
             ],
             oci_image_digest: "sha256:".to_owned() + &"f".repeat(64),
@@ -2215,10 +2237,10 @@ mod distribution_tests {
             name: "tokenizer_config.json".to_owned(),
             sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_owned(),
             bytes: 0,
-            kind: "model".to_owned(),
+            kind: "model".parse().unwrap(),
         };
         value.validate().unwrap();
-        value.objects[0].kind = "oci-archive".to_owned();
+        value.objects[0].kind = "oci-archive".parse().unwrap();
         assert!(value.validate().is_err());
     }
 }
@@ -2254,6 +2276,6 @@ pub fn canonical_generated_json<T: Serialize + DeserializeOwned>(
     document: &T,
 ) -> Result<Vec<u8>, ProtocolError> {
     let value = serde_json::to_value(document)?;
-    let _: T = serde_json::from_value(value.clone())?;
-    canonical_json(&value)
+    let validated: T = serde_json::from_value(value)?;
+    canonical_json(&validated)
 }
