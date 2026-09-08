@@ -29,6 +29,13 @@ from .models import (
     ResourceReservation,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    build_policy_document,
+    parse_stored_build_plan,
+    parse_stored_build_policy,
+)
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
@@ -715,6 +722,15 @@ class RecipeBuildService:
             "builder_binary_digest": builder_binary_digest,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
         }
+        try:
+            # Persist the canonical JSON-mode representation.  This is also
+            # the representation handed to the agent build queue.
+            payload = build_plan_document(payload)
+            policy_document = build_policy_document(policy_document)
+        except RecipeExecutionContractError as error:
+            raise RecipeBuildError(
+                "build.contract_invalid", "source build envelope is invalid"
+            ) from error
         with self._sessions.begin() as session:
             existing = session.scalar(
                 select(RecipeBuild).where(
@@ -754,7 +770,13 @@ class RecipeBuildService:
                 session.add(existing)
                 session.flush()
             elif existing.recipe_revision_id == revision.id:
-                payload = copy.deepcopy(existing.plan)
+                try:
+                    payload = build_plan_document(existing.plan)
+                    parse_stored_build_policy(existing.policy_report)
+                except RecipeExecutionContractError as error:
+                    raise RecipeBuildError(
+                        "build.plan_invalid", "stored source build envelope is invalid"
+                    ) from error
             else:
                 # Keep the immutable receipt and its original provenance. The
                 # plan returned to the caller carries the newly requested
@@ -762,6 +784,12 @@ class RecipeBuildService:
                 payload["build_id"] = existing.id
                 payload["recipe_revision_id"] = revision.id
                 payload["recipe_content_sha256"] = revision.content_digest
+            try:
+                payload = build_plan_document(payload)
+            except RecipeExecutionContractError as error:
+                raise RecipeBuildError(
+                    "build.plan_invalid", "stored source build plan is invalid"
+                ) from error
             build_id = existing.id
         return RecipeBuildPlan(
             build_id=build_id,
@@ -846,19 +874,21 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.dependencies_stale", "exact recipe dependencies changed"
             )
-        expected_binary_digest = (
-            build.policy_report.get("builder_binary_digest")
-            if build is not None and isinstance(build.policy_report, dict)
-            else None
-        )
-        expected_format = (
-            build.policy_report.get("artifact_format")
-            if build is not None and isinstance(build.policy_report, dict)
-            else None
-        )
+        if build is None:
+            raise RecipeBuildError(
+                "build.plan_invalid", "stored build identity is invalid"
+            )
+        try:
+            stored_policy = parse_stored_build_policy(build.policy_report)
+            parse_stored_build_plan(build.plan)
+        except RecipeExecutionContractError as error:
+            raise RecipeBuildError(
+                "build.plan_invalid", "stored source build envelope is invalid"
+            ) from error
+        expected_binary_digest = stored_policy.builder_binary_digest
+        expected_format = stored_policy.artifact_format
         if (
-            build is None
-            or build.builder_node_id != plan.builder_node_id
+            build.builder_node_id != plan.builder_node_id
             or build.build_input_sha256 != plan.build_input_sha256
             or expected_format != BUILD_ARTIFACT_FORMAT
         ):

@@ -33,6 +33,11 @@ from .recipe_start_payloads import (
     RecipeStartPlacement,
     build_recipe_start_payload,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    installation_plan_document,
+    run_plan_document,
+)
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
@@ -299,7 +304,11 @@ def _recovery_authority(
         or failed_rank not in {node.rank for node in nodes}
     ):
         raise DistributedLifecycleError("distributed recovery rank set is invalid")
-    run_plan = run.plan if isinstance(run.plan, Mapping) else None
+    try:
+        run_plan = run_plan_document(run.plan)
+        installation_plan = installation_plan_document(installation.plan)
+    except RecipeExecutionContractError as error:
+        raise DistributedLifecycleError("distributed recovery plan is invalid") from error
     if (
         run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
@@ -315,7 +324,7 @@ def _recovery_authority(
     ):
         raise DistributedLifecycleError("distributed recovery run authority is stale")
     plans = run_plan.get("nodes")
-    compiled_plans = installation.plan.get("compiled_execution_plans")
+    compiled_plans = installation_plan.get("compiled_execution_plans")
     if (
         not isinstance(plans, list)
         or len(plans) != len(nodes)

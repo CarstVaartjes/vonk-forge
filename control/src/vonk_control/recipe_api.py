@@ -29,6 +29,12 @@ from .recipe_operations import (
     RecipeOperationView,
     RecipeRunStatus,
 )
+from .recipe_execution_contract import (
+    StoredAdmissionReason as PlanReason,
+    StoredInstallNodePlan as InstallNodePlanResponse,
+    StoredPolicyFinding as SourcePolicyFindingResponse,
+    StoredRunNodePlan as RunNodePlanResponse,
+)
 from .strict_json import StrictJSONModel
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -85,11 +91,6 @@ class StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-class PlanReason(StrictModel):
-    code: str = Field(min_length=1, max_length=80)
-    detail: str = Field(min_length=1, max_length=512)
-
-
 class MappingNodePlanResponse(StrictModel):
     node_id: NodeId
     rank: int
@@ -131,35 +132,11 @@ class ImageDistributionPlanResponse(StrictModel):
     plan_digest: Digest
 
 
-class SourcePolicyFindingResponse(StrictModel):
-    code: str
-    path: str
-    line: int | None
-    detail: str
-
-
 class SourcePolicyResponse(StrictModel):
     passed: bool
     source_bundle_sha256: Digest
     dockerfile: str
     findings: list[SourcePolicyFindingResponse]
-
-
-class InstallNodePlanResponse(StrictModel):
-    node_id: NodeId
-    rank: int
-    role: Text64
-    allowed: bool
-    inventory_observed_at: datetime | None
-    free_bytes: int | None
-    active_reserved_bytes: int
-    reused_bytes: int
-    required_download_bytes: int
-    required_bytes: int
-    disk_floor_bytes: int
-    free_after_bytes: int | None
-    blockers: list[PlanReason]
-    warnings: list[PlanReason]
 
 
 class InstallPlanResponse(StrictModel):
@@ -175,27 +152,6 @@ class InstallPlanResponse(StrictModel):
     compiled_execution_plans: dict[NodeId, CompiledExecutionPlan] = Field(
         default_factory=dict
     )
-
-
-class RunNodePlanResponse(StrictModel):
-    node_id: NodeId
-    rank: int
-    role: Text64
-    endpoint_owner: bool
-    port: int
-    allowed: bool
-    inventory_observed_at: datetime | None
-    memory_kind: str
-    required_memory_bytes: int
-    available_memory_bytes: int | None
-    active_reserved_bytes: int
-    free_after_bytes: int | None
-    memory_floor_bytes: int
-    fabric_address: str | None
-    fabric_bandwidth_mbps: int | None
-    rendezvous_port: int | None
-    blockers: list[PlanReason]
-    warnings: list[PlanReason]
 
 
 class RunPlanResponse(StrictModel):
@@ -462,6 +418,10 @@ class RequestKey(StrictModel):
 def _normalize_json(value: object) -> object:
     """Project Python producer containers into JSON array/object containers."""
 
+    if isinstance(value, datetime):
+        # The response boundary is JSON; persisted contracts keep their
+        # lexical timestamp, while fresh admission dataclasses use datetime.
+        return value.isoformat()
     if isinstance(value, tuple):
         return [_normalize_json(item) for item in value]
     if isinstance(value, list):
