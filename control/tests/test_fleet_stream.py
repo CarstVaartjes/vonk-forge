@@ -45,6 +45,7 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleView,
 )
+from vonk_control.telemetry_contract import TelemetryDetails
 
 from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
@@ -789,7 +790,10 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                 network_receive_bytes_per_second=None,
                 network_transmit_bytes_per_second=None,
                 gap_samples=0,
-                details={},
+                details=TelemetryDetails(
+                    accelerator_name=None,
+                    accelerator_performance_state=None,
+                ).model_dump(mode="json"),
                 metrics=telemetry_metrics_document(),
             )
             for sequence, sample_id in enumerate(sample_ids)

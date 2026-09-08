@@ -233,7 +233,7 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     download = operations["downloadArtifactJobResult"]
     assert download["x-vonk-streaming-transport"] is True
     assert download["responses"]["200"]["content"] == {
-        "application/octet-stream": {"schema": {"format": "binary", "type": "string"}}
+        "*/*": {"schema": {"format": "binary", "type": "string"}}
     }
 
     typescript = TYPESCRIPT_CLIENT.read_text()
