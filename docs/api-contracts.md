@@ -299,6 +299,31 @@ and semantic validation; schema equality alone does not prove runtime behavior.
 These checks establish source and interface consistency. Publication, Controller
 deployment and physical Spark execution remain separate verification steps.
 
+### Persisted execution and cache documents
+
+PostgreSQL JSON columns store current documents, not alternate API formats.
+Their owners validate the complete document in JSON mode before writing it and
+before a later operation consumes it:
+
+| Stored document | Authoritative contract |
+| --- | --- |
+| Installation and run plans, node admission details, run endpoints | `recipe_execution_contract.py` |
+| Build requests | Protocol `RecipeBuildRequest`, reused by `recipe_execution_contract.py` |
+| Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
+| Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
+| Catalog projections | `catalog_revision_contract.py`, composed from public model/topology and protocol build-option types |
+| Cache manifests, download/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
+
+A required nullable value remains present; unused optional fields are omitted.
+Malformed stored documents produce a controlled error instead of becoming empty
+state. Engine-owned extension values retain their declared flexibility. Unused
+parallel copies have no persistence contract: remove their column and writer.
+
+Structure validation does not replace transaction semantics. Cache workers
+refresh the database row when acquiring its lock, so a prior cooldown scan
+cannot hide another worker's newly committed claim. The PostgreSQL regression
+forces that interleaving and verifies that workers claim different operations.
+
 ## Discovered HTTP completeness gate
 
 `scripts/tests/check_api_contract_completeness.py` constructs both supported
