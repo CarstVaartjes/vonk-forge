@@ -25,7 +25,9 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{CompiledExecutionPlan, Placement, same_installed_workload},
+    workloads::{
+        CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, same_installed_workload,
+    },
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
@@ -1168,7 +1170,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "job input staging is not same-run exact",
                     );
                 }
-                let placement = job_placement(&request);
+                let placement = match job_placement(&spec, &request) {
+                    Ok(placement) => placement,
+                    Err(_) => {
+                        return failed_job(
+                            &request,
+                            1,
+                            started,
+                            "job placement does not match the installed workload",
+                        );
+                    }
+                };
                 let plan = match self.runtime.prepare_job_start(
                     &spec,
                     &installation_id,
@@ -1513,17 +1525,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
-                let placement = Placement {
-                    endpoint_address: spec.runtime.placement.endpoint_address,
-                    rank: request.rank,
-                    role: request.role.clone(),
-                    world_size: request.world_size,
-                    local_address: request.local_address,
-                    master_address: request.master_address,
-                    master_port: request.master_port,
-                    port: Some(request.port),
-                    reserved_memory_bytes: request.reserved_memory_bytes,
-                };
+                let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity =
                     request
@@ -2003,18 +2005,21 @@ where
     }
 }
 
-fn job_placement(request: &vonk_agent_protocol::RecipeJobRunRequest) -> Placement {
-    Placement {
-        endpoint_address: None,
-        rank: 0,
-        role: request.role.clone(),
-        world_size: 1,
-        local_address: None,
-        master_address: None,
-        master_port: None,
-        port: None,
-        reserved_memory_bytes: request.reserved_memory_bytes,
+fn job_placement(
+    spec: &CompiledExecutionPlan,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<CompiledRuntimePlacement, WorkloadError> {
+    let placement = &spec.runtime.placement;
+    if placement.rank != request.rank
+        || placement.role != request.role
+        || placement.world_size != 1
+        || placement.port.is_some()
+        || placement.reserved_memory_bytes != request.reserved_memory_bytes
+    {
+        return Err(WorkloadError::Invalid("job placement"));
     }
+    placement.validate_bound()?;
+    Ok(placement.clone())
 }
 
 fn failed_job(
@@ -2592,13 +2597,15 @@ mod tests {
         .unwrap();
         let request: vonk_agent_protocol::RecipeJobRunRequest =
             serde_json::from_value(claim["payload"].clone()).unwrap();
-        let placement = super::job_placement(&request);
         let mut value: Value = serde_json::from_str(include_str!(
             "../../../../control/tests/fixtures/compiled_workload_v2.json"
         ))
         .unwrap();
         value["endpoint"] = Value::Null;
-        value["runtime"]["placement"] = serde_json::to_value(&placement).unwrap();
+        value["runtime"]["placement"]["endpoint_address"] = Value::Null;
+        value["runtime"]["placement"]["port"] = Value::Null;
+        value["runtime"]["placement"]["reserved_memory_bytes"] =
+            json!(request.reserved_memory_bytes);
         value["security"]["network_mode"] = json!("none");
         value["security"]["mounts"]
             .as_array_mut()
@@ -2611,6 +2618,17 @@ mod tests {
             "output_path": "/outputs", "timeout_seconds": request.timeout_seconds
         });
         let spec = parse_compiled_execution_plan(&value).unwrap();
+        let placement = super::job_placement(&spec, &request).unwrap();
+        for field in ["rank", "role", "reserved_memory_bytes"] {
+            let mut altered = claim["payload"].clone();
+            altered[field] = match field {
+                "rank" => json!(1),
+                "role" => json!("worker"),
+                _ => json!(request.reserved_memory_bytes + 1024),
+            };
+            let altered = serde_json::from_value(altered).unwrap();
+            assert!(super::job_placement(&spec, &altered).is_err());
+        }
         let data = tempdir().unwrap();
         let run_id = request.run_id.to_string();
         fs::create_dir_all(data.path().join("runs").join(&run_id).join("inputs")).unwrap();
