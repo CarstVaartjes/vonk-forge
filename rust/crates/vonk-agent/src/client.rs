@@ -23,7 +23,8 @@ use vonk_agent_protocol::{
     HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
     InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
-    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
+    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_generated_json, canonical_json,
+    hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -82,7 +83,7 @@ pub fn claim_request_document(
     runtime_identity
         .observation_receipt_public_key()
         .map_err(|_| ClientError::Protocol)?;
-    canonical_json(&ClaimRequest {
+    canonical_generated_json(&ClaimRequest {
         capabilities: capabilities
             .iter()
             .map(|value| (*value).to_owned())
@@ -92,7 +93,7 @@ pub fn claim_request_document(
         node_id: node_id.to_owned(),
         protocol_version: 3,
         runtime_identity: runtime_identity.clone(),
-        wait_seconds: wait_seconds.min(60),
+        wait_seconds: u32::try_from(wait_seconds.min(60)).expect("bounded claim wait"),
     })
     .map_err(|_| ClientError::Protocol)
 }
@@ -304,11 +305,7 @@ impl AgentHttpClient {
 
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
-        if progress
-            .progress
-            .get("phase")
-            .and_then(serde_json::Value::as_str)
-            == Some("executing")
+        if progress.progress.phase == "executing"
             && let Some((operation_id, phase)) = self
                 .progress_phase
                 .lock()
@@ -316,7 +313,7 @@ impl AgentHttpClient {
                 .as_ref()
             && *operation_id == progress.operation_id
         {
-            progress.progress["phase"] = serde_json::json!(phase);
+            progress.progress.phase.clone_from(phase);
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
@@ -357,15 +354,15 @@ impl AgentHttpClient {
         if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&HostRuntimeGrantRequest {
+        let body = canonical_generated_json(&HostRuntimeGrantRequest {
             node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
-            attempt: u64::from(claim.attempt),
+            attempt: claim.attempt,
             fence: claim.fence,
             action: host_runtime_grant_action(action),
             request_sha256: request_sha256.to_owned(),
-            expires_in_seconds: u64::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -402,7 +399,7 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&RecipeRunObservationGrantRequest {
+        let body = canonical_generated_json(&RecipeRunObservationGrantRequest {
             schema_version: 1,
             node_id: self.node_id.clone(),
             run_id: binding.run_id,
@@ -411,21 +408,22 @@ impl AgentHttpClient {
             recipe_content_sha256: binding.recipe_content_sha256.clone(),
             mapping_id: binding.mapping_id,
             mapping_generation: binding.mapping_generation,
-            run_generation: binding.run_generation,
+            run_generation: u32::try_from(binding.run_generation)
+                .map_err(|_| ClientError::Protocol)?,
             image_digest: binding.image_digest.clone(),
             artifact_set_digest: binding.artifact_set_digest.clone(),
             model_identity: binding.model_identity.clone(),
-            rank: u64::from(binding.rank),
+            rank: binding.rank,
             role: binding.role.clone(),
-            world_size: u64::from(binding.world_size),
-            local_address: binding.local_address.map(|value| value.to_string()),
-            master_address: binding.master_address.map(|value| value.to_string()),
-            master_port: binding.master_port.map(u64::from),
-            port: u64::from(binding.port),
+            world_size: binding.world_size,
+            local_address: binding.local_address,
+            master_address: binding.master_address,
+            master_port: binding.master_port,
+            port: binding.port,
             runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
             job_id: request.job_id,
             operation_id: request.operation_id,
-            attempt: u64::from(request.attempt),
+            attempt: request.attempt,
             fence: request.fence,
             request_sha256: request_sha256.to_owned(),
             expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS as u8,
@@ -493,7 +491,7 @@ impl AgentHttpClient {
         receipt: &vonk_agent_protocol::PackageActivationReceipt,
         runtime_identity: &AgentRuntimeIdentity,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        let body = canonical_json(&PackageActivationGrantRequest {
+        let body = canonical_generated_json(&PackageActivationGrantRequest {
             node_id: self.node_id.clone(),
             receipt: receipt.clone(),
             runtime_identity: runtime_identity.clone(),
@@ -529,15 +527,15 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let body = canonical_json(&AgentUpgradeGrantRequest {
+        let body = canonical_generated_json(&AgentUpgradeGrantRequest {
             node_id: self.node_id.clone(),
             job_id: claim.job_id,
             operation_id: claim.operation_id,
-            attempt: u64::from(claim.attempt),
+            attempt: claim.attempt,
             fence: claim.fence,
             package_sha256: package_sha256.to_owned(),
             package_signature: package_signature.to_owned(),
-            expires_in_seconds: u64::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -873,7 +871,7 @@ impl AgentHttpClient {
                 tokio::fs::create_dir_all(parent).await?;
             }
             let object_digest = object.sha256.clone();
-            let kind = object.kind.clone();
+            let kind = object.kind.to_string();
             let base = downloaded_bytes;
             self.download_trusted_distribution_object_with_progress(
                 plan_digest,
@@ -900,7 +898,7 @@ impl AgentHttpClient {
                 completed_items: index as u64 + 1,
                 total_items: assignment.objects.len() as u64,
                 object_sha256: object.sha256.clone(),
-                kind: object.kind.clone(),
+                kind: object.kind.to_string(),
                 bytes: downloaded_bytes,
                 total_bytes: Some(total_bytes),
             });
@@ -1171,7 +1169,7 @@ impl AgentHttpClient {
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
         let request = InventoryRequest {
             schema_version: 1,
-            observed_at: chrono::Utc::now(),
+            observed_at: chrono::Utc::now().into(),
             disk_total_bytes: inventory.disk_total_bytes,
             disk_free_bytes: inventory.disk_available_bytes,
             host_memory_total_bytes: inventory.memory_total_bytes,
@@ -1181,16 +1179,21 @@ impl AgentHttpClient {
             gpu_count: inventory.gpu_count,
             artifact_store_read_only: inventory.artifact_store_read_only,
             capabilities: inventory.capabilities.clone(),
-            fabric_address: inventory.fabric_address,
-            fabric_bandwidth_mbps: inventory.fabric_bandwidth_mbps,
+            fabric_address: inventory.fabric_address.map(|value| value.to_string()),
+            fabric_bandwidth_mbps: inventory
+                .fabric_bandwidth_mbps
+                .map(|value| u32::try_from(value).map_err(|_| ClientError::Protocol))
+                .transpose()?,
             nvidia_driver_version: inventory.nvidia_driver_version.clone(),
             container_runtime_version: inventory.container_runtime_version.clone(),
         };
         request.validate().map_err(|_| ClientError::Protocol)?;
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/inventory")?)
-            .json(&request)
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1225,14 +1228,20 @@ impl AgentHttpClient {
         if !valid_report_batch(samples) {
             return Err(ClientError::Protocol);
         }
+        let request = TelemetryRequest {
+            schema_version: 1,
+            samples: samples
+                .iter()
+                .map(|sample| sample.wire().clone())
+                .collect(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
-            .json(&TelemetryRequest {
-                schema_version: 1,
-                samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -1248,13 +1257,16 @@ impl AgentHttpClient {
         if csr.is_empty() || csr.len() > 16 * 1024 {
             return Err(ClientError::Protocol);
         }
+        let request = RenewRequest {
+            csr: csr.to_owned(),
+            node_id: self.node_id.clone(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/renew")?)
-            .json(&RenewRequest {
-                csr: csr.to_owned(),
-                node_id: self.node_id.clone(),
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         classify_status(response.status())?;
@@ -1271,13 +1283,16 @@ impl AgentHttpClient {
         if generation == 0 {
             return Err(ClientError::Protocol);
         }
+        let request = ActivateRequest {
+            generation,
+            node_id: self.node_id.clone(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/renew/activate")?)
-            .json(&ActivateRequest {
-                generation,
-                node_id: self.node_id.clone(),
-            })
+            .header("content-type", "application/json")
+            .body(body)
             .send()
             .await?;
         if response.status() != StatusCode::NO_CONTENT {

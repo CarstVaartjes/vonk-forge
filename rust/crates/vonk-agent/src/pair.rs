@@ -15,6 +15,7 @@ use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x5
 pub use vonk_agent_protocol::generated::{
     EnrollmentEvidence, EnrollmentSubmitRequest, IssuedCertificateResponse,
 };
+use vonk_agent_protocol::canonical_generated_json;
 
 use crate::{
     config::AgentConfig,
@@ -99,14 +100,16 @@ pub async fn pair(
     let endpoint = enrollment
         .join("/agent/v1/enroll")
         .map_err(|_| PairingError::Response)?;
+    let request = EnrollmentSubmitRequest {
+        csr: csr.to_owned(),
+        evidence,
+        grant_token: token.to_owned(),
+    };
+    let body = canonical_generated_json(&request).map_err(|_| PairingError::Response)?;
     let response = client
         .post(endpoint)
         .header("content-type", "application/json")
-        .json(&EnrollmentSubmitRequest {
-            csr: csr.to_owned(),
-            evidence,
-            grant_token: token.to_owned(),
-        })
+        .body(body)
         .send()
         .await?;
     let status = response.status().as_u16();

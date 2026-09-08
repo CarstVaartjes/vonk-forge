@@ -9,6 +9,7 @@ use thiserror::Error;
 
 pub use vonk_agent_protocol::generated::AgentRuntimeIdentity;
 use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
+use vonk_agent_protocol::canonical_generated_json;
 
 const MAX_AGENT_BYTES: u64 = 512 * 1024 * 1024;
 pub const OBSERVATION_RECEIPT_PUBLIC_KEY_PATH: &str =
@@ -113,8 +114,8 @@ impl PreparedRuntimeIdentity {
             package_activation: None,
             observation_receipt_public_key: hex::encode(observation_receipt_public_key),
         };
-        let document =
-            serde_json::to_vec(&identity).map_err(|_| RuntimeIdentityError::InvalidIdentity)?;
+        let document = canonical_generated_json(&identity)
+            .map_err(|_| RuntimeIdentityError::InvalidIdentity)?;
         serde_json::from_slice(&document).map_err(|_| RuntimeIdentityError::InvalidIdentity)
     }
 }
