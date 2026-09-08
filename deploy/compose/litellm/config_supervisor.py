@@ -617,8 +617,23 @@ def _healthy(child: subprocess.Popen[bytes]) -> bool:
         return False
 
 
-def _await_healthy(child: subprocess.Popen[bytes], *, deadline: float) -> bool:
+def _newer_activation(
+    current: ActiveRequest | None, candidate: ActiveRequest | None
+) -> bool:
+    return candidate is not None and (
+        current is None or candidate.marker["generation"] > current.marker["generation"]
+    )
+
+
+def _await_healthy(
+    child: subprocess.Popen[bytes],
+    *,
+    deadline: float,
+    request: ActiveRequest | None = None,
+) -> bool:
     while child.poll() is None and time.monotonic() < deadline:
+        if _newer_activation(request, _active_request(now=datetime.now(UTC))):
+            return False
         if _healthy(child) and time.monotonic() < deadline:
             return True
         remaining = deadline - time.monotonic()
@@ -668,14 +683,23 @@ def _supervise(
         )
         serving_lease = _ServingLeaseGuard(request, child, authority=authority)
         serving_lease.start()
-        if not _await_healthy(child, deadline=startup_deadline):
+        if not _await_healthy(child, deadline=startup_deadline, request=request):
             exited_before_health = child.poll() is not None
             authority.deny()
             serving_lease.cancel()
             _clear_ack()
-            _stop(child, deadline=startup_deadline)
+            next_request = _active_request(now=datetime.now(UTC))
+            newer_activation = _newer_activation(request, next_request)
+            _stop(child, deadline=None if newer_activation else startup_deadline)
+            if newer_activation:
+                # This generation owns a new transition budget, after confirmed
+                # shutdown of the superseded child. Ordinary retries do not.
+                startup_attempts = 0
+                request = next_request
+                selected = request.config
+                startup_deadline = time.monotonic() + STARTUP_SECONDS
+                continue
             if serving_lease.expired:
-                next_request = _active_request(now=datetime.now(UTC))
                 if next_request is not None and (
                     request is None
                     or next_request.marker["generation"] <= request.marker["generation"]
@@ -693,8 +717,6 @@ def _supervise(
                 if remaining <= 0:
                     return 1
                 time.sleep(min(STARTUP_RETRY_SECONDS, remaining))
-                request = _active_request(now=datetime.now(UTC))
-                selected = request.config if request is not None else _selected()
                 continue
             return 1
         startup_attempts = 0
