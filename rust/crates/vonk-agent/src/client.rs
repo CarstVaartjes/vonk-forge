@@ -1583,7 +1583,10 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
-    use vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation;
+    use vonk_agent_protocol::generated::{
+        AgentClaimPayload, AgentOperation, DistributionObjectKind,
+        ExecuteContainerRuntimeRequestOperation, OperationProgress, RecipeImageImportRequest,
+    };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
         HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
@@ -1759,19 +1762,19 @@ mod tests {
                     name: "weights/model.bin".to_owned(),
                     sha256: model_digest.clone(),
                     bytes: model.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "config/tokenizer.json".to_owned(),
                     sha256: config_digest.clone(),
                     bytes: config.len() as u64,
-                    kind: "model".to_owned(),
+                    kind: DistributionObjectKind::Model,
                 },
                 vonk_agent_protocol::DistributionObject {
                     name: "image.oci.tar".to_owned(),
                     sha256: archive_digest.clone(),
                     bytes: archive.len() as u64,
-                    kind: "oci-archive".to_owned(),
+                    kind: DistributionObjectKind::OciArchive,
                 },
             ],
             oci_image_digest: format!("sha256:{}", "d".repeat(64)),
@@ -1929,13 +1932,13 @@ mod tests {
             name: "weights/model.bin".to_owned(),
             sha256: hex_sha256(model),
             bytes: model.len() as u64,
-            kind: "model".to_owned(),
+            kind: DistributionObjectKind::Model,
         };
         let archive_object = vonk_agent_protocol::DistributionObject {
             name: "image.oci.tar".to_owned(),
             sha256: hex_sha256(archive),
             bytes: archive.len() as u64,
-            kind: "oci-archive".to_owned(),
+            kind: DistributionObjectKind::OciArchive,
         };
         vonk_agent_protocol::DistributionAssignment {
             schema_version: 2,
@@ -2641,7 +2644,25 @@ mod tests {
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
-            progress: serde_json::json!({"phase": "executing"}),
+            progress: OperationProgress {
+                phase: "executing".to_owned(),
+                completed_bytes: 0,
+                total_bytes: None,
+                total_bytes_known: false,
+                completed_items: None,
+                total_items: None,
+                object_sha256: None,
+                kind: None,
+                activity: None,
+                observed_at: None,
+                last_progress_at: None,
+                bytes_per_second: None,
+                smoothed_bytes_per_second: None,
+                eta_seconds: None,
+                elapsed_seconds: None,
+                checkpoint: None,
+                members: Vec::new(),
+            },
             schema_version: 1,
         }
     }
@@ -2720,7 +2741,18 @@ mod tests {
 
     #[tokio::test]
     async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
-        let payload = serde_json::json!({});
+        let payload = RecipeImageImportRequest {
+            build_id: Uuid::new_v4(),
+            image_bytes: 1,
+            image_digest: format!("sha256:{}", "b".repeat(64)),
+            kind: "image.import".to_owned(),
+            mapping_generation: 1,
+            mapping_id: Uuid::new_v4(),
+            oci_layout_sha256: "c".repeat(64),
+            schema_version: 1,
+            source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        };
+        let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
         let claim = AgentClaim {
             schema_version: 1,
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
@@ -2728,10 +2760,10 @@ mod tests {
             attempt: 1,
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.image.import.v1".to_owned(),
+            operation: AgentOperation::RecipeImageImportV1,
             authority_revision: "a".repeat(64),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload_digest,
+            payload: AgentClaimPayload::RecipeImageImportRequest(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
         let (client, server) = host_runtime_grant_client();
