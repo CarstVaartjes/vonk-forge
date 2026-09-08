@@ -1498,6 +1498,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             RecipeOperationRequest::Start(request) => {
                 self.report_phase(claim, "starting").await;
                 let installation_id = request.installation_id.to_string();
+                let phase_deadline = match request
+                    .start_deadline
+                    .as_deref()
+                    .map(DateTime::parse_from_rfc3339)
+                    .transpose()
+                {
+                    Ok(deadline) => deadline,
+                    Err(_) => return failed("recipe start deadline is invalid"),
+                };
                 let spec = request.compiled_execution_plan.clone();
                 if spec.validate().is_err() {
                     return failed("compiled execution plan is invalid");
@@ -1556,7 +1565,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
                 let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
                 if request.phase.is_some()
-                    && !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                    && !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                 {
                     return failed("distributed start deadline elapsed before execution");
                 }
@@ -1666,14 +1675,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .await;
                     let stable = if first_inspect.is_err()
                         || *cancellation.borrow()
-                        || !before_phase_deadline(&lease_deadline, request.start_deadline.as_ref())
+                        || !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                     {
                         false
                     } else {
                         wait_for_launch_stability(
                             lease_deadline.clone(),
                             cancellation.clone(),
-                            request.start_deadline,
+                            phase_deadline,
                             Duration::from_secs(2),
                         )
                         .await
@@ -1685,10 +1694,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 )
                                 .await
                                 .is_ok()
-                            && before_phase_deadline(
-                                &lease_deadline,
-                                request.start_deadline.as_ref(),
-                            )
+                            && before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                     };
                     if !stable {
                         let _ = self
@@ -1759,7 +1765,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             request.port,
                             &endpoint.health_path,
                             lease_deadline,
-                            request.start_deadline,
+                            phase_deadline,
                         ),
                         runtime_guard,
                         cancellation.clone(),
@@ -2918,7 +2924,9 @@ mod tests {
         stale.grant.claims.issued_at = Utc::now().timestamp() - 20;
         stale.grant.claims.expires_at = Utc::now().timestamp() - 10;
         stale.helper_receipt.claims.observed_at = stale.grant.claims.issued_at;
-        stale.observed_at = DateTime::from_timestamp(stale.grant.claims.issued_at, 0).unwrap();
+        stale.observed_at = DateTime::from_timestamp(stale.grant.claims.issued_at, 0)
+            .unwrap()
+            .into();
         stale.validate().unwrap();
         assert!(matches!(
             report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
@@ -3000,7 +3008,7 @@ mod tests {
     #[test]
     fn failed_recipe_build_preserves_only_safe_classified_evidence() {
         let mut build_claim = claim();
-        build_claim.operation = "recipe.build.v1".to_owned();
+        build_claim.operation = "recipe.build.v1".parse().unwrap();
         let result = normalize_execution_result(
             &build_claim,
             ExecutionResult {
@@ -3064,9 +3072,9 @@ mod tests {
             job_id: Uuid::new_v4(),
             node_id: NODE_ID.to_owned(),
             operation_id: Uuid::new_v4(),
-            result: body,
+            result: serde_json::from_value(body).unwrap(),
             schema_version: 1,
-            state: "succeeded".to_owned(),
+            state: "succeeded".parse().unwrap(),
         };
         result.validate().unwrap();
     }
@@ -3074,7 +3082,7 @@ mod tests {
     #[test]
     fn distribution_failure_uses_operation_specific_result_code() {
         let mut distribution_claim = claim();
-        distribution_claim.operation = "artifact.distribution.v1".to_owned();
+        distribution_claim.operation = "artifact.distribution.v1".parse().unwrap();
         let result = normalize_execution_result(
             &distribution_claim,
             ExecutionResult {
@@ -3130,10 +3138,10 @@ mod tests {
             fence: Uuid::new_v4(),
             job_id: Uuid::new_v4(),
             node_id: NODE_ID.to_owned(),
-            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation: "recipe.model-uninstall.v1".parse().unwrap(),
             operation_id: Uuid::new_v4(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload: serde_json::from_value(payload).unwrap(),
             schema_version: 1,
         };
         let client = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
@@ -3177,9 +3185,9 @@ mod tests {
             "plan_digest": "b".repeat(64),
         });
         let mut uninstall_claim = claim.clone();
-        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
         uninstall_claim.payload_digest = hex_sha256(&canonical_json(&uninstall_payload).unwrap());
-        uninstall_claim.payload = uninstall_payload;
+        uninstall_claim.payload = serde_json::from_value(uninstall_payload).unwrap();
         let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(uninstall_claim.deadline);
         let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
 
@@ -3470,10 +3478,10 @@ mod tests {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
             node_id: NODE_ID.to_owned(),
-            operation: "recipe.install".to_owned(),
+            operation: "recipe.install".parse().unwrap(),
             operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
+            payload: serde_json::from_value(payload).unwrap(),
             schema_version: 1,
         };
         RecipeOperationRequest::parse(&claim).unwrap();
@@ -3483,7 +3491,7 @@ mod tests {
     #[test]
     fn artifact_job_failure_keeps_current_result_and_typed_diagnostics() {
         let mut job_claim = claim();
-        job_claim.operation = "recipe.job.run.v1".to_owned();
+        job_claim.operation = "recipe.job.run.v1".parse().unwrap();
         let envelope: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
         ))
@@ -3651,7 +3659,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            checked_failure_body(client.results.lock().unwrap()[0].result.clone()),
+            checked_failure_body(
+                serde_json::to_value(&client.results.lock().unwrap()[0].result).unwrap()
+            ),
             json!({
                 "error_code": "recipe_install_failed",
                 "reason": "rootless image build failed",
@@ -3663,7 +3673,7 @@ mod tests {
     #[test]
     fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
         let mut upgrade_claim = claim();
-        upgrade_claim.operation = "agent.upgrade.v1".to_owned();
+        upgrade_claim.operation = "agent.upgrade.v1".parse().unwrap();
         let result = normalize_execution_result(
             &upgrade_claim,
             ExecutionResult {
@@ -3706,7 +3716,7 @@ mod tests {
     #[test]
     fn image_import_failure_preserves_only_bounded_helper_diagnostics() {
         let mut import_claim = claim();
-        import_claim.operation = "recipe.image.import.v1".to_owned();
+        import_claim.operation = "recipe.image.import.v1".parse().unwrap();
         for code in [
             "runtime_helper_unavailable",
             "runtime_authority_unavailable",
@@ -3745,7 +3755,7 @@ mod tests {
     async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled() {
         let directory = tempdir().unwrap();
         let mut job_claim = claim();
-        job_claim.operation = "recipe.job.run.v1".to_owned();
+        job_claim.operation = "recipe.job.run.v1".parse().unwrap();
         let client = RecordingClient {
             cancel_requested: true,
             claim: Arc::new(Mutex::new(Some(job_claim))),
@@ -3772,11 +3782,16 @@ mod tests {
 
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].state, "cancelled");
-        assert_eq!(results[0].result["exit_code"], 130);
+        assert_eq!(results[0].state.as_str(), "cancelled");
+        let vonk_agent_protocol::generated::AgentResultResult::RecipeJobRunResult(result) =
+            &results[0].result
+        else {
+            panic!("expected canonical job result");
+        };
+        assert_eq!(result.exit_code, 130);
         assert_eq!(
-            results[0].result["reason"],
-            "controller cancellation requested"
+            result.reason.as_deref(),
+            Some("controller cancellation requested")
         );
     }
 }
