@@ -1061,8 +1061,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Err(rustix::io::Errno::NOENT) => return Ok(()),
             Err(error) => return Err(errno_io(error).into()),
         };
-        let cache_device = u64::try_from(rustix::fs::fstat(&cache).map_err(errno_io)?.st_dev)
-            .map_err(|_| OperationError::UnsafePath)?;
+        let cache_device = rustix::fs::fstat(&cache).map_err(errno_io)?.st_dev;
         remove_directory_contents(&cache, cache_device)?;
         rustix::fs::unlinkat(
             &installation,
@@ -2622,7 +2621,7 @@ fn remove_directory_entry(
     let metadata = rustix::fs::statat(parent, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
         .map_err(errno_io)?;
     if rustix::fs::FileType::from_raw_mode(metadata.st_mode) == rustix::fs::FileType::Directory {
-        if u64::try_from(metadata.st_dev).ok() != Some(expected_device) {
+        if metadata.st_dev != expected_device {
             return Err(OperationError::UnsafePath);
         }
         let child = rustix::fs::openat(
