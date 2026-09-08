@@ -48,7 +48,9 @@ def test_claim_rejects_unknown_top_level_fields_and_roundtrips_json() -> None:
     with pytest.raises(AgentProtocolError):
         AgentClaim.parse(raw | {"unexpected": 1})
     parsed = AgentClaim.parse(raw)
-    assert json.loads(canonical_message(parsed)) == raw
+    assert json.loads(canonical_message(parsed)) == raw | {
+        "deadline": "2026-08-03T12:00:00Z"
+    }
 
 
 def test_distribution_payload_is_typed_and_plan_bound() -> None:

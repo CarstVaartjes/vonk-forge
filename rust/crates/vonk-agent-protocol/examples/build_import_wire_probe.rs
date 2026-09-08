@@ -16,6 +16,7 @@ fn main() {
         } else {
             let operation = input["operation"].as_str().expect("operation");
             let payload = input["payload"].clone();
+            let payload = serde_json::from_value(payload).expect("typed payload");
             let payload_bytes = canonical_json(&payload).expect("payload canonicalization");
             AgentClaim {
                 attempt: 1,
@@ -26,7 +27,7 @@ fn main() {
                 node_id: "spk_11111111111111111111111111111111".to_owned(),
                 operation: operation.parse().expect("operation"),
                 operation_id: Uuid::new_v4(),
-                payload: serde_json::from_value(payload.clone()).expect("typed payload"),
+                payload,
                 payload_digest: hex_sha256(&payload_bytes),
                 schema_version: 1,
             }
