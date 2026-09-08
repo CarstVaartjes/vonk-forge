@@ -12,6 +12,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_job_api import install_artifact_job_routes
 from vonk_control.auth import Actor
@@ -179,7 +180,9 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
         invocation["runtime"]["executable"],
         *invocation["runtime"]["argv"],
     ]
-    assert output["runtime"] == invocation
+    assert CompiledExecutionPlan.model_validate(output["runtime"]) == (
+        CompiledExecutionPlan.model_validate(invocation)
+    )
     assert output["input_manifest"] == {
         "schema_version": 1,
         "total_bytes": 3 if has_input else 0,
@@ -187,6 +190,21 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
     }
     assert any("dst=/inputs,readonly" in argument for argument in arguments)
     assert "VONK_JOB_TIMEOUT_SECONDS=600" in arguments
+    if has_input:
+        for include_null in (False, True):
+            equivalent = copy.deepcopy(probe_input)
+            job_input = equivalent["claim"]["payload"]["compiled_execution_plan"][
+                "job"
+            ]["input"]
+            if include_null:
+                job_input["slots"] = None
+            else:
+                job_input.pop("slots", None)
+            # Keep the actual Controller digest: optional omission and explicit
+            # null must verify as the same signed invocation, without rehashing.
+            equivalent_result = invoke(equivalent)
+            assert equivalent_result.returncode == 0, equivalent_result.stderr
+            assert json.loads(equivalent_result.stdout)["arguments"] == arguments
     for change in (
         "image",
         "mount",
