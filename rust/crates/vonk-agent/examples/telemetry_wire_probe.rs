@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let report = TelemetryRequest {
         schema_version: 1,
-        samples,
+        samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
     };
     println!("{}", serde_json::to_string(&report)?);
     Ok(())
