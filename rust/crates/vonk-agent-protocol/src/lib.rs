@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 pub mod runtime_preflight;
 
-
 pub mod operation_progress;
 pub use operation_progress::{
     OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
@@ -1052,7 +1051,10 @@ impl RecipeJobRunResult {
             "files": self.output_manifest.files,
         });
         let valid = self.schema_version == 1
-            && self.diagnostics.as_ref().is_none_or(|value| value.validate().is_ok())
+            && self
+                .diagnostics
+                .as_ref()
+                .is_none_or(|value| value.validate().is_ok())
             && (0..=255).contains(&self.exit_code)
             && self.output_manifest.schema_version == 1
             && self.output_manifest.files.len() <= 32
@@ -1403,7 +1405,9 @@ impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match claim.operation.as_str() {
-            "runtime.preflight.v1" => Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?),
+            "runtime.preflight.v1" => {
+                Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?)
+            }
             "recipe.build.v1" => {
                 validate_build_wire(&claim.payload)?;
                 Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))

@@ -567,6 +567,7 @@ fn write_runtime_request(roots: &ManagedRoots, request: &HostRuntimeRequest) -> 
 fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperation {
     HostOperation::ExecuteContainerRuntimeRequest {
         action: match request.action {
+            HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
             HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
             HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
             HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,

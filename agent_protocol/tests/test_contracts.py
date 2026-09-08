@@ -470,6 +470,19 @@ def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> Non
         "schema_version": 1,
         "target_binary_digest": "d" * 64,
         "target_build_digest": "sha256:" + "e" * 64,
+        "source_package_bytes": 4_000_000,
+        "source_package_url": "https://install.vonkforge.ai/artifacts/agent-packages/" + "a" * 64 + "/vonk-forge-agent.deb",
+        "rollback": {
+            "source": {
+                "package_sha256": "a" * 64,
+                "package_signature": "b" * 128,
+                "package_version": "0.1.0~dev.329+g0123456789ab",
+                "binary_sha256": "c" * 64,
+                "helper_sha256": "d" * 64,
+            },
+            "attempt_nonce": "f" * 64,
+            "activation_deadline": 2_000_000_000,
+        },
     }
     raw = claim_for_operation("agent.upgrade.v1", payload)
 
@@ -487,6 +500,18 @@ def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
         "package_version": "0.1.0~dev.330+g0123456789ab",
         "self_test_passed": True,
         "status": "upgraded",
+        "activation_receipt": {
+            "schema_version": 2, "node_id": "spk_" + "1" * 32,
+            "source_package_sha256": "a" * 64,
+            "source_version": "0.1.0~dev.329+g0123456789ab",
+            "source_binary_sha256": "c" * 64,
+            "candidate_package_sha256": "b" * 64,
+            "candidate_version": "0.1.0~dev.330+g0123456789ab",
+            "candidate_binary_sha256": "d" * 64,
+            "attempt_nonce": "f" * 64,
+            "phase": "acknowledged", "created_at": 100, "updated_at": 130,
+            "outcome": "controller_acknowledged",
+        },
     }
 
     parsed = validate_result_for_operation(
@@ -602,6 +627,7 @@ def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
 def test_operation_enum_contains_only_supported_operations() -> None:
     assert {member.value for member in AgentOperation} == {
         "agent.upgrade.v1",
+        "runtime.preflight.v1",
         "artifact.distribution.v1",
         "recipe.build.v1",
         "recipe.image.import.v1",

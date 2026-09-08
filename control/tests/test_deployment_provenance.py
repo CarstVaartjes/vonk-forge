@@ -247,6 +247,8 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
 
     from vonk_control.models import AgentOperation, AgentOperationAttempt
 
+    from .package_upgrade_fixtures import activation_receipt, source_transport
+
     sessions, now, node, _ = deployment(tmp_path)
     with sessions.begin() as session:
         operation = AgentOperation(
@@ -278,6 +280,10 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
                     "package_version": "1.2.3",
                     "self_test_passed": True,
                     "status": "upgraded",
+                    "activation_receipt": activation_receipt({
+                        **source_transport(), "package_sha256": "d" * 64,
+                        "package_version": "1.2.3", "target_binary_digest": "b" * 64,
+                    }, node, now=int(now.timestamp())),
                 },
             )
         )
@@ -363,7 +369,10 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
     )
     with sessions.begin() as session:
         attempt = session.scalar(
-            select(AgentOperationAttempt).order_by(AgentOperationAttempt.id)
+            select(AgentOperationAttempt)
+            .join(AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id)
+            .where(AgentOperation.kind == "recipe.start")
+            .order_by(AgentOperationAttempt.id)
         )
         attempt.result = {
             **attempt.result,

@@ -159,6 +159,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
 ) -> None:
     jobs, sessions, clock = service
+    from .package_upgrade_fixtures import activation_receipt, source_transport
     target = {
         "architecture": "linux-arm64",
         "package_bytes": 1234,
@@ -174,6 +175,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "target_build_digest": "sha256:" + "b" * 64,
     }
     job = parent(sessions, clock)
+    target.update(source_transport())
     operation = jobs.enqueue(job.id, NODE_A, "agent.upgrade.v1", COMMIT, target)
     old_identity = {
         "architecture": "linux-arm64",
@@ -199,6 +201,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         **old_identity,
         "binary_digest": target["target_binary_digest"],
         "build_digest": target["target_build_digest"],
+        "package_activation": activation_receipt(claim.payload.model_dump(mode="json"), NODE_A, now=int(clock.now.timestamp())),
     }
     assert (
         claim_agent(
@@ -230,6 +233,7 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
             "package_version": "0.1.0~dev.330+g0123456789ab",
             "self_test_passed": True,
             "status": "upgraded",
+            "activation_receipt": new_identity["package_activation"],
         }
 
 
@@ -919,7 +923,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
             "observation_receipt_public_key": node.observation_receipt_public_key,
-        } == runtime_identity.model_dump()
+        } == runtime_identity.model_dump(exclude={"package_activation"})
         assert node.contact_observation_digest is not None
         assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
 

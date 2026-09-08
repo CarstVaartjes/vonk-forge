@@ -41,6 +41,7 @@ from .runtime_preflight import (
     latest_result,
     node_fingerprint,
     recipe_requirements,
+    request_digest,
 )
 from .topology import Placement, TopologyError, validate_topology
 
@@ -198,7 +199,7 @@ class InstallAdmissionService:
             preflight_request = recipe_requirements(revision.document, source_build=False, minimum_free_bytes=self._disk_floor)
             runtime_blockers_by_node = {
                 node.node_id: admission_blockers(
-                    preflight_request, latest_result(session, node.node_id),
+                    preflight_request, latest_result(session, node.node_id, requirements_sha256=request_digest(preflight_request)),
                     current_fingerprint=node_fingerprint(node.capabilities),
                     now=int(now.timestamp()),
                 )

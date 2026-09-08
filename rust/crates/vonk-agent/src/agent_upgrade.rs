@@ -78,8 +78,19 @@ impl AgentUpgradeExecutor<'_> {
     pub async fn execute(&self, claim: &AgentClaim) -> Result<(), AgentUpgradeError> {
         let request =
             AgentUpgradeRequest::parse(claim).map_err(|_| AgentUpgradeError::InvalidClaim)?;
-        self.download(&request.source_package_url, request.source_package_bytes, &request.rollback.source.package_sha256).await?;
-        let package = self.download(&request.package_url, request.package_bytes, &request.package_sha256).await?;
+        self.download(
+            &request.source_package_url,
+            request.source_package_bytes,
+            &request.rollback.source.package_sha256,
+        )
+        .await?;
+        let package = self
+            .download(
+                &request.package_url,
+                request.package_bytes,
+                &request.package_sha256,
+            )
+            .await?;
         let grant = self
             .client
             .agent_upgrade_grant(claim, &request.package_sha256, &request.package_signature)
@@ -90,7 +101,9 @@ impl AgentUpgradeExecutor<'_> {
             .await
             .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
         validate_helper_response(&response, &request_id, &request.package_sha256)?;
-        if response.status != "package-installed" { return Err(AgentUpgradeError::HelperResponseInvalid); }
+        if response.status != "package-installed" {
+            return Err(AgentUpgradeError::HelperResponseInvalid);
+        }
         // A real upgrade restarts this service from dpkg postinst before the helper
         // can answer. Reaching here is intentionally not treated as proof that the
         // new runtime is active; the controller completes only after a fresh claim
@@ -99,11 +112,14 @@ impl AgentUpgradeExecutor<'_> {
         Err(AgentUpgradeError::RestartNotObserved)
     }
 
-    async fn download(&self, package_url: &str, package_bytes: u64, package_sha256: &str) -> Result<PathBuf, AgentUpgradeError> {
+    async fn download(
+        &self,
+        package_url: &str,
+        package_bytes: u64,
+        package_sha256: &str,
+    ) -> Result<PathBuf, AgentUpgradeError> {
         ensure_private_directory(self.incoming)?;
-        let destination = self
-            .incoming
-            .join(format!("{}.deb", package_sha256));
+        let destination = self.incoming.join(format!("{}.deb", package_sha256));
         if verified_file(&destination, package_bytes, package_sha256)? {
             return Ok(destination);
         }
@@ -130,9 +146,7 @@ impl AgentUpgradeExecutor<'_> {
                 .timeout(Duration::from_secs(300))
                 .build()?;
             let mut response = client.get(package_url).send().await?;
-            if !response.status().is_success()
-                || response.content_length() != Some(package_bytes)
-            {
+            if !response.status().is_success() || response.content_length() != Some(package_bytes) {
                 return Err(AgentUpgradeError::DownloadIdentityInvalid);
             }
             let mut digest = Sha256::new();
@@ -147,9 +161,7 @@ impl AgentUpgradeExecutor<'_> {
                 digest.update(&chunk);
                 file.write_all(&chunk)?;
             }
-            if received != package_bytes
-                || hex::encode(digest.finalize()) != package_sha256
-            {
+            if received != package_bytes || hex::encode(digest.finalize()) != package_sha256 {
                 return Err(AgentUpgradeError::DownloadIdentityInvalid);
             }
             file.sync_all()?;
@@ -288,7 +300,10 @@ pub(crate) fn validate_helper_response(
     }
     let expected_evidence_sha256 = hex::encode(Sha256::digest(expected_package_sha256.as_bytes()));
     if response.request_id.as_deref() != Some(expected_request_id)
-        || !matches!(response.status.as_str(), "package-installed" | "package-activation-confirmed")
+        || !matches!(
+            response.status.as_str(),
+            "package-installed" | "package-activation-confirmed"
+        )
         || response.evidence_sha256.as_deref() != Some(expected_evidence_sha256.as_str())
         || response.exit_code.is_some()
         || response.error_code.is_some()

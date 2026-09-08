@@ -383,17 +383,14 @@ impl AgentHttpClient {
             .get("phase")
             .and_then(serde_json::Value::as_str)
             == Some("executing")
-        {
-            if let Some((operation_id, phase)) = self
+            && let Some((operation_id, phase)) = self
                 .progress_phase
                 .lock()
                 .expect("progress phase lock poisoned")
                 .as_ref()
-            {
-                if *operation_id == progress.operation_id {
-                    progress.progress["phase"] = serde_json::json!(phase);
-                }
-            }
+            && *operation_id == progress.operation_id
+        {
+            progress.progress["phase"] = serde_json::json!(phase);
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
@@ -548,12 +545,23 @@ impl AgentHttpClient {
         })
     }
 
-    pub async fn package_activation_grant(&self, receipt: &vonk_agent_protocol::PackageActivationReceipt, runtime_identity: &AgentRuntimeIdentity) -> Result<SignedHostHelperGrant, ClientError> {
+    pub async fn package_activation_grant(
+        &self,
+        receipt: &vonk_agent_protocol::PackageActivationReceipt,
+        runtime_identity: &AgentRuntimeIdentity,
+    ) -> Result<SignedHostHelperGrant, ClientError> {
         let body = canonical_json(&serde_json::json!({"node_id": self.node_id, "receipt": receipt, "runtime_identity": runtime_identity})).map_err(|_| ClientError::Protocol)?;
-        let response = self.client.post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?).header("content-type", "application/json").body(body).send().await?;
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let response: HostRuntimeGrantResponse = parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        let response: HostRuntimeGrantResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
     }
 

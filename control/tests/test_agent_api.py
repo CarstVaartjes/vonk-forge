@@ -825,10 +825,12 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
             self.upgrade_calls.append(kwargs)
+            from .package_upgrade_fixtures import rollback_authority
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
                 package_sha256=kwargs["package_sha256"],
                 package_signature=kwargs["package_signature"],
+                rollback=rollback_authority(),
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -4010,6 +4012,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
 
 
 def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
+    from .package_upgrade_fixtures import source_transport
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"expected").hexdigest()
     (services.artifact_root / digest).write_bytes(b"tampered")
@@ -4028,6 +4031,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
             "package_version": "1.2.3",
             "target_binary_digest": "b" * 64,
             "target_build_digest": "sha256:" + "c" * 64,
+            **source_transport(),
         },
     )
     assert (

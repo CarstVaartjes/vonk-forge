@@ -573,8 +573,9 @@ class AgentJobService:
                 self._aggregate_parent(session, operation.parent_job_id)
                 return None
             if operation.kind == AgentOperation.AGENT_UPGRADE.value:
-                from vonk_agent_protocol.contracts import AgentUpgradePayload
                 import secrets
+
+                from vonk_agent_protocol.contracts import AgentUpgradePayload
                 payload = AgentUpgradePayload.model_validate(operation.payload)
                 if runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
                     return None

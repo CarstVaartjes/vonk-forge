@@ -381,6 +381,8 @@ from .operational_run_state import OperationalRunState
 from .operational_state import OperationalState
 from .operations_response import OperationsResponse
 from .output_limits import OutputLimits
+from .package_activation_receipt import PackageActivationReceipt
+from .package_activation_receipt_phase import PackageActivationReceiptPhase
 from .physical_acceptance_evidence import PhysicalAcceptanceEvidence
 from .physical_acceptance_evidence_state import PhysicalAcceptanceEvidenceState
 from .placement_evidence_counts import PlacementEvidenceCounts
@@ -1059,6 +1061,8 @@ __all__ = (
     "OperationResponse",
     "OperationsResponse",
     "OutputLimits",
+    "PackageActivationReceipt",
+    "PackageActivationReceiptPhase",
     "PhysicalAcceptanceEvidence",
     "PhysicalAcceptanceEvidenceState",
     "PlacementEvidenceCounts",

@@ -1823,6 +1823,7 @@ export interface components {
             /** Helper Exit Code */
             helper_exit_code?: number | null;
             operation?: components["schemas"]["AgentOperation"] | null;
+            package_activation?: components["schemas"]["PackageActivationReceipt"] | null;
             /** Reason */
             reason?: string | null;
             /** Recovery */
@@ -5326,20 +5327,15 @@ export interface components {
         };
         /** ModelCacheOperationProgress */
         ModelCacheOperationProgress: {
-            /** Bytes Per Second */
-            bytes_per_second?: number | null;
             /** Completed Artifacts */
             completed_artifacts: number;
             /** Current Artifact Key */
             current_artifact_key?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes: number;
-            /** Eta Seconds */
-            eta_seconds?: number | null;
             /** Expected Bytes */
             expected_bytes?: number | null;
-            /** Members */
-            members?: components["schemas"]["OperationMemberProgress"][];
+            measurement: components["schemas"]["OperationProgress"];
             /**
              * Phase
              * @enum {string}
@@ -6247,6 +6243,41 @@ export interface components {
             max_files: number;
             /** Max Total Bytes */
             max_total_bytes: number;
+        };
+        /** PackageActivationReceipt */
+        PackageActivationReceipt: {
+            /** Attempt Nonce */
+            attempt_nonce: string;
+            /** Candidate Binary Sha256 */
+            candidate_binary_sha256: string;
+            /** Candidate Package Sha256 */
+            candidate_package_sha256: string;
+            /** Candidate Version */
+            candidate_version: string;
+            /** Created At */
+            created_at: number;
+            /** Node Id */
+            node_id: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "armed" | "activation_failed" | "acknowledged" | "rolling_back" | "rolled_back" | "rollback_failed";
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /** Source Binary Sha256 */
+            source_binary_sha256: string;
+            /** Source Package Sha256 */
+            source_package_sha256: string;
+            /** Source Version */
+            source_version: string;
+            /** Updated At */
+            updated_at: number;
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;

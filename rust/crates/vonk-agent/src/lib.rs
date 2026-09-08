@@ -1,9 +1,7 @@
 #![forbid(unsafe_code)]
 pub mod runtime_preflight;
 
-
 pub mod agent_upgrade;
-pub mod package_activation;
 mod base_images;
 pub mod build_source;
 pub mod client;
@@ -17,6 +15,7 @@ pub mod identity;
 pub mod image_importer;
 pub mod inventory;
 pub mod oci;
+pub mod package_activation;
 pub mod pair;
 pub mod process;
 pub mod readiness;

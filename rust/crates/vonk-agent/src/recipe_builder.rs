@@ -758,7 +758,9 @@ fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImp
     }
 }
 
-pub(crate) fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
+pub(crate) fn podman_build_diagnostic(
+    output: &crate::process::ProcessOutput,
+) -> PodmanBuildDiagnostic {
     let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
     evidence.extend_from_slice(&output.stdout);
     evidence.push(b'\n');
@@ -1218,7 +1220,11 @@ mod tests {
         let output = crate::process::ProcessOutput {
             success: false,
             stdout: Vec::new(),
-            stderr: format!("{}\nAuthorization: Bearer never-persist\npermission denied mounting proc\n", "noise\n".repeat(5000)).into_bytes(),
+            stderr: format!(
+                "{}\nAuthorization: Bearer never-persist\npermission denied mounting proc\n",
+                "noise\n".repeat(5000)
+            )
+            .into_bytes(),
         };
         let error = RecipeBuildError::ImageBuild {
             diagnostic: podman_build_diagnostic(&output),
@@ -1228,8 +1234,15 @@ mod tests {
         let diagnostics = crate::failure_evidence::from_failure("recipe.build.v1", &body);
         assert!(diagnostics.stderr.truncated);
         assert!(diagnostics.stderr.text.contains("permission denied"));
-        assert!(!serde_json::to_string(&body).unwrap().contains("never-persist"));
-        assert!(matches!(diagnostics.category, crate::failure_evidence::FailureCategory::PlatformPolicy));
+        assert!(
+            !serde_json::to_string(&body)
+                .unwrap()
+                .contains("never-persist")
+        );
+        assert!(matches!(
+            diagnostics.category,
+            crate::failure_evidence::FailureCategory::PlatformPolicy
+        ));
     }
 
     #[test]

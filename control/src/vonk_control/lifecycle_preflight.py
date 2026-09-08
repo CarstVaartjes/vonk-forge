@@ -100,7 +100,7 @@ class LifecyclePreflight:
                 )
                 fingerprint = node_fingerprint(node.capabilities)
                 result = checkpoint.receipts.get(node_id) or latest_result(
-                    session, node_id
+                    session, node_id, requirements_sha256=request_digest(request)
                 )
                 blockers = admission_blockers(
                     request,

@@ -586,6 +586,10 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
+    from .deployment_observer import DeploymentObserver
+    deployment_observer = DeploymentObserver(
+        sessions, channel=os.environ.get("VONK_INSTALL_CHANNEL", "stable"), clock=clock,
+    )
     worker = assemble_production_worker(
         jobs=jobs,
         sessions=sessions,
@@ -602,6 +606,8 @@ if __name__ == "__main__":
         ),
         artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
         model_cache=model_cache,
+        background_services=(deployment_observer.tick,),
+        background_closers=(deployment_observer.close,),
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=(

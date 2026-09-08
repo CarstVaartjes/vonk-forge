@@ -165,16 +165,15 @@ impl OperationProgress {
         {
             return Err(ProtocolError::Identity("operation progress"));
         }
-        if let Some(checkpoint) = &self.checkpoint {
-            if !bounded(&checkpoint.key, 128)
+        if let Some(checkpoint) = &self.checkpoint
+            && (!bounded(&checkpoint.key, 128)
                 || checkpoint
                     .cursor
                     .as_ref()
                     .is_some_and(|v| v.chars().count() > 512)
-                || checkpoint.digest.as_ref().is_some_and(|v| !valid_sha256(v))
-            {
-                return Err(ProtocolError::Identity("operation checkpoint"));
-            }
+                || checkpoint.digest.as_ref().is_some_and(|v| !valid_sha256(v)))
+        {
+            return Err(ProtocolError::Identity("operation checkpoint"));
         }
         let mut ids = BTreeSet::new();
         for member in &self.members {

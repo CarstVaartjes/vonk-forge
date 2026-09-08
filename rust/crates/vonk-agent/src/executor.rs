@@ -810,25 +810,55 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         };
         match request {
             RecipeOperationRequest::RuntimePreflight(request) => {
-                use crate::runtime_preflight::{RuntimePreflight, PROBE_BINARY, host_fingerprint, finding};
+                use crate::runtime_preflight::{
+                    PROBE_BINARY, RuntimePreflight, finding, host_fingerprint,
+                };
                 let started = std::time::Instant::now();
-                let fingerprint = match host_fingerprint(self.runtime.runner, env!("VONK_AGENT_BUILD_DIGEST"), self.runtime.data_root, self.runtime_root) {
+                let fingerprint = match host_fingerprint(
+                    self.runtime.runner,
+                    env!("VONK_AGENT_BUILD_DIGEST"),
+                    self.runtime.data_root,
+                    self.runtime_root,
+                ) {
                     Ok(value) => value,
-                    Err(_) => return failed("runtime preflight host policy fingerprint is unavailable"),
+                    Err(_) => {
+                        return failed("runtime preflight host policy fingerprint is unavailable");
+                    }
                 };
                 // Fabric bandwidth is declared inventory, not measured NCCL acceptance.
                 // The configured fabric address must actually be bindable on this host.
-                let fabric = crate::config::AgentConfig::load(Path::new(crate::config::DEFAULT_CONFIG_PATH)).ok().and_then(|config| {
-                    let address = config.fabric_address?;
-                    let speed = config.fabric_bandwidth_mbps?;
-                    std::net::TcpListener::bind((address, 0)).ok().map(|_| ("connected", speed))
-                });
-                let probe = RuntimePreflight { runner: self.runtime.runner, data_root: self.runtime.data_root, runtime_root: self.runtime_root, probe_binary: Path::new(PROBE_BINARY) };
-                let mut result = match probe.run(&request, fingerprint, fabric, &|| *cancellation.borrow()) {
-                    Ok(result) => result,
-                    Err(_) => return failed("runtime preflight could not inspect the agent service environment"),
+                let fabric =
+                    crate::config::AgentConfig::load(Path::new(crate::config::DEFAULT_CONFIG_PATH))
+                        .ok()
+                        .and_then(|config| {
+                            let address = config.fabric_address?;
+                            let speed = config.fabric_bandwidth_mbps?;
+                            std::net::TcpListener::bind((address, 0))
+                                .ok()
+                                .map(|_| ("connected", speed))
+                        });
+                let probe = RuntimePreflight {
+                    runner: self.runtime.runner,
+                    data_root: self.runtime.data_root,
+                    runtime_root: self.runtime_root,
+                    probe_binary: Path::new(PROBE_BINARY),
                 };
-                let outcome = self.execute_host_runtime_outcome(claim, HostRuntimeAction::RuntimePreflight, vec![]).await;
+                let mut result =
+                    match probe.run(&request, fingerprint, fabric, &|| *cancellation.borrow()) {
+                        Ok(result) => result,
+                        Err(_) => {
+                            return failed(
+                                "runtime preflight could not inspect the agent service environment",
+                            );
+                        }
+                    };
+                let outcome = self
+                    .execute_host_runtime_outcome(
+                        claim,
+                        HostRuntimeAction::RuntimePreflight,
+                        vec![],
+                    )
+                    .await;
                 let (passed, code) = match outcome {
                     Ok(outcome) => match outcome.exit_code {
                         Some(0) => (true, "available"),
@@ -844,11 +874,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     },
                     Err(_) => (false, "helper_probe_unavailable"),
                 };
-                result.findings.retain(|value| value.capability != "signed_helper_run");
-                result.findings.push(finding("signed_helper_run", passed, code));
+                result
+                    .findings
+                    .retain(|value| value.capability != "signed_helper_run");
+                result
+                    .findings
+                    .push(finding("signed_helper_run", passed, code));
                 result.duration_ms = started.elapsed().as_millis() as u64;
-                if result.validate().is_err() { return failed("runtime preflight exceeded the bounded deadline"); }
-                ExecutionResult { state: "succeeded", body: serde_json::to_value(result).expect("typed preflight serializes") }
+                if result.validate().is_err() {
+                    return failed("runtime preflight exceeded the bounded deadline");
+                }
+                ExecutionResult {
+                    state: "succeeded",
+                    body: serde_json::to_value(result).expect("typed preflight serializes"),
+                }
             }
             RecipeOperationRequest::Build(request) => {
                 self.report_phase(claim, "downloading").await;
@@ -3142,7 +3181,10 @@ mod tests {
         body["reason"] = json!("runtime failed");
         let result = normalize_execution_result(
             &job_claim,
-            ExecutionResult { state: "failed", body },
+            ExecutionResult {
+                state: "failed",
+                body,
+            },
         );
         let typed: vonk_agent_protocol::RecipeJobRunResult =
             serde_json::from_value(result.body).unwrap();

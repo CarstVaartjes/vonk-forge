@@ -995,11 +995,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let code = crate::runtime_preflight::run(
                     Path::new("/var/lib/vonk-forge"),
                     Path::new(crate::runtime_preflight::PROBE_BINARY),
-                    |arguments, timeout| self.run_docker_with_timeout(arguments, timeout)
-                        .map(|output| (output.success, output.stdout))
-                        .map_err(|_| std::io::Error::other("preflight runtime unavailable")),
-                ).map_err(|_| OperationError::CommandFailed)?;
-                Ok(RuntimeRequestOutcome { exit_code: Some(code), recipe_run_observation: None })
+                    |arguments, timeout| {
+                        self.run_docker_with_timeout(arguments, timeout)
+                            .map(|output| (output.success, output.stdout))
+                            .map_err(|_| std::io::Error::other("preflight runtime unavailable"))
+                    },
+                )
+                .map_err(|_| OperationError::CommandFailed)?;
+                Ok(RuntimeRequestOutcome {
+                    exit_code: Some(code),
+                    recipe_run_observation: None,
+                })
             }
             HostRuntimeAction::ImageImport => {
                 self.runtime_image_import(&request.arguments)

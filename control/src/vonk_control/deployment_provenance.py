@@ -91,6 +91,12 @@ class DeploymentProvenanceService:
     def snapshot(self) -> DeploymentProvenance:
         now = _utc(self._clock())
         observations = self._observations()
+        from .deployment_observer import stored_observation
+        with self._sessions() as session:
+            if observations.repository is None:
+                observations.repository = stored_observation(session, "repository")
+            if observations.publication is None:
+                observations.publication = stored_observation(session, "publication")
 
         def age(source: str, observed_at: datetime | None = None) -> EvidenceAge:
             seconds = (

@@ -2345,6 +2345,9 @@ def test_stable_publication_refuses_version_rollback_before_writing(
     older_inputs = _inputs(tmp_path / "older", version="1.2.3")
     older_inputs["signing_key"] = newest_inputs["signing_key"]
     older_inputs["signing_public_key"] = newest_inputs["signing_public_key"]
+    # Both publications refer to the exact already published baseline package.
+    # Repacking identical binaries creates a different archive, not a new source identity.
+    older_inputs["baseline_packages"] = newest_inputs["baseline_packages"]
     older = _assemble(tmp_path / "older", older_inputs)
     candidate = _publish_candidate(older, destination)
     assert candidate.returncode == 0, candidate.stderr

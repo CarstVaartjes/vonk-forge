@@ -170,6 +170,16 @@
               }
             ]
           },
+          "package_activation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PackageActivationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "anyOf": [
               {
@@ -10993,19 +11003,6 @@
       "ModelCacheOperationProgress": {
         "additionalProperties": false,
         "properties": {
-          "bytes_per_second": {
-            "anyOf": [
-              {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bytes Per Second"
-          },
           "completed_artifacts": {
             "minimum": 0.0,
             "title": "Completed Artifacts",
@@ -11028,19 +11025,6 @@
             "title": "Downloaded Bytes",
             "type": "integer"
           },
-          "eta_seconds": {
-            "anyOf": [
-              {
-                "maximum": 1000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Eta Seconds"
-          },
           "expected_bytes": {
             "anyOf": [
               {
@@ -11053,13 +11037,8 @@
             ],
             "title": "Expected Bytes"
           },
-          "members": {
-            "items": {
-              "$ref": "#/components/schemas/OperationMemberProgress"
-            },
-            "maxItems": 1024,
-            "title": "Members",
-            "type": "array"
+          "measurement": {
+            "$ref": "#/components/schemas/OperationProgress"
           },
           "phase": {
             "enum": [
@@ -11094,7 +11073,8 @@
           "phase",
           "completed_artifacts",
           "total_artifacts",
-          "downloaded_bytes"
+          "downloaded_bytes",
+          "measurement"
         ],
         "title": "ModelCacheOperationProgress",
         "type": "object"
@@ -13998,6 +13978,100 @@
           "allowed_media_types"
         ],
         "title": "OutputLimits",
+        "type": "object"
+      },
+      "PackageActivationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_nonce": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Attempt Nonce",
+            "type": "string"
+          },
+          "candidate_binary_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Binary Sha256",
+            "type": "string"
+          },
+          "candidate_package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Package Sha256",
+            "type": "string"
+          },
+          "candidate_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+            "title": "Candidate Version",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 1.0,
+            "title": "Created At",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "outcome": {
+            "pattern": "^[a-z_]{1,128}$",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "armed",
+              "activation_failed",
+              "acknowledged",
+              "rolling_back",
+              "rolled_back",
+              "rollback_failed"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_binary_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Binary Sha256",
+            "type": "string"
+          },
+          "source_package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Package Sha256",
+            "type": "string"
+          },
+          "source_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+            "title": "Source Version",
+            "type": "string"
+          },
+          "updated_at": {
+            "minimum": 1.0,
+            "title": "Updated At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "node_id",
+          "source_package_sha256",
+          "source_version",
+          "source_binary_sha256",
+          "candidate_package_sha256",
+          "candidate_version",
+          "candidate_binary_sha256",
+          "attempt_nonce",
+          "phase",
+          "created_at",
+          "updated_at",
+          "outcome"
+        ],
+        "title": "PackageActivationReceipt",
         "type": "object"
       },
       "ParameterDefinition": {
