@@ -35,7 +35,6 @@
       "environment": [],
       "format": "oci",
       "identity_label": true,
-      "ignorefile": null,
       "jobs": 1,
       "labels": [],
       "layer_compression": "disabled",
@@ -45,15 +44,12 @@
       "no_hosts": false,
       "omit_history": false,
       "os_features": [],
-      "os_version": null,
       "shm_bytes": 67108864,
       "skip_unused_stages": true,
       "squash": "none",
-      "timestamp": null,
       "unset_environment": [],
       "unset_labels": []
     },
-    "target": null,
     "limits": {
       "cpu_cores": 8,
       "memory_bytes": 8589934592,
