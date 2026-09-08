@@ -433,7 +433,7 @@ def compile_canonical_harness(
         devices=devices,
         model_mounts=tuple(model_mounts),
         output_mount=HarnessMount("/run/vonk/outputs", "/outputs", read_only=False, isolated=True),
-        input_mount=(HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True) if getattr(interface, "input", None) is not None else None),
+        input_mount=(HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True) if interface.adapter != "openai" else None),
         environment=environment,
         writable_paths=writable_paths(slug),
         telemetry=telemetry_contract(slug),

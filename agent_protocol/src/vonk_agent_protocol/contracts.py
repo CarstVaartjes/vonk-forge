@@ -569,8 +569,6 @@ def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
                 value,
             )
         )
-    if path and path[0] == "parameters":
-        return len(value.encode("utf-8")) <= 4096 and "\x00" not in value
     return False
 
 

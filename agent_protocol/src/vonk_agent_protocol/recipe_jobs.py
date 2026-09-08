@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
@@ -16,9 +15,9 @@ from pydantic import (
     model_validator,
 )
 
+from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
-from .compiled_execution_plan import CompiledExecutionPlan
 from .wire_model import WireModel
 
 MAX_INPUT_FILES = 32

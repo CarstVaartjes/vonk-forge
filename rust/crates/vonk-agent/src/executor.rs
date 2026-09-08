@@ -1055,29 +1055,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(plan) => plan,
                     Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
                 };
-                let Some(job) = invocation.job.as_ref() else {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "installed recipe is not a one-shot job",
-                    );
-                };
-                if job.interface != request.interface
-                    || request.timeout_seconds == 0
-                    || request.timeout_seconds != job.timeout_seconds
-                    || invocation.endpoint.is_some()
-                    || invocation.runtime.image_digest != request.image_digest
-                    || invocation.identity.recipe_revision_sha256 != request.recipe_content_sha256
-                    || !crate::workloads::same_job_workload(&spec, &invocation)
-                {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "job request does not match the installed workload",
-                    );
-                }
                 if self
                     .runtime
                     .ensure_memory_available(
@@ -1153,12 +1130,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .iter()
                     .map(|input| input.name.clone())
                     .collect::<Vec<_>>();
-                let input_manifest = json!({
-                    "schema_version": 1,
-                    "total_bytes": request.input_total_bytes,
-                    "files": request.inputs,
-                });
-                let input_manifest = match canonical_json(&input_manifest) {
+                let input_manifest = match recipe_job_input_manifest(&request) {
                     Ok(bytes) => bytes,
                     Err(_) => {
                         let _ = self.runtime.cleanup_job_scope(&job_scope);
@@ -2032,6 +2004,16 @@ fn job_placement(
     }
     placement.validate_bound()?;
     Ok(placement.clone())
+}
+
+pub fn recipe_job_input_manifest(
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Result<Vec<u8>, vonk_agent_protocol::ProtocolError> {
+    canonical_json(&json!({
+        "schema_version": 1,
+        "total_bytes": request.input_total_bytes,
+        "files": request.inputs,
+    }))
 }
 
 pub fn prepare_job_invocation(
