@@ -3045,7 +3045,7 @@ fn build_metrics(
         item.process_name = Some(process.name.clone());
         series.push(item);
     }
-    if processes.is_empty() {
+    if processes.is_empty() && !accelerators.is_empty() {
         capabilities.push(capability(
             metric_identity(
                 "gpu.process_memory_bytes",
