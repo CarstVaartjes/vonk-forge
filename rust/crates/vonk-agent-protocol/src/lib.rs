@@ -526,8 +526,10 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
-        let maximum_bytes = if matches!(self.operation.as_str(), "recipe.install" | "recipe.start")
-        {
+        let maximum_bytes = if matches!(
+            self.operation.as_str(),
+            "recipe.install" | "recipe.start" | "recipe.job.run.v1"
+        ) {
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
         } else {
             MAX_DOCUMENT_BYTES
@@ -990,7 +992,7 @@ pub struct RecipeJobRunRequest {
     pub input_manifest_sha256: String,
     pub input_total_bytes: u64,
     pub inputs: Vec<RecipeJobInputFile>,
-    pub parameters: Value,
+    pub compiled_execution_plan: Value,
     pub output_mappings: Vec<RecipeJobOutputMapping>,
     pub output_limits: RecipeJobOutputLimits,
     pub timeout_seconds: u16,
@@ -2052,9 +2054,7 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && value.role == "entrypoint"
         && inputs_valid
         && manifest_valid
-        && value.parameters.is_object()
-        && canonical_json(&value.parameters).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
-        && valid_job_parameter(&value.parameters, 0)
+        && value.compiled_execution_plan.is_object()
         && mappings_valid
         && (1..=32).contains(&limits.max_files)
         && (1..=1024 * 1024 * 1024).contains(&limits.max_file_bytes)
@@ -2129,54 +2129,6 @@ fn valid_media_type(value: &str) -> bool {
         };
         valid_part(kind) && valid_part(subtype)
     })
-}
-
-fn valid_job_parameter(value: &Value, depth: usize) -> bool {
-    if depth > 8 {
-        return false;
-    }
-    match value {
-        Value::Null | Value::Bool(_) | Value::Number(_) => true,
-        Value::String(value) => value.len() <= 4096 && !value.contains('\0'),
-        Value::Array(values) => {
-            values.len() <= 128
-                && values
-                    .iter()
-                    .all(|value| valid_job_parameter(value, depth + 1))
-        }
-        Value::Object(values) => values.iter().all(|(key, value)| {
-            let key = key.to_ascii_lowercase();
-            values.len() <= 128
-                && !key.is_empty()
-                && key.len() <= 64
-                && !unsafe_parameter_key(&key)
-                && valid_job_parameter(value, depth + 1)
-        }),
-    }
-}
-
-fn unsafe_parameter_key(key: &str) -> bool {
-    [
-        "password",
-        "secret",
-        "token",
-        "authorization",
-        "command",
-        "shell",
-        "environment",
-    ]
-    .iter()
-    .any(|value| key.contains(value))
-        || key.match_indices("private").any(|(index, _)| {
-            let tail = &key[index + "private".len()..];
-            tail.starts_with("key") || tail.get(1..).is_some_and(|value| value.starts_with("key"))
-        })
-        || key.split(['_', '-']).any(|part| {
-            matches!(
-                part,
-                "path" | "file" | "filename" | "filepath" | "directory" | "folder"
-            )
-        })
 }
 
 fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
@@ -2602,7 +2554,7 @@ mod recipe_job_tests {
             input_manifest_sha256: hex_sha256(&canonical_json(&manifest).unwrap()),
             input_total_bytes: 123,
             inputs,
-            parameters: serde_json::json!({"guidance_scale": 7}),
+            compiled_execution_plan: serde_json::json!({}),
             output_mappings: vec![RecipeJobOutputMapping {
                 slot: "video".to_owned(),
                 media_type: "video/mp4".to_owned(),
@@ -2620,7 +2572,7 @@ mod recipe_job_tests {
     }
 
     #[test]
-    fn job_contract_binds_canonical_inputs_and_rejects_unsafe_parameters() {
+    fn job_contract_binds_canonical_inputs_and_requires_plan_object() {
         let valid = request();
         assert!(validate_recipe_job(&valid));
 
@@ -2647,7 +2599,7 @@ mod recipe_job_tests {
         assert!(!validate_recipe_job(&reserved_manifest));
 
         let mut command = valid;
-        command.parameters = serde_json::json!({"shell_command": "curl example.invalid"});
+        command.compiled_execution_plan = serde_json::json!(null);
         assert!(!validate_recipe_job(&command));
     }
 

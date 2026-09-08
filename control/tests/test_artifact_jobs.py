@@ -162,6 +162,10 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
             },
         }
     ]
+    document["runtime"]["arguments"].extend([
+        {"name": "prompt", "value": None, "setting": "prompt"},
+        {"name": "seed", "value": None, "setting": "seed"},
+    ])
     document["settings"]["knobs"] = {
         "prompt": {"value": "", "change_effect": "restart"},
         "seed": {"value": 0, "change_effect": "restart"},
@@ -483,7 +487,7 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         assert operation.payload["reserved_memory_bytes"] == 225
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         assert operation.payload["contract_sha256"] == job.contract_sha256
-        assert operation.payload["parameters"]["prompt"] == "fox / meadow"
+        assert "fox / meadow" in operation.payload["compiled_execution_plan"]["runtime"]["argv"]
         assert operation.payload["output_mappings"] == [
             {
                 "slot": "image",

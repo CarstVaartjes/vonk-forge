@@ -400,7 +400,7 @@ def _validate_safe_keys(
                 and key == "name"
             )
             typed_compiled_plan_key = (
-                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
                 and path[:1] == ("compiled_execution_plan",)
             )
             if _is_path_key(key) and not (
@@ -477,7 +477,7 @@ def _validate_safe_keys(
                 and _typed_result_string(path, value)
             )
         ) or (
-            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
             and path[:1] == ("compiled_execution_plan",)
         ):
             return
@@ -982,7 +982,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
-            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
             else MAX_DOCUMENT_BYTES
         )
         payload = _validate_bounded_document(
@@ -1013,7 +1013,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
                     maximum_bytes=(
                         MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
                         if operation_kind
-                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
                         else MAX_DOCUMENT_BYTES
                     ),
                 )
