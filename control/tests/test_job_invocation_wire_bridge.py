@@ -62,9 +62,14 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
             {"name": "engine-config", "value": compound, "setting": None}
         )
 
-    sessions, _, _, service, run_id, node_id = running_artifact_service(
+    sessions, operations, _, service, run_id, node_id = running_artifact_service(
         tmp_path, recipe_transform=configure
     )
+    # Installation setup has recorded its completed operations; job submission
+    # and claiming must use the production queue and its canonical payload bytes.
+    agent_jobs = AgentJobService(sessions, clock=lambda: NOW)
+    operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0", 60) is None
     app = FastAPI()
 
     @app.middleware("http")
@@ -133,9 +138,7 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
     assert client.post(f"/api/v1/artifact-jobs/{job_id}/finalize").status_code == 200
     submitted = client.post(f"/api/v1/artifact-jobs/{job_id}/submit")
     assert submitted.status_code == 202, submitted.text
-    claim = claim_agent(
-        AgentJobService(sessions, clock=lambda: NOW), node_id, "serial-0", 60
-    )
+    claim = claim_agent(agent_jobs, node_id, "serial-0", 60)
     document = json.loads(canonical_message(claim))
     request = document["payload"]
     invocation = request["compiled_execution_plan"]
@@ -204,7 +207,18 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
             # null must verify as the same signed invocation, without rehashing.
             equivalent_result = invoke(equivalent)
             assert equivalent_result.returncode == 0, equivalent_result.stderr
-            assert json.loads(equivalent_result.stdout)["arguments"] == arguments
+            equivalent_output = json.loads(equivalent_result.stdout)
+            equivalent_arguments = equivalent_output["arguments"]
+            equivalent_image_index = equivalent_arguments.index(
+                installed["runtime_image"]["local_image_reference"]
+            )
+            assert (
+                equivalent_arguments[equivalent_image_index + 1 :]
+                == (arguments[image_index + 1 :])
+            )
+            assert CompiledExecutionPlan.model_validate(
+                equivalent_output["runtime"]
+            ) == (CompiledExecutionPlan.model_validate(invocation))
     for change in (
         "image",
         "mount",
