@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import pytest
@@ -399,19 +399,33 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.observed_run_generation == identity["run_generation"]
         assert node.state == "running"
-        assert node.updated_at == max(
+        assert node.updated_at.replace(tzinfo=UTC) == max(
             observed_at, NOW + timedelta(microseconds=500_000) if same_second else NOW
         )
+        accepted_receipt = node.observation_receipt_sha256
+        accepted_at = node.updated_at
         pending = session.get(RecipeRunObservationGrant, node.id)
         assert pending is not None and pending.consumed is True
     with TestClient(app) as client:
         replay = client.post(
             "/agent/v1/recipe-runs/observations", headers=headers, json=envelope
         )
-        assert replay.status_code == 204
+        assert replay.status_code == 422
+        assert "replayed" in replay.json()["detail"]
+    with sessions() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        assert node.state == "running"
+        assert node.observation_receipt_sha256 == accepted_receipt
+        assert node.updated_at == accepted_at
+    with sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        node.state = "failed"
+    with TestClient(app) as client:
+        client.post("/agent/v1/recipe-runs/observations", headers=headers, json=envelope)
     with sessions() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.state == "failed"
+        assert node.observation_receipt_sha256 is None
 
 
 @pytest.mark.parametrize("singleton", [False, True])

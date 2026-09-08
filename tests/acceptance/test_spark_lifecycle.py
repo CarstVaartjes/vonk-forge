@@ -2245,6 +2245,39 @@ class SparkLifecycle:
             )
         )
 
+    def _preflight_failure_evidence(self, operation_id: str) -> list[object]:
+        # Project only diagnostic fields from the current checkpoint. Never
+        # serialize complete operation results, signed grants, or credentials.
+        query = (
+            "SELECT json_build_object('node_id',r.key,"
+            "'current_fingerprint',(SELECT substring(c from 31) FROM "
+            "jsonb_array_elements_text(n.capabilities::jsonb) c "
+            "WHERE c LIKE 'runtime.preflight.fingerprint.%' LIMIT 1),"
+            "'receipt_fingerprint',r.value->>'fingerprint',"
+            "'request_sha256',r.value->>'request_sha256',"
+            "'payload_sha256',a.payload_digest,"
+            "'observed_at',r.value->'observed_at',"
+            "'controller_now',floor(extract(epoch FROM clock_timestamp())),"
+            "'failed_findings',(SELECT jsonb_agg(jsonb_build_object("
+            "'capability',f->>'capability','code',f->>'code')) FROM "
+            "jsonb_array_elements(r.value->'findings') f WHERE f->>'status'!='passed')) "
+            "FROM jobs j CROSS JOIN LATERAL "
+            "jsonb_each(j.result::jsonb->'preflight'->'receipts') r "
+            "LEFT JOIN agent_nodes n ON n.node_id=r.key "
+            "LEFT JOIN LATERAL (SELECT o.payload_digest FROM agent_operations o "
+            "JOIN agent_operation_attempts t ON t.operation_id=o.id "
+            "AND t.attempt=o.current_attempt WHERE o.node_id=r.key "
+            "AND o.kind='runtime.preflight.v1' "
+            "AND t.result::jsonb->>'observed_at'=r.value->>'observed_at' "
+            "AND t.result::jsonb->>'request_sha256'=r.value->>'request_sha256' "
+            "ORDER BY o.updated_at DESC LIMIT 1) a ON true "
+            f"WHERE j.id='{operation_id}' ORDER BY r.key LIMIT 2"
+        )
+        try:
+            return [json.loads(row[0]) for row in self._psql(query) if len(row) == 1]
+        except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
+            return [{"diagnostic": "preflight evidence unavailable"}]
+
     def _await_canary_run_switch(
         self,
         operation: dict[str, object],
@@ -2295,6 +2328,8 @@ class SparkLifecycle:
                 ) if phase.get(key) is not None}
                 for phase in phase_results[-3:] if isinstance(phase, dict)
             ] if isinstance(phase_results, list) else []
+            if isinstance(reason, str) and reason.startswith("runtime_preflight."):
+                summary["preflight"] = self._preflight_failure_evidence(operation_id)
             details = self._redact_diagnostics(json.dumps({
                 **summary,
                 "status_reason": reason,

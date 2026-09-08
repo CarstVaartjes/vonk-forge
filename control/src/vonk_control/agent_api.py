@@ -91,6 +91,7 @@ from .enrollment_bootstrap import EnrollmentBootstrapConfig
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
+    RecipeRunObservationReplayError,
 )
 from .inventory_repository import InventoryRepository, InventorySnapshotInput
 from .models import (
@@ -1757,6 +1758,8 @@ def install_agent_routes(
                             signed_grant=evidence.grant,
                             helper_receipt=evidence.helper_receipt,
                         )
+                    except RecipeRunObservationReplayError as error:
+                        raise ValueError(str(error)) from error
                     except HostHelperAuthorityError:
                         # An authenticated same-generation identity mismatch is
                         # rank failure, not permission to keep serving.
