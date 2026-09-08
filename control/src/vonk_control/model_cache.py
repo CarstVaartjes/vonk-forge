@@ -2312,7 +2312,9 @@ class ModelCacheService:
                 old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
                 old_completed = old_progress.get("completed_artifacts")
                 old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
-                operation.state = "running" if state != "partial" else "partial"
+                # A partial file is an active download checkpoint. Only an
+                # interrupted operation should enter the resumable partial state.
+                operation.state = "running"
                 operation.progress = self._progress(
                     manifest,
                     previous=operation.progress,

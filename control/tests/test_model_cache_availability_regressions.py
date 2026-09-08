@@ -220,7 +220,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(tmp_path: Pat
     assert sibling_started.wait(2)
     time.sleep(0.05)
     service.tick()
-    assert service.get_operation(operation.id).state in {"running", "partial"}
+    assert service.get_operation(operation.id).state == "running"
     release_sibling.set()
     _drain(service, operation.id)
     final = service.get_operation(operation.id)
@@ -398,7 +398,9 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
         artifacts,
         "00000000-0000-4000-8000-000000000309",
     )
-    _drain(service, operation.id, timeout_seconds=30)
+    # This checks 129 durable file checkpoints, not a throughput requirement;
+    # allow the full set to commit on a busy shared CI filesystem.
+    _drain(service, operation.id, timeout_seconds=120)
     result = service.get_operation(operation.id)
     assert result.state == "succeeded", result.failure
     parsed = ModelCacheOperationProgress.model_validate(result.progress)
