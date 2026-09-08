@@ -1771,15 +1771,15 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         }
         if !valid_metric_identity(
             &series.key,
-            &*series.scope,
+            &series.scope,
             series.device_id.as_deref(),
             series.interface_name.as_deref(),
             series.run_id.as_deref(),
         ) || !valid_metric_text(&series.unit, 32)
             || !valid_metric_text(&series.source, 128)
-            || !valid_metric_text(&*series.measurement_kind, 16)
-            || !valid_metric_text(&*series.freshness, 16)
-            || !valid_metric_text(&*series.support_status, 16)
+            || !valid_metric_text(&series.measurement_kind, 16)
+            || !valid_metric_text(&series.freshness, 16)
+            || !valid_metric_text(&series.support_status, 16)
             || !valid_metric_text(&series.aggregation, 32)
             || !valid_optional_text(series.reason.as_deref(), 256)
             || !series.freshness_threshold_seconds.is_finite()
@@ -1819,13 +1819,13 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         }
         if !valid_metric_identity(
             &capability.key,
-            &*capability.scope,
+            &capability.scope,
             capability.device_id.as_deref(),
             capability.interface_name.as_deref(),
             capability.run_id.as_deref(),
         ) || !valid_metric_text(&capability.unit, 32)
             || !valid_metric_text(&capability.source, 128)
-            || !valid_metric_text(&*capability.measurement_kind, 16)
+            || !valid_metric_text(&capability.measurement_kind, 16)
             || !valid_optional_text(capability.reason.as_deref(), 256)
             || capability.process_id == Some(0)
             || !valid_optional_text(capability.process_name.as_deref(), 128)

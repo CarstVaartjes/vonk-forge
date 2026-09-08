@@ -11,18 +11,18 @@ fn prepare(value: &mut Value) {
             if object.get("x-vonk-source-type").and_then(Value::as_str) == Some("string") {
                 object.remove("format");
             }
-            if let Some(format) = object.get("format").cloned() {
-                if let Some(Value::Array(variants)) = object.get_mut("anyOf") {
-                    for variant in variants {
-                        if variant.get("type").and_then(Value::as_str) == Some("string") {
-                            variant
-                                .as_object_mut()
-                                .unwrap()
-                                .insert("format".into(), format.clone());
-                        }
+            if let Some(format) = object.get("format").cloned()
+                && let Some(Value::Array(variants)) = object.get_mut("anyOf")
+            {
+                for variant in variants {
+                    if variant.get("type").and_then(Value::as_str) == Some("string") {
+                        variant
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("format".into(), format.clone());
                     }
-                    object.remove("format");
                 }
+                object.remove("format");
             }
             let uuid = object.get("format").and_then(Value::as_str) == Some("uuid")
                 || object
@@ -216,6 +216,18 @@ fn strip_docs(item: &mut Item) {
         _ => return,
     };
     attrs.retain(|attr| !attr.path().is_ident("doc"));
+    // typify's union variants mirror canonical model names and use inline
+    // payloads. Keep that generated API stable; names and layout are not
+    // handwritten choices. Copy this narrowly scoped attribute to Raw too.
+    if let Item::Enum(item) = item
+        && item
+            .variants
+            .iter()
+            .any(|variant| !matches!(variant.fields, syn::Fields::Unit))
+    {
+        item.attrs
+            .push(parse_quote!(#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]));
+    }
     if let Item::Struct(item) = item {
         for field in &mut item.fields {
             if let syn::Type::Path(path) = &field.ty {
@@ -237,6 +249,85 @@ fn strip_docs(item: &mut Item) {
                     *attr = parse_quote!(#[serde(#(#kept),*)]);
                 }
             }
+        }
+    }
+}
+
+// Only classify Rust types whose Copy contract is known. Unknown/generated
+// types keep Clone; this never infers ownership from a wire field's name.
+fn is_copy_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Tuple(tuple) = ty {
+        return tuple.elems.iter().all(is_copy_type);
+    }
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    let name = path.path.to_token_stream().to_string().replace(' ', "");
+    if [
+        "bool",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f32",
+        "f64",
+        "::uuid::Uuid",
+        "::std::net::IpAddr",
+        "::chrono::DateTime<::chrono::FixedOffset>",
+    ]
+    .contains(&name.as_str())
+    {
+        return true;
+    }
+    let leaf = path.path.segments.last().unwrap();
+    if leaf.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(arguments) = &leaf.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = arguments.args.first()
+    {
+        return is_copy_type(inner);
+    }
+    false
+}
+
+// Replace only typify defaults that are exactly a derived field-by-field
+// Default. Schema defaults still materialize in the validated Deserialize path.
+fn derive_trivial_defaults(items: &mut Vec<Item>) {
+    let mut derived = Vec::new();
+    items.retain(|item| {
+        let Item::Impl(item) = item else { return true };
+        let Some((_, trait_path, _)) = &item.trait_ else {
+            return true;
+        };
+        if trait_path.segments.last().unwrap().ident != "Default" {
+            return true;
+        }
+        let [syn::ImplItem::Fn(method)] = item.items.as_slice() else {
+            return true;
+        };
+        let [syn::Stmt::Expr(syn::Expr::Struct(value), None)] = method.block.stmts.as_slice()
+        else {
+            return true;
+        };
+        if !value.path.is_ident("Self")
+            || value.rest.is_some()
+            || !value.fields.iter().all(|field| {
+                field.expr.to_token_stream().to_string() == quote!(Default::default()).to_string()
+            })
+        {
+            return true;
+        }
+        derived.push(item.self_ty.to_token_stream().to_string());
+        false
+    });
+    for item in items {
+        if let Item::Struct(item) = item
+            && derived.contains(&item.ident.to_string())
+        {
+            item.attrs.push(parse_quote!(#[derive(Default)]));
         }
     }
 }
@@ -456,14 +547,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut types = typify::TypeSpace::new(&settings);
     types.add_ref_types(definitions)?;
     let mut syntax: syn::File = syn::parse2(types.to_stream())?;
+    derive_trivial_defaults(&mut syntax.items);
     let eq_types = equality_types(&syntax.items);
     let mut validation = Vec::new();
     for item in &mut syntax.items {
         strip_docs(item);
-        if let Item::Enum(item) = item {
-            if let Some(implementations) = enum_string_impl(item) {
-                validation.extend(implementations);
-            }
+        if let Item::Enum(item) = item
+            && let Some(implementations) = enum_string_impl(item)
+        {
+            validation.extend(implementations);
         }
         let name = match item {
             Item::Struct(item) => item.ident.to_string(),
@@ -491,10 +583,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 attrs.push(parse_quote!(#[derive(Eq)]));
             }
         }
-        if let Some(schema_name) = names.get(&name) {
-            if let Some(implementation) = deserialize_impl(item, schema_name) {
-                validation.push(implementation);
-            }
+        if let Some(schema_name) = names.get(&name)
+            && let Some(implementation) = deserialize_impl(item, schema_name)
+        {
+            validation.push(implementation);
         }
     }
     // Pydantic inheritance defines identity projections. Generate their field
@@ -545,10 +637,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }) {
                 continue;
             }
+            let values: Vec<_> = base_fields
+                .iter()
+                .map(|field| {
+                    let name = field.ident.as_ref().unwrap();
+                    if is_copy_type(&field.ty) {
+                        quote!(value.#name)
+                    } else {
+                        quote!(value.#name.clone())
+                    }
+                })
+                .collect();
             validation.push(parse_quote! {
                 impl From<&#derived_ident> for #base_ident {
                     fn from(value: &#derived_ident) -> Self {
-                        Self { #(#fields: value.#fields.clone()),* }
+                        Self { #(#fields: #values),* }
                     }
                 }
             });

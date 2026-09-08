@@ -139,11 +139,11 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
             strict_numbers(&format!("{pointer}/additionalProperties"), child)?;
         }
     }
-    if schema.get("items").is_some() {
-        if let Some(array) = value.as_array() {
-            for child in array {
-                strict_numbers(&format!("{pointer}/items"), child)?;
-            }
+    if schema.get("items").is_some()
+        && let Some(array) = value.as_array()
+    {
+        for child in array {
+            strict_numbers(&format!("{pointer}/items"), child)?;
         }
     }
     Ok(())
@@ -166,10 +166,10 @@ fn materialize(schema: &Value, value: &mut Value) {
         value.as_object_mut(),
     ) {
         for (name, property) in properties {
-            if !object.contains_key(name) {
-                if let Some(default) = property.get("default") {
-                    object.insert(name.clone(), default.clone());
-                }
+            if !object.contains_key(name)
+                && let Some(default) = property.get("default")
+            {
+                object.insert(name.clone(), default.clone());
             }
             if let Some(child) = object.get_mut(name) {
                 materialize(property, child);

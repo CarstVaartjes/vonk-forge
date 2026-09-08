@@ -2402,7 +2402,7 @@ where
             heartbeat_result?;
             result
         }
-        Ok(BeginDecision::Replay(result)) => result,
+        Ok(BeginDecision::Replay(result)) => *result,
         Err(StateError::Busy) => return Ok(()),
         Err(error) => return Err(error.into()),
     };

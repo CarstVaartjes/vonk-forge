@@ -386,8 +386,7 @@ impl AgentHttpClient {
     ) -> Result<RecipeRunInspectionGrant, ClientError> {
         binding.validate().map_err(|_| ClientError::Protocol)?;
         request.validate().map_err(|_| ClientError::Protocol)?;
-        let expected_attempt =
-            u32::try_from(binding.run_generation).map_err(|_| ClientError::Protocol)?;
+        let expected_attempt = binding.run_generation;
         if request.action != HostRuntimeAction::RunInspect
             || request.job_id != binding.run_id
             || request.attempt != expected_attempt
@@ -407,8 +406,7 @@ impl AgentHttpClient {
             recipe_content_sha256: binding.recipe_content_sha256.clone(),
             mapping_id: binding.mapping_id,
             mapping_generation: binding.mapping_generation,
-            run_generation: u32::try_from(binding.run_generation)
-                .map_err(|_| ClientError::Protocol)?,
+            run_generation: binding.run_generation,
             image_digest: binding.image_digest.clone(),
             artifact_set_digest: binding.artifact_set_digest.clone(),
             model_identity: binding.model_identity.clone(),
@@ -2831,7 +2829,7 @@ mod tests {
             action: HostRuntimeAction::RunInspect,
             job_id: binding.run_id,
             operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation as u32,
+            attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
@@ -2929,7 +2927,7 @@ mod tests {
             recipe_content_sha256: binding.recipe_content_sha256.clone(),
             recipe_revision_id: binding.recipe_revision_id,
             role: binding.role.clone(),
-            run_generation: u32::try_from(binding.run_generation).unwrap(),
+            run_generation: binding.run_generation,
             run_id: binding.run_id,
             runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
             world_size: binding.world_size,
@@ -2949,7 +2947,7 @@ mod tests {
                             type_: "execute-container-runtime-request".to_owned(),
                             job_id: binding.run_id,
                             operation_id: Uuid::new_v4(),
-                            attempt: binding.run_generation as u32,
+                            attempt: binding.run_generation,
                             fence: Uuid::new_v4(),
                             request_sha256: helper_receipt.claims.request_sha256.clone(),
                             observation_identity_sha256: Some("e".repeat(64)),
