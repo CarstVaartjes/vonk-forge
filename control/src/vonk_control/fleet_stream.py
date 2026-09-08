@@ -10,6 +10,12 @@ from datetime import UTC, datetime
 
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
+from .fleet_stream_contract import (
+    FleetChange,
+    FleetChangeEvent,
+    FleetSnapshotEvent,
+    FleetTelemetryEvent,
+)
 from .telemetry import TelemetryRepository, TelemetrySampleView
 
 MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -73,11 +79,9 @@ def _keepalive_frame(now: datetime, *, retry: bool) -> str:
 
 
 def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "reset_reason": reason,
-        "snapshot": snapshot.model_dump(mode="json"),
-    }
+    return FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot).model_dump(
+        mode="json"
+    )
 
 
 class FleetStream:
@@ -222,21 +226,18 @@ class FleetStream:
             sample = samples.get(sample_id) if isinstance(sample_id, str) else None
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
-            return {
-                "schema_version": 1,
-                "node_id": sample.node_id,
-                "sample": telemetry_point(sample).model_dump(mode="json"),
-            }
+            return FleetTelemetryEvent(
+                node_id=sample.node_id,
+                sample=telemetry_point(sample),
+            ).model_dump(mode="json")
         if event.event_type not in {"node-profile", "recipe-state", "operation-state"}:
             raise RuntimeError("Fleet stream event type is invalid")
-        return {
-            "schema_version": 1,
-            "projection_refresh_required": True,
-            "change": {
-                "entity_kind": event.entity_kind,
-                "entity_id": event.entity_id,
-                "node_id": event.node_id,
-                "occurred_at": _iso(event.occurred_at),
-                "fields": dict(event.payload),
-            },
-        }
+        return FleetChangeEvent(
+            change=FleetChange(
+                entity_kind=event.entity_kind,
+                entity_id=event.entity_id,
+                node_id=event.node_id,
+                occurred_at=event.occurred_at,
+                fields=dict(event.payload),
+            )
+        ).model_dump(mode="json")

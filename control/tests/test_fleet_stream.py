@@ -26,6 +26,11 @@ from vonk_control.fleet_events import (
 )
 from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.fleet_stream import FleetStream, parse_last_event_id
+from vonk_control.fleet_stream_contract import (
+    FleetChangeEvent,
+    FleetSnapshotEvent,
+    FleetTelemetryEvent,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -440,6 +445,12 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     }
     assert replay_fields == {"id": "6", "event": "operation-state"}
     assert replay_data["projection_refresh_required"] is True
+    assert FleetSnapshotEvent.model_validate_json(
+        json.dumps(snapshot_data)
+    ).snapshot.event_cursor == 5
+    assert FleetChangeEvent.model_validate_json(
+        json.dumps(replay_data)
+    ).change.entity_id == "entity-6"
     assert events.high_watermark_calls == 1
     assert projection.cursors == [5]
     assert events.replay_calls == [(5, NOW, 128)]
@@ -741,6 +752,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     assert fields["id"] == "1"
     assert fields["event"] == "node-telemetry"
     assert data["sample"]["boot_id"] == NON_RFC_BOOT_ID
+    assert FleetTelemetryEvent.model_validate_json(json.dumps(data)).node_id == NODE_ID
     assert sum("fleet_stream_events" in statement for statement in selects) == 1
     assert sum("from node_telemetry_samples" in statement for statement in selects) == 1
     assert len(selects) == 2
