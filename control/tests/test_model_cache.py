@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog_entities import _build_projection
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
     ModelCacheVerifiedObjectSource,
@@ -26,6 +27,7 @@ from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheResolutionError,
     ModelCacheService,
+    ModelCacheStorageError,
     _retry_after_seconds,
     _retryable_failure,
 )
@@ -541,7 +543,7 @@ def test_cache_operation_reads_reject_malformed_or_wrong_kind_results(
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, operation.id)
         row.payload = {**row.payload, "result": invalid_result}
-    with pytest.raises(ValidationError):
+    with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
         service.get_operation(operation.id)
 
 
@@ -1030,16 +1032,23 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
     ).artifact_set_sha256 or ""
     recipe_revision_id = "00000000-0000-4000-8000-000000000022"
     recipe_document = _canonical_recipe(model)
-    recipe_digest = hashlib.sha256(
-        json.dumps(recipe_document, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
+    recipe_projection = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    recipe_projection.update(_build_projection(recipe))
     with sessions.begin() as session:
         session.add(
             CatalogDocument(
-                id="00000000-0000-4000-8000-000000000021",
-                kind="recipe",
-                publisher="owner",
-                slug="protected-recipe",
+                    id="00000000-0000-4000-8000-000000000021",
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
                 title="Protected recipe",
                 created_by="test",
                 created_at=NOW,
@@ -1051,14 +1060,14 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
                 id=recipe_revision_id,
                 document_id="00000000-0000-4000-8000-000000000021",
                 kind="recipe",
-                publisher="owner",
-                slug="protected-recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
                 revision_number=1,
                 state="active",
                 schema_version=2,
                 document=recipe_document,
                 content_digest=recipe_digest,
-                projected={},
+                    projected=recipe_projection,
                 created_by="test",
                 created_at=NOW,
             )
