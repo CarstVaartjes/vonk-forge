@@ -2346,7 +2346,6 @@ pub struct OperationProgress {
     pub kind: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub last_progress_at: ::std::option::Option<::std::string::String>,
-    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     pub members: ::std::vec::Vec<OperationMemberProgress>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub object_sha256: ::std::option::Option<::std::string::String>,
@@ -3754,7 +3753,7 @@ pub struct RecipeStartPayload {
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-    pub start_deadline: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
+    pub start_deadline: ::std::option::Option<::std::string::String>,
     pub world_size: u64,
 }
 #[derive(
@@ -7818,7 +7817,6 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             pub kind: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub last_progress_at: ::std::option::Option<::std::string::String>,
-            #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
             pub members: ::std::vec::Vec<OperationMemberProgress>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub object_sha256: ::std::option::Option<::std::string::String>,
@@ -9759,7 +9757,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            pub start_deadline: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
+            pub start_deadline: ::std::option::Option<::std::string::String>,
             pub world_size: u64,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
