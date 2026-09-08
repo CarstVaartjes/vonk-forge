@@ -118,7 +118,7 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
     drop(state);
     let mut reopened = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let result = reopened
-        .finish(&claim, "succeeded", json!({"status": "ok"}))
+        .finish(&claim, "succeeded", json!({"stopped": true}))
         .unwrap();
 
     assert_eq!(result.deadline, renewed.deadline);
