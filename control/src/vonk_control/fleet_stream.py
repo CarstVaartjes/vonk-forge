@@ -8,10 +8,11 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
+from .fleet_event_contract import validate_fleet_event_payload
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
 from .fleet_stream_contract import (
-    FleetChange,
+    FleetChangeAdapter,
     FleetChangeEvent,
     FleetSnapshotEvent,
     FleetTelemetryEvent,
@@ -232,12 +233,21 @@ class FleetStream:
             ).model_dump(mode="json")
         if event.event_type not in {"node-profile", "recipe-state", "operation-state"}:
             raise RuntimeError("Fleet stream event type is invalid")
+        fields = validate_fleet_event_payload(
+            event.event_type,
+            event.entity_kind,
+            event.entity_id,
+            event.node_id,
+            event.payload,
+        )
         return FleetChangeEvent(
-            change=FleetChange(
-                entity_kind=event.entity_kind,
-                entity_id=event.entity_id,
-                node_id=event.node_id,
-                occurred_at=event.occurred_at,
-                fields=dict(event.payload),
+            change=FleetChangeAdapter.validate_python(
+                {
+                    "entity_kind": event.entity_kind,
+                    "entity_id": event.entity_id,
+                    "node_id": event.node_id,
+                    "occurred_at": event.occurred_at,
+                    "fields": fields,
+                }
             )
         ).model_dump(mode="json")

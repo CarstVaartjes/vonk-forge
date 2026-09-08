@@ -178,12 +178,20 @@ def _production_stream_store():
 
 
 def _operation_draft(identifier: int) -> FleetEventDraft:
+    entity_id = f"job-{identifier}"
     return FleetEventDraft(
         event_type="operation-state",
         node_id=None,
         entity_kind="job",
-        entity_id=f"job-{identifier}",
-        payload={"schema_version": 1, "state": "running"},
+        entity_id=entity_id,
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": entity_id,
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
     )
 
 
@@ -303,8 +311,14 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         payload={
             "schema_version": 1,
             "entity_kind": "installation-node",
-            "entity_id": "rank-1",
+            "entity_id": "entity-7",
+            "installation_id": "installation-1",
+            "node_id": NODE_ID,
+            "rank": 0,
+            "role": "leader",
             "state": "installed",
+            "installed_bytes": 0,
+            "required_bytes": 0,
         },
     )
     events = Events(
@@ -377,8 +391,14 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
             "entity_id": "entity-7",
             "entity_kind": "installation-node",
             "fields": {
-                "entity_id": "rank-1",
+                "entity_id": "entity-7",
                 "entity_kind": "installation-node",
+                "installation_id": "installation-1",
+                "installed_bytes": 0,
+                "node_id": NODE_ID,
+                "rank": 0,
+                "required_bytes": 0,
+                "role": "leader",
                 "schema_version": 1,
                 "state": "installed",
             },
@@ -397,7 +417,14 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     operation_event = _event(
         6,
         "operation-state",
-        payload={"schema_version": 1, "entity_id": "job-1", "state": "running"},
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-6",
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
         entity_kind="job",
     )
     events = Events(
@@ -454,6 +481,35 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     assert events.high_watermark_calls == 1
     assert projection.cursors == [5]
     assert events.replay_calls == [(5, NOW, 128)]
+
+
+def test_fleet_change_schema_rejects_unknown_typed_fields() -> None:
+    data = {
+        "schema_version": 1,
+        "projection_refresh_required": True,
+        "change": {
+            "entity_kind": "job",
+            "entity_id": "job-typed",
+            "node_id": None,
+            "occurred_at": "2026-08-15T12:00:00Z",
+            "fields": {
+                "schema_version": 1,
+                "entity_kind": "job",
+                "entity_id": "job-typed",
+                "kind": "deploy",
+                "state": "queued",
+                "target_count": 1,
+                "unexpected": "must be rejected",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        FleetChangeEvent.model_validate(data)
+    data["change"]["fields"].pop("unexpected")
+    data["change"]["fields"]["target_count"] = "1"
+    with pytest.raises(ValueError, match="int_type"):
+        FleetChangeEvent.model_validate(data)
 
 
 @pytest.mark.parametrize(
@@ -559,7 +615,14 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
     later = _event(
         6,
         "operation-state",
-        payload={"schema_version": 1, "entity_id": "job-6", "state": "running"},
+        payload={
+            "schema_version": 1,
+            "entity_kind": "job",
+            "entity_id": "entity-6",
+            "kind": "deploy",
+            "state": "running",
+            "target_count": 1,
+        },
         entity_kind="job",
     )
     events = Events(
@@ -919,7 +982,14 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         node_id=None,
                         entity_kind="job",
                         entity_id="job-5",
-                        payload={"schema_version": 1, "state": "running"},
+                        payload={
+                            "schema_version": 1,
+                            "entity_kind": "job",
+                            "entity_id": "job-5",
+                            "kind": "deploy",
+                            "state": "running",
+                            "target_count": 1,
+                        },
                         occurred_at=NOW - timedelta(hours=23, minutes=59),
                         expires_at=NOW + timedelta(milliseconds=500),
                     ),
@@ -929,7 +999,14 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         node_id=None,
                         entity_kind="job",
                         entity_id="job-6",
-                        payload={"schema_version": 1, "state": "running"},
+                        payload={
+                            "schema_version": 1,
+                            "entity_kind": "job",
+                            "entity_id": "job-6",
+                            "kind": "deploy",
+                            "state": "running",
+                            "target_count": 1,
+                        },
                         occurred_at=NOW,
                         expires_at=NOW + timedelta(hours=24),
                     ),
