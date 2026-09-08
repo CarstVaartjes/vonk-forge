@@ -499,7 +499,9 @@ class CompiledJobInput(_Strict):
     required: StrictBool
     media_types: list[StrictStr] = Field(min_length=1, max_length=16)
     max_bytes: StrictInt = Field(ge=1, le=1024**3)
-    slots: list[CompiledJobInputSlot] | None = Field(min_length=1, max_length=32)
+    slots: list[CompiledJobInputSlot] | None = Field(
+        default=None, min_length=1, max_length=32
+    )
 
     @field_validator("media_types")
     @classmethod

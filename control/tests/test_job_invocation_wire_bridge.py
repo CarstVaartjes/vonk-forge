@@ -196,10 +196,7 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
         "memory",
         "missing_nullable_endpoint",
         "missing_nullable_engine_version",
-        "missing_nullable_input_slots",
     ):
-        if change == "missing_nullable_input_slots" and not has_input:
-            continue
         invalid = copy.deepcopy(probe_input)
         plan = invalid["claim"]["payload"]["compiled_execution_plan"]
         if change == "image":
@@ -217,10 +214,8 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
             plan["runtime"]["placement"]["reserved_memory_bytes"] += 1
         elif change == "missing_nullable_endpoint":
             del plan["runtime"]["placement"]["endpoint_address"]
-        elif change == "missing_nullable_engine_version":
-            del plan["runtime"]["telemetry"]["engine_version"]
         else:
-            del plan["job"]["input"]["slots"]
+            del plan["runtime"]["telemetry"]["engine_version"]
         invalid["claim"]["payload_digest"] = hashlib.sha256(
             canonical_message(invalid["claim"]["payload"])
         ).hexdigest()
