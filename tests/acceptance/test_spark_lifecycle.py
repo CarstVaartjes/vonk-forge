@@ -54,6 +54,7 @@ from tests.acceptance.runtime import (
     bootstrap_command,
     run_interactive,
 )
+from tests.acceptance.systemd_sandbox import SandboxError, verify_effective_sandbox
 from tests.acceptance.test_fresh_nas_install import (
     DEFAULT_SERVICES,
     command_environment,
@@ -958,7 +959,7 @@ class SparkLifecycle:
         return result
 
     @staticmethod
-    def _redact_diagnostics(raw: str) -> str:
+    def _redact_diagnostics(raw: str, *, limit: int = 8_000) -> str:
         redacted = raw
         for name in (
             "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
@@ -969,7 +970,7 @@ class SparkLifecycle:
             if value:
                 redacted = redacted.replace(value, "<redacted>")
         redacted = re.sub(r"\x1b\[[0-9;]*m", "", redacted)
-        return redacted[-8_000:]
+        return redacted[-limit:]
 
     def _diagnostic_command(
         self, command: list[str]
@@ -1029,7 +1030,7 @@ class SparkLifecycle:
     def _installation_failure(
         self, stage: str, error: Exception
     ) -> LifecycleError:
-        raw = ""
+        sections = ["installer error:\n" + self._redact_diagnostics(str(error), limit=2_000)]
         if getattr(self, "bundle", None) is not None:
             logs = self._diagnostic_command(
                 self._compose(
@@ -1044,20 +1045,18 @@ class SparkLifecycle:
                 )
             )
             if logs is not None:
-                raw = "controller diagnostics:\n" + (logs.stdout or logs.stderr)
-            journal = self._diagnostic_command(
-                [
-                    "sudo", "journalctl", "--no-pager", "--lines=60",
-                    "--unit=vonk-forge-agent.service",
-                    "--unit=vonk-forge-package-helper.service",
-                ]
-            )
-            if journal is not None:
-                raw += "\nSpark agent/helper diagnostics:\n" + (
-                    journal.stdout or journal.stderr
+                sections.append("controller diagnostics:\n" + self._redact_diagnostics(
+                    logs.stdout or logs.stderr, limit=2_000
+                ))
+            for unit in ("vonk-forge-agent.service", "vonk-forge-package-helper.service"):
+                journal = self._diagnostic_command(
+                    ["sudo", "journalctl", "--no-pager", "--lines=40", f"--unit={unit}"]
                 )
-        raw += "\ninstaller error:\n" + str(error)
-        diagnostics = self._redact_diagnostics(raw)
+                if journal is not None:
+                    sections.append(f"{unit} diagnostics:\n" + self._redact_diagnostics(
+                        journal.stdout or journal.stderr, limit=1_800
+                    ))
+        diagnostics = "\n".join(sections)
         return LifecycleError(
             f"{stage} failed; {diagnostics or 'installer diagnostics unavailable'}"
         )
@@ -1737,6 +1736,10 @@ class SparkLifecycle:
         finally:
             del pairing_token
         self.agent_installed = True
+        try:
+            verify_effective_sandbox()
+        except (SandboxError, OSError, subprocess.SubprocessError) as error:
+            raise self._installation_failure("Spark service sandbox verification", error) from error
         self._prepare_podman_apparmor_profile()
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
@@ -2261,12 +2264,34 @@ class SparkLifecycle:
             or operation.get("completed_phases") != expected_phases
         ):
             reason = operation.get("status_reason")
-            details = self._redact_diagnostics(json.dumps({
+            progress = operation.get("progress")
+            result = operation.get("result")
+            phase_results = result.get("phase_results") if isinstance(result, dict) else None
+            # Artifact receipts and byte-progress members can occupy tens of
+            # kilobytes. Keep the failed phase and actual failure instead of
+            # allowing successful transfer history to erase that information.
+            summary = {
                 key: operation.get(key)
-                for key in (
-                    "operation_id", "state", "failed_phase", "completed_phases",
-                    "progress", "result", "status_reason",
-                )
+                for key in ("operation_id", "state", "failed_phase", "completed_phases")
+            }
+            summary["progress"] = {
+                key: progress.get(key)
+                for key in ("phase", "subphase", "failed_phase", "pending_job_id", "pending_node_id")
+            } if isinstance(progress, dict) else None
+            summary["result"] = {
+                key: result.get(key)
+                for key in ("failure", "error", "reason", "failed_phase")
+                if result.get(key) is not None
+            } if isinstance(result, dict) else None
+            summary["recent_phases"] = [
+                {key: phase.get(key) for key in (
+                    "phase", "subphase", "run_id", "installation_id", "state", "error", "reason"
+                ) if phase.get(key) is not None}
+                for phase in phase_results[-3:] if isinstance(phase, dict)
+            ] if isinstance(phase_results, list) else []
+            details = self._redact_diagnostics(json.dumps({
+                **summary,
+                "status_reason": reason,
             }))
             raise LifecycleError(
                 f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}; "
