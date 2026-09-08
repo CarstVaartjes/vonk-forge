@@ -835,11 +835,19 @@ fn out_of_range_optional_process_and_uptime_evidence_does_not_break_wire_report(
             .iter()
             .all(|series| series.process_id.is_none())
     );
+    let encoded = serde_json::to_vec(sample.wire()).unwrap();
+    serde_json::from_slice::<vonk_agent_protocol::generated::TelemetrySample>(&encoded).unwrap();
+    let process_capabilities = sample
+        .metrics
+        .capabilities
+        .iter()
+        .filter(|item| item.key == "gpu.process_memory_bytes")
+        .collect::<Vec<_>>();
+    assert_eq!(process_capabilities.len(), 1);
+    assert!(!process_capabilities[0].supported);
     assert!(vonk_agent::telemetry::valid_report_batch(
         std::slice::from_ref(&sample)
     ));
-    let encoded = serde_json::to_vec(sample.wire()).unwrap();
-    serde_json::from_slice::<vonk_agent_protocol::generated::TelemetrySample>(&encoded).unwrap();
 }
 
 #[test]

@@ -468,10 +468,12 @@ impl AgentUpgradeRequest {
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
-        if canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES {
-            return Err(ProtocolError::Identity("progress document"));
+        if let Some(progress) = &self.progress {
+            if canonical_json(progress)?.len() > MAX_DOCUMENT_BYTES {
+                return Err(ProtocolError::Identity("progress document"));
+            }
+            progress.validate()?;
         }
-        self.progress.validate()?;
         Ok(())
     }
 }

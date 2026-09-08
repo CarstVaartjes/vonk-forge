@@ -175,7 +175,8 @@ class OperationRecovery(BaseModel):
 
 
 def validate_progress_update(
-    previous: Mapping[str, object] | None, current: Mapping[str, object]
+    previous: Mapping[str, object] | None, current: Mapping[str, object],
+    *, partial: bool = True,
 ) -> dict[str, object]:
     """Validate monotonic bytes/checkpoint updates within one leased attempt."""
 
@@ -183,11 +184,8 @@ def validate_progress_update(
     if not previous:
         return normalized
     old = normalize_operation_progress(previous)
-    # Lease renewal is independent of the executor's more specific progress.
-    if normalized["phase"] == "executing" and old["phase"] != "executing":
-        normalized["phase"] = old["phase"]
-    # A phase-only heartbeat may report only a new phase. Keep the last durable
-    # counters/checkpoint instead of treating omitted fields as zero/reset.
+    # Controller-internal partial updates carry omitted durable fields forward.
+    # Agent snapshots are complete; lease-only heartbeats carry no progress.
     for key in (
         "kind",
         "object_sha256",
@@ -199,7 +197,7 @@ def validate_progress_update(
         "checkpoint",
         "members",
     ):
-        if key not in old:
+        if not partial or key not in old:
             continue
         if key == "total_bytes" and (
             "total_bytes" in current or current.get("total_bytes_known") is False
@@ -210,7 +208,7 @@ def validate_progress_update(
             and "total_bytes_known" not in current
             and "total_bytes" not in current
         )
-        if key not in normalized or omitted_total:
+        if key not in current or current[key] is None or omitted_total:
             normalized[key] = old[key]
     old_bytes = int(old.get("completed_bytes", 0))
     new_bytes = int(normalized.get("completed_bytes", 0))

@@ -6,9 +6,11 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, cast
 from uuid import UUID
+import datetime
 
 if TYPE_CHECKING:
   from ..models.distribution_object import DistributionObject
@@ -27,7 +29,7 @@ class DistributionAssignment:
 
         Attributes:
             assignment_id (UUID):
-            expires_at (str):
+            expires_at (datetime.datetime):
             generation (int):
             model_artifact_set_sha256 (str):
             node_id (str):
@@ -39,7 +41,7 @@ class DistributionAssignment:
      """
 
     assignment_id: UUID
-    expires_at: str
+    expires_at: datetime.datetime
     generation: int
     model_artifact_set_sha256: str
     node_id: str
@@ -57,7 +59,7 @@ class DistributionAssignment:
         from ..models.distribution_object import DistributionObject
         assignment_id = str(self.assignment_id)
 
-        expires_at = self.expires_at
+        expires_at = self.expires_at.isoformat()
 
         generation = self.generation
 
@@ -109,7 +111,10 @@ class DistributionAssignment:
 
 
 
-        expires_at = d.pop("expires_at")
+        expires_at = isoparse(d.pop("expires_at"))
+
+
+
 
         generation = d.pop("generation")
 

@@ -4,6 +4,44 @@ Status: implementation in progress. This plan closes every finding in the
 [8 September audit](contract-handoff-audit-2026-09-08.md), including the user's
 clarification that Rust wire structures must be generated with typify.
 
+## Integration checkpoint — 8 September
+
+The four contract branches are consolidated in the platform integration branch,
+including the final transport fixes (`f0308ead`). The combined locked Rust
+workspace compiled all 40 test executables; the focused protocol, helper,
+transport, identity and setup suites passed 168 tests in OrbStack ARM64.
+Python canonical normalization passed 409 focused tests at its checkpoint.
+These results describe those checkpoints, not a final release candidate.
+
+Native datetime parity (`efc72d1a`) is now integrated: 39 Python tests,
+including 14 actual Python/Rust serialization cases, and 10 focused Rust tests
+passed. Formatted strings retain their original representation.
+
+Controller API/SSE serialization is integrated (`e2adb102`), including nested
+models, typed mappings, required nulls and injected response metadata. The
+production queue now participates in both passing connected job regressions
+(`5540fb2f`). Lease-only heartbeats and the generated helper response are
+integrated (`997b142a`, `1e13c5cb`, `eda339cd`).
+
+The partial-receipt audit found no defect: those internal fragments preserve
+field presence so an absent measurement does not become an observed zero.
+Strict persistence and public model serialization retain their respective roles.
+
+Remaining work has explicit owners:
+
+- Runtime owner: verify the final combined Linux protocol/helper/agent suites.
+- Parent: finish both LTX adapters using shared input and compiled-plan models,
+  refresh their bundled protocol wheel and recipe packages, and validate the
+  complete catalog against the final platform.
+- Parent: regenerate clients, schemas, wheels, locks and supply-chain evidence
+  after source changes settle; verify a second generation is unchanged.
+- Canary owner: replay the local connected lifecycle after combined artifacts
+  are available. The earlier Controller-startup timeout is not a passing run.
+
+Final integration, green PR CI, publication, deployment and physical Spark
+acceptance remain outstanding. Do not mark the audit complete solely because
+individual branch tests pass.
+
 ## Contract decisions
 
 1. Pydantic owns shared document structure. Export JSON Schema from those

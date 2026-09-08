@@ -3569,6 +3569,7 @@
             "type": "string"
           },
           "expires_at": {
+            "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
@@ -17193,9 +17194,9 @@
         },
         "required": [
           "schema_version",
-          "manifest_sha256",
           "total_bytes",
-          "files"
+          "files",
+          "manifest_sha256"
         ],
         "title": "RecipeJobOutputManifest",
         "type": "object"

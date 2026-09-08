@@ -14,7 +14,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustix::net::sockopt::socket_peercred;
-use serde::Serialize;
 use vonk_agent_helper::operations::{
     ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
 };
@@ -22,7 +21,7 @@ use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_request, read_frame,
     sign_observation_receipt, write_frame,
 };
-use vonk_agent_protocol::RecipeRunObservationReceipt;
+use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
@@ -52,21 +51,6 @@ fn acquire_worker(counter: &Arc<AtomicUsize>) -> Option<WorkerPermit> {
         })
         .ok()
         .map(|_| WorkerPermit(Arc::clone(counter)))
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct HelperResponse<'a> {
-    schema_version: u8,
-    request_id: Option<String>,
-    status: &'a str,
-    evidence_sha256: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exit_code: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error_code: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    observation_receipt: Option<RecipeRunObservationReceipt>,
 }
 
 struct HelperRejection {
@@ -247,16 +231,24 @@ fn run() -> Result<(), String> {
 }
 
 fn reject(stream: &mut UnixStream, error: &HelperRejection) {
+    let Ok(request_id) = error.request_id.as_deref().map(str::parse).transpose() else {
+        eprintln!("vonk-agent-helper: invalid rejection request identity");
+        return;
+    };
+    let Ok(exit_code) = error.exit_code.map(u32::try_from).transpose() else {
+        eprintln!("vonk-agent-helper: invalid rejection exit code");
+        return;
+    };
     let response = HelperResponse {
         schema_version: 1,
-        request_id: error.request_id.clone(),
-        status: "rejected",
+        request_id,
+        status: "rejected".parse().expect("declared helper response status"),
         evidence_sha256: None,
-        exit_code: error.exit_code,
-        error_code: Some(error.error_code),
+        exit_code,
+        error_code: Some(error.error_code.to_owned()),
         observation_receipt: None,
     };
-    if let Ok(body) = vonk_agent_protocol::canonical_json(&response) {
+    if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
         let _ = write_frame(stream, &body);
     }
     eprintln!("vonk-agent-helper: request rejected: {}", error.detail);
@@ -353,14 +345,30 @@ fn handle(
     };
     let response = HelperResponse {
         schema_version: 1,
-        request_id: Some(request.claims.request_id.to_string()),
-        status: &outcome.status,
+        request_id: Some(request.claims.request_id),
+        status: outcome.status.parse().map_err(|_| {
+            HelperRejection::for_request(
+                &request_id,
+                "operation_failed",
+                "invalid operation response status",
+            )
+        })?,
         evidence_sha256: Some(outcome.evidence_sha256),
-        exit_code: outcome.exit_code,
+        exit_code: outcome
+            .exit_code
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| {
+                HelperRejection::for_request(
+                    &request_id,
+                    "operation_failed",
+                    "invalid operation exit code",
+                )
+            })?,
         error_code: None,
         observation_receipt,
     };
-    let body = vonk_agent_protocol::canonical_json(&response).map_err(|error| {
+    let body = vonk_agent_protocol::canonical_generated_json(&response).map_err(|error| {
         HelperRejection::for_request(&request_id, "operation_failed", display(error))
     })?;
     write_frame(stream, &body).map_err(|error| {
@@ -613,36 +621,60 @@ mod tests {
     }
 
     #[test]
+    fn framed_rejection_uses_the_shared_response_contract() {
+        let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+        super::reject(
+            &mut server,
+            &HelperRejection::new("request_invalid", "private diagnostic"),
+        );
+        let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
+        let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
+        assert_eq!(response.status, "rejected");
+        assert!(response.request_id.is_none());
+        assert!(response.evidence_sha256.is_none());
+        assert_eq!(response.error_code.as_deref(), Some("request_invalid"));
+        assert_eq!(
+            vonk_agent_protocol::canonical_generated_json(&response).unwrap(),
+            bytes
+        );
+        assert!(
+            !String::from_utf8(bytes)
+                .unwrap()
+                .contains("private diagnostic")
+        );
+    }
+
+    #[test]
     fn rejection_response_contains_only_stable_diagnostics() {
         let response = HelperResponse {
             schema_version: 1,
-            request_id: Some("request-1".to_owned()),
-            status: "rejected",
+            request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
+            status: "rejected".parse().expect("declared helper response status"),
             evidence_sha256: None,
             exit_code: None,
-            error_code: Some("operation_failed"),
+            error_code: Some("operation_failed".to_owned()),
             observation_receipt: None,
         };
-        let body = vonk_agent_protocol::canonical_json(&response).unwrap();
+        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["request_id"], "request-1");
+        assert_eq!(value["request_id"], "10000000-0000-4000-8000-000000000001");
         assert_eq!(value["error_code"], "operation_failed");
         assert!(value.get("detail").is_none());
         assert!(value.get("stderr").is_none());
     }
 
     #[test]
-    fn success_response_omits_error_code_for_old_clients() {
+    fn success_response_omits_unused_optional_fields() {
         let response = HelperResponse {
             schema_version: 1,
-            request_id: Some("request-1".to_owned()),
-            status: "package-installed",
+            request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
+            status: "package-installed".parse().unwrap(),
             evidence_sha256: Some("a".repeat(64)),
             exit_code: None,
             error_code: None,
             observation_receipt: None,
         };
-        let body = vonk_agent_protocol::canonical_json(&response).unwrap();
+        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(value.get("error_code").is_none());
     }

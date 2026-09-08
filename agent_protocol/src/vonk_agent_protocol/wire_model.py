@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from datetime import datetime
@@ -184,33 +185,11 @@ class OperationProgress(WireModel):
 
 
 def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and canonicalize progress while preserving phase-only wire data."""
+    """Validate progress and retain every meaningful declared default."""
 
-    parsed = OperationProgress.model_validate(value)
-    document = parsed.model_dump(mode="json", exclude_none=True)
-    if not document.get("members"):
-        document.pop("members", None)
-    if parsed.checkpoint is None:
-        document.pop("checkpoint", None)
-    if parsed.completed_bytes == 0 and "completed_bytes" not in value:
-        document.pop("completed_bytes", None)
-    extended = bool(
-        set(value)
-        & {
-            "completed_bytes",
-            "total_bytes",
-            "bytes_per_second",
-            "eta_seconds",
-            "checkpoint",
-            "members",
-        }
-    )
-    if parsed.total_bytes_known is False and "total_bytes_known" not in value:
-        if extended:
-            document["total_bytes_known"] = False
-        else:
-            document.pop("total_bytes_known", None)
-    return document
+    from .contracts import canonical_message
+
+    return json.loads(canonical_message(OperationProgress.model_validate(value)))
 
 
 __all__ = [
