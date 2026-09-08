@@ -121,11 +121,9 @@ pub fn build_exact_recipe_run_observations<'a>(
         }
         let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
         let (grant_job_id, grant_request_sha256) = match &observation.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequest {
-                job_id,
-                request_sha256,
-                ..
-            } => (job_id, request_sha256),
+            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
+                (&operation.job_id, &operation.request_sha256)
+            }
             _ => return Err(ClientError::Protocol),
         };
         if observation.schema_version != 1
@@ -451,22 +449,17 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let operation = match &response.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequest {
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256: granted_request_sha256,
-                observation_identity_sha256: Some(observation_identity_sha256),
-            } => (
-                action,
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                granted_request_sha256,
-                observation_identity_sha256,
+            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => (
+                &operation.action,
+                &operation.job_id,
+                &operation.operation_id,
+                &operation.attempt,
+                &operation.fence,
+                &operation.request_sha256,
+                operation
+                    .observation_identity_sha256
+                    .as_ref()
+                    .ok_or(ClientError::Protocol)?,
             ),
             _ => return Err(ClientError::Protocol),
         };
@@ -1230,10 +1223,7 @@ impl AgentHttpClient {
         }
         let request = TelemetryRequest {
             schema_version: 1,
-            samples: samples
-                .iter()
-                .map(|sample| sample.wire().clone())
-                .collect(),
+            samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
