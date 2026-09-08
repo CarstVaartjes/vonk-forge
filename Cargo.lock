@@ -2896,6 +2896,7 @@ dependencies = [
  "toml",
  "url",
  "uuid",
+ "vonk-agent-protocol",
  "wait-timeout",
 ]
 
