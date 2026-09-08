@@ -1144,7 +1144,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
                 total_bytes=bundle.manifest.total_bytes,
                 file_count=len(bundle.manifest.files),
                 storage_key=str(stored.path),
-                manifest={"schema_version": 1},
+                manifest=bundle.manifest.model_dump(mode="json"),
                 verified_at=clock.now,
             )
         )

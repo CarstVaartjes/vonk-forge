@@ -7,9 +7,12 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use serde::Serialize;
 use thiserror::Error;
-use vonk_agent_protocol::{canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    canonical_json,
+    generated::{SourceBundleDigestManifest, SourceBundleFile},
+    hex_sha256,
+};
 
 const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_FILES: usize = 4096;
@@ -37,21 +40,6 @@ pub struct MaterializedSource {
     pub sha256: String,
     pub total_bytes: u64,
     pub files: BTreeMap<String, Vec<u8>>,
-}
-
-#[derive(Serialize)]
-struct Manifest<'a> {
-    files: &'a [ManifestFile],
-    schema_version: u8,
-    total_bytes: u64,
-}
-
-#[derive(Serialize)]
-struct ManifestFile {
-    mode: u32,
-    path: String,
-    sha256: String,
-    size: u64,
 }
 
 pub fn materialize_source_bundle(
@@ -108,11 +96,13 @@ pub fn materialize_source_bundle(
             .mode()
             .map_err(|_| BuildSourceError::Archive)?;
         let mode = if raw_mode & 0o111 == 0 { 0o644 } else { 0o755 };
-        manifest.push(ManifestFile {
-            mode,
+        manifest.push(SourceBundleFile {
+            mode: i64::from(mode)
+                .try_into()
+                .map_err(|_| BuildSourceError::Entry)?,
             path: normalized.clone(),
             sha256: hex_sha256(&content),
-            size,
+            size: size.try_into().map_err(|_| BuildSourceError::Size)?,
         });
         files.insert(normalized, content);
     }
@@ -120,17 +110,17 @@ pub fn materialize_source_bundle(
         return Err(BuildSourceError::Entry);
     }
     manifest.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
-    let canonical = canonical_json(&Manifest {
-        files: &manifest,
+    let manifest = SourceBundleDigestManifest {
+        files: manifest,
         schema_version: 1,
-        total_bytes: total,
-    })
-    .map_err(|_| BuildSourceError::Archive)?;
+        total_bytes: total.try_into().map_err(|_| BuildSourceError::Size)?,
+    };
+    let canonical = canonical_json(&manifest).map_err(|_| BuildSourceError::Archive)?;
     let sha256 = hex_sha256(&canonical);
     if sha256 != expected_sha256 {
         return Err(BuildSourceError::Digest);
     }
-    for item in &manifest {
+    for item in &manifest.files {
         let destination = root.join(&item.path);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
@@ -144,7 +134,14 @@ pub fn materialize_source_bundle(
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&destination, fs::Permissions::from_mode(item.mode))?;
+            fs::set_permissions(
+                &destination,
+                fs::Permissions::from_mode(
+                    (*item.mode)
+                        .try_into()
+                        .map_err(|_| BuildSourceError::Entry)?,
+                ),
+            )?;
         }
     }
     Ok(MaterializedSource {
