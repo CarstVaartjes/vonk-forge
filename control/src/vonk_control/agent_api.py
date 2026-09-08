@@ -120,7 +120,7 @@ from .recipe_operations import (
 )
 from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
-from .strict_json import StrictJSONModel
+from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -1181,15 +1181,14 @@ def install_agent_routes(
     upgrades: AgentUpgradeService | None = None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
-    human = APIRouter(prefix="/api/v1/agents")
-    agent = APIRouter(prefix="/agent/v1")
+    human = APIRouter(prefix="/api/v1/agents", route_class=ControllerAPIRoute)
+    agent = APIRouter(prefix="/agent/v1", route_class=ControllerAPIRoute)
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
 
     @human.post(
         "/upgrades/preview",
         response_model=AgentUpgradePreviewResponse,
-        response_model_exclude_none=True,
         responses=bounded_error_responses(401, 403, 409, 503),
     )
     def preview_agent_upgrade(
@@ -1282,8 +1281,6 @@ def install_agent_routes(
         "/enrollments/grants",
         status_code=status.HTTP_201_CREATED,
         response_model=EnrollmentGrantResponse,
-        response_model_exclude_none=True,
-        response_model_exclude_defaults=True,
         responses=bounded_error_responses(401, 403, 503),
     )
     def create_grant(

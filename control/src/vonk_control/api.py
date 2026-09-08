@@ -132,6 +132,7 @@ from .recipe_packages import RecipePackageClient
 from .run_switch_api import install_run_switch_routes
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
+from .strict_json import ControllerAPIRoute
 from .telemetry import TelemetryResolution
 
 _LOGGER = logging.getLogger(__name__)
@@ -542,6 +543,7 @@ def create_app(
         redoc_url=None,
         responses={422: {"model": RequestValidationProblem}},
     )
+    app.router.route_class = ControllerAPIRoute
     cursor_codec = tokens.cursor_codec()
 
     @app.exception_handler(StarletteHTTPException)

@@ -365,28 +365,26 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
                 "accelerator_name": "NVIDIA GB10",
                 "accelerator_performance_state": "P0",
             },
-            "disk_free_bytes": None,
-            "disk_total_bytes": None,
             "gap_samples": 0,
-            "gpu_memory_free_bytes": None,
-            "gpu_memory_total_bytes": None,
-            "gpu_utilization_percent": None,
             "id": SAMPLE_ID,
-            "load_average_1m": None,
-            "memory_available_bytes": None,
-            "memory_total_bytes": None,
-            "network_receive_bytes_per_second": None,
-            "network_transmit_bytes_per_second": None,
             "node_id": NODE_ID,
             "observed_at": "2026-08-15T11:59:58Z",
-            "power_watts": None,
             "received_at": "2026-08-15T11:59:59Z",
             "sequence": 3,
-            "temperature_c": None,
-            "metrics": telemetry_metrics_document(),
-        },
-        "schema_version": 1,
-    }
+                "metrics": {
+                    "capabilities": [],
+                    "provenance": {
+                        "collector": "test",
+                        "collector_version": "1",
+                    },
+                    "runtimes": [],
+                    "schema_version": 2,
+                    "series": [],
+                    "workloads": [],
+                },
+            },
+            "schema_version": 1,
+        }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
         "change": {
