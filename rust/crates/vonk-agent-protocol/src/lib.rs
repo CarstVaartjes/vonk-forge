@@ -182,6 +182,71 @@ impl HostRuntimeRequest {
     }
 }
 
+#[cfg(test)]
+mod installation_cleanup_contract_tests {
+    use super::*;
+
+    fn request(action: HostRuntimeAction, installation_id: Option<Uuid>) -> HostRuntimeRequest {
+        HostRuntimeRequest {
+            schema_version: 1,
+            action,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments: Vec::new(),
+            observation: None,
+            installation_id,
+        }
+    }
+
+    #[test]
+    fn cleanup_requires_one_installation_identity_and_other_actions_reject_it() {
+        let installation_id = Uuid::new_v4();
+        assert!(
+            request(
+                HostRuntimeAction::InstallationCleanup,
+                Some(installation_id)
+            )
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            request(HostRuntimeAction::InstallationCleanup, None)
+                .validate()
+                .is_err()
+        );
+        let mut ordinary = request(HostRuntimeAction::Start, Some(installation_id));
+        ordinary.arguments.push("run".to_owned());
+        assert!(ordinary.validate().is_err());
+
+        for raw in [
+            serde_json::json!({
+                "schema_version": 1,
+                "action": "installation-cleanup",
+                "job_id": Uuid::new_v4(),
+                "operation_id": Uuid::new_v4(),
+                "attempt": 1,
+                "fence": Uuid::new_v4(),
+                "arguments": [],
+            }),
+            serde_json::json!({
+                "schema_version": 1,
+                "action": "installation-cleanup",
+                "job_id": Uuid::new_v4(),
+                "operation_id": Uuid::new_v4(),
+                "attempt": 1,
+                "fence": Uuid::new_v4(),
+                "arguments": [],
+                "installation_id": null,
+            }),
+        ] {
+            let parsed: HostRuntimeRequest = serde_json::from_value(raw).unwrap();
+            assert!(parsed.validate().is_err());
+        }
+    }
+}
+
 /// Immutable Controller/run identity carried inside an exact periodic runtime
 /// inspection request.  Because the host-helper grant signs the canonical
 /// request digest, these fields are bound to the exact RunInspect arguments and

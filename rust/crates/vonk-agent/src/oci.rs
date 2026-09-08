@@ -2310,6 +2310,40 @@ mod tests {
     }
 
     #[test]
+    fn model_cleanup_retry_skips_an_installation_removed_after_validation() {
+        let data = tempdir().unwrap();
+        let (first_id, first, plan) = persisted_installation(data.path());
+        let second_id = "10000000-0000-4000-8000-000000000001".to_owned();
+        let (_, second, _) =
+            persisted_plan_installation(data.path(), second_id.clone(), plan.clone());
+        let first_digest = "1".repeat(64);
+        let second_digest = "2".repeat(64);
+        authorize_installation(&first, &first_digest);
+        authorize_installation(&second, &second_digest);
+        let installations = vec![
+            (first_id.clone(), first_digest.clone()),
+            (second_id.clone(), second_digest),
+        ];
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+
+        assert_eq!(
+            runtime
+                .validate_model_uninstall(&installations, &"e".repeat(64))
+                .unwrap(),
+            32
+        );
+        runtime.uninstall(&first_id, &first_digest).unwrap();
+        let removed = runtime
+            .uninstall_model(&installations, &"e".repeat(64))
+            .unwrap();
+
+        assert_eq!(removed, 16);
+        assert!(!first.exists());
+        assert!(!second.exists());
+    }
+
+    #[test]
     fn explicit_auxiliary_model_cleanup_removes_selected_install_and_retains_shared_other_install()
     {
         let data = tempdir().unwrap();
