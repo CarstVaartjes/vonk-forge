@@ -383,7 +383,7 @@ def setup(
         publisher=publisher,
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock or (lambda: NOW),
-        maximum_age_seconds=300,
+        maximum_age_seconds=120,
     )
     return service, publisher, applied, run.id
 
@@ -506,7 +506,7 @@ def atomic_service(
         publisher=AtomicRecipeRoutePublisher(runtime, clock=clock),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
-        maximum_age_seconds=300,
+        maximum_age_seconds=120,
     )
 
 
@@ -688,7 +688,7 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
         ),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
-        maximum_age_seconds=300,
+        maximum_age_seconds=120,
     )
     with pytest.raises(LiteLlmPolicyError):
         rejecting.publish_run(run_id)
@@ -975,7 +975,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         publisher=AtomicRecipeRoutePublisher(atomic, clock=lambda: NOW),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
-        maximum_age_seconds=300,
+        maximum_age_seconds=120,
     )
 
     generation = service.publish_run(run_id)
@@ -1048,7 +1048,7 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
         publication = session.get(RoutePublication, owner.authority_id)
         assert run.route_generation > first.generation
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            clock.now + timedelta(seconds=300)
+            clock.now + timedelta(seconds=180)
         )
 
 
