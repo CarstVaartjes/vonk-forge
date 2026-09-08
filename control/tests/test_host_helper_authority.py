@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
@@ -11,8 +14,15 @@ from vonk_agent_protocol import (
     ExecuteContainerRuntimeRequestOperation,
     RestartVonkUnitOperation,
     ScheduleRebootOperation,
+    canonical_message,
     host_helper_grant_signing_bytes,
 )
+from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_agent_protocol.recipe_operations import (
+    RecipeModelCleanupPayload,
+    RecipeUninstallPayload,
+)
+from vonk_control.agent_api import HostRuntimeGrantRequest
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -372,3 +382,117 @@ def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity()
             service.issue_package_activation_grant(node_id=receipt.node_id, receipt=invalid, runtime_identity=identity, certificate_serial="certificate-1")
     with pytest.raises(HostHelperAuthorityError):
         service.issue_package_activation_grant(node_id=receipt.node_id, receipt=receipt, runtime_identity=identity.model_copy(update={"binary_digest": "0" * 64}), certificate_serial="certificate-1")
+
+
+INSTALLATION_ID = "70000000-0000-4000-8000-000000000007"
+SECOND_INSTALLATION_ID = "80000000-0000-4000-8000-000000000008"
+OUTSIDE_INSTALLATION_ID = "90000000-0000-4000-8000-000000000009"
+
+
+def cleanup_grant_arguments(installation_id: str) -> dict[str, object]:
+    request = HostRuntimeRequest(
+        schema_version=1,
+        action="installation-cleanup",
+        job_id="20000000-0000-4000-8000-000000000002",
+        operation_id="30000000-0000-4000-8000-000000000003",
+        attempt=2,
+        fence="40000000-0000-4000-8000-000000000004",
+        arguments=[],
+        installation_id=installation_id,
+    )
+    return {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": request.job_id,
+        "operation_id": request.operation_id,
+        "attempt": request.attempt,
+        "fence": request.fence,
+        "action": ContainerRuntimeAction.INSTALLATION_CLEANUP,
+        "request_sha256": hashlib.sha256(canonical_message(request)).hexdigest(),
+        "certificate_serial": "certificate-1",
+        "installation_id": installation_id,
+    }
+
+
+@pytest.mark.parametrize("operation_kind", ["recipe.uninstall", "recipe.model-uninstall.v1"])
+def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload(
+    operation_kind: str,
+) -> None:
+    if operation_kind == "recipe.uninstall":
+        payload = RecipeUninstallPayload(
+            schema_version=1,
+            installation_id=INSTALLATION_ID,
+            plan_digest="a" * 64,
+            recipe_content_sha256="b" * 64,
+            cleanup_model_content_sha256=None,
+        )
+        authorized = [INSTALLATION_ID]
+        unauthorized = [SECOND_INSTALLATION_ID, OUTSIDE_INSTALLATION_ID]
+    else:
+        payload = RecipeModelCleanupPayload.model_validate({
+            "schema_version": 1,
+            "model_content_sha256": "c" * 64,
+            "plan_digest": "a" * 64,
+            "installations": tuple(
+                {"installation_id": installation_id, "recipe_content_sha256": "b" * 64}
+                for installation_id in (INSTALLATION_ID, SECOND_INSTALLATION_ID)
+            ),
+        })
+        authorized = [INSTALLATION_ID, SECOND_INSTALLATION_ID]
+        unauthorized = [OUTSIDE_INSTALLATION_ID]
+    service = runtime_service(
+        operation_kind=operation_kind,
+        operation_payload=json.loads(canonical_message(payload)),
+    )
+    for installation_id in authorized:
+        arguments = cleanup_grant_arguments(installation_id)
+        grant = service.issue_grant(**arguments)
+        assert grant.claims.operation.installation_id == installation_id
+        assert grant.claims.operation.action == "installation-cleanup"
+        assert grant.claims.operation.request_sha256 == arguments["request_sha256"]
+        issuer().public_key.verify(
+            bytes.fromhex(grant.signature.value),
+            host_helper_grant_signing_bytes(grant.claims),
+        )
+    for installation_id in unauthorized:
+        with pytest.raises(HostHelperAuthorityError, match="installation is unauthorized"):
+            service.issue_grant(**cleanup_grant_arguments(installation_id))
+
+
+def test_runtime_authority_rejects_installation_binding_on_noncleanup_action() -> None:
+    arguments = cleanup_grant_arguments(INSTALLATION_ID)
+    arguments["action"] = ContainerRuntimeAction.START
+    with pytest.raises(HostHelperAuthorityError, match="installation binding is invalid"):
+        runtime_service().issue_grant(**arguments)
+
+
+def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
+    payload = {
+        "schema_version": 1,
+        "installation_id": INSTALLATION_ID,
+        "plan_digest": "a" * 64,
+        "recipe_content_sha256": "b" * 64,
+    }
+    # The required nullable cleanup field cannot disappear from stored authority.
+    service = runtime_service(operation_kind="recipe.uninstall", operation_payload=payload)
+    with pytest.raises(HostHelperAuthorityError, match="cleanup authority is invalid"):
+        service.issue_grant(**cleanup_grant_arguments(INSTALLATION_ID))
+
+
+def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> None:
+    document = cleanup_grant_arguments(INSTALLATION_ID)
+    document.pop("certificate_serial")
+    document["action"] = "installation-cleanup"
+    document["expires_in_seconds"] = 30
+    assert HostRuntimeGrantRequest.model_validate(document).installation_id == INSTALLATION_ID
+    for missing in ({}, {"installation_id": None}):
+        incomplete = {key: value for key, value in document.items() if key != "installation_id"}
+        with pytest.raises(ValidationError, match="installation binding"):
+            HostRuntimeGrantRequest.model_validate(incomplete | missing)
+    ordinary = document | {"action": "start"}
+    with pytest.raises(ValidationError, match="installation binding"):
+        HostRuntimeGrantRequest.model_validate(ordinary)
+    ordinary.pop("installation_id")
+    omitted = HostRuntimeGrantRequest.model_validate(ordinary)
+    explicit_null = HostRuntimeGrantRequest.model_validate(ordinary | {"installation_id": None})
+    assert canonical_message(omitted) == canonical_message(explicit_null)
+    assert "installation_id" not in json.loads(canonical_message(explicit_null))
