@@ -95,3 +95,23 @@ fn metadata_named_fields_keep_their_canonical_type() {
     value["description"] = json!({"unexpected":"object"});
     assert!(serde_json::from_value::<CompiledJobInputSlot>(value).is_err());
 }
+
+#[test]
+fn inherited_observation_identity_is_generated_from_the_canonical_base() {
+    let observation: vonk_agent_protocol::RecipeRunObservationWire = serde_json::from_str(
+        include_str!("../../../../agent_protocol/fixtures/recipe-run-observation.json"),
+    )
+    .unwrap();
+    let binding = vonk_agent_protocol::RecipeRunInspectionBinding::from(&observation);
+    binding.validate().unwrap();
+    assert_eq!(binding.run_id, observation.run_id);
+    assert_eq!(
+        binding.runtime_arguments_sha256,
+        observation.runtime_arguments_sha256
+    );
+    let mut value = serde_json::to_value(observation).unwrap();
+    value.as_object_mut().unwrap().remove("endpoint_ready");
+    assert!(
+        serde_json::from_value::<vonk_agent_protocol::RecipeRunObservationWire>(value).is_err()
+    );
+}

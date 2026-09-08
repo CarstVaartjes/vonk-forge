@@ -11236,3 +11236,127 @@ impl<'de> ::serde::Deserialize<'de> for ValidationRecord {
         })
     }
 }
+impl From<&RecipeRunObservationGrantRequest> for RecipeRunObservationIdentity {
+    fn from(value: &RecipeRunObservationGrantRequest) -> Self {
+        Self {
+            artifact_set_digest: value.artifact_set_digest.clone(),
+            image_digest: value.image_digest.clone(),
+            installation_id: value.installation_id.clone(),
+            local_address: value.local_address.clone(),
+            mapping_generation: value.mapping_generation.clone(),
+            mapping_id: value.mapping_id.clone(),
+            master_address: value.master_address.clone(),
+            master_port: value.master_port.clone(),
+            model_identity: value.model_identity.clone(),
+            node_id: value.node_id.clone(),
+            port: value.port.clone(),
+            rank: value.rank.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id.clone(),
+            role: value.role.clone(),
+            run_generation: value.run_generation.clone(),
+            run_id: value.run_id.clone(),
+            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
+            schema_version: value.schema_version.clone(),
+            world_size: value.world_size.clone(),
+        }
+    }
+}
+impl From<&RecipeRunObservationGrantRequest> for RecipeRunInspectionBinding {
+    fn from(value: &RecipeRunObservationGrantRequest) -> Self {
+        Self {
+            artifact_set_digest: value.artifact_set_digest.clone(),
+            image_digest: value.image_digest.clone(),
+            installation_id: value.installation_id.clone(),
+            local_address: value.local_address.clone(),
+            mapping_generation: value.mapping_generation.clone(),
+            mapping_id: value.mapping_id.clone(),
+            master_address: value.master_address.clone(),
+            master_port: value.master_port.clone(),
+            model_identity: value.model_identity.clone(),
+            port: value.port.clone(),
+            rank: value.rank.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id.clone(),
+            role: value.role.clone(),
+            run_generation: value.run_generation.clone(),
+            run_id: value.run_id.clone(),
+            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
+            world_size: value.world_size.clone(),
+        }
+    }
+}
+impl From<&RecipeRunObservationIdentity> for RecipeRunInspectionBinding {
+    fn from(value: &RecipeRunObservationIdentity) -> Self {
+        Self {
+            artifact_set_digest: value.artifact_set_digest.clone(),
+            image_digest: value.image_digest.clone(),
+            installation_id: value.installation_id.clone(),
+            local_address: value.local_address.clone(),
+            mapping_generation: value.mapping_generation.clone(),
+            mapping_id: value.mapping_id.clone(),
+            master_address: value.master_address.clone(),
+            master_port: value.master_port.clone(),
+            model_identity: value.model_identity.clone(),
+            port: value.port.clone(),
+            rank: value.rank.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id.clone(),
+            role: value.role.clone(),
+            run_generation: value.run_generation.clone(),
+            run_id: value.run_id.clone(),
+            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
+            world_size: value.world_size.clone(),
+        }
+    }
+}
+impl From<&RecipeRunObservationWire> for RecipeRunObservationIdentity {
+    fn from(value: &RecipeRunObservationWire) -> Self {
+        Self {
+            artifact_set_digest: value.artifact_set_digest.clone(),
+            image_digest: value.image_digest.clone(),
+            installation_id: value.installation_id.clone(),
+            local_address: value.local_address.clone(),
+            mapping_generation: value.mapping_generation.clone(),
+            mapping_id: value.mapping_id.clone(),
+            master_address: value.master_address.clone(),
+            master_port: value.master_port.clone(),
+            model_identity: value.model_identity.clone(),
+            node_id: value.node_id.clone(),
+            port: value.port.clone(),
+            rank: value.rank.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id.clone(),
+            role: value.role.clone(),
+            run_generation: value.run_generation.clone(),
+            run_id: value.run_id.clone(),
+            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
+            schema_version: value.schema_version.clone(),
+            world_size: value.world_size.clone(),
+        }
+    }
+}
+impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
+    fn from(value: &RecipeRunObservationWire) -> Self {
+        Self {
+            artifact_set_digest: value.artifact_set_digest.clone(),
+            image_digest: value.image_digest.clone(),
+            installation_id: value.installation_id.clone(),
+            local_address: value.local_address.clone(),
+            mapping_generation: value.mapping_generation.clone(),
+            mapping_id: value.mapping_id.clone(),
+            master_address: value.master_address.clone(),
+            master_port: value.master_port.clone(),
+            model_identity: value.model_identity.clone(),
+            port: value.port.clone(),
+            rank: value.rank.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id.clone(),
+            role: value.role.clone(),
+            run_generation: value.run_generation.clone(),
+            run_id: value.run_id.clone(),
+            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
+            world_size: value.world_size.clone(),
+        }
+    }
+}

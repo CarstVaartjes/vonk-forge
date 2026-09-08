@@ -57,6 +57,11 @@ def export_schema() -> dict[str, object]:
         model.__name__: references[model, "validation"]["$ref"]
         for model in ordered
     }
+    schema["x-vonk-model-bases"] = {
+        model.__name__: [base.__name__ for base in model.__mro__[1:] if base in models]
+        for model in ordered
+        if any(base in models for base in model.__mro__[1:])
+    }
     return schema
 
 
