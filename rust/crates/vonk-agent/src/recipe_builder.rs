@@ -194,7 +194,9 @@ impl From<SourcePolicyReport> for RecipeBuildPolicy {
                 .map(|finding| RecipeBuildPolicyFinding {
                     code: finding.code.to_owned(),
                     path: finding.path,
-                    line: finding.line,
+                    line: finding.line.map(|line| {
+                        u64::try_from(line).expect("usize fits the wire u64 line count")
+                    }),
                     detail: finding.detail.to_owned(),
                 })
                 .collect(),
@@ -662,7 +664,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
 fn build_disk_envelope(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
     let retained_inputs_and_output = request
         .base_image_storage_bytes
-        .checked_add(request.source_bundle_bytes)
+        .checked_add(request.source_bundle_bytes.into())
         .and_then(|bytes| bytes.checked_add(request.limits.output_bytes))
         .ok_or(RecipeBuildError::Evidence)?;
     Ok(request
