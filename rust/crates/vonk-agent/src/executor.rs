@@ -390,6 +390,29 @@ impl<R> RecipeExecutor<'_, R> {
                 }
             })
     }
+
+    async fn cleanup_installation_cache(
+        &self,
+        claim: &AgentClaim,
+        installation_id: uuid::Uuid,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        let request_root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            observation_receipt_public_key: self.observation_receipt_public_key,
+        }
+        .cleanup_installation(claim, installation_id)
+        .await
+        .and_then(|outcome| {
+            if outcome.stop_uncertain {
+                Err(crate::host_runtime::HostRuntimeError::Protocol)
+            } else {
+                Ok(())
+            }
+        })
+    }
 }
 
 async fn wait_ready_with_runtime_guard<R, G>(readiness: R, runtime_guard: G) -> bool
@@ -1892,7 +1915,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
             RecipeOperationRequest::Uninstall(request) => {
                 self.report_phase(claim, "uninstalling").await;
-                let installation_id = request.installation_id.to_string();
+                let installation_uuid = request.installation_id;
+                let installation_id = installation_uuid.to_string();
                 match self.runtime.recipe_digest_if_present(&installation_id) {
                     Ok(None) => {
                         return ExecutionResult {
@@ -1908,23 +1932,63 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                 }
                 let removed_model_bytes = match request.cleanup_model_content_sha256 {
-                    Some(model_content_sha256) => self.runtime.uninstall_with_model_cleanup(
-                        &installation_id,
-                        &request.recipe_content_sha256,
-                        &model_content_sha256,
-                    ),
+                    Some(model_content_sha256) => {
+                        self.runtime.validate_uninstall_with_model_cleanup(
+                            &installation_id,
+                            &request.recipe_content_sha256,
+                            &model_content_sha256,
+                        )
+                    }
                     None => self
                         .runtime
-                        .uninstall(&installation_id, &request.recipe_content_sha256)
+                        .validate_uninstall(&installation_id, &request.recipe_content_sha256)
                         .map(|()| 0),
                 };
-                if removed_model_bytes.is_err() {
-                    failed("installed recipe could not be safely removed")
-                } else {
-                    ExecutionResult {
-                        state: "succeeded",
-                        body: recipe_uninstall_success_body(removed_model_bytes.unwrap_or(0)),
+                let removed_model_bytes = match removed_model_bytes {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return failed_stage(
+                            "installed recipe could not be safely removed",
+                            "installation-validation",
+                            error.safe_category(),
+                        );
                     }
+                };
+                match self.runtime.runtime_cache_present(&installation_id) {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        if let Err(error) = self
+                            .cleanup_installation_cache(claim, installation_uuid)
+                            .await
+                        {
+                            return failed_stage_owned(
+                                "installed recipe could not be safely removed",
+                                "runtime-cache-cleanup",
+                                error.preflight_code(),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        return failed_stage(
+                            "installed recipe could not be safely removed",
+                            "runtime-cache-cleanup",
+                            error.safe_category(),
+                        );
+                    }
+                }
+                if let Err(error) = self
+                    .runtime
+                    .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
+                {
+                    return failed_stage(
+                        "installed recipe could not be safely removed",
+                        "installation-removal",
+                        error.safe_category(),
+                    );
+                }
+                ExecutionResult {
+                    state: "succeeded",
+                    body: recipe_uninstall_success_body(removed_model_bytes),
                 }
             }
             RecipeOperationRequest::ModelCleanup(request) => {
@@ -1934,23 +1998,84 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .into_iter()
                     .map(|installation| {
                         (
-                            installation.installation_id.to_string(),
+                            installation.installation_id,
                             installation.recipe_content_sha256,
                         )
                     })
                     .collect::<Vec<_>>();
-                match self
+                let string_installations = installations
+                    .iter()
+                    .map(|(installation_id, digest)| (installation_id.to_string(), digest.clone()))
+                    .collect::<Vec<_>>();
+                let removed_model_bytes = match self
                     .runtime
-                    .uninstall_model(&installations, &request.model_content_sha256)
+                    .validate_model_uninstall(&string_installations, &request.model_content_sha256)
                 {
-                    Ok(removed_model_bytes) => ExecutionResult {
-                        state: "succeeded",
-                        body: recipe_model_cleanup_success_body(
-                            installations.len(),
-                            removed_model_bytes,
-                        ),
-                    },
-                    Err(_) => failed("model dependencies could not be safely removed"),
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return failed_stage(
+                            "model dependencies could not be safely removed",
+                            "installation-validation",
+                            error.safe_category(),
+                        );
+                    }
+                };
+                for (installation_uuid, _) in &installations {
+                    match self
+                        .runtime
+                        .runtime_cache_present(&installation_uuid.to_string())
+                    {
+                        Ok(false) => {}
+                        Ok(true) => {
+                            if let Err(error) = self
+                                .cleanup_installation_cache(claim, *installation_uuid)
+                                .await
+                            {
+                                return failed_stage_owned(
+                                    "model dependencies could not be safely removed",
+                                    "runtime-cache-cleanup",
+                                    error.preflight_code(),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            return failed_stage(
+                                "model dependencies could not be safely removed",
+                                "runtime-cache-cleanup",
+                                error.safe_category(),
+                            );
+                        }
+                    }
+                }
+                for (installation_id, recipe_digest) in &string_installations {
+                    match self.runtime.recipe_digest_if_present(installation_id) {
+                        Ok(None) => continue,
+                        Ok(Some(_)) => {}
+                        Err(error) => {
+                            return failed_stage(
+                                "model dependencies could not be safely removed",
+                                "installation-removal",
+                                error.safe_category(),
+                            );
+                        }
+                    }
+                    if let Err(error) = self
+                        .runtime
+                        .finalize_uninstall(installation_id, recipe_digest)
+                    {
+                        return failed_stage(
+                            "model dependencies could not be safely removed",
+                            "installation-removal",
+                            error.safe_category(),
+                        );
+                    }
+                }
+                ExecutionResult {
+                    state: "succeeded",
+                    body: recipe_model_cleanup_success_body(
+                        installations.len(),
+                        removed_model_bytes,
+                    ),
                 }
             }
         }
@@ -1968,6 +2093,28 @@ fn failed_owned(reason: String) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
         body: json!({"reason": reason}),
+    }
+}
+
+fn failed_stage(
+    reason: &'static str,
+    stage: &'static str,
+    diagnostic: &'static str,
+) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({"reason": reason, "stage": stage, "diagnostic": diagnostic}),
+    }
+}
+
+fn failed_stage_owned(
+    reason: &'static str,
+    stage: &'static str,
+    diagnostic: String,
+) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({"reason": reason, "stage": stage, "diagnostic": diagnostic}),
     }
 }
 

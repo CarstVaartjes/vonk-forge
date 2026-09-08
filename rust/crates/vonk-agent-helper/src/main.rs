@@ -750,6 +750,7 @@ mod tests {
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
+                installation_id: None,
             },
         );
         for (error, code) in [
