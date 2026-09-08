@@ -146,21 +146,24 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         &std::env::current_exe()?,
         Path::new("/run/vonk-forge-agent"),
     )?;
-    rotate_if_due(config).await?;
     let client = AgentHttpClient::from_config(config)?;
+    rotate_if_due(config, &client).await?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
-    let (client_updates, telemetry_client) = tokio::sync::watch::channel(client.clone());
-    let control = run_control_lane(config, runtime_identity, client, state, client_updates);
+    let (_client_updates, telemetry_client) = tokio::sync::watch::channel(client.clone());
+    let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let telemetry = run_telemetry_lane(
         config.data_dir.clone(),
         telemetry_client,
         config.poll_min_seconds,
         config.poll_max_seconds,
     );
-    match supervise_lanes(control, telemetry, tokio::signal::ctrl_c()).await {
-        LaneExit::Control(result) => result,
-        LaneExit::Shutdown(signal) => {
+    let rotation = run_rotation_lane(config.clone(), client.clone());
+    match supervise_lanes_with_rotation(control, telemetry, rotation, tokio::signal::ctrl_c()).await
+    {
+        LaneExitWithRotation::Control(result) => result,
+        LaneExitWithRotation::Rotation(result) => result,
+        LaneExitWithRotation::Shutdown(signal) => {
             signal?;
             Ok(())
         }
@@ -170,9 +173,8 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 async fn run_control_lane(
     config: &AgentConfig,
     mut runtime_identity: AgentRuntimeIdentity,
-    mut client: AgentHttpClient,
+    client: AgentHttpClient,
     mut state: StateStore,
-    client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
@@ -181,10 +183,6 @@ async fn run_control_lane(
     let mut readiness_published = false;
     loop {
         if tokio::time::Instant::now() >= next_inventory {
-            if rotate_if_due(config).await? {
-                client = AgentHttpClient::from_config(config)?;
-                client_updates.send_replace(client.clone());
-            }
             let inventory = InventoryCollector {
                 runner: &runner,
                 meminfo_path: Path::new("/proc/meminfo"),
@@ -318,6 +316,17 @@ async fn run_control_lane(
     }
 }
 
+async fn run_rotation_lane(
+    config: AgentConfig,
+    client: AgentHttpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let interval = std::time::Duration::from_secs(config.poll_min_seconds.min(5).max(1));
+    loop {
+        rotate_if_due(&config, &client).await?;
+        tokio::time::sleep(interval).await;
+    }
+}
+
 async fn run_telemetry_lane(
     data_dir: PathBuf,
     clients: tokio::sync::watch::Receiver<AgentHttpClient>,
@@ -442,6 +451,40 @@ enum LaneExit<C, S> {
     Shutdown(S),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum LaneExitWithRotation<C, R, S> {
+    Control(C),
+    Rotation(R),
+    Shutdown(S),
+}
+
+async fn supervise_lanes_with_rotation<C, T, R, S>(
+    control: C,
+    telemetry: T,
+    rotation: R,
+    shutdown: S,
+) -> LaneExitWithRotation<C::Output, R::Output, S::Output>
+where
+    C: Future,
+    T: Future<Output = ()>,
+    R: Future,
+    S: Future,
+{
+    tokio::pin!(control);
+    tokio::pin!(telemetry);
+    tokio::pin!(rotation);
+    tokio::pin!(shutdown);
+    let mut telemetry_running = true;
+    loop {
+        tokio::select! {
+            result = &mut control => return LaneExitWithRotation::Control(result),
+            result = &mut rotation => return LaneExitWithRotation::Rotation(result),
+            signal = &mut shutdown => return LaneExitWithRotation::Shutdown(signal),
+            () = &mut telemetry, if telemetry_running => telemetry_running = false,
+        }
+    }
+}
+
 async fn supervise_lanes<C, T, S>(
     control: C,
     telemetry: T,
@@ -499,8 +542,8 @@ fn claim_wait_seconds(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaneExit, claim_wait_seconds, exact_observation_disposition, supervise_lanes,
-        telemetry_retry_after,
+        LaneExit, LaneExitWithRotation, claim_wait_seconds, exact_observation_disposition,
+        supervise_lanes, supervise_lanes_with_rotation, telemetry_retry_after,
     };
     use std::future;
     use vonk_agent::client::ClientError;
@@ -564,5 +607,20 @@ mod tests {
         .expect("claim lane was gated by telemetry retry state");
 
         assert_eq!(outcome, LaneExit::Control("claim attempted"));
+    }
+
+    #[tokio::test]
+    async fn rotation_lane_failure_is_supervised_independently_of_control_lane() {
+        let outcome = supervise_lanes_with_rotation(
+            future::pending::<()>(),
+            future::pending::<()>(),
+            future::ready(Err::<(), _>("rotation failed")),
+            future::pending::<()>(),
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            LaneExitWithRotation::Rotation(Err("rotation failed"))
+        );
     }
 }
