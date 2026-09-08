@@ -11,8 +11,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
+from pydantic import TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
 from .inventory_repository import InventoryRepository
 from .models import (
@@ -40,6 +44,7 @@ BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
 MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3
 MAXIMUM_BUILD_DISK_RESERVE_BYTES = 64 * 1024**3
 BUILD_INPUT_IDENTITY_SCHEMA_VERSION = 2
+_RECIPE_SETTINGS = TypeAdapter(RecipeSettings)
 
 
 def derive_build_input_identity(
@@ -100,109 +105,35 @@ def derive_build_input_identity(
 
 
 def _build_effective_settings(value: object | None) -> dict[str, object] | None:
-    """Project only canonical settings with a ``rebuild`` change effect."""
+    """Project rebuild inputs from the shared current RecipeSettings contract."""
     if value is None:
         return None
-    if isinstance(value, Mapping):
-        # The public v2 contract stores every setting as {value,
-        # change_effect}; older resolver objects expose a separate map.  Both
-        # shapes are projections of the same canonical settings authority.
-        effects = value.get("change_effects")
-        if isinstance(effects, Mapping):
-            return _select_rebuild_settings(value, effects)
-        selected: dict[str, object] = {}
-        selected_effects: dict[str, str] = {}
-        for key, setting in value.items():
-            if key in {"kind", "knobs"}:
-                continue
-            if isinstance(setting, Mapping) and setting.get("change_effect") == "rebuild":
-                if "value" not in setting:
-                    raise ValueError(f"rebuild setting {key!r} has no effective value")
-                selected[key] = copy.deepcopy(setting["value"])
-                selected_effects[key] = "rebuild"
-        knobs = value.get("knobs")
-        if isinstance(knobs, Mapping):
-            for key, setting in knobs.items():
-                if isinstance(setting, Mapping) and setting.get("change_effect") == "rebuild":
-                    if "value" not in setting:
-                        raise ValueError(f"rebuild setting {key!r} has no effective value")
-                    selected[f"knobs.{key}"] = copy.deepcopy(setting["value"])
-                    selected_effects[f"knobs.{key}"] = "rebuild"
-        return (
-            None
-            if not selected_effects
-            else {"values": selected, "change_effects": selected_effects}
-        )
-
-    effects = getattr(value, "change_effects", None)
-    if not isinstance(effects, Sequence) or isinstance(effects, (str, bytes)):
-        return None
-    effect_map = {
-        key: _change_effect_value(effect)
-        for key, effect in effects
-        if isinstance(key, str)
+    settings = _RECIPE_SETTINGS.validate_json(canonical_message(value))
+    selected = {
+        name: copy.deepcopy(setting.value)
+        for name in type(settings).model_fields
+        if isinstance(setting := getattr(settings, name), RecipeSetting)
+        and setting.change_effect == "rebuild"
     }
-    values: dict[str, object] = {}
-    knobs = getattr(value, "knobs", None)
-    knob_values = (
-        {key: copy.deepcopy(item) for key, item in knobs if isinstance(key, str)}
-        if isinstance(knobs, Sequence) and not isinstance(knobs, (str, bytes))
-        else {}
+    selected.update({
+        f"knobs.{name}": copy.deepcopy(setting.value)
+        for name, setting in settings.knobs.items()
+        if setting.change_effect == "rebuild"
+    })
+    return (
+        {"values": selected, "change_effects": {name: "rebuild" for name in selected}}
+        if selected else None
     )
-    for key, effect in effect_map.items():
-        if effect != "rebuild":
-            continue
-        if key in knob_values:
-            values[key] = knob_values[key]
-        elif hasattr(value, key):
-            values[key] = copy.deepcopy(getattr(value, key))
-    selected_effects = {key: "rebuild" for key, effect in effect_map.items() if effect == "rebuild"}
-    if len(values) != len(selected_effects):
-        raise ValueError("rebuild settings must expose every effective value")
-    return None if not selected_effects else {"values": values, "change_effects": selected_effects}
 
 
-def _change_effect_value(value: object) -> object:
-    return getattr(value, "value", value)
-
-
-def _select_rebuild_settings(
-    settings: Mapping[str, object], effects: Mapping[str, object]
-) -> dict[str, object] | None:
-    selected: dict[str, object] = {}
-    for key, effect in effects.items():
-        if _change_effect_value(effect) != "rebuild":
-            continue
-        found, setting = _lookup_setting(settings, key)
-        if not found:
-            raise ValueError(f"rebuild setting {key!r} has no effective value")
-        selected[key] = copy.deepcopy(setting)
-    selected_effects = {
-        key: "rebuild" for key, effect in effects.items() if _change_effect_value(effect) == "rebuild"
-    }
-    return None if not selected_effects else {"values": selected, "change_effects": selected_effects}
-
-
-def _lookup_setting(settings: Mapping[str, object], key: str) -> tuple[bool, object]:
-    if key in settings:
-        value = settings[key]
-        if isinstance(value, Mapping) and "value" in value:
-            return True, value["value"]
-        return True, value
-    knobs = settings.get("knobs")
-    if isinstance(knobs, Mapping) and key in knobs:
-        value = knobs[key]
-        if isinstance(value, Mapping) and "value" in value:
-            return True, value["value"]
-        return True, value
-    current: object = settings
-    for component in key.split("."):
-        if not isinstance(current, Mapping) or component not in current:
-            return False, None
-        current = current[component]
-    if isinstance(current, Mapping) and "value" in current:
-        return True, current["value"]
-    return True, current
+def _canonical_recipe_document(value: object) -> dict[str, object]:
+    try:
+        recipe = RecipeDefinition.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise RecipeBuildError(
+            "build.contract_invalid", "stored recipe does not satisfy RecipeDefinition"
+        ) from error
+    return recipe.model_dump(mode="json")
 
 
 def _canonical_model_build_inputs(artifacts: Sequence[object]) -> list[dict[str, object]]:
@@ -437,7 +368,7 @@ class RecipeBuildService:
                 raise RecipeBuildError(
                     "build.recipe_unresolved", "only a resolved recipe can be checked"
                 )
-            document = copy.deepcopy(revision.document)
+            document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             if (
@@ -471,7 +402,7 @@ class RecipeBuildService:
                 raise RecipeBuildError(
                     "build.recipe_unresolved", "only a resolved recipe can be built"
                 )
-            document = copy.deepcopy(revision.document)
+            document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             if session.get(RecipeSourceBundle, source_sha256) is None:
@@ -520,7 +451,7 @@ class RecipeBuildService:
             builder_binary_digest=None,
             artifact_format=BUILD_ARTIFACT_FORMAT,
             base_images=base_images,
-            effective_settings=document.get("settings"),
+            effective_settings=document["settings"],
             topology_inputs=topology,
             model_artifacts=model_artifacts,
         )
@@ -559,7 +490,7 @@ class RecipeBuildService:
                     builder_binary_digest=builder_digest,
                     artifact_format=BUILD_ARTIFACT_FORMAT,
                     base_images=base_images,
-                    effective_settings=document.get("settings"),
+                    effective_settings=document["settings"],
                     topology_inputs=topology,
                     model_artifacts=model_artifacts,
                 )
@@ -615,7 +546,7 @@ class RecipeBuildService:
                     "build.node_unknown", "builder GPU node is unknown"
                 )
             _validate_builder(node)
-            document = copy.deepcopy(revision.document)
+            document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             public_network = _public_build_network(build)
@@ -721,7 +652,7 @@ class RecipeBuildService:
             builder_binary_digest=builder_binary_digest,
             artifact_format=BUILD_ARTIFACT_FORMAT,
             base_images=base_images,
-            effective_settings=document.get("settings"),
+            effective_settings=document["settings"],
             topology_inputs=(topology_inputs if isinstance(topology_inputs, Mapping) else None),
             model_artifacts=(model_inputs if isinstance(model_inputs, Sequence) and not isinstance(model_inputs, (str, bytes)) else None),
         )
