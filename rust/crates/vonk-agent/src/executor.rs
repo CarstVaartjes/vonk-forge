@@ -704,7 +704,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         job_id: progress_claim.job_id,
                         node_id: progress_claim.node_id.clone(),
                         operation_id: progress_claim.operation_id,
-                        progress: OperationProgress {
+                        progress: Some(OperationProgress {
                             completed_items: Some(completed_items),
                             total_items: Some(item.total_items),
                             object_sha256: Some(item.object_sha256),
@@ -713,7 +713,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             total_bytes: item.total_bytes,
                             total_bytes_known: item.total_bytes.is_some(),
                             ..phase_progress(item.phase)
-                        },
+                        }),
                         schema_version: 1,
                     };
                     let _ = progress_client.heartbeat(&progress).await;
@@ -2569,7 +2569,7 @@ async fn run_heartbeats<C: LoopClient>(
             job_id: claim.job_id,
             node_id: claim.node_id.clone(),
             operation_id: claim.operation_id,
-            progress: phase_progress("executing"),
+            progress: None,
             schema_version: claim.schema_version,
         };
         let directive = match client.heartbeat(&progress).await {
@@ -3585,6 +3585,11 @@ mod tests {
 
         let heartbeats = client.heartbeats.lock().unwrap();
         assert!(heartbeats.len() >= 2);
+        assert!(
+            heartbeats
+                .iter()
+                .all(|heartbeat| heartbeat.progress.is_none())
+        );
         drop(heartbeats);
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
