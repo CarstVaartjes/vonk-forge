@@ -32,6 +32,7 @@ from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
     ClusterMappingService,
+    validate_mapping_parameters,
 )
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .model_cache import ModelCacheService
@@ -3845,7 +3846,7 @@ class RunSwitchOperationService:
             mapping_id=mapping.id,
             mapping_generation=mapping.generation,
             topology_name=mapping.topology_name,
-            parameters=dict(mapping.parameters),
+            parameters=validate_mapping_parameters(mapping.parameters),
             placement_digest=mapping.placement_digest,
             action="reuse",
             nodes=[
