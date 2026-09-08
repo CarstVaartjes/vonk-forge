@@ -1581,6 +1581,35 @@ def test_worker_death_while_owner_is_healthy_never_publishes_route(
         assert worker.state == "failed"
 
 
+
+def test_singleton_start_grants_time_for_first_exact_observation(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path, nodes=1)
+    installation = installed_recipe(service, mapping_id, build_id, nodes, request_id="g" * 36)
+    plan = service.preview_run(installation.owner_id, "singleton-observation-grace")
+    start = service.start(plan, plan_digest=plan.plan_digest, actor="admin", request_id="h" * 36)
+    with sessions() as session:
+        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == start.id))
+    assert operation is not None
+    started_at = NOW + timedelta(microseconds=500_000)
+    service._clock = lambda: started_at
+    service.record_node_result(start.id, operation.node_id, succeeded=True,
+                               evidence=start_evidence(operation.payload))
+    _bound, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    worker = RecipeOperationWorker(sessions, routes, clock=lambda: started_at + timedelta(milliseconds=1))
+    assert worker.tick() is False
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run.id))
+        assert run.observation_deadline_at.replace(tzinfo=UTC) == started_at + timedelta(seconds=120)
+        assert run.route_state == "pending"
+        assert node.state == "running"
+        assert node.observed_run_generation is None
+    expired = RecipeOperationWorker(sessions, routes, clock=lambda: started_at + timedelta(seconds=120))
+    assert expired._expire_initial_observation_deadline() is True
+    with sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == start.owner_id))
+        assert node.state == "failed"
+
 def test_collective_readiness_starts_distinct_observation_grace(
     tmp_path: Path,
 ) -> None:
