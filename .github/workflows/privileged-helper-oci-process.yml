@@ -10,6 +10,8 @@ on:
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
       - tests/acceptance/privileged_helper_oci_process.sh
+      - tests/nodes/test_helper_runtime_filesystem.py
+      - packaging/systemd/vonk-forge-package-helper.service
   workflow_dispatch:
 
 permissions:
@@ -52,6 +54,11 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             acl adduser ca-certificates curl systemd-container
           docker info
+      - name: Verify canonical installation access under the packaged helper filesystem policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 tests/nodes/test_helper_runtime_filesystem.py --disposable-systemd
       - name: Build production helper and compiled-plan probe
         shell: bash
         run: |

@@ -793,7 +793,7 @@ def _verify_payload(
         "IPAddressDeny=any",
         "vonk-forge-docker-firewall.service",
         "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
-        "ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
+        "ReadWritePaths=-/var/lib/vonk-forge-agent/installations -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
         "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
     ):
         if boundary not in helper:
