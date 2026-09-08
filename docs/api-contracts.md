@@ -62,11 +62,16 @@ and reuse the canonical model-cache and runtime-image receipt types.
 
 ## Rust and generated clients
 
-Rust uses `serde` structs and enums, with explicit semantic validation where
-types alone are insufficient. The current Rust protocol definitions are
-handwritten; they are not generated from Pydantic. Job envelopes and signed
-observations use the shared model graph and connected wire checks. The retired
-operation graph removal is tracked in the launch progress document.
+Rust wire structs and enums must be generated with **typify** from JSON Schema
+exported from the authoritative Pydantic models. Do not maintain parallel
+handwritten payload fields. Rust keeps explicit semantic and execution/security
+validation where types and JSON Schema cannot express the rule.
+
+The generator is now present in `scripts/generate-agent-wire`; replacing all
+existing wire definitions and their consumers is in progress. The remaining
+adoption work and connected checks are tracked in
+`docs/contract-handoff-implementation-plan-2026-09-08.md`. Generated types sitting
+beside handwritten active DTOs do not complete this chain.
 Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
@@ -95,10 +100,11 @@ when its Python validator remains strict. `test_api_contract_graph.py` permits
 open objects only at explicitly documented engine-value and authority-document
 extension points; it rejects opaque fixed nested documents.
 
-Future Rust type generation should consume schemas exported from this same
-Pydantic graph. It must preserve field presence, nullability and tagged unions,
-and retain explicit semantic validation and the connected wire tests. Rust
-type generation is not currently enabled.
+Rust generation must preserve field presence, nullability, scalar types, and
+tagged unions from this same Pydantic graph. Generation does not replace
+semantic validation or connected wire tests: test the actual producers and
+consumers, including omitted required fields, explicit nulls, and numeric
+boundaries.
 
 ## Required launch checks
 
