@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import yaml
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
@@ -104,7 +104,13 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
         check=True,
         capture_output=True,
     )
-    Path(f"{package}.host.sig").write_text(key.sign(b"VONK-HOST-ARTIFACT-V1\x00deb\x00" + hashlib.sha256(package.read_bytes()).digest()).hex() + "\n")
+    Path(f"{package}.host.sig").write_text(
+        key.sign(
+            b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
+            + hashlib.sha256(package.read_bytes()).digest()
+        ).hex()
+        + "\n"
+    )
     _canonical(
         package.with_suffix(".provenance.json"),
         {
@@ -113,7 +119,10 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
                     "externalParameters": {"build_digest": "sha256:" + "c" * 64}
                 }
             },
-            "subject": [{"digest": {"sha256": hashlib.sha256(raw).hexdigest()}, "name": name} for name, raw in (("vonk-agent", binary), ("vonk-agent-helper", helper))],
+            "subject": [
+                {"digest": {"sha256": hashlib.sha256(raw).hexdigest()}, "name": name}
+                for name, raw in (("vonk-agent", binary), ("vonk-agent-helper", helper))
+            ],
         },
     )
     return package
@@ -2384,7 +2393,6 @@ def test_refresh_extends_signed_manifest_after_verifying_all_release_objects(
     refreshed = subprocess.run(
         [
             sys.executable,
-            "-S",  # Scheduled refresh has only system Python, without site packages.
             str(SCRIPT),
             "refresh",
             "--channel",
@@ -2524,3 +2532,101 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
     assert rejected.returncode != 0
     assert "signature is invalid" in rejected.stderr
     assert not receipt.exists()
+
+
+def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
+    tmp_path: Path,
+) -> None:
+    probe = os.environ.get("VONK_INSTALLER_RELEASE_WIRE_PROBE")
+    if not probe:
+        pytest.skip("VONK_INSTALLER_RELEASE_WIRE_PROBE requires the native Rust probe")
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from jsonschema import Draft202012Validator
+    from pydantic import ValidationError
+    from vonk_agent_protocol.installer_release import InstallerReleaseManifest
+
+    inputs = _inputs(tmp_path)
+    publication = _assemble(tmp_path, inputs)
+    plan = json.loads((publication / "publication-plan.json").read_bytes())
+    root = publication / "objects"
+    release_paths = [
+        root / item["key"]
+        for item in plan["objects"]
+        if item["key"].endswith("/release.json")
+    ]
+    assert len(release_paths) == 2
+    schema = json.loads(
+        (ROOT / "schemas/install-release-manifest.schema.json").read_bytes()
+    )
+    validator = Draft202012Validator(schema)
+    signing_key = serialization.load_pem_private_key(
+        Path(inputs["signing_key"]).read_bytes(), password=None
+    )
+
+    def consume(path: Path, signature: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [probe, str(path), str(signature), str(inputs["signing_public_key"])],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    for release_path in release_paths:
+        raw = release_path.read_bytes()
+        document = json.loads(raw)
+        validator.validate(document)
+        model = InstallerReleaseManifest.model_validate_json(raw)
+        assert model.model_dump(mode="json", by_alias=True) == document
+        consumed = consume(release_path, release_path.with_suffix(".sig"))
+        assert consumed.returncode == 0, consumed.stderr
+        assert json.loads(consumed.stdout) == document
+
+        mutations = []
+        missing_image = copy.deepcopy(document)
+        del missing_image["images"]["litellm"]
+        mutations.append(missing_image)
+        missing_artifact = copy.deepcopy(document)
+        del missing_artifact["artifacts"]["spark-setup-signature-linux-arm64"]
+        mutations.append(missing_artifact)
+        extra_artifact = copy.deepcopy(document)
+        extra_artifact["artifacts"]["obsolete-setup"] = copy.deepcopy(
+            next(iter(document["artifacts"].values()))
+        )
+        mutations.append(extra_artifact)
+        extra_root = copy.deepcopy(document)
+        extra_root["retired_schema"] = 1
+        mutations.append(extra_root)
+        if not document.get("acceptance_only"):
+            missing_package_identity = copy.deepcopy(document)
+            del missing_package_identity["artifacts"]["agent-package-linux-arm64"][
+                "target_binary_digest"
+            ]
+            mutations.append(missing_package_identity)
+            missing_nas = copy.deepcopy(document)
+            del missing_nas["artifacts"]["nas-setup-darwin-amd64"]
+            mutations.append(missing_nas)
+        else:
+            missing_role = copy.deepcopy(document)
+            del missing_role["acceptance_only"]
+            mutations.append(missing_role)
+        for malformed in mutations:
+            with pytest.raises(ValidationError):
+                InstallerReleaseManifest.model_validate(malformed)
+            assert not validator.is_valid(malformed)
+            changed = tmp_path / "malformed-release.json"
+            _canonical(changed, malformed)
+            signature = tmp_path / "malformed-release.sig"
+            signature.write_bytes(
+                base64.b64encode(
+                    signing_key.sign(
+                        changed.read_bytes(), padding.PKCS1v15(), hashes.SHA256()
+                    )
+                )
+                + b"\n"
+            )
+            # Valid signatures must not allow incomplete or extra graph fields.
+            assert consume(changed, signature).returncode != 0
+        bad_signature = tmp_path / "corrupt.sig"
+        bad_signature.write_bytes(base64.b64encode(b"x" * 256) + b"\n")
+        assert consume(release_path, bad_signature).returncode != 0

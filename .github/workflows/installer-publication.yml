@@ -937,6 +937,13 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.authority.outputs.source_sha }}
 
+      - name: Install canonical publication model runtime
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+
       - name: Download exact candidate publication graph
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -980,7 +987,7 @@ jobs:
           # aggregate NAS report and one linux-arm64 Spark report.
           test "${#reports[@]}" = 2
           command=(
-            scripts/install-release-publication accept
+            uv run --no-project --with-editable agent_protocol python scripts/install-release-publication accept
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
@@ -1120,6 +1127,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install canonical publication model runtime
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+
       - name: Install R2 publication client
         shell: bash
         run: |
@@ -1202,7 +1216,7 @@ jobs:
             "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
-          scripts/install-release-publication refresh \
+          uv run --no-project --with-editable agent_protocol python scripts/install-release-publication refresh \
             --channel "$CHANNEL" \
             --expires-at "$(($(date +%s) + 604800))" \
             --signing-key "$signing_key" \
