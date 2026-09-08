@@ -104,7 +104,7 @@ impl HelperRejection {
         operation: &HostOperation,
         error: OperationError,
     ) -> Self {
-        let package_install = matches!(operation, HostOperation::InstallVonkDeb { .. });
+        let package_install = matches!(operation, HostOperation::InstallVonkDebOperation(_));
         let (error_code, exit_code) = match error {
             OperationError::InvalidArtifact if package_install => {
                 ("package_verification_failed", None)
@@ -310,12 +310,14 @@ fn handle(
         })?;
     let observation_receipt = match (&request.claims.operation, outcome.recipe_run_observation) {
         (
-            vonk_agent_helper::protocol::HostOperation::ExecuteContainerRuntimeRequest {
-                action: vonk_agent_helper::protocol::ContainerRuntimeAction::RunInspect,
-                request_sha256,
-                observation_identity_sha256: Some(observation_identity_sha256),
-                ..
-            },
+            vonk_agent_helper::protocol::HostOperation::ExecuteContainerRuntimeRequestOperation(
+                vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                    action: vonk_agent_helper::protocol::ContainerRuntimeAction::RunInspect,
+                    request_sha256,
+                    observation_identity_sha256: Some(observation_identity_sha256),
+                    ..
+                },
+            ),
             Some(observation_outcome),
         ) => Some(
             sign_observation_receipt(
@@ -658,21 +660,24 @@ mod tests {
 
     #[test]
     fn package_failures_are_stage_specific_and_exit_codes_are_bounded() {
-        let operation = HostOperation::InstallVonkDeb {
-            rollback: vonk_agent_protocol::PackageRollbackAuthority {
-                source: vonk_agent_protocol::PackageRollbackSource {
-                    package_sha256: "a".repeat(64),
-                    package_signature: "b".repeat(128),
-                    package_version: "0.1.0".into(),
-                    binary_sha256: "c".repeat(64),
-                    helper_sha256: "d".repeat(64),
+        let operation = HostOperation::InstallVonkDebOperation(
+            vonk_agent_protocol::generated::InstallVonkDebOperation {
+                type_: "install-vonk-deb".into(),
+                rollback: vonk_agent_protocol::PackageRollbackAuthority {
+                    source: vonk_agent_protocol::PackageRollbackSource {
+                        package_sha256: "a".repeat(64),
+                        package_signature: "b".repeat(128),
+                        package_version: "0.1.0".into(),
+                        binary_sha256: "c".repeat(64),
+                        helper_sha256: "d".repeat(64),
+                    },
+                    attempt_nonce: "e".repeat(64),
+                    activation_deadline: 2100000000,
                 },
-                attempt_nonce: "e".repeat(64),
-                activation_deadline: 2100000000,
+                package_sha256: "a".repeat(64),
+                package_signature: "b".repeat(128),
             },
-            package_sha256: "a".repeat(64),
-            package_signature: "b".repeat(128),
-        };
+        );
         let install = HelperRejection::for_operation(
             "request-1",
             &operation,
@@ -703,15 +708,18 @@ mod tests {
 
     #[test]
     fn runtime_image_failures_identify_the_failed_stage_without_details() {
-        let operation = HostOperation::ExecuteContainerRuntimeRequest {
-            action: ContainerRuntimeAction::ImageImport,
-            job_id: uuid::Uuid::nil(),
-            operation_id: uuid::Uuid::nil(),
-            attempt: 1,
-            fence: uuid::Uuid::nil(),
-            request_sha256: "a".repeat(64),
-            observation_identity_sha256: None,
-        };
+        let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
+            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                type_: "execute-container-runtime-request".into(),
+                action: ContainerRuntimeAction::ImageImport,
+                job_id: uuid::Uuid::nil(),
+                operation_id: uuid::Uuid::nil(),
+                attempt: 1,
+                fence: uuid::Uuid::nil(),
+                request_sha256: "a".repeat(64),
+                observation_identity_sha256: None,
+            },
+        );
         for (error, code) in [
             (
                 OperationError::RuntimeImageLoadFailed,

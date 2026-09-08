@@ -905,7 +905,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         run = session.get(RecipeRun, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         assert run.route_state == "withdrawn"
-        assert run.route_error == "distributed start observation deadline elapsed"
+        assert run.route_error == "initial exact observation deadline elapsed"
         assert all(node.state == "failed" for node in nodes)
 
 
@@ -935,7 +935,7 @@ def test_initial_exact_observation_deadline_fails_late_signed_ranks(
         run = session.get(RecipeRun, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         assert run.route_state == "withdrawn"
-        assert run.route_error == "distributed start observation deadline elapsed"
+        assert run.route_error == "initial exact observation deadline elapsed"
         assert all(node.state == "failed" for node in nodes)
 
 

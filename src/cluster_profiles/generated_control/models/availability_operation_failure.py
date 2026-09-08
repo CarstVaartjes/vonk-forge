@@ -29,6 +29,7 @@ class AvailabilityOperationFailure:
         Attributes:
             code (str):
             detail (str):
+            artifact_key (Union[None, Unset, str]):
             free_bytes (Union[None, Unset, int]):
             log_excerpt (Union[None, Unset, str]):
             recovery_actions (Union[Unset, list[AvailabilityRecoveryAction]]):
@@ -41,6 +42,7 @@ class AvailabilityOperationFailure:
 
     code: str
     detail: str
+    artifact_key: Union[None, Unset, str] = UNSET
     free_bytes: Union[None, Unset, int] = UNSET
     log_excerpt: Union[None, Unset, str] = UNSET
     recovery_actions: Union[Unset, list[AvailabilityRecoveryAction]] = UNSET
@@ -58,6 +60,12 @@ class AvailabilityOperationFailure:
         code = self.code
 
         detail = self.detail
+
+        artifact_key: Union[None, Unset, str]
+        if isinstance(self.artifact_key, Unset):
+            artifact_key = UNSET
+        else:
+            artifact_key = self.artifact_key
 
         free_bytes: Union[None, Unset, int]
         if isinstance(self.free_bytes, Unset):
@@ -113,6 +121,8 @@ class AvailabilityOperationFailure:
             "code": code,
             "detail": detail,
         })
+        if artifact_key is not UNSET:
+            field_dict["artifact_key"] = artifact_key
         if free_bytes is not UNSET:
             field_dict["free_bytes"] = free_bytes
         if log_excerpt is not UNSET:
@@ -140,6 +150,16 @@ class AvailabilityOperationFailure:
         code = d.pop("code")
 
         detail = d.pop("detail")
+
+        def _parse_artifact_key(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        artifact_key = _parse_artifact_key(d.pop("artifact_key", UNSET))
+
 
         def _parse_free_bytes(data: object) -> Union[None, Unset, int]:
             if data is None:
@@ -216,6 +236,7 @@ class AvailabilityOperationFailure:
         availability_operation_failure = cls(
             code=code,
             detail=detail,
+            artifact_key=artifact_key,
             free_bytes=free_bytes,
             log_excerpt=log_excerpt,
             recovery_actions=recovery_actions,

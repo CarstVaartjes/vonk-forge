@@ -149,7 +149,7 @@ class RecipeOperationWorker:
                     node.state = "failed"
                     node.updated_at = now
                 run.route_state = "withdrawn"
-                run.route_error = "distributed start observation deadline elapsed"
+                run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True
         return False

@@ -5,6 +5,8 @@ from .agent_deployment_evidence_connectivity import AgentDeploymentEvidenceConne
 from .agent_failure_result import AgentFailureResult
 from .agent_install_result import AgentInstallResult
 from .agent_operation import AgentOperation
+from .agent_operation_change import AgentOperationChange
+from .agent_operation_payload import AgentOperationPayload
 from .agent_repair_manifest_request import AgentRepairManifestRequest
 from .agent_summary import AgentSummary
 from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
@@ -123,6 +125,7 @@ from .failure_diagnostics_category import FailureDiagnosticsCategory
 from .failure_evidence_bundle import FailureEvidenceBundle
 from .failure_log_tail import FailureLogTail
 from .failure_property import FailureProperty
+from .fleet_change_event import FleetChangeEvent
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -190,6 +193,8 @@ from .fleet_profile_view import FleetProfileView
 from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_snapshot import FleetSnapshot
+from .fleet_snapshot_event import FleetSnapshotEvent
+from .fleet_telemetry_event import FleetTelemetryEvent
 from .float_parameter import FloatParameter
 from .freshness_evidence import FreshnessEvidence
 from .freshness_evidence_state import FreshnessEvidenceState
@@ -211,14 +216,18 @@ from .install_preview_input import InstallPreviewInput
 from .install_preview_request import InstallPreviewRequest
 from .install_preview_target import InstallPreviewTarget
 from .install_request import InstallRequest
+from .installation_node_change import InstallationNodeChange
+from .installation_node_payload import InstallationNodePayload
 from .integer_parameter import IntegerParameter
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
 from .invocation_metadata import InvocationMetadata
 from .invocation_metadata_context import InvocationMetadataContext
+from .job_change import JobChange
 from .job_detail_response import JobDetailResponse
 from .job_logs_response import JobLogsResponse
 from .job_operation_response import JobOperationResponse
+from .job_payload import JobPayload
 from .job_progress import JobProgress
 from .job_resume_response import JobResumeResponse
 from .job_summary import JobSummary
@@ -355,6 +364,8 @@ from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
 from .node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from .node_connection_online_state import NodeConnectionOnlineState
+from .node_profile_change import NodeProfileChange
+from .node_profile_payload import NodeProfilePayload
 from .node_profile_update_request import NodeProfileUpdateRequest
 from .operation_checkpoint import OperationCheckpoint
 from .operation_detail_response import OperationDetailResponse
@@ -447,6 +458,8 @@ from .recipe_image_availability_start import RecipeImageAvailabilityStart
 from .recipe_image_execution import RecipeImageExecution
 from .recipe_image_import_evidence import RecipeImageImportEvidence
 from .recipe_input_slot import RecipeInputSlot
+from .recipe_installation_change import RecipeInstallationChange
+from .recipe_installation_payload import RecipeInstallationPayload
 from .recipe_integer_setting import RecipeIntegerSetting
 from .recipe_integer_setting_change_effect import RecipeIntegerSettingChangeEffect
 from .recipe_job_evidence import RecipeJobEvidence
@@ -497,6 +510,8 @@ from .recipe_release_change_kind import RecipeReleaseChangeKind
 from .recipe_release_history_entry import RecipeReleaseHistoryEntry
 from .recipe_release_history_entry_upgrade_effect import RecipeReleaseHistoryEntryUpgradeEffect
 from .recipe_role_resources import RecipeRoleResources
+from .recipe_run_change import RecipeRunChange
+from .recipe_run_payload import RecipeRunPayload
 from .recipe_runtime import RecipeRuntime
 from .recipe_runtime_argument import RecipeRuntimeArgument
 from .recipe_runtime_environment import RecipeRuntimeEnvironment
@@ -524,6 +539,8 @@ from .request_validation_problem import RequestValidationProblem
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
+from .run_node_change import RunNodeChange
+from .run_node_payload import RunNodePayload
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
@@ -685,6 +702,8 @@ __all__ = (
     "AgentFailureResult",
     "AgentInstallResult",
     "AgentOperation",
+    "AgentOperationChange",
+    "AgentOperationPayload",
     "AgentRepairManifestRequest",
     "AgentsResponse",
     "AgentSummary",
@@ -803,6 +822,7 @@ __all__ = (
     "FailureEvidenceBundle",
     "FailureLogTail",
     "FailureProperty",
+    "FleetChangeEvent",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -870,6 +890,8 @@ __all__ = (
     "FleetProfileViewInstallationPolicy",
     "FleetProfileViewLabels",
     "FleetSnapshot",
+    "FleetSnapshotEvent",
+    "FleetTelemetryEvent",
     "FloatParameter",
     "FreshnessEvidence",
     "FreshnessEvidenceState",
@@ -884,6 +906,8 @@ __all__ = (
     "ImageDistributionPreviewRequest",
     "ImageDistributionPreviewTarget",
     "ImageDistributionRequest",
+    "InstallationNodeChange",
+    "InstallationNodePayload",
     "InstallNodePlanResponse",
     "InstallPlanResponse",
     "InstallPlanResponseCompiledExecutionPlans",
@@ -896,9 +920,11 @@ __all__ = (
     "InventoryStateFreshness",
     "InvocationMetadata",
     "InvocationMetadataContext",
+    "JobChange",
     "JobDetailResponse",
     "JobLogsResponse",
     "JobOperationResponse",
+    "JobPayload",
     "JobProgress",
     "JobResumeResponse",
     "JobsResponse",
@@ -1035,6 +1061,8 @@ __all__ = (
     "NodeConnectionCertificateState",
     "NodeConnectionOfflineReasonType0",
     "NodeConnectionOnlineState",
+    "NodeProfileChange",
+    "NodeProfilePayload",
     "NodeProfileUpdateRequest",
     "OperationalBuild",
     "OperationalBuildState",
@@ -1127,6 +1155,8 @@ __all__ = (
     "RecipeImageExecution",
     "RecipeImageImportEvidence",
     "RecipeInputSlot",
+    "RecipeInstallationChange",
+    "RecipeInstallationPayload",
     "RecipeIntegerSetting",
     "RecipeIntegerSettingChangeEffect",
     "RecipeJobEvidence",
@@ -1177,6 +1207,8 @@ __all__ = (
     "RecipeReleaseHistoryEntry",
     "RecipeReleaseHistoryEntryUpgradeEffect",
     "RecipeRoleResources",
+    "RecipeRunChange",
+    "RecipeRunPayload",
     "RecipeRuntime",
     "RecipeRuntimeArgument",
     "RecipeRuntimeEnvironment",
@@ -1204,6 +1236,8 @@ __all__ = (
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
+    "RunNodeChange",
+    "RunNodePayload",
     "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",

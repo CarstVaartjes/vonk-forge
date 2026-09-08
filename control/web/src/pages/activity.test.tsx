@@ -478,6 +478,31 @@ function canonicalApi(operations: OperationDetail[]) {
   return client;
 }
 
+test("shows reason-only and long canonical agent evidence without dropping it", async () => {
+  const reason = "Worker could not acquire runtime image";
+  const summary = "Image preparation failed. ".repeat(20);
+  const operations = [
+    canonicalOperation({id: "reason-only", kind: "recipe.start.v1", failure: {reason}}),
+    canonicalOperation({id: "long-failure", kind: "recipe.start.v1", failure: {error_code: "runtime_image.transport_failed", summary}}),
+  ];
+  render(<ActivityPage api={canonicalApi(operations)} now={NOW}/>);
+  expect(await screen.findByText(reason)).toBeVisible();
+  expect(screen.getByText(summary.trim())).toBeVisible();
+});
+
+test("retains actionable cache failure guidance and retry timing in Activity", async () => {
+  const failure = {
+    code: "access_denied", detail: "Accept the model access terms on Hugging Face.",
+    retryable: false, recovery_actions: ["open_model_access", "check_access_and_resume"] as const,
+    retry_time: "2026-08-15T12:05:00Z", retry_after_seconds: 300,
+  };
+  const operation = canonicalOperation({kind: "model-cache.download", failure: {...failure, recovery_actions: [...failure.recovery_actions]}});
+  render(<ActivityPage api={canonicalApi([operation])} now={NOW}/>);
+  expect(await screen.findByText(failure.detail)).toBeVisible();
+  expect(screen.getByRole("list", {name: "Recovery steps"})).toHaveTextContent("Check access and resume");
+  expect(screen.getByText(failure.retry_time)).toBeVisible();
+});
+
 test("downloads diagnostics for the exact failed attempt without losing the error", async () => {
   const operation = canonicalOperation({attempt: 3, evidence_download: {media_type: "application/json", size_bytes: 128, sha256: "a".repeat(64), href: "/api/v1/operations/profile-attempt-1/evidence?attempt=3"}});
   render(<ActivityPage api={canonicalApi([operation])} now={NOW}/>);

@@ -643,6 +643,7 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         "required_bytes",
         "free_bytes",
         "shortfall_bytes",
+        "artifact_key",
     }
     assert "check_access_and_resume" in failed.failure["recovery_actions"]
     assert failed.progress["downloaded_bytes"] >= len(public_data)
@@ -652,7 +653,7 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         assert persisted is not None
         assert persisted.state == failed.state
         assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
-        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["failure"]["code"] == "access_denied"
         assert persisted.payload["retry"]["next_retry_at"] is None
         assert persisted.payload["retry"]["retry_after_seconds"] is None
     assert service._hf_cooldown_until is None
@@ -675,7 +676,7 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
         assert persisted.state == denied.state
-        assert persisted.payload["failure"]["code"] == "model_cache.credentials_denied"
+        assert persisted.payload["failure"]["code"] == "access_denied"
         assert persisted.payload["retry"]["next_retry_at"] is None
         assert persisted.payload["retry"]["retry_after_seconds"] is None
     assert service._hf_cooldown_until is None
@@ -712,7 +713,7 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
         assert persisted.state == "queued"
-        assert persisted.payload["failure"]["code"] == "model_cache.rate_limited"
+        assert persisted.payload["failure"]["code"] == "rate_limited"
         assert persisted.payload["failure"]["retry_time"] == NOW.replace(
             second=30
         ).isoformat()

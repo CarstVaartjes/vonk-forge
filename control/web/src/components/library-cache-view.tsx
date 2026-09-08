@@ -6,6 +6,7 @@ import {modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord} from "./library-workcell";
 import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 import {availabilityFailure, availabilityRetryable, LibraryAvailabilityFeedback} from "./library-availability-feedback";
+import {LibraryRequestError} from "./library-request-error";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
 
 export type LibraryCacheEntry = {key: string; model: LibraryModel; cache?: CacheEntryResponse; files: LibraryModel["model_document"]["files"]; recipeCount: number; status: string; expectedBytes: number; verifiedBytes: number; error?: string};
@@ -31,7 +32,7 @@ export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComple
   const [error, setError] = useState("");
   const completedOperation = useRef<string | undefined>(undefined);
   const active = Boolean(operation && !terminal(operation.state));
-  const retryable = operation?.state === "failed" && availabilityRetryable(operation);
+  const retryable = operation?.state === "failed" && availabilityRetryable(operation.failure);
   useEffect(() => { if (!operation) return; if (operation.state === "succeeded") { if (completedOperation.current !== operation.id) { completedOperation.current = operation.id; onComplete?.(); } return; } if (!active) return; const timer = window.setTimeout(() => void api.modelCacheOperation(operation.id).then(setOperation).catch(value => setError(value instanceof Error ? value.message : "Download progress unavailable")), 1200); return () => window.clearTimeout(timer); }, [active, api, onComplete, operation]);
   async function download(force = false) {
     setError("");
@@ -60,7 +61,7 @@ export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComple
       setOperation(await api.checkModelCacheAccessAndResume(operation.id, {schema_version: 2, request_key: crypto.randomUUID(), artifact_set_sha256: operation.artifact_set_sha256, plan_digest: operation.plan_digest}));
     } catch (value) { setError(value instanceof Error ? value.message : "Model access check failed"); }
   }
-  return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Available on NAS" : retryable ? "Retry download" : "Make available"}</button>{operation && <><small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small><LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/></>}{!active && <details><summary>More actions</summary><button type="button" className="button secondary" onClick={() => void download(true)}>Download again</button></details>}{error && <LibraryAvailabilityFeedback failure={availabilityFailure(error, "Download to NAS failed.")} onRetry={() => void download()} retryLabel="Retry download"/>}{operation?.state === "failed" && <LibraryAvailabilityFeedback failure={availabilityFailure(operation, "Download to NAS failed.")} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={() => void checkAccess()} onRetry={retryable ? () => void download() : undefined} retryLabel="Retry download"/>}</span>;
+  return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Available on NAS" : retryable ? "Retry download" : "Make available"}</button>{operation && <><small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small><LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/></>}{!active && <details><summary>More actions</summary><button type="button" className="button secondary" onClick={() => void download(true)}>Download again</button></details>}{error && <LibraryRequestError error={error} title="Download to NAS failed." onRetry={() => void download()} retryLabel="Retry download"/>}{operation?.state === "failed" && operation.failure && <LibraryAvailabilityFeedback failure={availabilityFailure(operation.failure, {operationId: operation.id, preservedBytes: operation.progress.downloaded_bytes})} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={() => void checkAccess()} onRetry={retryable ? () => void download() : undefined} retryLabel="Retry download"/>}</span>;
 }
 
 export function aggregateCacheEntries(models: readonly LibraryModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
@@ -92,7 +93,7 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
   useEffect(() => { if (!operation || terminal(operation.state) || !api.modelCacheOperation) return; const timer = window.setTimeout(() => void api.modelCacheOperation!(operation.id).then(next => { setOperation(next); if (terminal(next.state) && next.state === "succeeded") setAttempt(value => value + 1); }).catch(value => setError(value instanceof Error ? value.message : "Cache operation progress is unavailable")), 1500); return () => window.clearTimeout(timer); }, [api, operation]);
   const entries = useMemo(() => aggregateCacheEntries(modelInventory, inventory), [inventory, modelInventory]);
   const visible = entries.filter(entry => !query.trim() || `${entry.model.model_document.metadata.description} ${entry.model.model.slug}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const retryable = operation?.state === "failed" && availabilityRetryable(operation);
+  const retryable = operation?.state === "failed" && availabilityRetryable(operation.failure);
   async function download(model: LibraryModel) {
     if (!api.previewModelCacheDownload || !api.downloadModelCache) return;
     setError("");
@@ -114,12 +115,12 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
       <a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a Model</a>
     </header>
     <label className="library-cache-search">Find a Model<input type="search" aria-label="Search NAS cache" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search exact model"/></label>
-    {error && <div className="library-cache-state is-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry cache</button></div>}
+    {error && <LibraryRequestError error={error} title="NAS cache request failed." onRetry={() => { setError(""); setAttempt(value => value + 1); }} retryLabel="Retry cache"/>}
     {operation && <section className={`library-cache-operation state-${operation.state}`} role="status" aria-live="polite">
       <strong>{operation.state === "succeeded" ? "Downloaded to NAS" : operation.state === "failed" ? "Cache operation failed" : "Cache operation in progress"}</strong>
-      <span>{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}{operation.failure?.detail ? ` · ${operation.failure.detail}` : ""}</span>
+      <span>{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}{operation.failure ? ` · ${availabilityFailure(operation.failure).detail}` : ""}</span>
       <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/>
-      {operation.state === "failed" && <LibraryAvailabilityFeedback failure={availabilityFailure(operation, "Cache operation failed.")} onRetry={retryable && operationModelDigest ? () => { const model = modelInventory.find(item => item.model.content_sha256 === operationModelDigest); if (model) void download(model); } : undefined} retryLabel="Retry cache operation"/>}
+      {operation.state === "failed" && operation.failure && <LibraryAvailabilityFeedback failure={availabilityFailure(operation.failure, {operationId: operation.id, preservedBytes: operation.progress.downloaded_bytes})} onRetry={retryable && operationModelDigest ? () => { const model = modelInventory.find(item => item.model.content_sha256 === operationModelDigest); if (model) void download(model); } : undefined} retryLabel="Retry cache operation"/>}
     </section>}
     <div className="library-cache-list" aria-label="Complete model file cache">
       {visible.map(entry => {

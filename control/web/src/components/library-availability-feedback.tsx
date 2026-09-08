@@ -1,4 +1,6 @@
 import {useEffect, useMemo, useState} from "react";
+import type {AvailabilityOperationFailure} from "../api/types";
+import {safeErrorText} from "../lib/error-display";
 
 export type AvailabilityFailure = {
   code: string;
@@ -15,9 +17,8 @@ export type AvailabilityFailure = {
   shortfallBytes?: number;
 };
 
-const MAX_TEXT = 512;
-const MAX_LOG = 2_000;
-const RECOVERY_ACTION_LABELS: Record<string, string> = {
+type RecoveryAction = NonNullable<AvailabilityOperationFailure["recovery_actions"]>[number];
+const RECOVERY_ACTION_LABELS: Record<RecoveryAction, string> = {
   retry: "Retry the operation",
   resume: "Resume the operation",
   download_again: "Download the exact selected bytes again",
@@ -29,70 +30,27 @@ const RECOVERY_ACTION_LABELS: Record<string, string> = {
   inspect: "Inspect the operation details",
 };
 
-function boundedText(value: unknown, fallback: string, maximum = MAX_TEXT): string {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  const text = value.replace(/\u0000/g, "").trim();
-  return text.length > maximum ? `${text.slice(0, maximum - 15)}…<truncated>` : text;
-}
-
-function safeLog(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  const redacted = value
-    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+/gim, "$1<redacted>")
-    .replace(/(token|api[_-]?key|secret|password)\s*[:=]\s*[^\s,;]+/gim, "$1=<redacted>")
-    .replace(/https?:\/\/[^\s?]+\?[^\s]+/g, "<signed-url-redacted>");
-  return boundedText(redacted, "", MAX_LOG) || undefined;
-}
-
-function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function recoveryList(value: unknown): {codes: string[]; labels: string[]} {
-  const values = Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-    : typeof value === "string" && value.trim() ? [value] : [];
-  return {codes: values, labels: values.map(item => RECOVERY_ACTION_LABELS[item] ?? "Review the operation recovery guidance")};
-}
-
-/**
- * Read the common availability failure shape without duplicating an API DTO.
- * Generated API types can be passed directly; this also keeps older string
- * errors actionable until the Controller contract is upgraded.
- */
-export function availabilityFailure(value: unknown, fallbackDetail = "The availability operation could not complete."): AvailabilityFailure {
-  const root = objectValue(value);
-  const nested = objectValue(root?.failure) ?? root;
-  const code = boundedText(nested?.code, "availability.operation_failed", 128);
-  const detail = boundedText(nested?.detail ?? (typeof value === "string" ? value : undefined), fallbackDetail);
-  const retryAfter = nested?.retry_after_seconds;
-  const retryAfterSeconds = typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0
-    ? Math.min(86_400, Math.floor(retryAfter))
-    : undefined;
-  const retryAt = typeof nested?.retry_time === "string"
-    ? boundedText(nested.retry_time, "")
-    : undefined;
-  const progress = objectValue(nested?.progress) ?? objectValue(root?.progress);
-  const recovery = recoveryList(nested?.recovery_actions);
-  const progressBytes = progress?.completed_bytes;
-  const preserved = boundedText(progress?.preserved, "", 256)
-    || (typeof progressBytes === "number" && progressBytes > 0 ? `${progressBytes} bytes of progress retained.` : undefined);
-  const operationId = boundedText(root?.id, "", 128) || undefined;
-  const logExcerpt = safeLog(nested?.log_excerpt ?? nested?.log ?? nested?.logs);
-  const bytes = (key: string): number | undefined => {
-    const raw = nested?.[key];
-    return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
+/** Adapt canonical failure evidence to display text; operation context stays explicit. */
+export function availabilityFailure(value: AvailabilityOperationFailure, context: {operationId?: string; preservedBytes?: number} = {}): AvailabilityFailure {
+  const recoveryCodes = value.recovery_actions ?? [];
+  return {
+    code: safeErrorText(value.code, 128),
+    detail: safeErrorText(value.detail),
+    recovery: recoveryCodes.map(action => RECOVERY_ACTION_LABELS[action]),
+    recoveryCodes,
+    retryAt: value.retry_time ?? undefined,
+    retryAfterSeconds: value.retry_after_seconds ?? undefined,
+    operationId: context.operationId ? safeErrorText(context.operationId, 128) : undefined,
+    preserved: context.preservedBytes !== undefined && context.preservedBytes > 0 ? `${context.preservedBytes} bytes of progress retained.` : undefined,
+    logExcerpt: value.log_excerpt ? safeErrorText(value.log_excerpt, 2_000) : undefined,
+    requiredBytes: value.required_bytes ?? undefined,
+    freeBytes: value.free_bytes ?? undefined,
+    shortfallBytes: value.shortfall_bytes ?? undefined,
   };
-  return {code, detail, recovery: recovery.labels, recoveryCodes: recovery.codes, retryAt, retryAfterSeconds, operationId, preserved, logExcerpt, requiredBytes: bytes("required_bytes"), freeBytes: bytes("free_bytes"), shortfallBytes: bytes("shortfall_bytes")};
 }
 
-/** Return the shared retry decision without exposing the API DTO in UI code. */
-export function availabilityRetryable(value: unknown): boolean {
-  const root = objectValue(value);
-  const nested = objectValue(root?.failure) ?? root;
-  return nested?.retryable === true;
+export function availabilityRetryable(value: AvailabilityOperationFailure | null | undefined): boolean {
+  return value?.retryable === true;
 }
 
 function retryLabel(seconds: number): string {

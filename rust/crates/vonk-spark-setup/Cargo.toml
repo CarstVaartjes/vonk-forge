@@ -20,6 +20,7 @@ toml.workspace = true
 url.workspace = true
 uuid.workspace = true
 wait-timeout.workspace = true
+vonk-agent-protocol = { path = "../vonk-agent-protocol" }
 
 [dev-dependencies]
 rcgen.workspace = true

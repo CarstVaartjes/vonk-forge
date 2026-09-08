@@ -1,5 +1,10 @@
 import {useCallback, useEffect, useReducer, useState} from "react";
-import type {ControlApi, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
+import type {
+  ControlApi,
+  FleetChangeEvent,
+  FleetSnapshotEvent,
+  FleetTelemetryEvent,
+} from "../api/types";
 import {fleetStreamReducer, initialFleetStreamState} from "./fleet-stream-state";
 
 const POLL_INTERVAL_MS = 10_000;
@@ -9,18 +14,6 @@ const SPARSE_REFRESH_DELAY_MS = 75;
 const SPARSE_RETRY_BASE_MS = 1_000;
 const SPARSE_RETRY_MAX_MS = 10_000;
 const MAX_ERROR_LENGTH = 512;
-
-type SnapshotEventData = {
-  reset_reason: string;
-  schema_version: 1;
-  snapshot: VisualFleetSnapshot;
-};
-
-type TelemetryEventData = {
-  node_id: string;
-  sample: TelemetryPoint;
-  schema_version: 1;
-};
 
 function cursorFrom(event: MessageEvent<string>): number | null {
   if (!/^[0-9]+$/.test(event.lastEventId)) return null;
@@ -169,7 +162,7 @@ export function useFleetStream(api: ControlApi) {
     function onSnapshot(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event) as SnapshotEventData | null;
+      const data = eventData(event) as FleetSnapshotEvent | null;
       if (cursor === null || !data || data.schema_version !== 1
           || typeof data.reset_reason !== "string"
           || typeof data.snapshot !== "object" || data.snapshot === null
@@ -189,7 +182,7 @@ export function useFleetStream(api: ControlApi) {
     function onTelemetry(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event) as TelemetryEventData | null;
+      const data = eventData(event) as FleetTelemetryEvent | null;
       if (cursor === null || !data || data.schema_version !== 1
           || typeof data.node_id !== "string"
           || typeof data.sample !== "object" || data.sample === null
@@ -202,7 +195,7 @@ export function useFleetStream(api: ControlApi) {
     function onSparse(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event);
+      const data = eventData(event) as FleetChangeEvent | null;
       if (cursor === null || data?.schema_version !== 1 || data.projection_refresh_required !== true) return;
       if (cursor <= Math.max(appliedCursor, requiredRefreshCursor ?? -1)) return;
       requiredRefreshCursor = cursor;
