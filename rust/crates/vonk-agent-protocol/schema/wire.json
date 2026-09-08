@@ -2743,7 +2743,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -2758,6 +2759,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3195,7 +3209,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3216,6 +3231,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3262,7 +3290,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3288,6 +3317,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",

@@ -94,6 +94,7 @@ impl HostRuntimeBoundary<'_> {
             fence: uuid::Uuid::new_v4(),
             arguments,
             observation: Some(binding.clone()),
+            installation_id: None,
         };
         request.validate().map_err(|_| HostRuntimeError::Protocol)?;
         let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
@@ -150,6 +151,30 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        self.execute_bound(claim, action, arguments, None).await
+    }
+
+    pub async fn cleanup_installation(
+        &self,
+        claim: &AgentClaim,
+        installation_id: uuid::Uuid,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        self.execute_bound(
+            claim,
+            HostRuntimeAction::InstallationCleanup,
+            Vec::new(),
+            Some(installation_id),
+        )
+        .await
+    }
+
+    async fn execute_bound(
+        &self,
+        claim: &AgentClaim,
+        action: HostRuntimeAction,
+        arguments: Vec<String>,
+        installation_id: Option<uuid::Uuid>,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
         let helper_timeout = match action {
             HostRuntimeAction::RuntimePreflight => Duration::from_secs(14),
             HostRuntimeAction::Start => arguments
@@ -180,6 +205,7 @@ impl HostRuntimeBoundary<'_> {
             fence: claim.fence,
             arguments,
             observation: None,
+            installation_id,
         };
         request.validate().map_err(|_| HostRuntimeError::Protocol)?;
         let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
@@ -192,7 +218,7 @@ impl HostRuntimeBoundary<'_> {
         async {
             let grant = self
                 .client
-                .host_runtime_grant(claim, action, &digest)
+                .host_runtime_grant(claim, action, &digest, installation_id)
                 .await?;
             let request_id = grant.claims.request_id.to_string();
             let grant = canonical_json(&grant).map_err(|_| HostRuntimeError::Protocol)?;

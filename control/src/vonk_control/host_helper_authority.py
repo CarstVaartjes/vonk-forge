@@ -33,6 +33,10 @@ from vonk_agent_protocol.host_helper import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_operations import (
+    RecipeModelCleanupPayload,
+    RecipeUninstallPayload,
+)
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
 from pydantic import ValidationError
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -200,6 +204,9 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.STOP: frozenset(
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
+        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset(
+            {"recipe.uninstall", "recipe.model-uninstall.v1"}
+        ),
     }
 
     def __init__(
@@ -234,6 +241,7 @@ class HostRuntimeAuthorityService:
         action: ContainerRuntimeAction,
         request_sha256: str,
         certificate_serial: str,
+        installation_id: str | None = None,
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
@@ -245,6 +253,7 @@ class HostRuntimeAuthorityService:
             attempt=attempt,
             fence=fence,
             action=action,
+            installation_id=installation_id,
             certificate_serial=certificate_serial,
         )
         grant = self._issuer.issue_grant(
@@ -257,6 +266,7 @@ class HostRuntimeAuthorityService:
                 attempt=attempt,
                 fence=fence,
                 request_sha256=request_sha256,
+                installation_id=installation_id,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -661,6 +671,7 @@ class HostRuntimeAuthorityService:
         attempt: int,
         fence: str,
         action: ContainerRuntimeAction,
+        installation_id: str | None,
         certificate_serial: str,
     ) -> datetime:
         now = self._clock()
@@ -699,5 +710,32 @@ class HostRuntimeAuthorityService:
             ):
                 raise HostHelperAuthorityError(
                     "container runtime action authority is stale"
+                )
+            if action is ContainerRuntimeAction.INSTALLATION_CLEANUP:
+                try:
+                    if operation.kind == "recipe.uninstall":
+                        authorized = {
+                            RecipeUninstallPayload.model_validate(
+                                operation.payload
+                            ).installation_id
+                        }
+                    else:
+                        authorized = {
+                            item.installation_id
+                            for item in RecipeModelCleanupPayload.model_validate(
+                                operation.payload
+                            ).installations
+                        }
+                except (TypeError, ValueError) as error:
+                    raise HostHelperAuthorityError(
+                        "container runtime cleanup authority is invalid"
+                    ) from error
+                if installation_id is None or installation_id not in authorized:
+                    raise HostHelperAuthorityError(
+                        "container runtime cleanup installation is unauthorized"
+                    )
+            elif installation_id is not None:
+                raise HostHelperAuthorityError(
+                    "container runtime installation binding is invalid"
                 )
             return lease_deadline

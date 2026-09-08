@@ -185,6 +185,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
+                installation_id: None,
             },
         ),
     ];
@@ -588,6 +589,9 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
                 HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
                 HostRuntimeAction::Start => ContainerRuntimeAction::Start,
                 HostRuntimeAction::Stop => ContainerRuntimeAction::Stop,
+                HostRuntimeAction::InstallationCleanup => {
+                    ContainerRuntimeAction::InstallationCleanup
+                }
             },
             job_id: request.job_id,
             operation_id: request.operation_id,
@@ -595,6 +599,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             fence: request.fence,
             request_sha256: digest,
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
+            installation_id: request.installation_id,
         },
     )
 }
@@ -609,6 +614,7 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
         observation: None,
+        installation_id: None,
     }
 }
 
