@@ -3315,6 +3315,14 @@ pub struct RecipeJobOutputManifest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RecipeJobOutputManifestContent {
+    pub files: ::std::vec::Vec<RecipeJobFile>,
+    pub schema_version: u8,
+    pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct RecipeJobOutputMapping {
     pub extensions: ::std::vec::Vec<::std::string::String>,
     pub media_type: ::std::string::String,
@@ -9080,6 +9088,27 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifestContent {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeJobOutputManifestContent", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub files: ::std::vec::Vec<RecipeJobFile>,
+            pub schema_version: u8,
+            pub total_bytes: u32,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            files: raw.files,
+            schema_version: raw.schema_version,
+            total_bytes: raw.total_bytes,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputMapping {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -11234,6 +11263,15 @@ impl<'de> ::serde::Deserialize<'de> for ValidationRecord {
             kind: raw.kind,
             required: raw.required,
         })
+    }
+}
+impl From<&RecipeJobOutputManifest> for RecipeJobOutputManifestContent {
+    fn from(value: &RecipeJobOutputManifest) -> Self {
+        Self {
+            files: value.files.clone(),
+            schema_version: value.schema_version.clone(),
+            total_bytes: value.total_bytes.clone(),
+        }
     }
 }
 impl From<&RecipeRunObservationGrantRequest> for RecipeRunObservationIdentity {
