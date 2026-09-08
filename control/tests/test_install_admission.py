@@ -260,6 +260,12 @@ def _compiled_plan(
             "argv": ["serve"],
             "env": [],
             "image_digest": image_digest,
+            "telemetry": {
+                "engine": "vllm",
+                "engine_version": None,
+                "metrics_format": "prometheus",
+                "metrics_path": "/metrics",
+            },
             "placement": {
                 "endpoint_address": None,
                 "rank": rank,
