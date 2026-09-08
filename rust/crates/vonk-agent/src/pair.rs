@@ -12,10 +12,10 @@ use thiserror::Error;
 use url::Url;
 use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x509_pem};
 
+use vonk_agent_protocol::canonical_generated_json;
 pub use vonk_agent_protocol::generated::{
     EnrollmentEvidence, EnrollmentSubmitRequest, IssuedCertificateResponse,
 };
-use vonk_agent_protocol::canonical_generated_json;
 
 use crate::{
     config::AgentConfig,

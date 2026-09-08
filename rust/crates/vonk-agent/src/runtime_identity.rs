@@ -7,9 +7,9 @@ use rustix::fs::{Mode, OFlags};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use vonk_agent_protocol::canonical_generated_json;
 pub use vonk_agent_protocol::generated::AgentRuntimeIdentity;
 use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
-use vonk_agent_protocol::canonical_generated_json;
 
 const MAX_AGENT_BYTES: u64 = 512 * 1024 * 1024;
 pub const OBSERVATION_RECEIPT_PUBLIC_KEY_PATH: &str =
