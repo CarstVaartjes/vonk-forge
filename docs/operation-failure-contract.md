@@ -18,3 +18,10 @@ Reads validate this document without repairing missing fields or invalid types.
 Cache details and Activity return the same failure, including recovery actions,
 retry timing, capacity measurements, and the failed artifact key. A queued
 retry retains its failure evidence until execution resumes.
+
+Library feedback accepts the generated `AvailabilityOperationFailure` type.
+Callers pass the operation ID and retained progress as explicit display context.
+The display adapter sanitizes text and labels canonical recovery actions; it
+does not interpret strings or arbitrary nested objects as failure evidence.
+API request exceptions use a separate local error component with sanitized
+messages and caller-owned retry actions.
