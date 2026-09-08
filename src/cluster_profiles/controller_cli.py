@@ -2709,6 +2709,10 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     progress = observed.get("progress")
     if not isinstance(progress, Mapping):
         return None
+    if observed.get("kind") in {"download", "repair", "evict"}:
+        from .generated_control.models.operation_progress import OperationProgress
+
+        progress = OperationProgress.from_dict(dict(progress["measurement"])).to_dict()
     if isinstance(progress.get("operation"), Mapping):
         progress = progress["operation"]
     phase = progress.get("phase")
@@ -2718,8 +2722,8 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     subphase = progress.get("subphase")
     if isinstance(subphase, str) and subphase:
         pieces.append(f"subphase: {subphase}")
-    completed = progress.get("completed_bytes", progress.get("downloaded_bytes"))
-    total = progress.get("total_bytes", progress.get("expected_bytes"))
+    completed = progress.get("completed_bytes")
+    total = progress.get("total_bytes")
     if isinstance(completed, int) and not isinstance(completed, bool):
         if isinstance(total, int) and not isinstance(total, bool):
             pieces.append(f"bytes: {completed}/{total}")
@@ -2738,7 +2742,12 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
         value = progress.get(field)
         if isinstance(value, str) and value:
             pieces.append(f"{label}: {value.replace('_', ' ')}")
-    artifact = progress.get("current_artifact_key")
+    completed_items = progress.get("completed_items")
+    total_items = progress.get("total_items")
+    if type(completed_items) is int:
+        pieces.append(f"items: {completed_items}/{total_items}" if type(total_items) is int else f"items: {completed_items}")
+    checkpoint = progress.get("checkpoint")
+    artifact = checkpoint.get("cursor") if isinstance(checkpoint, Mapping) else None
     if isinstance(artifact, str) and artifact:
         pieces.append(f"artifact: {artifact}")
     members = progress.get("members")

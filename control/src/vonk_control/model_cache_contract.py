@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_forge_contracts.model import ModelReference
 
-from .operation_contract import AvailabilityOperationFailure, OperationMemberProgress
+from .operation_contract import AvailabilityOperationFailure, OperationProgress
 from .strict_json import StrictJSONModel
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -179,14 +179,18 @@ class ModelCacheOperationProgress(StrictModel):
     expected_bytes: int | None = Field(default=None, ge=0)
     current_artifact_key: str | None = Field(default=None, pattern=ARTIFACT_KEY_PATTERN)
     total_bytes_known: bool = True
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
+    measurement: OperationProgress
 
     @model_validator(mode="after")
     def total_known_matches_value(self) -> ModelCacheOperationProgress:
         if self.total_bytes_known != (self.expected_bytes is not None):
             raise ValueError("total_bytes_known must match expected_bytes")
+        if (self.measurement.completed_bytes, self.measurement.total_bytes,
+            self.measurement.completed_items, self.measurement.total_items) != (
+            self.downloaded_bytes, self.expected_bytes, self.completed_artifacts, self.total_artifacts):
+            raise ValueError("cache counters must match canonical measurement")
+        if len(self.model_dump_json().encode("utf-8")) > 1024 * 1024:
+            raise ValueError("cache progress exceeds 1 MiB")
         return self
 
 

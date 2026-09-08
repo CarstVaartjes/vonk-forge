@@ -1269,13 +1269,12 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
 
     @staticmethod
     def _cache_result(view: Any) -> Mapping[str, object]:
-        progress = dict(view.progress) if isinstance(view.progress, Mapping) else {}
-        downloaded = progress.get("downloaded_bytes")
-        expected = progress.get("expected_bytes")
-        if type(downloaded) is not int or downloaded < 0:
-            downloaded = 0
-        if type(expected) is not int or expected < 0:
-            expected = None
+        from .model_cache_contract import ModelCacheOperationProgress
+        from .model_cache_progress import project_cache_progress
+
+        cache = ModelCacheOperationProgress.model_validate(view.progress)
+        progress = project_cache_progress(view.progress)
+        downloaded, expected = cache.downloaded_bytes, cache.expected_bytes
         result: dict[str, object] = {
             "schema_version": 2,
             "phase": "transfer",
@@ -1285,6 +1284,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 "completed_bytes": downloaded,
                 "total_bytes": expected,
                 "total_bytes_known": expected is not None,
+                "operation": progress,
             },
             "artifact_set_sha256": view.artifact_set_sha256,
             "downloaded_bytes": downloaded,

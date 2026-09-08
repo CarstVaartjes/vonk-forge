@@ -194,7 +194,7 @@ def upgrade() -> None:
             name="ck_model_cache_operations_plan_digest",
         ),
         sa.CheckConstraint(
-            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 65536",
+            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 1048576",
             name="ck_model_cache_operations_progress_size",
         ),
         sa.CheckConstraint(

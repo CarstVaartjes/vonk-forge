@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -563,7 +564,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress={"phase": "download", "completed_bytes": 1024, "total_bytes": 1024, "total_bytes_known": True},
+        progress=cache_progress({"phase": "downloading", "downloaded_bytes": 1024, "expected_bytes": 1024, "completed_artifacts": 0, "total_artifacts": 1}, previous=None, now=datetime.now(UTC)),
         failure=None,
     )
 
@@ -635,7 +636,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress={"phase": "download", "completed_bytes": 40, "total_bytes": 100, "total_bytes_known": True},
+        progress=cache_progress({"phase": "downloading", "downloaded_bytes": 40, "expected_bytes": 100, "completed_artifacts": 0, "total_artifacts": 1}, previous=None, now=datetime.now(UTC)),
         failure=None,
     )
 
@@ -699,7 +700,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(tmp_path: Path
         state="failed",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress={"phase": "download", "completed_bytes": 4, "total_bytes": 10, "total_bytes_known": True},
+        progress=cache_progress({"phase": "downloading", "downloaded_bytes": 4, "expected_bytes": 10, "completed_artifacts": 0, "total_artifacts": 1}, previous=None, now=datetime.now(UTC)),
         failure={
             "code": "access_denied",
             "detail": "HF access denied",
@@ -762,7 +763,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress={"phase": "download", "completed_bytes": 4, "total_bytes": 10, "total_bytes_known": True},
+        progress=cache_progress({"phase": "downloading", "downloaded_bytes": 4, "expected_bytes": 10, "completed_artifacts": 0, "total_artifacts": 1}, previous=None, now=datetime.now(UTC)),
         failure=None,
     )
     repaired = SimpleNamespace(
@@ -771,7 +772,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="e" * 64,
-        progress={"phase": "download", "completed_bytes": 10, "total_bytes": 10, "total_bytes_known": True},
+        progress=cache_progress({"phase": "downloading", "downloaded_bytes": 10, "expected_bytes": 10, "completed_artifacts": 0, "total_artifacts": 1}, previous=None, now=datetime.now(UTC)),
         failure=None,
     )
 
@@ -922,8 +923,8 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
             "model_content_digests": ["d" * 64],
             "progress": {
                 "phase": "download",
-                "downloaded_bytes": 40,
-                "expected_bytes": 100,
+                "completed_bytes": 40,
+                "total_bytes": 100,
                 "total_bytes_known": True,
             },
         },
