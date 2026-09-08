@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 
-from pydantic import ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -25,6 +25,10 @@ from .serializers import serialize_document
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _DEPENDENCIES = TypeAdapter(dict[str, list[str]], config=ConfigDict(strict=True))
+_DOCUMENTS = TypeAdapter(
+    dict[str, dict[str, JsonValue]], config=ConfigDict(strict=True)
+)
+_STRING_LIST = TypeAdapter(list[str], config=ConfigDict(strict=True))
 _ALLOWED_ROOTS = ("inventory/", "locks/", "manifests/", "docs/audits/")
 
 
@@ -52,10 +56,17 @@ class AuthoritySnapshot:
     dependencies: Mapping[str, tuple[str, ...]]
 
 
-@dataclass(frozen=True)
-class AuthorityChange:
-    path: str
-    document: Mapping[str, object]
+class ProposalChangeRequest(BaseModel):
+    """Canonical persisted and API proposal change envelope."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    path: str = Field(min_length=1, max_length=512)
+    document: dict[str, object]
+
+
+_PROPOSAL_CHANGES = TypeAdapter(
+    list[ProposalChangeRequest], config=ConfigDict(strict=True)
+)
 
 
 @dataclass(frozen=True)
@@ -85,9 +96,18 @@ def _revision(documents: Mapping[str, object], dependencies: Mapping[str, object
 
 
 def _document_map(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise AuthorityPolicyError("authority documents are invalid")
-    return {str(path): document for path, document in value.items()}
+    try:
+        documents = _DOCUMENTS.validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError("authority documents are invalid") from error
+    normalized: dict[str, object] = {}
+    for path, document in documents.items():
+        try:
+            serialize_document(path, document)
+        except (AssertionError, TypeError, ValueError) as error:
+            raise AuthorityPolicyError("authority documents are invalid") from error
+        normalized[path] = document
+    return normalized
 
 
 def _dependency_map(value: object) -> dict[str, list[str]]:
@@ -95,6 +115,37 @@ def _dependency_map(value: object) -> dict[str, list[str]]:
         return _DEPENDENCIES.validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
         raise AuthorityPolicyError("authority dependencies are invalid") from error
+
+
+def _proposal_changes(
+    value: object, validate_path: Callable[[str], str]
+) -> tuple[ProposalChangeRequest, ...]:
+    try:
+        changes = tuple(
+            _PROPOSAL_CHANGES.validate_json(canonical_message(value))
+        )
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError("authority proposal changes are invalid") from error
+    normalized: list[ProposalChangeRequest] = []
+    seen: set[str] = set()
+    for change in changes:
+        try:
+            path = validate_path(change.path)
+            serialize_document(path, change.document)
+        except (AssertionError, TypeError, ValueError) as error:
+            raise AuthorityPolicyError("authority proposal changes are invalid") from error
+        if path in seen:
+            raise AuthorityPolicyError("authority proposal changes are invalid")
+        seen.add(path)
+        normalized.append(ProposalChangeRequest(path=path, document=change.document))
+    return tuple(normalized)
+
+
+def _stored_string_list(value: object, label: str) -> tuple[str, ...]:
+    try:
+        return tuple(_STRING_LIST.validate_json(canonical_message(value)))
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError(f"authority {label} are invalid") from error
 
 
 class DatabaseAuthorityService:
@@ -240,8 +291,9 @@ class DatabaseAuthorityService:
                 )
             parent = self._snapshot_row(session, proposal.base_revision)
             documents = _document_map(parent.documents)
-            for change in proposal.changes:
-                documents[str(change["path"])] = change["document"]
+            changes = _proposal_changes(proposal.changes, self.validate_path)
+            for change in changes:
+                documents[change.path] = change.document
             dependencies = _dependency_map(parent.dependencies)
             revision_id = _revision(documents, dependencies)
             existing = session.get(ControlAuthorityRevision, revision_id)
@@ -274,7 +326,7 @@ class DatabaseProposalService:
         self,
         actor: str,
         base_revision: str,
-        changes: Sequence[AuthorityChange],
+        changes: Sequence[ProposalChangeRequest],
     ) -> AuthorityProposalPreview:
         if not actor.strip() or not changes:
             raise ValueError("proposal actor and changes are required")
@@ -323,12 +375,21 @@ class DatabaseProposalService:
             row = session.get(ControlAuthorityProposal, digest)
             if row is None:
                 raise ValueError("unknown proposal digest")
+            changes = _proposal_changes(row.changes, self._authority.validate_path)
+            affected_documents = _stored_string_list(
+                row.affected_documents, "proposal affected documents"
+            )
+            validation_results = _stored_string_list(
+                row.validation_results, "proposal validation results"
+            )
+            if tuple(change.path for change in changes) != affected_documents:
+                raise AuthorityPolicyError("authority proposal fields are inconsistent")
             return AuthorityProposalPreview(
                 row.actor,
                 row.base_revision,
                 row.patch,
-                tuple(row.affected_documents),
-                tuple(row.validation_results),
+                affected_documents,
+                validation_results,
                 row.digest,
             )
 

@@ -68,7 +68,7 @@ from .catalog_service import CatalogError, CatalogService
 from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
 from .database_authority import (
-    AuthorityChange,
+    ProposalChangeRequest,
 )
 from .deployment_provenance import DeploymentProvenanceService
 from .deployment_provenance_api import install_deployment_provenance_routes
@@ -475,12 +475,6 @@ def refresh_fleet_metrics(
     """Refresh metrics from the single typed FleetProjection evidence path."""
 
     metrics.update_fleet(fleet_snapshot)
-
-
-class ProposalChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    path: str = Field(min_length=1, max_length=512)
-    document: dict[str, object]
 
 
 class ProposalRequest(BaseModel):
@@ -1226,7 +1220,7 @@ def create_app(
         preview = admin.proposals.preview(
             authenticated.subject,
             body.base_revision,
-            [AuthorityChange(change.path, change.document) for change in body.changes],
+            body.changes,
         )
         return ProposalPreviewResponse(
             base_revision=preview.base_revision,

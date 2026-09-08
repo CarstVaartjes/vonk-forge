@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -281,6 +282,20 @@ def test_details_are_exact_and_bounded() -> None:
         TelemetryDetailsInput(accelerator_name="x" * 257)
     with pytest.raises(ValueError, match="performance state"):
         TelemetryDetailsInput(accelerator_performance_state="x" * 33)
+
+
+def test_latest_rejects_malformed_persisted_details(telemetry) -> None:
+    repository, sessions, _, _ = telemetry
+    stored = repository.record_batch(NODE_A, (sample(sequence=1),))[0]
+    with sessions.begin() as session:
+        session.get(NodeTelemetrySample, stored.id).details = {
+            "accelerator_name": "NVIDIA GB10",
+            "accelerator_performance_state": "P0",
+            "engine_owned": "preserve-if-declared",
+        }
+
+    with pytest.raises(ValidationError):
+        repository.latest((NODE_A,))
 
 
 def test_sample_rejects_nil_boot_id() -> None:
