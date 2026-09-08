@@ -16,6 +16,7 @@ from pydantic import Field, field_serializer, field_validator, model_validator
 from .contracts import AgentProtocolError, canonical_message
 from .host_helper import (
     ExecuteContainerRuntimeRequestOperation,
+    RecipeRunInspectionBinding,
     SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt,
 )
@@ -38,29 +39,16 @@ def _strict_datetime(value: object, message: str) -> object:
     raise ValueError(message)
 
 
-class RecipeRunObservationWire(WireModel):
-    """One current, exact observation produced by the Rust agent."""
+class RecipeRunObservationIdentity(RecipeRunInspectionBinding):
+    """Canonical Controller identity projection for one exact observation."""
 
     schema_version: Literal[1]
     node_id: str = Field(pattern=_NODE)
-    run_id: str = Field(pattern=_UUID4)
-    installation_id: str = Field(pattern=_UUID4)
-    recipe_revision_id: str = Field(pattern=_UUID4)
-    recipe_content_sha256: Digest
-    mapping_id: str = Field(pattern=_UUID4)
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
-    image_digest: Digest
-    artifact_set_digest: Digest
-    model_identity: str = Field(min_length=3, max_length=1024)
-    rank: int = Field(ge=0, le=1023, strict=True)
-    role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str | None = Field(min_length=2, max_length=45)
-    master_address: str | None = Field(min_length=2, max_length=45)
-    master_port: int | None = Field(ge=1024, le=65535, strict=True)
-    port: int = Field(ge=1024, le=65535, strict=True)
-    runtime_arguments_sha256: Digest
+
+
+class RecipeRunObservationWire(RecipeRunObservationIdentity):
+    """One current, exact observation produced by the Rust agent."""
+
     observed_at: datetime
     endpoint_ready: bool | None = Field(strict=True)
     observation_identity_sha256: Digest
@@ -215,29 +203,9 @@ class RecipeRunObservationsWire(WireModel):
             ) from error
 
 
-class RecipeRunObservationGrantRequest(WireModel):
+class RecipeRunObservationGrantRequest(RecipeRunObservationIdentity):
     """Exact Controller request that authorizes one runtime inspection."""
 
-    schema_version: Literal[1]
-    node_id: str = Field(pattern=_NODE)
-    run_id: str = Field(pattern=_UUID4)
-    installation_id: str = Field(pattern=_UUID4)
-    recipe_revision_id: str = Field(pattern=_UUID4)
-    recipe_content_sha256: Digest
-    mapping_id: str = Field(pattern=_UUID4)
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
-    image_digest: Digest
-    artifact_set_digest: Digest
-    model_identity: str = Field(min_length=3, max_length=1024)
-    rank: int = Field(ge=0, le=1023, strict=True)
-    role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str | None = Field(min_length=2, max_length=45)
-    master_address: str | None = Field(min_length=2, max_length=45)
-    master_port: int | None = Field(ge=1024, le=65535, strict=True)
-    port: int = Field(ge=1024, le=65535, strict=True)
-    runtime_arguments_sha256: Digest
     job_id: str = Field(pattern=_UUID4)
     operation_id: str = Field(pattern=_UUID4)
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
@@ -256,16 +224,10 @@ class RecipeRunObservationGrantRequest(WireModel):
         return self
 
     def observation_identity(self) -> dict[str, object]:
-        return self.model_dump(
-            exclude={
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "request_sha256",
-                "expires_in_seconds",
-            }
-        )
+        return RecipeRunObservationIdentity.model_validate({
+            name: getattr(self, name)
+            for name in RecipeRunObservationIdentity.model_fields
+        }).model_dump(mode="json")
 
 
 class RecipeRunObservationGrantWire(WireModel):

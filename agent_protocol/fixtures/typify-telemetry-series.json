@@ -1,0 +1,21 @@
+{
+  "aggregation": "last",
+  "device_id": null,
+  "freshness": "fresh",
+  "freshness_threshold_seconds": 6.0,
+  "interface_name": null,
+  "key": "cpu.utilization_percent",
+  "measurement_kind": "measured",
+  "node_id": null,
+  "observed_at": "2026-09-08T12:00:00Z",
+  "process_id": null,
+  "process_name": null,
+  "reason": null,
+  "received_at": null,
+  "run_id": null,
+  "scope": "node",
+  "source": "procfs:/proc/stat",
+  "support_status": "available",
+  "unit": "%",
+  "value": 1
+}

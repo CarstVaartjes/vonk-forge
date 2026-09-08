@@ -3,6 +3,23 @@
 pub mod generated;
 pub mod runtime_preflight;
 mod wire_schema;
+pub use generated::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult,
+    AgentUpgradePayload as AgentUpgradeRequest,
+    ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
+    DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
+    InventoryRequest, RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage,
+    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
+    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeImageImportEvidence, RecipeImageImportRequest,
+    RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
+    RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
+    RecipeJobRunRequest, RecipeJobRunResult, RecipeModelCleanupInstallation,
+    RecipeModelCleanupPayload as RecipeModelCleanupRequest, RecipeModelCleanupResult,
+    RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
+    RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
+    RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+};
 
 pub mod operation_progress;
 pub use operation_progress::{
@@ -19,7 +36,7 @@ pub use package_upgrade::{
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as DeError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -488,22 +505,6 @@ pub enum ProtocolError {
     Identity(&'static str),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentClaim {
-    pub attempt: u32,
-    pub authority_revision: String,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation: String,
-    pub operation_id: Uuid,
-    pub payload: Value,
-    pub payload_digest: String,
-    pub schema_version: u8,
-}
-
 impl AgentClaim {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1 || self.attempt == 0 {
@@ -537,10 +538,7 @@ impl AgentClaim {
         } else {
             MAX_DOCUMENT_BYTES
         };
-        if !self.payload.is_object()
-            || payload.len() > maximum_bytes
-            || hex_sha256(&payload) != self.payload_digest
-        {
+        if payload.len() > maximum_bytes || hex_sha256(&payload) != self.payload_digest {
             return Err(ProtocolError::Identity("claim payload digest"));
         }
         Ok(())
@@ -550,53 +548,7 @@ impl AgentClaim {
 /// Agent command to consume one Controller assignment. The destination is
 /// selected by the agent configuration, so claims cannot choose a filesystem
 /// path; only the plan identity crosses the wire.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactDistributionRequest {
-    pub authority_revision: String,
-    pub plan_digest: String,
-    pub schema_version: u8,
-}
-
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct InventoryRequest {
-    pub schema_version: u8,
-    pub observed_at: DateTime<Utc>,
-    pub disk_total_bytes: u64,
-    pub disk_free_bytes: u64,
-    pub host_memory_total_bytes: u64,
-    pub host_memory_free_bytes: u64,
-    pub gpu_memory_total_bytes: u64,
-    pub gpu_memory_free_bytes: u64,
-    pub gpu_count: u32,
-    pub artifact_store_read_only: bool,
-    pub capabilities: Vec<String>,
-    #[serde(deserialize_with = "deserialize_canonical_ip")]
-    pub fabric_address: Option<std::net::IpAddr>,
-    pub fabric_bandwidth_mbps: Option<u64>,
-    pub nvidia_driver_version: String,
-    pub container_runtime_version: String,
-}
-
-fn deserialize_canonical_ip<'de, D>(deserializer: D) -> Result<Option<std::net::IpAddr>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = Option::<String>::deserialize(deserializer)?;
-    raw.map(|value| {
-        let parsed: std::net::IpAddr = value
-            .parse()
-            .map_err(|_| D::Error::custom("invalid IP address"))?;
-        if parsed.to_string() != value {
-            return Err(D::Error::custom("non-canonical IP address"));
-        }
-        Ok(parsed)
-    })
-    .transpose()
-}
-
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
@@ -658,29 +610,15 @@ impl ArtifactDistributionRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentUpgradeRequest {
-    pub rollback: PackageRollbackAuthority,
-    pub source_package_url: String,
-    pub source_package_bytes: u64,
-    pub architecture: String,
-    pub package_bytes: u64,
-    pub package_sha256: String,
-    pub package_signature: String,
-    pub package_url: String,
-    pub package_version: String,
-    pub schema_version: u8,
-    pub target_binary_digest: String,
-    pub target_build_digest: String,
-}
-
 impl AgentUpgradeRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         if claim.operation != "agent.upgrade.v1" {
             return Err(ProtocolError::Identity("agent upgrade operation"));
         }
-        let value: Self = serde_json::from_value(claim.payload.clone())?;
+        let generated::AgentClaimPayload::AgentUpgradePayload(value) = &claim.payload else {
+            return Err(ProtocolError::Identity("agent upgrade payload"));
+        };
+        let value = value.clone();
         let url = url::Url::parse(&value.package_url)
             .map_err(|_| ProtocolError::Identity("agent upgrade URL"))?;
         let source_url = url::Url::parse(&value.source_package_url)
@@ -732,44 +670,15 @@ impl AgentUpgradeRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentProgress {
-    pub attempt: u32,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub progress: Value,
-    pub schema_version: u8,
-}
-
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
-        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES
-        {
+        if canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES {
             return Err(ProtocolError::Identity("progress document"));
         }
-        let progress: OperationProgress = serde_json::from_value(self.progress.clone())
-            .map_err(|_| ProtocolError::Identity("operation progress"))?;
-        progress.validate()?;
+        self.progress.validate()?;
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentDirective {
-    pub attempt: u32,
-    pub cancel_requested: bool,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub schema_version: u8,
 }
 
 impl AgentDirective {
@@ -778,30 +687,7 @@ impl AgentDirective {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct AgentResult {
-    pub attempt: u32,
-    pub deadline: DateTime<FixedOffset>,
-    pub fence: Uuid,
-    pub job_id: Uuid,
-    pub node_id: String,
-    pub operation_id: Uuid,
-    pub result: Value,
-    pub schema_version: u8,
-    pub state: String,
-}
-
 /// A content-addressed object authorized by one exact Controller assignment.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DistributionObject {
-    pub name: String,
-    pub sha256: String,
-    pub bytes: u64,
-    pub kind: String,
-}
-
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         let valid_name = !self.name.is_empty()
@@ -830,21 +716,6 @@ impl DistributionObject {
 /// Controller-issued, node-scoped authorization for a complete model and
 /// executable image set.  The assignment is carried alongside every fetch;
 /// an enrolled agent cannot turn a digest into a general object browser.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DistributionAssignment {
-    pub schema_version: u8,
-    pub assignment_id: Uuid,
-    pub plan_digest: String,
-    pub generation: u64,
-    pub node_id: String,
-    pub expires_at: DateTime<FixedOffset>,
-    pub model_artifact_set_sha256: String,
-    pub objects: Vec<DistributionObject>,
-    pub oci_image_digest: String,
-    pub oci_archive_sha256: String,
-}
-
 impl DistributionAssignment {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 2
@@ -897,26 +768,6 @@ impl AgentResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentRequest {
-    pub csr: String,
-    pub evidence: EnrollmentEvidence,
-    pub grant_token: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentEvidence {
-    pub agent_digest: String,
-    pub boot_id: String,
-    pub csr_public_key_fingerprint: String,
-    pub hardware_fingerprint: String,
-    pub host_key_fingerprint: String,
-    pub node_id: String,
-    pub observation_receipt_public_key: String,
-}
-
 impl EnrollmentEvidence {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if !lower_hex(&self.observation_receipt_public_key, 64) {
@@ -939,98 +790,6 @@ pub enum RecipeOperationRequest {
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
     ModelCleanup(RecipeModelCleanupRequest),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobFile {
-    pub name: String,
-    pub media_type: String,
-    pub size_bytes: u64,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobInputFile {
-    pub slot: String,
-    pub name: String,
-    pub media_type: String,
-    pub size_bytes: u64,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputLimits {
-    pub max_files: u16,
-    pub max_file_bytes: u64,
-    pub max_total_bytes: u64,
-    pub allowed_media_types: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputMapping {
-    pub slot: String,
-    pub media_type: String,
-    pub extensions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobRunRequest {
-    pub schema_version: u8,
-    pub job_id: Uuid,
-    pub run_id: Uuid,
-    pub installation_id: Uuid,
-    pub recipe_revision_id: Uuid,
-    pub recipe_content_sha256: String,
-    pub image_digest: String,
-    pub plan_digest: String,
-    pub interface: String,
-    pub rank: u32,
-    pub role: String,
-    pub contract_sha256: String,
-    pub input_manifest_sha256: String,
-    pub input_total_bytes: u64,
-    pub inputs: Vec<RecipeJobInputFile>,
-    pub compiled_execution_plan: Value,
-    pub output_mappings: Vec<RecipeJobOutputMapping>,
-    pub output_limits: RecipeJobOutputLimits,
-    pub timeout_seconds: u16,
-    pub reserved_memory_bytes: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobOutputManifest {
-    pub schema_version: u8,
-    pub manifest_sha256: String,
-    pub total_bytes: u64,
-    pub files: Vec<RecipeJobFile>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobEvidence {
-    pub elapsed_milliseconds: u64,
-    pub peak_memory_bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeJobRunResult {
-    pub schema_version: u8,
-    pub job_id: Uuid,
-    pub run_id: Uuid,
-    pub exit_code: i32,
-    pub output_manifest: RecipeJobOutputManifest,
-    pub evidence: RecipeJobEvidence,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostics: Option<failure_evidence::FailureDiagnostics>,
 }
 
 impl RecipeJobRunResult {
@@ -1063,8 +822,10 @@ impl RecipeJobRunResult {
                 .output_manifest
                 .files
                 .iter()
-                .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
-                == Some(self.output_manifest.total_bytes)
+                .try_fold(0_u64, |total, file| {
+                    total.checked_add(u64::from(file.size_bytes))
+                })
+                == Some(u64::from(self.output_manifest.total_bytes))
             && self.output_manifest.total_bytes <= 2 * 1024 * 1024 * 1024
             && canonical_json(&manifest)
                 .ok()
@@ -1085,266 +846,10 @@ impl RecipeJobRunResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildRequest {
-    pub arguments: Vec<RecipeBuildArgument>,
-    pub base_image_storage_bytes: u64,
-    pub base_images: Vec<RecipeBuildBaseImage>,
-    pub capabilities: Vec<String>,
-    pub build_id: Uuid,
-    pub build_input_sha256: String,
-    pub dockerfile: String,
-    pub kind: String,
-    pub limits: RecipeBuildLimits,
-    pub network: RecipeBuildNetwork,
-    pub options: RecipeBuildOptions,
-    pub platform: String,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub schema_version: u8,
-    pub source_bundle_bytes: u64,
-    pub source_bundle_sha256: String,
-    pub target: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildBaseImage {
-    pub manifest_digest: String,
-    pub reference: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildArgument {
-    pub name: String,
-    pub value: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildNetwork {
-    pub hosts: Vec<String>,
-    pub mode: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildOptions {
-    pub additional_contexts: Vec<RecipeBuildAdditionalContext>,
-    pub annotations: Vec<RecipeBuildMetadata>,
-    pub environment: Vec<RecipeBuildArgument>,
-    pub format: String,
-    pub identity_label: bool,
-    pub ignorefile: Option<String>,
-    pub jobs: u8,
-    pub labels: Vec<RecipeBuildMetadata>,
-    pub layer_compression: String,
-    pub layer_labels: Vec<RecipeBuildMetadata>,
-    pub layers: bool,
-    pub no_hostname: bool,
-    pub no_hosts: bool,
-    pub omit_history: bool,
-    pub os_features: Vec<String>,
-    pub os_version: Option<String>,
-    pub shm_bytes: u64,
-    pub skip_unused_stages: bool,
-    pub squash: String,
-    pub timestamp: Option<u64>,
-    pub unset_environment: Vec<String>,
-    pub unset_labels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildAdditionalContext {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildMetadata {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildLimits {
-    pub container_socket: bool,
-    pub cpu_cores: u16,
-    pub gpu: u8,
-    pub host_mounts: bool,
-    pub memory_bytes: u64,
-    pub output_bytes: u64,
-    pub privileged: bool,
-    pub processes: u32,
-    pub temporary_bytes: u64,
-    pub timeout_seconds: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeImageImportRequest {
-    pub build_id: Uuid,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub kind: String,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    // The field binds the complete Docker archive digest for the imported
-    // image, including when the producer uses Docker-backed storage.
-    pub oci_layout_sha256: String,
-    pub schema_version: u8,
-    pub source_node_id: String,
-}
-
 /// Typed receipt emitted after a recipe image has been built and the exported
 /// archive has been bound to its content identity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildEvidence {
-    pub build_input_sha256: String,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub oci_layout_sha256: String,
-    pub policy: RecipeBuildPolicy,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildPolicy {
-    pub passed: bool,
-    pub dockerfile: String,
-    pub findings: Vec<RecipeBuildPolicyFinding>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeBuildPolicyFinding {
-    pub code: String,
-    pub path: String,
-    pub line: Option<usize>,
-    pub detail: String,
-}
-
 /// Typed receipt emitted after a node verifies and imports the exact build
 /// archive identified by the Controller operation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeImageImportEvidence {
-    pub build_id: Uuid,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub oci_layout_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeInstallRequest {
-    pub schema_version: u8,
-    pub installation_id: Uuid,
-    pub plan_digest: String,
-    pub expected_bytes: u64,
-    pub rank: u32,
-    pub role: String,
-    pub compiled_execution_plan: Value,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub enum RecipeStartPhase {
-    #[serde(rename = "rank-launch")]
-    RankLaunch,
-    #[serde(rename = "collective-readiness")]
-    CollectiveReadiness,
-}
-
-fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStartRequest {
-    pub alias: String,
-    pub compiled_execution_plan: Value,
-    pub endpoint_address: std::net::IpAddr,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub local_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub master_address: Option<std::net::IpAddr>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub master_port: Option<u16>,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase: Option<RecipeStartPhase>,
-    pub plan_digest: String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub reserved_memory_bytes: u64,
-    pub role: String,
-    pub run_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_generation: Option<u64>,
-    pub schema_version: u8,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_deadline: Option<DateTime<FixedOffset>>,
-    pub world_size: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStopRequest {
-    pub plan_digest: String,
-    pub run_id: Uuid,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeUninstallRequest {
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub cleanup_model_content_sha256: Option<String>,
-    pub installation_id: Uuid,
-    pub plan_digest: String,
-    pub recipe_content_sha256: String,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupInstallation {
-    pub installation_id: Uuid,
-    pub recipe_content_sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupRequest {
-    pub installations: Vec<RecipeModelCleanupInstallation>,
-    pub model_content_sha256: String,
-    pub plan_digest: String,
-    pub schema_version: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeStopResult {
-    pub stopped: bool,
-}
-
 impl RecipeStopResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.stopped {
@@ -1355,13 +860,6 @@ impl RecipeStopResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeUninstallResult {
-    pub uninstalled: bool,
-    pub removed_model_bytes: u64,
-}
-
 impl RecipeUninstallResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.uninstalled && self.removed_model_bytes <= 16 * 1024_u64.pow(4) {
@@ -1370,13 +868,6 @@ impl RecipeUninstallResult {
             Err(ProtocolError::Identity("recipe uninstall result"))
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeModelCleanupResult {
-    pub uninstalled_installations: u16,
-    pub removed_model_bytes: u64,
 }
 
 impl RecipeModelCleanupResult {
@@ -1394,29 +885,38 @@ impl RecipeModelCleanupResult {
 impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
-        let request = match claim.operation.as_str() {
-            "runtime.preflight.v1" => {
-                Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?)
+        let request = match (claim.operation.as_str(), &claim.payload) {
+            (
+                "runtime.preflight.v1",
+                generated::AgentClaimPayload::RuntimePreflightRequest(value),
+            ) => Self::RuntimePreflight(value.clone()),
+            ("recipe.build.v1", generated::AgentClaimPayload::RecipeBuildRequest(value)) => {
+                Self::Build(Box::new(value.clone()))
             }
-            "recipe.build.v1" => {
-                validate_build_wire(&claim.payload)?;
-                Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
+            (
+                "recipe.image.import.v1",
+                generated::AgentClaimPayload::RecipeImageImportRequest(value),
+            ) => Self::ImageImport(value.clone()),
+            ("recipe.job.run.v1", generated::AgentClaimPayload::RecipeJobRunRequest(value)) => {
+                Self::JobRun(value.clone())
             }
-            "recipe.image.import.v1" => {
-                Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.install", generated::AgentClaimPayload::RecipeInstallPayload(value)) => {
+                Self::Install(value.clone())
             }
-            "recipe.job.run.v1" => {
-                validate_job_wire(&claim.payload)?;
-                Self::JobRun(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.start", generated::AgentClaimPayload::RecipeStartPayload(value)) => {
+                Self::Start(value.clone())
             }
-            "recipe.install" => Self::Install(serde_json::from_value(claim.payload.clone())?),
-            "recipe.start" => Self::Start(serde_json::from_value(claim.payload.clone())?),
-            "recipe.stop" => Self::Stop(serde_json::from_value(claim.payload.clone())?),
-            "recipe.uninstall" => Self::Uninstall(serde_json::from_value(claim.payload.clone())?),
-            "recipe.model-uninstall.v1" => {
-                Self::ModelCleanup(serde_json::from_value(claim.payload.clone())?)
+            ("recipe.stop", generated::AgentClaimPayload::RecipeStopPayload(value)) => {
+                Self::Stop(value.clone())
             }
-            _ => return Err(ProtocolError::Identity("recipe operation")),
+            ("recipe.uninstall", generated::AgentClaimPayload::RecipeUninstallPayload(value)) => {
+                Self::Uninstall(value.clone())
+            }
+            (
+                "recipe.model-uninstall.v1",
+                generated::AgentClaimPayload::RecipeModelCleanupPayload(value),
+            ) => Self::ModelCleanup(value.clone()),
+            _ => return Err(ProtocolError::Identity("recipe operation payload")),
         };
         request.validate()?;
         Ok(request)
@@ -1442,7 +942,7 @@ impl RecipeOperationRequest {
                     && lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
                     && valid_role(&value.role)
-                    && value.compiled_execution_plan.is_object()
+                    && value.compiled_execution_plan.schema_version == 2
             }
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
@@ -1500,7 +1000,7 @@ impl RecipeOperationRequest {
                             && value.master_port.is_some_and(|port| port >= 1024)
                     }
                     && valid_alias(&value.alias)
-                    && value.compiled_execution_plan.is_object()
+                    && value.compiled_execution_plan.schema_version == 2
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
@@ -1976,20 +1476,6 @@ mod recipe_install_tests {
     }
 }
 
-fn validate_job_wire(value: &Value) -> Result<(), ProtocolError> {
-    for field in ["job_id", "run_id", "installation_id", "recipe_revision_id"] {
-        let canonical = value
-            .get(field)
-            .and_then(Value::as_str)
-            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
-            .is_some_and(|(raw, parsed)| parsed.to_string() == raw);
-        if !canonical {
-            return Err(ProtocolError::Identity("recipe job payload"));
-        }
-    }
-    Ok(())
-}
-
 fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
     let inputs_valid = value.inputs.len() <= 32
         && value
@@ -2003,11 +1489,9 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 && file.size_bytes <= 512 * 1024 * 1024
                 && lower_hex(&file.sha256, 64)
         })
-        && value
-            .inputs
-            .iter()
-            .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
-            == Some(value.input_total_bytes)
+        && value.inputs.iter().try_fold(0_u64, |total, file| {
+            total.checked_add(u64::from(file.size_bytes))
+        }) == Some(u64::from(value.input_total_bytes))
         && value.input_total_bytes <= 1024 * 1024 * 1024;
     let manifest = serde_json::json!({
         "schema_version": 1,
@@ -2057,7 +1541,7 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && value.role == "entrypoint"
         && inputs_valid
         && manifest_valid
-        && value.compiled_execution_plan.is_object()
+        && value.compiled_execution_plan.schema_version == 2
         && mappings_valid
         && (1..=32).contains(&limits.max_files)
         && (1..=1024 * 1024 * 1024).contains(&limits.max_file_bytes)
@@ -2134,20 +1618,6 @@ fn valid_media_type(value: &str) -> bool {
     })
 }
 
-fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
-    let canonical_uuid = |field: &str| {
-        value
-            .get(field)
-            .and_then(Value::as_str)
-            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
-            .is_some_and(|(raw, parsed)| parsed.to_string() == raw)
-    };
-    if !canonical_uuid("build_id") || !canonical_uuid("recipe_revision_id") {
-        return Err(ProtocolError::Identity("recipe payload"));
-    }
-    Ok(())
-}
-
 fn validate_build(value: &RecipeBuildRequest) -> bool {
     value.schema_version == 1
         && value.kind == "recipe.build.v1"
@@ -2221,7 +1691,6 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         && value.limits.temporary_bytes > 0
         && value.limits.temporary_bytes <= 16 * 1024_u64.pow(4)
         && value.limits.processes >= 1
-        && value.limits.processes <= 65_535
         && value.limits.timeout_seconds >= 1
         && value.limits.timeout_seconds <= 86_400
         && value.limits.output_bytes >= 1
@@ -2983,4 +2452,14 @@ impl generated::AgentRuntimeIdentity {
         }
         Ok(bytes)
     }
+}
+
+/// Validate an outgoing generated document before producing its canonical bytes.
+/// This also covers direct Rust construction, which does not invoke Deserialize.
+pub fn canonical_generated_json<T: Serialize + DeserializeOwned>(
+    document: &T,
+) -> Result<Vec<u8>, ProtocolError> {
+    let value = serde_json::to_value(document)?;
+    let _: T = serde_json::from_value(value.clone())?;
+    canonical_json(&value)
 }

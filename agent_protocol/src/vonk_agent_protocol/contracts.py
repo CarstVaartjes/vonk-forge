@@ -936,7 +936,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     operation: AgentOperation
@@ -1026,7 +1026,7 @@ class AgentProgress(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
@@ -1078,7 +1078,7 @@ class AgentDirective(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
@@ -1118,7 +1118,7 @@ class AgentResult(_ProtocolEnvelopeModel):
     schema_version: Literal[1]
     job_id: CanonicalUUID
     operation_id: CanonicalUUID
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(strict=True, ge=1, le=2**31 - 1)
     fence: CanonicalUUID
     node_id: NodeIdentifier
     deadline: datetime
