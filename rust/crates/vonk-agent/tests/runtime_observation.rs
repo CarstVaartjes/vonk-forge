@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use vonk_agent::{
     oci::{OciRuntime, RecipeRunStartIdentity},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
-    workloads::{CompiledExecutionPlan, Placement},
+    workloads::{CompiledExecutionPlan, CompiledRuntimePlacement},
 };
 
 const INSTALLATION: &str = "cb555393-764b-4eb6-8f15-b416d289428f";
@@ -53,8 +53,8 @@ fn persist_plan(root: &Path, plan: &CompiledExecutionPlan) {
     .unwrap();
 }
 
-fn placement(plan: &CompiledExecutionPlan) -> Placement {
-    serde_json::from_value(serde_json::to_value(&plan.runtime.placement).unwrap()).unwrap()
+fn placement(plan: &CompiledExecutionPlan) -> CompiledRuntimePlacement {
+    plan.runtime.placement.clone()
 }
 
 fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
@@ -298,4 +298,63 @@ fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
     )
     .unwrap();
     assert!(runtime.prepare_stop(RUN).is_err());
+}
+
+#[test]
+fn retained_lifecycle_requires_all_canonical_placement_fields() {
+    let root = tempdir().unwrap();
+    let plan = schema2_dual_plan();
+    persist_plan(root.path(), &plan);
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &plan.runtime.placement,
+            &identity(&plan),
+        )
+        .unwrap();
+    runtime.recipe_run_inspection_plans().unwrap();
+    let path = root
+        .path()
+        .join("run-metadata")
+        .join(RUN)
+        .join("lifecycle.json");
+    let lifecycle: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    for field in [
+        "endpoint_address",
+        "local_address",
+        "master_address",
+        "master_port",
+        "port",
+    ] {
+        let mut incomplete = lifecycle.clone();
+        incomplete["placement"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        fs::write(&path, serde_json::to_vec(&incomplete).unwrap()).unwrap();
+        assert!(
+            runtime.recipe_run_inspection_plans().is_err(),
+            "missing {field}"
+        );
+    }
+}
+
+#[test]
+fn unbound_compiled_placement_requires_addresses_only_at_execution() {
+    let mut plan = schema2_dual_plan();
+    plan.runtime.placement.local_address = None;
+    plan.runtime.placement.master_address = None;
+    plan.runtime.placement.master_port = None;
+    plan.security.network_mode = "none".to_owned();
+    plan.validate().unwrap();
+    assert!(plan.runtime.placement.validate_bound().is_err());
+    let bound = schema2_dual_plan();
+    bound.runtime.placement.validate_bound().unwrap();
 }

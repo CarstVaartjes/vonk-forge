@@ -293,22 +293,6 @@ pub struct MountSpec {
     pub read_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct Placement {
-    #[serde(default)]
-    pub endpoint_address: Option<IpAddr>,
-    pub rank: u32,
-    pub role: String,
-    pub world_size: u32,
-    pub local_address: Option<IpAddr>,
-    pub master_address: Option<IpAddr>,
-    pub master_port: Option<u16>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub port: Option<u16>,
-    pub reserved_memory_bytes: u64,
-}
-
 pub(crate) fn same_installed_workload(
     installed: &CompiledExecutionPlan,
     requested: &CompiledExecutionPlan,
@@ -786,8 +770,9 @@ fn valid_mount_policy(mount: &MountSpec) -> bool {
     }
 }
 
-impl Placement {
-    pub fn validate(&self) -> Result<(), WorkloadError> {
+impl CompiledRuntimePlacement {
+    /// Validate placement after Controller assignment has resolved execution addresses.
+    pub fn validate_bound(&self) -> Result<(), WorkloadError> {
         if self.rank >= self.world_size
             || self.world_size == 0
             || !valid_role(&self.role)
