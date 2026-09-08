@@ -30,6 +30,61 @@ from .recipe_runtime_specs import (
 from .runtime_image_preparation import RuntimeImageReceipt
 
 
+def compile_job_invocation(
+    session: Session,
+    *,
+    recipe: RecipeDefinition,
+    installed: object,
+    build: RecipeBuild | None,
+    parameters: Mapping[str, object],
+    timeout_seconds: int,
+) -> dict[str, object]:
+    """Compile invocation settings against the installation's exact receipts."""
+    from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+
+    plan = CompiledExecutionPlan.model_validate(installed)
+    if plan.job is None or not 1 <= timeout_seconds <= plan.job.timeout_seconds:
+        raise ExecutionPlanCompilationError("job timeout exceeds the installed workload")
+    if content_sha256(recipe) != plan.identity.recipe_revision_sha256:
+        raise ExecutionPlanCompilationError("job recipe differs from the installed workload")
+    resolved = resolve_recipe_entities(session, recipe.model_dump(mode="json"))
+    models = _canonical_models(resolved["models"])
+    if _is_source_build(recipe) and build is None:
+        raise ExecutionPlanCompilationError("job build receipt is unavailable")
+    runtime_spec = compile_runtime_spec(
+        recipe,
+        models=models,
+        package_handle=_build_package(build) if build is not None else None,
+        parameters=parameters,
+        role=plan.runtime.placement.role,
+        rank=plan.runtime.placement.rank,
+    )
+    runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
+    runtime_spec["job"]["timeout_seconds"] = timeout_seconds
+    runtime_spec["identity"]["execution_sha256"] = execution_identity_sha256(runtime_spec)
+    objects = {
+        (artifact.model.content_sha256, artifact.file_id): {
+            "model_content_sha256": artifact.model.content_sha256,
+            "file_id": artifact.file_id,
+            "path": artifact.path,
+            "sha256": artifact.sha256,
+            "bytes": artifact.size_bytes,
+            "roles": artifact.roles,
+            "distribution_object": artifact.distribution_object.model_dump(mode="json"),
+        }
+        for artifact in plan.artifacts
+    }
+    compiled = compile_verified_execution_plan(
+        runtime_spec,
+        model_artifact_set_sha256=plan.identity.model_artifact_set_sha256,
+        model_objects=tuple(objects.values()),
+        runtime_image=plan.runtime_image.model_dump(mode="json"),
+    )
+    return compiled.to_compiled_launch_payload(
+        runtime_spec, placement=plan.runtime.placement.model_dump(mode="json")
+    )
+
+
 class ExecutionPlanCompilationError(ValueError):
     """Canonical launch facts and verified Controller receipts cannot agree."""
 

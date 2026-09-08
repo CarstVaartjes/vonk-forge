@@ -36,7 +36,7 @@ def test_recipe_job_vectors_are_canonical_typed_and_digest_bound() -> None:
         claim_document, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
     assert request.reserved_memory_bytes == 32 * 1024**3
-    assert request.parameters["prompt"] == "A red fox / alpine meadow"
+    assert request.compiled_execution_plan.job.interface == request.interface
     assert request.output_mappings[0].to_mapping() == {
         "slot": "image",
         "media_type": "image/png",
@@ -57,7 +57,7 @@ def test_recipe_job_vectors_are_canonical_typed_and_digest_bound() -> None:
         lambda value: value["inputs"][0].update(name="../escape"),
         lambda value: value.update(input_total_bytes=4),
         lambda value: value.update(reserved_memory_bytes=0),
-        lambda value: value["parameters"].update(command="curl evil"),
+        lambda value: value["compiled_execution_plan"]["runtime"].update(argv=["bad\x00value"]),
         lambda value: value["output_limits"].update(
             allowed_media_types=["image/png", "image/png"]
         ),
@@ -84,38 +84,16 @@ def test_recipe_job_request_rejects_traversal_digest_drift_and_unsafe_values(
         RecipeJobRunRequest.parse(payload)
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_recipe_job_request_rejects_nonfinite_parameter_numbers(value: float) -> None:
-    claim_document, _result_document = documents()
-    claim_document["payload"]["parameters"]["scale"] = value
-
-    with pytest.raises(AgentProtocolError, match="finite|canonical"):
-        RecipeJobRunRequest.parse(claim_document["payload"])
-
-
-@pytest.mark.parametrize("name", ["max_tokens", "token_budget", "tokenizer"])
-def test_recipe_job_parameters_preserve_engine_names(name: str) -> None:
-    claim_document, _result_document = documents()
-    claim_document["payload"]["parameters"] = {name: 1}
-    assert RecipeJobRunRequest.parse(claim_document["payload"]).parameters[name] == 1
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "apiKey",
-        "accessToken",
-        "privateKey",
-        "passwordHash",
-        "hf_token",
-        "github_token",
-    ],
-)
-def test_recipe_job_parameters_reject_credential_names(name: str) -> None:
-    claim_document, _result_document = documents()
-    claim_document["payload"]["parameters"] = {name: "secret"}
-    with pytest.raises(AgentProtocolError, match="unsafe"):
-        RecipeJobRunRequest.parse(claim_document["payload"])
+@pytest.mark.parametrize("field", ["compiled_execution_plan", "parameters"])
+def test_recipe_job_requires_only_the_canonical_invocation(field: str) -> None:
+    claim_document, _ = documents()
+    payload = claim_document["payload"]
+    if field == "compiled_execution_plan":
+        payload.pop(field)
+    else:
+        payload[field] = {"seed": 999}
+    with pytest.raises(AgentProtocolError):
+        RecipeJobRunRequest.parse(payload)
 
 
 @pytest.mark.parametrize(

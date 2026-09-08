@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
@@ -19,6 +18,7 @@ from pydantic import (
 
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
+from .compiled_execution_plan import CompiledExecutionPlan
 from .wire_model import WireModel
 
 MAX_INPUT_FILES = 32
@@ -27,7 +27,6 @@ MAX_INPUT_TOTAL_BYTES = 1024**3
 MAX_OUTPUT_FILES = 32
 MAX_OUTPUT_FILE_BYTES = 1024**3
 MAX_OUTPUT_TOTAL_BYTES = 2 * 1024**3
-MAX_PARAMETERS_BYTES = 16 * 1024
 MAX_TIMEOUT_SECONDS = 60 * 60
 
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -39,16 +38,6 @@ _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{12}$"
-)
-_UNSAFE_PARAMETER_KEY = re.compile(
-    r"^(?:apikey|passwordhash)$|"
-    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
-    r"(?:$|[_-])|"
-    r"(?:^|[_-])(?:api|access|auth|bearer|github|hf|huggingface)[_-]?token$|"
-    r"(?:^|[_-])private[_-]?key$|"
-    r"^token$|"
-    r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
-    re.IGNORECASE,
 )
 
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST)]
@@ -93,40 +82,6 @@ def _parse_model[ModelT: _RecipeJobModel](
         ) from error
 
 
-def _validate_parameters(value: object, *, depth: int = 0) -> object:
-    if depth > 8:
-        raise ValueError("job parameters are too deeply nested")
-    if value is None or isinstance(value, bool):
-        return value
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("job parameter number is not finite")
-        return value
-    if isinstance(value, str):
-        if "\x00" in value or len(value.encode("utf-8")) > 4096:
-            raise ValueError("job parameter string is invalid")
-        return value
-    if isinstance(value, list):
-        if len(value) > 128:
-            raise ValueError("job parameter array is too large")
-        return [_validate_parameters(item, depth=depth + 1) for item in value]
-    if isinstance(value, Mapping):
-        if len(value) > 128:
-            raise ValueError("job parameter object is too large")
-        result: dict[str, object] = {}
-        for key, item in value.items():
-            if (
-                not isinstance(key, str)
-                or not key
-                or len(key.encode("utf-8")) > 64
-                or _UNSAFE_PARAMETER_KEY.search(key)
-            ):
-                raise ValueError("job parameter key is unsafe")
-            result[key] = _validate_parameters(item, depth=depth + 1)
-        return result
-    raise ValueError("job parameters must contain JSON values")
 
 
 class RecipeJobFile(_RecipeJobModel):
@@ -295,7 +250,7 @@ class RecipeJobRunRequest(_RecipeJobModel):
     input_manifest_sha256: Digest
     input_total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
     inputs: tuple[RecipeJobInputFile, ...] = Field(max_length=MAX_INPUT_FILES)
-    parameters: dict[str, object]
+    compiled_execution_plan: CompiledExecutionPlan
     output_mappings: tuple[RecipeJobOutputMapping, ...] = Field(
         min_length=1, max_length=MAX_OUTPUT_FILES
     )
@@ -307,19 +262,20 @@ class RecipeJobRunRequest(_RecipeJobModel):
     def arrays_are_immutable(cls, value: object) -> object:
         return _as_tuple(value)
 
-    @field_validator("parameters", mode="before")
-    @classmethod
-    def parameters_are_safe(cls, value: object) -> object:
-        parsed = _validate_parameters(value)
-        if (
-            not isinstance(parsed, dict)
-            or len(canonical_message(parsed)) > MAX_PARAMETERS_BYTES
-        ):
-            raise ValueError("job parameters are invalid")
-        return parsed
-
     @model_validator(mode="after")
     def request_is_canonical(self) -> RecipeJobRunRequest:
+        plan = self.compiled_execution_plan
+        placement = plan.runtime.placement
+        if (
+            plan.job is None
+            or plan.job.interface != self.interface
+            or plan.job.timeout_seconds != self.timeout_seconds
+            or plan.identity.recipe_revision_sha256 != self.recipe_content_sha256
+            or plan.runtime.image_digest != self.image_digest
+            or (placement.rank, placement.role, placement.reserved_memory_bytes)
+            != (self.rank, self.role, self.reserved_memory_bytes)
+        ):
+            raise ValueError("job invocation does not match request authority")
         names = [item.name for item in self.inputs]
         if names != sorted(names, key=lambda value: value.encode("utf-8")):
             raise ValueError("artifact manifest is not canonically sorted")
