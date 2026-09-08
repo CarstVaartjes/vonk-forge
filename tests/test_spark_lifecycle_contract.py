@@ -193,12 +193,44 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
         )
         for platform in ("linux-arm64",)
     }
+    prefix = f"artifacts/dev/releases/{GENERATION}"
+    for artifacts, base in (
+        (candidate_artifacts, prefix),
+        (baseline_artifacts, f"{prefix}/acceptance-baseline"),
+    ):
+        for key, name in (
+            ("spark-setup-linux-arm64", "vonk-spark-setup"),
+            ("spark-setup-signature-linux-arm64", "vonk-spark-setup.sig"),
+        ):
+            artifacts[key] = _record(
+                objects, f"{base}/spark/current/linux-arm64/{name}", name.encode()
+            )
+    for platform in ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"):
+        candidate_artifacts[f"nas-setup-{platform}"] = _record(
+            objects,
+            f"{prefix}/nas/current/{platform}/vonk-nas-setup",
+            platform.encode(),
+        )
+    candidate_artifacts["nas-payload"] = _record(
+        objects, f"{prefix}/nas/current/payload.json", b"payload"
+    )
+    candidate_bootstraps = {
+        kind: _record(objects, f"{prefix}/bootstraps/{kind}", kind.encode())
+        for kind in ("nas", "spark")
+    }
+    baseline_bootstraps = {
+        "spark": _record(
+            objects, f"{prefix}/acceptance-baseline/bootstraps/spark", b"spark"
+        ),
+    }
     common = {
         "channel": "dev",
         "generation": GENERATION,
         "images": {
             "api": "ghcr.io/example/api:1.2.3@sha256:" + "c" * 64,
             "worker": "ghcr.io/example/worker:1.2.3@sha256:" + "d" * 64,
+            "hermes": "ghcr.io/example/hermes:1.2.3@sha256:" + "e" * 64,
+            "litellm": "ghcr.io/example/litellm:1.2.3@sha256:" + "f" * 64,
         },
         "schema_version": 2,
         "source_sha": SOURCE_SHA,
@@ -209,7 +241,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
         common
         | {
             "artifacts": candidate_artifacts,
-            "bootstraps": {},
+            "bootstraps": candidate_bootstraps,
             "version": "1.2.3",
         },
     )
@@ -223,7 +255,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
         | {
             "acceptance_only": True,
             "artifacts": baseline_artifacts,
-            "bootstraps": {},
+            "bootstraps": baseline_bootstraps,
             "version": "1.2.2~acceptance.1+gbbbbbbbbbbbb",
         },
     )
@@ -373,7 +405,7 @@ def test_publication_graph_rejects_any_missing_native_package_record(
     )
 
     assert result.returncode == 1
-    assert f"agent-package-{platform}" in result.stderr
+    assert "release object is invalid" in result.stderr
 
 
 def test_verified_artifact_hashes_open_descriptor_during_path_substitution(

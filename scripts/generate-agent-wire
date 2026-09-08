@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate (or check) Rust wire declarations from the current Pydantic graph."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,12 +19,34 @@ def main() -> None:
     output = ROOT / "rust/crates/vonk-agent-protocol/src/generated.rs"
     check = ["--check"] if args.check else []
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts/export-agent-wire-schema"), "--output", str(schema), *check],
+        [
+            sys.executable,
+            str(ROOT / "scripts/export-agent-wire-schema"),
+            "--output",
+            str(schema),
+            *check,
+        ],
         cwd=ROOT,
         check=True,
     )
     subprocess.run(
-        ["cargo", "run", "--locked", "--quiet", "-p", "vonk-wire-codegen", "--", str(schema), str(output), *check],
+        [sys.executable, str(ROOT / "scripts/export-installer-release-schema"), *check],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--locked",
+            "--quiet",
+            "-p",
+            "vonk-wire-codegen",
+            "--",
+            str(schema),
+            str(output),
+            *check,
+        ],
         cwd=ROOT,
         check=True,
     )
