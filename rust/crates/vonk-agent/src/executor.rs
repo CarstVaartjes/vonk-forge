@@ -25,7 +25,7 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{CompiledExecutionPlan, Placement},
+    workloads::{CompiledExecutionPlan, Placement, same_installed_workload},
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
@@ -44,34 +44,6 @@ pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionP
     let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
     plan.validate()?;
     Ok(plan)
-}
-
-fn same_installed_workload(
-    installed: &CompiledExecutionPlan,
-    requested: &CompiledExecutionPlan,
-) -> bool {
-    installed.identity == requested.identity
-        && installed.artifacts == requested.artifacts
-        && installed.runtime.executable == requested.runtime.executable
-        && installed.runtime.argv == requested.runtime.argv
-        && installed.runtime.env == requested.runtime.env
-        && installed.runtime.image_digest == requested.runtime.image_digest
-        && installed.runtime_image == requested.runtime_image
-        && installed.security.devices == requested.security.devices
-        && installed.security.capabilities == requested.security.capabilities
-        && installed.security.host_network == requested.security.host_network
-        && installed.security.privileged == requested.security.privileged
-        && installed.security.user == requested.security.user
-        && installed.security.mounts == requested.security.mounts
-        && installed.security.read_only_root == requested.security.read_only_root
-        && installed.security.no_new_privileges == requested.security.no_new_privileges
-        && installed.lifecycle == requested.lifecycle
-        && installed.endpoint == requested.endpoint
-        && installed.job == requested.job
-        && installed.topology.name == requested.topology.name
-        && installed.topology.mode == requested.topology.mode
-        && installed.topology.backend == requested.topology.backend
-        && installed.topology.node_count == requested.topology.node_count
 }
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
@@ -196,7 +168,7 @@ pub struct RecipeExecutor<'a, R> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecipeObservationError {
-    #[error("managed recipe run identity is invalid")]
+    #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection was not authorized")]
     Inspection(#[from] crate::host_runtime::HostRuntimeError),

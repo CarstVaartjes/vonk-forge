@@ -308,6 +308,34 @@ pub struct Placement {
     pub reserved_memory_bytes: u64,
 }
 
+pub(crate) fn same_installed_workload(
+    installed: &CompiledExecutionPlan,
+    requested: &CompiledExecutionPlan,
+) -> bool {
+    installed.identity == requested.identity
+        && installed.artifacts == requested.artifacts
+        && installed.runtime.executable == requested.runtime.executable
+        && installed.runtime.argv == requested.runtime.argv
+        && installed.runtime.env == requested.runtime.env
+        && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime_image == requested.runtime_image
+        && installed.security.devices == requested.security.devices
+        && installed.security.capabilities == requested.security.capabilities
+        && installed.security.host_network == requested.security.host_network
+        && installed.security.privileged == requested.security.privileged
+        && installed.security.user == requested.security.user
+        && installed.security.mounts == requested.security.mounts
+        && installed.security.read_only_root == requested.security.read_only_root
+        && installed.security.no_new_privileges == requested.security.no_new_privileges
+        && installed.lifecycle == requested.lifecycle
+        && installed.endpoint == requested.endpoint
+        && installed.job == requested.job
+        && installed.topology.name == requested.topology.name
+        && installed.topology.mode == requested.topology.mode
+        && installed.topology.backend == requested.topology.backend
+        && installed.topology.node_count == requested.topology.node_count
+}
+
 impl CompiledExecutionPlan {
     pub fn validate(&self) -> Result<(), WorkloadError> {
         if self.schema_version != 2

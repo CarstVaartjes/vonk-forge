@@ -21,7 +21,9 @@ use crate::{
     health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
-    workloads::{CompiledExecutionPlan, Placement, WorkloadError, managed_path},
+    workloads::{
+        CompiledExecutionPlan, Placement, WorkloadError, managed_path, same_installed_workload,
+    },
 };
 
 #[derive(Debug, Error)]
@@ -58,7 +60,7 @@ impl OciError {
         }
     }
 
-    fn safe_category(&self) -> &'static str {
+    pub(crate) fn safe_category(&self) -> &'static str {
         match self {
             Self::Process(_) => "process",
             Self::Workload(_) => "workload",
@@ -1009,7 +1011,34 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         managed_path(self.data_root, "installations", &record.installation_id)?;
-        let spec = self.load_spec(&record.installation_id)?;
+        let spec: CompiledExecutionPlan = serde_json::from_slice(&read_regular_file(
+            &metadata.join("runtime.json"),
+            MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
+        )?)?;
+        spec.validate()?;
+        let mut installed = self.load_spec(&record.installation_id)?;
+        // A job may select a shorter timeout at start, within its installed limit.
+        if let (Some(installed_job), Some(retained_job)) = (&mut installed.job, &spec.job)
+            && retained_job.timeout_seconds <= installed_job.timeout_seconds
+        {
+            installed_job.timeout_seconds = retained_job.timeout_seconds;
+        }
+        let placement = &spec.runtime.placement;
+        if !same_installed_workload(&installed, &spec)
+            || placement.endpoint_address != record.placement.endpoint_address
+            || placement.rank != record.placement.rank
+            || placement.role != record.placement.role
+            || placement.world_size != record.placement.world_size
+            || placement.local_address != record.placement.local_address
+            || placement.master_address != record.placement.master_address
+            || placement.master_port != record.placement.master_port
+            || placement
+                .port
+                .is_some_and(|port| port != record.placement.port)
+            || placement.reserved_memory_bytes != record.placement.reserved_memory_bytes
+        {
+            return Err(OciError::Artifact);
+        }
         Ok(Some((
             spec,
             record.installation_id,
