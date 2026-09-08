@@ -940,7 +940,7 @@ class AgentJobService:
     def heartbeat(
         self,
         fence: AgentFence,
-        progress: Mapping[str, object],
+        progress: Mapping[str, object] | None,
         lease_seconds: int,
         *,
         source: AgentSource | None = None,
@@ -965,20 +965,22 @@ class AgentJobService:
                 deadline=deadline,
                 progress=progress,
             )
-            try:
-                current_progress = dict(message.progress)
-                if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
-                    # A restarted transfer walks already durable objects again.
-                    # Replayed offsets are not loss of retained operation bytes.
-                    for key in ("completed_bytes", "completed_items"):
-                        if key in current_progress and key in attempt.progress:
-                            current_progress[key] = max(current_progress[key], attempt.progress[key])
-                validated = validate_progress_update(attempt.progress, current_progress)
-                write_progress = progress_write_due(attempt.progress, validated, _aware(now))
-                if write_progress:
-                    attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
-            except (TypeError, ValueError) as error:
-                raise ValueError(f"operation progress is invalid: {error}") from error
+            write_progress = message.progress is None
+            if message.progress is not None:
+                try:
+                    current_progress = dict(message.progress)
+                    if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
+                        # A restarted transfer walks already durable objects again.
+                        # Replayed offsets are not loss of retained operation bytes.
+                        for key in ("completed_bytes", "completed_items"):
+                            if key in current_progress and key in attempt.progress:
+                                current_progress[key] = max(current_progress[key], attempt.progress[key])
+                    validated = validate_progress_update(attempt.progress, current_progress, partial=False)
+                    write_progress = progress_write_due(attempt.progress, validated, _aware(now))
+                    if write_progress:
+                        attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"operation progress is invalid: {error}") from error
             if write_progress:
                 attempt.lease_deadline = deadline
                 operation.updated_at = now
