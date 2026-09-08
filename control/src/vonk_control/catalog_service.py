@@ -18,6 +18,11 @@ from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
+from .catalog_revision_contract import (
+    read_catalog_document,
+    read_catalog_projection,
+    write_catalog_projection,
+)
 from .catalog_entities import (
     CatalogConflict,
     CatalogDocumentRevision,
@@ -284,7 +289,9 @@ class CatalogService:
             for model in models:
                 self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
             revision = self._upsert_canonical_document(session, recipe.model_dump(mode="json"), actor=actor)
-            projected = dict(revision.projected or {})
+            projected = read_catalog_projection(revision).model_dump(
+                mode="json", exclude_none=False
+            )
             projected.update(
                 {
                     "publication_commit": library_commit,
@@ -299,7 +306,7 @@ class CatalogService:
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision.id)
-                .values(projected=projected)
+                .values(projected=write_catalog_projection(projected, kind=revision.kind))
             )
             session.expire(revision, ["projected"])
             return _view(revision)
@@ -369,9 +376,11 @@ class CatalogService:
                 raise KeyError(recipe_id)
             if clean.get("recipe_sha256") != revision.content_digest:
                 raise CatalogValidationError("catalog.test_report_recipe_mismatch", "test report does not match this recipe revision")
-            projected = dict(revision.projected or {})
+            projected = read_catalog_projection(revision).model_dump(
+                mode="json", exclude_none=False
+            )
             projected["test_report"] = clean
-            revision.projected = projected
+            revision.projected = write_catalog_projection(projected, kind=revision.kind)
             session.flush()
         return clean
 
@@ -382,10 +391,13 @@ class CatalogService:
             revision = _get_active_recipe(session, recipe_id)
             if revision is None:
                 raise KeyError(recipe_id)
-            report = (revision.projected or {}).get("test_report")
-            if not isinstance(report, dict):
+            report = read_catalog_projection(revision).test_report
+            if report is None:
                 raise CatalogConflict("catalog.test_report_required", "attach a passing local test report before publication export")
-            recipe = copy.deepcopy(revision.document)
+            recipe_document = read_catalog_document(revision)
+            if not isinstance(recipe_document, RecipeDefinition):
+                raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
+            recipe = recipe_document.model_dump(mode="json", exclude_none=False, exclude_unset=False)
         identity = recipe["identity"]
         if isinstance(identity, dict):
             identity["publisher"] = target_publisher
@@ -409,19 +421,20 @@ def _resolve_recipe(session: Session, recipe: RecipeDefinition, *, actor: str) -
 
 
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
-    metadata = revision.document.get("metadata", {})
-    metadata = metadata if isinstance(metadata, Mapping) else {}
+    recipe = read_catalog_document(revision)
+    if not isinstance(recipe, RecipeDefinition):
+        raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
     return RecipeRevisionView(
         id=revision.id,
         recipe_id=revision.document_id,
         slug=revision.slug,
-        title=str(metadata.get("title", revision.slug)),
-        description=str(metadata.get("description", "")),
+        title=recipe.metadata.title,
+        description=recipe.metadata.description,
         source_kind="recipe_library",
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,
         schema_version=revision.schema_version,
-        document=copy.deepcopy(revision.document),
+        document=recipe.model_dump(mode="json", exclude_none=False, exclude_unset=False),
         content_sha256=revision.content_digest,
         created_by=revision.created_by,
         created_at=revision.created_at,
