@@ -3011,7 +3011,7 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>(),
-            ["schema_version", "samples"]
+            ["samples", "schema_version"]
         );
         assert_eq!(body["schema_version"], 1);
         assert_eq!(body["samples"].as_array().unwrap().len(), 1);

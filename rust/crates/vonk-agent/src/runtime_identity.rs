@@ -145,3 +145,26 @@ pub(crate) fn load_observation_public_key(path: &Path) -> Result<[u8; 32], Runti
     raw.try_into()
         .map_err(|_| RuntimeIdentityError::UnsafeObservationReceiptKey)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PreparedRuntimeIdentity;
+
+    #[test]
+    fn prepared_identity_becomes_wire_identity_only_after_key_and_self_test() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("vonk-agent");
+        std::fs::write(&executable, b"direct-agent-binary").unwrap();
+
+        let prepared = PreparedRuntimeIdentity::from_executable(&executable).unwrap();
+        assert!(prepared.clone().mark_self_test_passed().is_err());
+
+        let complete = prepared
+            .with_observation_receipt_public_key_bytes([9; 32])
+            .mark_self_test_passed()
+            .unwrap();
+        assert!(complete.self_test_passed);
+        assert_eq!(complete.observation_receipt_public_key, "09".repeat(32));
+        assert!(complete.package_activation.is_none());
+    }
+}

@@ -34,14 +34,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         identity.build_digest,
         format!("sha256:{}", identity.binary_digest)
     );
-    assert!(identity.clone().mark_self_test_passed().is_err());
-    let complete = identity
-        .with_observation_receipt_public_key_bytes([9; 32])
-        .mark_self_test_passed()
-        .unwrap();
-    assert!(complete.self_test_passed);
-    assert_eq!(complete.observation_receipt_public_key, "09".repeat(32));
-    assert!(complete.package_activation.is_none());
+    assert!(identity.mark_self_test_passed().is_err());
 }
 
 #[test]
