@@ -12,6 +12,14 @@ static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../schema/wire.json"))
         .expect("generated wire schema must be valid JSON")
 });
+const SCHEMA_URI: &str = "urn:vonk:agent-wire";
+static REGISTRY: LazyLock<jsonschema::Registry<'static>> = LazyLock::new(|| {
+    jsonschema::Registry::new()
+        .add(SCHEMA_URI, SCHEMA.clone())
+        .expect("generated schema resource must be valid")
+        .prepare()
+        .expect("generated schema references must resolve locally")
+});
 static VALIDATORS: LazyLock<Mutex<BTreeMap<String, Arc<jsonschema::Validator>>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
@@ -27,11 +35,11 @@ fn validator(pointer: &str) -> Result<Arc<jsonschema::Validator>, String> {
     }
     let schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$defs": SCHEMA["$defs"],
-        "$ref": pointer,
+        "$ref": format!("{SCHEMA_URI}{pointer}"),
     });
     let validator = Arc::new(
         jsonschema::options()
+            .with_registry(&REGISTRY)
             .should_validate_formats(true)
             .with_format("ip", |value: &str| {
                 value
@@ -50,6 +58,12 @@ fn pointer_component(value: &str) -> String {
 }
 
 fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
+    // Exact schema validation already checked nonnumeric scalar leaves. Only
+    // numbers and containers can contain the strict numeric token distinctions
+    // handled here; avoid compiling nullable string/bool branch validators.
+    if !value.is_number() && !value.is_array() && !value.is_object() {
+        return Ok(());
+    }
     let schema = SCHEMA
         .pointer(pointer.trim_start_matches('#'))
         .ok_or("unknown wire schema path")?;

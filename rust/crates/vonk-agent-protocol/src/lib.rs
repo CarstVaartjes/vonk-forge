@@ -29,6 +29,7 @@ pub use generated::{
     HostRuntimeRequestAction as HostRuntimeAction, RecipeRunInspectionBinding,
     RecipeRunObservationReceiptClaims,
     RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
+    RecipeRunObservationWire, RecipeRunObservationsWire,
     RestartVonkUnitOperationUnit as HostHelperRestartUnit, SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt as RecipeRunObservationReceipt,
 };
@@ -48,8 +49,9 @@ pub use package_upgrade::{
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+#[cfg(test)]
+use chrono::DateTime;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -135,14 +137,6 @@ pub fn host_helper_grant_signing_bytes(
     let mut value = HOST_HELPER_GRANT_DOMAIN.to_vec();
     value.extend(canonical_json(claims)?);
     Ok(value)
-}
-
-fn required_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 impl HostRuntimeRequest {
@@ -253,28 +247,9 @@ impl RecipeRunObservationReceipt {
     }
 }
 
-/// The only current Controller observation payload.  The receipt and its
-/// enrolled public key are mandatory so a plain run/readiness boolean can
-/// never cross the authenticated agent boundary.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationWire {
-    pub schema_version: u8,
-    pub node_id: String,
-    #[serde(flatten)]
-    pub binding: RecipeRunInspectionBinding,
-    pub observed_at: DateTime<Utc>,
-    #[serde(deserialize_with = "required_optional")]
-    pub endpoint_ready: Option<bool>,
-    pub observation_identity_sha256: String,
-    pub grant: SignedHostHelperGrant,
-    pub helper_receipt: RecipeRunObservationReceipt,
-    pub observation_receipt_public_key: String,
-}
-
 impl RecipeRunObservationWire {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        self.binding.validate()?;
+        RecipeRunInspectionBinding::from(self).validate()?;
         self.helper_receipt.validate()?;
         if self.schema_version != 1
             || !valid_node_id(&self.node_id)
@@ -290,9 +265,8 @@ impl RecipeRunObservationWire {
             || match &self.grant.claims.operation {
                 HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
                     operation.action != HostHelperContainerRuntimeAction::RunInspect
-                        || operation.job_id != self.binding.run_id
-                        || u32::try_from(self.binding.run_generation).ok()
-                            != Some(operation.attempt)
+                        || operation.job_id != self.run_id
+                        || u32::try_from(self.run_generation).ok() != Some(operation.attempt)
                         || operation.request_sha256 != self.helper_receipt.claims.request_sha256
                         || operation.observation_identity_sha256.as_deref()
                             != Some(self.observation_identity_sha256.as_str())
@@ -300,21 +274,12 @@ impl RecipeRunObservationWire {
                 _ => true,
             }
             || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
-            || (self.binding.local_address == self.binding.master_address)
-                != self.endpoint_ready.is_some()
+            || (self.local_address == self.master_address) != self.endpoint_ready.is_some()
         {
             return Err(ProtocolError::Identity("recipe run observation"));
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationsWire<'a> {
-    pub schema_version: u8,
-    pub observed_at: DateTime<Utc>,
-    pub runs: &'a [RecipeRunObservationWire],
 }
 
 pub fn recipe_run_observation_receipt_signing_bytes(
