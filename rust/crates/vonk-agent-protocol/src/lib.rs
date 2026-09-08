@@ -660,6 +660,9 @@ impl ArtifactDistributionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AgentUpgradeRequest {
+    pub rollback: PackageRollbackAuthority,
+    pub source_package_url: String,
+    pub source_package_bytes: u64,
     pub architecture: String,
     pub package_bytes: u64,
     pub package_sha256: String,
@@ -679,7 +682,19 @@ impl AgentUpgradeRequest {
         let value: Self = serde_json::from_value(claim.payload.clone())?;
         let url = url::Url::parse(&value.package_url)
             .map_err(|_| ProtocolError::Identity("agent upgrade URL"))?;
-        if value.schema_version != 1
+        let source_url = url::Url::parse(&value.source_package_url)
+            .map_err(|_| ProtocolError::Identity("rollback package URL"))?;
+        if !value.rollback.valid()
+            || !(1..=1024 * 1024 * 1024).contains(&value.source_package_bytes)
+            || source_url.scheme() != "https"
+            || source_url.host_str() != Some("install.vonkforge.ai")
+            || source_url.port().is_some()
+            || !source_url.username().is_empty()
+            || source_url.password().is_some()
+            || source_url.query().is_some()
+            || source_url.fragment().is_some()
+            || !source_url.path().ends_with("/vonk-forge-agent.deb")
+            || value.schema_version != 1
             || value.architecture != "linux-arm64"
             || !(1..=1024 * 1024 * 1024).contains(&value.package_bytes)
             || !lower_hex(&value.package_sha256, 64)

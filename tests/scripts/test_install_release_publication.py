@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,13 +88,23 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
         "Description: test\n",
         encoding="utf-8",
     )
+    binary = ("agent-" + version).encode()
+    helper = ("helper-" + version).encode()
+    for name, raw in (("vonk-agent", binary), ("vonk-agent-helper", helper)):
+        destination = root / "usr/lib/vonk-forge" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(raw)
+    key = Ed25519PrivateKey.from_private_bytes(b"k" * 32)
+    public = root / "usr/share/keyrings/vonk-forge-release.pub"
+    public.parent.mkdir(parents=True)
+    public.write_text(key.public_key().public_bytes_raw().hex() + "\n")
     package = tmp_path / f"vonk-forge-agent_{version}_{architecture}.deb"
     subprocess.run(
         ["/usr/bin/dpkg-deb", "--build", "--root-owner-group", root, package],
         check=True,
         capture_output=True,
     )
-    Path(f"{package}.host.sig").write_text("e" * 128 + "\n")
+    Path(f"{package}.host.sig").write_text(key.sign(b"VONK-HOST-ARTIFACT-V1\x00deb\x00" + hashlib.sha256(package.read_bytes()).digest()).hex() + "\n")
     _canonical(
         package.with_suffix(".provenance.json"),
         {
@@ -102,7 +113,7 @@ def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
                     "externalParameters": {"build_digest": "sha256:" + "c" * 64}
                 }
             },
-            "subject": [{"digest": {"sha256": "d" * 64}, "name": "vonk-agent"}],
+            "subject": [{"digest": {"sha256": hashlib.sha256(raw).hexdigest()}, "name": name} for name, raw in (("vonk-agent", binary), ("vonk-agent-helper", helper))],
         },
     )
     return package

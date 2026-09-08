@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from agent_package_source_publication import package_source
 from spark_lifecycle_contract import GATES as SPARK_GATES
 from spark_lifecycle_contract import ContractError as SparkContractError
 from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
@@ -666,6 +667,28 @@ def assemble(arguments: argparse.Namespace) -> str:
         def add_immutable(key: str, content: bytes, mode: int = 0o644) -> None:
             _install_object(objects, key, content, mode)
             entries.append(_object_entry(key, content, "immutable"))
+
+        from agent_package_source_publication import package_source
+
+        source_entries = [
+            (path, version) for path in packages.values()
+        ] + [(path, baseline_version) for path in baseline_packages.values()]
+        published_sources: dict[str, bytes] = {}
+        for source_path, source_version in source_entries:
+            try:
+                source = package_source(source_path, version=source_version)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+                raise PublicationError("signed package source closure is invalid") from error
+            source_key = source.object_key(channel)
+            source_raw = _canonical(source.model_dump(mode="json"))
+            if source_key in published_sources and published_sources[source_key] != source_raw:
+                raise PublicationError("package source build identity is ambiguous")
+            if source_key not in published_sources:
+                add_immutable(source_key, source_raw)
+                package_object_key = source.package_url.removeprefix("https://install.vonkforge.ai/")
+                add_immutable(package_object_key, source_path.read_bytes())
+                add_immutable(f"{package_object_key}.host.sig", (source.package.package_signature + "\n").encode())
+                published_sources[source_key] = source_raw
 
         for platform in NAS_PLATFORMS:
             key = f"{immutable_prefix}/nas/current/{platform}/vonk-nas-setup"

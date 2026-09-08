@@ -49,10 +49,10 @@ pub enum AgentUpgradeError {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HelperResponse {
+pub(crate) struct HelperResponse {
     schema_version: u8,
     request_id: Option<String>,
-    status: String,
+    pub(crate) status: String,
     evidence_sha256: Option<String>,
     #[serde(default)]
     error_code: Option<String>,
@@ -78,7 +78,8 @@ impl AgentUpgradeExecutor<'_> {
     pub async fn execute(&self, claim: &AgentClaim) -> Result<(), AgentUpgradeError> {
         let request =
             AgentUpgradeRequest::parse(claim).map_err(|_| AgentUpgradeError::InvalidClaim)?;
-        let package = self.download(&request).await?;
+        self.download(&request.source_package_url, request.source_package_bytes, &request.rollback.source.package_sha256).await?;
+        let package = self.download(&request.package_url, request.package_bytes, &request.package_sha256).await?;
         let grant = self
             .client
             .agent_upgrade_grant(claim, &request.package_sha256, &request.package_signature)
@@ -89,6 +90,7 @@ impl AgentUpgradeExecutor<'_> {
             .await
             .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
         validate_helper_response(&response, &request_id, &request.package_sha256)?;
+        if response.status != "package-installed" { return Err(AgentUpgradeError::HelperResponseInvalid); }
         // A real upgrade restarts this service from dpkg postinst before the helper
         // can answer. Reaching here is intentionally not treated as proof that the
         // new runtime is active; the controller completes only after a fresh claim
@@ -97,12 +99,12 @@ impl AgentUpgradeExecutor<'_> {
         Err(AgentUpgradeError::RestartNotObserved)
     }
 
-    async fn download(&self, request: &AgentUpgradeRequest) -> Result<PathBuf, AgentUpgradeError> {
+    async fn download(&self, package_url: &str, package_bytes: u64, package_sha256: &str) -> Result<PathBuf, AgentUpgradeError> {
         ensure_private_directory(self.incoming)?;
         let destination = self
             .incoming
-            .join(format!("{}.deb", request.package_sha256));
-        if verified_file(&destination, request.package_bytes, &request.package_sha256)? {
+            .join(format!("{}.deb", package_sha256));
+        if verified_file(&destination, package_bytes, package_sha256)? {
             return Ok(destination);
         }
         let nonce = SystemTime::now()
@@ -111,7 +113,7 @@ impl AgentUpgradeExecutor<'_> {
             .as_nanos();
         let temporary = self.incoming.join(format!(
             ".{}.{}.{}.tmp",
-            request.package_sha256,
+            package_sha256,
             std::process::id(),
             nonce
         ));
@@ -127,9 +129,9 @@ impl AgentUpgradeExecutor<'_> {
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(300))
                 .build()?;
-            let mut response = client.get(&request.package_url).send().await?;
+            let mut response = client.get(package_url).send().await?;
             if !response.status().is_success()
-                || response.content_length() != Some(request.package_bytes)
+                || response.content_length() != Some(package_bytes)
             {
                 return Err(AgentUpgradeError::DownloadIdentityInvalid);
             }
@@ -139,14 +141,14 @@ impl AgentUpgradeExecutor<'_> {
                 received = received
                     .checked_add(chunk.len() as u64)
                     .ok_or(AgentUpgradeError::DownloadIdentityInvalid)?;
-                if received > request.package_bytes {
+                if received > package_bytes {
                     return Err(AgentUpgradeError::DownloadIdentityInvalid);
                 }
                 digest.update(&chunk);
                 file.write_all(&chunk)?;
             }
-            if received != request.package_bytes
-                || hex::encode(digest.finalize()) != request.package_sha256
+            if received != package_bytes
+                || hex::encode(digest.finalize()) != package_sha256
             {
                 return Err(AgentUpgradeError::DownloadIdentityInvalid);
             }
@@ -214,7 +216,7 @@ fn verified_file(
     Ok(true)
 }
 
-fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
+pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         return Err(AgentUpgradeError::GrantInvalid);
     }
@@ -250,7 +252,7 @@ fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
     parse_strict(&response).map_err(|_| AgentUpgradeError::HelperResponseInvalid)
 }
 
-fn validate_helper_response(
+pub(crate) fn validate_helper_response(
     response: &HelperResponse,
     expected_request_id: &str,
     expected_package_sha256: &str,
@@ -286,7 +288,7 @@ fn validate_helper_response(
     }
     let expected_evidence_sha256 = hex::encode(Sha256::digest(expected_package_sha256.as_bytes()));
     if response.request_id.as_deref() != Some(expected_request_id)
-        || response.status != "package-installed"
+        || !matches!(response.status.as_str(), "package-installed" | "package-activation-confirmed")
         || response.evidence_sha256.as_deref() != Some(expected_evidence_sha256.as_str())
         || response.exit_code.is_some()
         || response.error_code.is_some()
@@ -306,6 +308,7 @@ fn stable_helper_error_code(value: &str) -> bool {
             | "grant_unauthorized"
             | "request_replayed"
             | "request_ledger_failed"
+            | "package_preflight_failed"
             | "package_verification_failed"
             | "package_metadata_failed"
             | "package_custody_failed"

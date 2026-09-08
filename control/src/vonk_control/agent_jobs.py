@@ -563,6 +563,18 @@ class AgentJobService:
                 self._project_artifact_job_expiry(session, operation, now)
                 self._aggregate_parent(session, operation.parent_job_id)
                 return None
+            if operation.kind == AgentOperation.AGENT_UPGRADE.value:
+                from vonk_agent_protocol.contracts import AgentUpgradePayload
+                import secrets
+                payload = AgentUpgradePayload.model_validate(operation.payload)
+                if runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+                    return None
+                # A new claim owns a fresh watchdog authority. The retry query
+                # already enforced the full previous rollback safety fence.
+                document = payload.model_dump(mode="json")
+                document["rollback"].update(attempt_nonce=secrets.token_hex(32), activation_deadline=int(now.timestamp()) + 900)
+                operation.payload = AgentUpgradePayload.model_validate(document).model_dump(mode="json")
+                operation.payload_digest = hashlib.sha256(canonical_message(operation.payload)).hexdigest()
             operation.current_attempt += 1
             operation.state = "running"
             operation.updated_at = now
@@ -625,7 +637,35 @@ class AgentJobService:
             .execution_options(populate_existing=True)
             .limit(1)
         )
-        if operation is None or (
+        from vonk_agent_protocol.contracts import AgentUpgradePayload
+
+        from .package_activation import matches_receipt
+        receipt = runtime_identity.package_activation
+        if operation is None or operation.current_attempt == 0 or receipt is None:
+            return
+        payload = AgentUpgradePayload.model_validate(operation.payload)
+        if not matches_receipt(receipt, payload, node_id):
+            return
+        if receipt.phase in {"rolled_back", "rollback_failed"}:
+            if receipt.phase == "rolled_back" and runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+                return
+            operation.state = "waiting-for-operator"
+            operation.retry_disposition = None
+            operation.retry_disposition_attempt = None
+            operation.updated_at = now
+            current = session.scalar(select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt))
+            if current is not None:
+                current.state = "failed"
+                current.result = {"reason": "agent package " + receipt.phase, "package_activation": receipt.model_dump(mode="json")}
+            parent = session.get(Job, operation.parent_job_id)
+            if parent is not None:
+                parent.state = "waiting-for-operator"
+                parent.status_reason = "Spark package " + receipt.phase + "; rollout stopped"
+                parent.updated_at = now
+            return
+        if receipt.phase != "acknowledged" or (
             runtime_identity.build_digest
             != operation.payload.get("target_build_digest")
             or runtime_identity.binary_digest
@@ -642,6 +682,7 @@ class AgentJobService:
             "package_version": operation.payload["package_version"],
             "self_test_passed": True,
             "status": "upgraded",
+            "activation_receipt": receipt.model_dump(mode="json"),
         }
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -651,23 +692,8 @@ class AgentJobService:
             )
             .with_for_update(of=AgentOperationAttempt)
         )
-        if operation.state == "queued" and operation.current_attempt == 0:
-            operation.current_attempt = 1
-            attempt = AgentOperationAttempt(
-                operation_id=operation.id,
-                attempt=1,
-                fence=str(uuid.uuid4()),
-                lease_deadline=now,
-                agent_certificate_serial=certificate_serial,
-                state="succeeded",
-                result=_document(evidence),
-            )
-            session.add(attempt)
-        elif attempt is None or attempt.state not in {
-            "running",
-            "waiting-for-operator",
-            "expired",
-            "failed",
+        if attempt is None or attempt.state not in {
+            "running", "waiting-for-operator", "expired", "failed",
         }:
             return
         message = AgentResult(

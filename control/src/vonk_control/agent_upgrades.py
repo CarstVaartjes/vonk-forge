@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import secrets
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -13,8 +14,10 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol.package_source import AgentPackageSource
 
 from .agent_jobs import AgentJobService
+from .agent_package_source import load_package_source
 from .agent_upgrade_status import RECOVERABLE_AGENT_UPGRADE_REASONS
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
@@ -28,11 +31,12 @@ _ONLINE_WINDOW = timedelta(seconds=150)
 # Both the sole automatic retry and every operator-triggered retry wait through
 # this explicit controller safety window. It is a stable dispatch contract, not
 # a derivation from package-helper implementation timeouts.
-_AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=240)
+_AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
 _TARGET_PROTOCOL_VERSION = 3
 _RECOVERABLE_HELPER_BRIDGE_FAILURES = RECOVERABLE_AGENT_UPGRADE_REASONS
 _RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
     "agent upgrade did not restart the service",
+    "agent upgrade helper rejected the request: package_preflight_failed",
     "agent upgrade helper rejected the request: package_verification_failed",
     "agent upgrade helper rejected the request: package_metadata_failed",
     "agent upgrade helper rejected the request: package_custody_failed",
@@ -56,6 +60,7 @@ class AgentUpgradePlan:
     plan_digest: str
     repair_manifest: dict[str, object] | None
     strategy: str
+    sources: dict[str, dict[str, object]]
 
 
 class AgentUpgradeService:
@@ -173,6 +178,7 @@ class AgentUpgradeService:
             )
         authority_revision = self._current_revision()
         now = self._clock()
+        sources: dict[str, dict[str, object]] = {}
         with self._sessions() as session:
             requested = None if node_ids is None else tuple(node_ids)
             if requested is not None and (
@@ -216,7 +222,13 @@ class AgentUpgradeService:
                     raise AgentUpgradeConflict(
                         f"Spark {node_id} already runs the requested agent build"
                     )
+                try:
+                    source = load_package_source(self._http, self._channel, node.build_digest or "", node.binary_digest or "")
+                except (httpx.HTTPError, ValueError) as error:
+                    raise AgentUpgradeConflict(f"Spark {node_id} exact signed rollback package is unavailable") from error
+                sources[node_id] = source.model_dump(mode="json")
         document = {
+            "sources": sources,
             "authority_revision": authority_revision,
             "node_ids": list(targets),
             "package": payload,
@@ -230,6 +242,7 @@ class AgentUpgradeService:
             plan_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
             repair_manifest=repair,
             strategy=strategy,
+            sources=sources,
         )
 
     def apply(
@@ -261,6 +274,7 @@ class AgentUpgradeService:
             targets=list(plan.node_ids),
             payload_digest=plan.plan_digest,
             payload={
+                "sources": plan.sources,
                 "node_order": list(plan.node_ids),
                 "package": plan.package,
                 **(
@@ -338,7 +352,7 @@ class AgentUpgradeService:
             order = parent.payload.get("node_order")
             strategy = parent.payload.get("strategy")
             repair = parent.payload.get("repair_manifest")
-            expected_payload_keys = {"node_order", "package", "strategy"}
+            expected_payload_keys = {"node_order", "package", "strategy", "sources"}
             if repair is not None:
                 expected_payload_keys.add("repair_manifest")
             if (
@@ -368,6 +382,7 @@ class AgentUpgradeService:
             plan_digest = hashlib.sha256(
                 canonical_message(
                     {
+                        "sources": parent.payload["sources"],
                         "authority_revision": parent.authority_revision,
                         "node_ids": order,
                         "package": normalized_package,
@@ -382,7 +397,10 @@ class AgentUpgradeService:
             ).hexdigest()
             if parent.payload_digest != plan_digest:
                 raise ValueError("stored agent upgrade plan is invalid")
-            payload_digest = hashlib.sha256(canonical_message(package)).hexdigest()
+            from vonk_agent_protocol.contracts import AgentUpgradePayload
+            sources = parent.payload["sources"]
+            if not isinstance(sources, dict) or set(sources) != set(order):
+                raise ValueError("stored rollback sources are invalid")
             stored_operations = list(
                 session.scalars(
                     select(AgentOperation)
@@ -406,12 +424,17 @@ class AgentUpgradeService:
             ):
                 raise ValueError("stored agent upgrade operation is invalid")
             for operation in stored_operations:
+                payload = AgentUpgradePayload.model_validate(operation.payload)
+                source = AgentPackageSource.model_validate(sources[operation.node_id])
                 if (
                     operation.kind != "agent.upgrade.v1"
                     or operation.node_id not in order
                     or operation.authority_revision != parent.authority_revision
-                    or operation.payload != package
-                    or operation.payload_digest != payload_digest
+                    or {key: value for key, value in operation.payload.items() if key not in {"rollback", "source_package_bytes", "source_package_url"}} != package
+                    or payload.rollback.source != source.package
+                    or payload.source_package_bytes != source.package_bytes
+                    or payload.source_package_url != source.package_url
+                    or operation.payload_digest != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
                     raise ValueError("stored agent upgrade operation is invalid")
             materialized = {
@@ -625,6 +648,16 @@ class AgentUpgradeService:
             else operation.created_at.replace(tzinfo=UTC)
         )
         evidence = message.result
+        from vonk_agent_protocol.contracts import AgentUpgradePayload
+        from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+
+        from .package_activation import matches_receipt
+        raw_receipt = evidence.get("activation_receipt")
+        if raw_receipt is None:
+            return False
+        receipt = PackageActivationReceipt.model_validate(raw_receipt)
+        if receipt.phase != "acknowledged" or not matches_receipt(receipt, AgentUpgradePayload.model_validate(operation.payload), node.node_id):
+            return False
         return bool(
             observed >= dispatched
             and node.state == "active"
@@ -702,19 +735,33 @@ class AgentUpgradeService:
             parent.status_reason = f"Spark {next_node} {reason}"
             parent.updated_at = self._clock()
             return
-        self._enqueue_node(session, parent, next_node)
+        try:
+            self._enqueue_node(session, parent, next_node)
+        except AgentUpgradeConflict as error:
+            parent.state = "waiting-for-operator"
+            parent.status_reason = str(error)
+            parent.updated_at = self._clock()
 
     def _enqueue_node(self, session: Session, parent: Job, node_id: str) -> None:
         package = parent.payload.get("package")
         if not isinstance(package, dict):
             raise AgentUpgradeConflict("stored agent upgrade package is invalid")
+        source = AgentPackageSource.model_validate(parent.payload["sources"][node_id])
+        node = session.get(AgentNode, node_id)
+        if node is None or node.binary_digest != source.package.binary_sha256 or node.build_digest != source.build_digest:
+            raise AgentUpgradeConflict("rollback source no longer matches installed agent")
+        payload = {**package, "source_package_bytes": source.package_bytes,
+            "source_package_url": source.package_url,
+            "rollback": {"source": source.package.model_dump(mode="json"),
+                "attempt_nonce": secrets.token_hex(32),
+                "activation_deadline": int(self._clock().timestamp()) + 900}}
         self._operations.enqueue_in_session(
             session,
             parent.id,
             node_id,
             "agent.upgrade.v1",
             parent.authority_revision,
-            package,
+            payload,
             operation_id=str(uuid.uuid4()),
         )
 
