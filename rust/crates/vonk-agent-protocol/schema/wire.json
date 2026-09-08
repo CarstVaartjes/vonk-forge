@@ -5767,11 +5767,43 @@
       },
       "required": [
         "schema_version",
-        "manifest_sha256",
+        "total_bytes",
+        "files",
+        "manifest_sha256"
+      ],
+      "title": "RecipeJobOutputManifest",
+      "type": "object"
+    },
+    "RecipeJobOutputManifestContent": {
+      "additionalProperties": false,
+      "description": "Canonical output bytes hashed before the manifest digest is attached.",
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/RecipeJobFile"
+          },
+          "maxItems": 32,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "total_bytes": {
+          "maximum": 2147483648,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
         "total_bytes",
         "files"
       ],
-      "title": "RecipeJobOutputManifest",
+      "title": "RecipeJobOutputManifestContent",
       "type": "object"
     },
     "RecipeJobOutputMapping": {
@@ -10032,6 +10064,9 @@
     "CompiledDistributionObject": [
       "DistributionObject"
     ],
+    "RecipeJobOutputManifest": [
+      "RecipeJobOutputManifestContent"
+    ],
     "RecipeRunObservationGrantRequest": [
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
@@ -10140,6 +10175,7 @@
     "RecipeJobInputManifest": "#/$defs/RecipeJobInputManifest",
     "RecipeJobOutputLimits": "#/$defs/RecipeJobOutputLimits",
     "RecipeJobOutputManifest": "#/$defs/RecipeJobOutputManifest",
+    "RecipeJobOutputManifestContent": "#/$defs/RecipeJobOutputManifestContent",
     "RecipeJobOutputMapping": "#/$defs/RecipeJobOutputMapping",
     "RecipeJobRunRequest": "#/$defs/RecipeJobRunRequest",
     "RecipeJobRunResult": "#/$defs/RecipeJobRunResult",

@@ -313,8 +313,25 @@ impl<R> RecipeExecutor<'_, R> {
                 Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     schema_version: 1,
                     node_id: self.client.node_id().to_owned(),
-                    observed_at,
-                    binding: plan.binding,
+                    observed_at: observed_at.into(),
+                    artifact_set_digest: plan.binding.artifact_set_digest,
+                    image_digest: plan.binding.image_digest,
+                    installation_id: plan.binding.installation_id,
+                    local_address: plan.binding.local_address,
+                    mapping_generation: plan.binding.mapping_generation,
+                    mapping_id: plan.binding.mapping_id,
+                    master_address: plan.binding.master_address,
+                    master_port: plan.binding.master_port,
+                    model_identity: plan.binding.model_identity,
+                    port: plan.binding.port,
+                    rank: plan.binding.rank,
+                    recipe_content_sha256: plan.binding.recipe_content_sha256,
+                    recipe_revision_id: plan.binding.recipe_revision_id,
+                    role: plan.binding.role,
+                    run_generation: plan.binding.run_generation,
+                    run_id: plan.binding.run_id,
+                    runtime_arguments_sha256: plan.binding.runtime_arguments_sha256,
+                    world_size: plan.binding.world_size,
                     endpoint_ready,
                     grant: outcome.grant,
                     observation_identity_sha256: outcome.observation_identity_sha256,
@@ -2086,17 +2103,27 @@ fn cancelled_job(
     }
 }
 
-fn empty_job_output_manifest() -> RecipeJobOutputManifest {
-    let value = json!({"schema_version": 1, "total_bytes": 0, "files": []});
-    let manifest_sha256 = canonical_json(&value)
-        .map(|bytes| hex_sha256(&bytes))
-        .unwrap_or_default();
-    RecipeJobOutputManifest {
-        schema_version: 1,
+fn output_manifest_with_digest(
+    content: vonk_agent_protocol::generated::RecipeJobOutputManifestContent,
+) -> Result<RecipeJobOutputManifest, ProtocolError> {
+    let manifest_sha256 = hex_sha256(&canonical_json(&content)?);
+    Ok(RecipeJobOutputManifest {
+        schema_version: content.schema_version,
         manifest_sha256,
-        total_bytes: 0,
-        files: Vec::new(),
-    }
+        total_bytes: content.total_bytes,
+        files: content.files,
+    })
+}
+
+fn empty_job_output_manifest() -> RecipeJobOutputManifest {
+    output_manifest_with_digest(
+        vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
+            schema_version: 1,
+            total_bytes: 0,
+            files: Vec::new(),
+        },
+    )
+    .expect("canonical empty job manifest")
 }
 
 fn job_result_body(
@@ -2193,17 +2220,15 @@ fn collect_job_outputs(
             sha256: hex::encode(hasher.finalize()),
         });
     }
-    let manifest = json!({"schema_version": 1, "total_bytes": total_bytes, "files": files});
-    let manifest_sha256 = canonical_json(&manifest)
-        .map(|bytes| hex_sha256(&bytes))
-        .map_err(|_| "job output manifest is invalid")?;
-    Ok(RecipeJobOutputManifest {
-        schema_version: 1,
-        manifest_sha256,
-        total_bytes: u32::try_from(total_bytes)
-            .map_err(|_| "job output total size exceeded its bound")?,
-        files,
-    })
+    output_manifest_with_digest(
+        vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
+            schema_version: 1,
+            total_bytes: u32::try_from(total_bytes)
+                .map_err(|_| "job output total size exceeded its bound")?,
+            files,
+        },
+    )
+    .map_err(|_| "job output manifest is invalid")
 }
 
 fn valid_job_output_name(value: &str) -> bool {
