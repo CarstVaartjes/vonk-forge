@@ -2431,3 +2431,26 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     back_to_a = service.preview(profile_a.id)
     assert [step.kind for step in back_to_a.steps] == ["start"]
     assert back_to_a.summary.installs == 0
+
+
+@pytest.mark.parametrize("damage", ["numeric-topology", "missing-nodes", "extra", "invalid-root"])
+def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(_input(revision_id), actor="admin")
+    assert service.get(created.id) == created
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assignments = deepcopy(row.assignments)
+        if damage == "invalid-root":
+            assignments = {}
+        elif damage == "numeric-topology":
+            assignments[0]["topology_name"] = 123
+        elif damage == "missing-nodes":
+            del assignments[0]["nodes"]
+        else:
+            assignments[0]["undeclared"] = None
+        row.assignments = assignments
+    with pytest.raises(FleetProfileConflict, match="stored Fleet profile assignment is invalid"):
+        service.get(created.id)

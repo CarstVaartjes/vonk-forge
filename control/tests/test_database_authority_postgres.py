@@ -200,3 +200,20 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
             ).scalar_one()
             == 1
         )
+
+
+@pytest.mark.parametrize("dependencies", [{"inventory/a.json": "invalid"}, {"inventory/a.json": [1]}, [], None])
+def test_postgres_authority_dependencies_reject_corruption_without_filtering(authority, dependencies):
+    service, proposals, sessions = authority
+    base = service.ensure_initialized()
+    preview = proposals.preview("admin", base, [AuthorityChange(AUTHORITY_DOCUMENT_PATH, {"status": "current"})])
+    revision = service.apply(preview)
+    assert dict(service.inspect(revision).dependencies) == {}
+    next_preview = proposals.preview("admin", revision, [AuthorityChange(AUTHORITY_DOCUMENT_PATH, {"status": "changed"})])
+    with sessions.begin() as session:
+        session.get(ControlAuthorityRevision, revision).dependencies = dependencies
+    with pytest.raises(AuthorityPolicyError, match="authority dependencies are invalid"):
+        service.inspect(revision)
+    with pytest.raises(AuthorityPolicyError, match="authority dependencies are invalid"):
+        service.apply(next_preview)
+    assert service.head() == revision

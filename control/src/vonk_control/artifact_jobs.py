@@ -126,6 +126,31 @@ class ArtifactJobResultEvidence(ArtifactJobContractModel):
     peak_memory_bytes: int | None = Field(default=None, ge=0)
 
 
+def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
+    try:
+        manifest = RecipeJobInputManifest.model_validate_json(
+            canonical_message(job.input_manifest)
+        )
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("stored artifact input manifest is invalid") from error
+    if (
+        manifest.total_bytes != job.input_total_bytes
+        or recipe_job_manifest_sha256(manifest.files) != job.input_manifest_sha256
+    ):
+        raise ArtifactJobError("stored artifact input manifest identity is invalid")
+    return manifest
+
+
+def _result_evidence(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    try:
+        evidence = ArtifactJobResultEvidence.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("stored artifact result evidence is invalid") from error
+    return json.loads(canonical_message(evidence))
+
+
 class ArtifactJobResponse(ArtifactJobContractModel):
     model_config = ConfigDict(extra="forbid", strict=True, from_attributes=True)
 
@@ -943,7 +968,7 @@ class ArtifactJobService:
                 return self._view_in_session(session, job)
             if job.state != "draft":
                 raise ArtifactJobError("artifact job cannot be finalized")
-            expected = job.input_manifest.get("files")
+            expected = _input_manifest(job).model_dump(mode="json")["files"]
             uploaded = self._files_in_session(session, job_id, "input")
             observed = [self._file_mapping(item) for item in uploaded]
             if expected != observed:
@@ -1003,7 +1028,7 @@ class ArtifactJobService:
                 parameters=artifact_job.parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
             )
-            raw_files = artifact_job.input_manifest["files"]
+            raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
                 "schema_version": 1,
                 "job_id": artifact_job.id,
@@ -1080,14 +1105,13 @@ class ArtifactJobService:
                 raise KeyError(job_id)
             operation_id = job.operation_id
             state = job.state
-            evidence = (
-                job.result_evidence if isinstance(job.result_evidence, Mapping) else {}
-            )
+            evidence = _result_evidence(job.result_evidence)
         if state in {"succeeded", "failed"}:
             raise ArtifactJobError("artifact job is not cancellable")
         if state == "cancelled" and operation_id is None:
             if (
-                evidence.get("cancel_request_id") == request_id
+                evidence is not None
+                and evidence.get("cancel_request_id") == request_id
                 and evidence.get("cancel_actor") == actor
                 and evidence.get("cancel_reason") == cancellation_reason
             ):
@@ -1118,16 +1142,16 @@ class ArtifactJobService:
             if job.state not in {"succeeded", "failed", "cancelled"}:
                 job.state = "cancelling" if cancel_pending else "cancelled"
                 job.status_reason = cancellation_reason
-                job.result_evidence = {
+                job.result_evidence = _result_evidence({
                     **(
-                        dict(job.result_evidence)
-                        if isinstance(job.result_evidence, Mapping)
+                        _result_evidence(job.result_evidence)
+                        if job.result_evidence is not None
                         else {}
                     ),
                     "cancel_request_id": request_id,
                     "cancel_actor": actor,
                     "cancel_reason": cancellation_reason,
-                }
+                })
                 job.completed_at = None if cancel_pending else now
                 job.updated_at = now
             return self._view_in_session(session, job)
@@ -1379,13 +1403,13 @@ class ArtifactJobService:
                 if waiting_result.reason
                 else "artifact cancellation could not safely stop the active scope"
             )[:512]
-            artifact_job.result_evidence = {
+            artifact_job.result_evidence = _result_evidence({
                 "failure_kind": "cancellation-stop-uncertain",
                 "recoverable": True,
                 "active_scope_may_remain": True,
                 "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
                 "peak_memory_bytes": waiting_result.peak_memory_bytes,
-            }
+            })
             artifact_job.updated_at = now
             return
         try:
@@ -1448,10 +1472,10 @@ class ArtifactJobService:
             **recipe_job_manifest_document(result.outputs),
             "manifest_sha256": result.output_manifest_sha256,
         }
-        artifact_job.result_evidence = {
+        artifact_job.result_evidence = _result_evidence({
             "elapsed_milliseconds": result.elapsed_milliseconds,
             "peak_memory_bytes": result.peak_memory_bytes,
-        }
+        })
         artifact_job.state = (
             "succeeded" if succeeded else "cancelled" if cancelled else "failed"
         )
@@ -1539,15 +1563,8 @@ class ArtifactJobService:
 
     @staticmethod
     def _input_declaration(job: ArtifactJob, name: str) -> Mapping[str, object] | None:
-        declarations = job.input_manifest.get("files")
-        if not isinstance(declarations, list):
-            return None
         return next(
-            (
-                item
-                for item in declarations
-                if isinstance(item, Mapping) and item.get("name") == name
-            ),
+            (item.model_dump(mode="json") for item in _input_manifest(job).files if item.name == name),
             None,
         )
 
@@ -1599,6 +1616,7 @@ class ArtifactJobService:
             for item in self._files_in_session(session, job.id, "output")
         )
         contract = _canonical_contract(job.compiled_contract)
+        manifest = _input_manifest(job)
         view = ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
@@ -1610,15 +1628,13 @@ class ArtifactJobService:
             input_manifest_sha256=job.input_manifest_sha256,
             input_total_bytes=job.input_total_bytes,
             input_declarations=tuple(
-                dict(item)
-                for item in job.input_manifest.get("files", [])
-                if isinstance(item, Mapping)
+                item.model_dump(mode="json") for item in manifest.files
             ),
             input_files=inputs,
             output_limits=dict(job.output_limits),
             output_manifest_sha256=job.output_manifest_sha256,
             output_files=outputs,
-            result_evidence=dict(job.result_evidence) if job.result_evidence else None,
+            result_evidence=_result_evidence(job.result_evidence),
             status_reason=job.status_reason,
             timeout_seconds=job.timeout_seconds,
             created_at=job.created_at,

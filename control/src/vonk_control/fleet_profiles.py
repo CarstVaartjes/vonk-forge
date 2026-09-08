@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
-from pydantic import ValidationError
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,6 +43,7 @@ from .fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileView,
+    StoredFleetProfileAssignment,
 )
 from .logging import redact_text
 from .models import (
@@ -82,6 +83,9 @@ from .run_switch_operations import (
     RunSwitchOperationService,
 )
 
+_STORED_ASSIGNMENTS = TypeAdapter(
+    list[StoredFleetProfileAssignment], config=ConfigDict(strict=True)
+)
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _ACTIVE_INSTALL_STATES = frozenset(
     {"planned", "installing", "installed", "partial", "failed"}
@@ -2425,14 +2429,9 @@ class FleetProfileService:
                         "profile Spark is not an active enrolled Fleet member"
                     )
             assignments.append(
-                {
-                    "id": _assignment_id(value),
-                    "recipe_revision_id": value.recipe_revision_id,
-                    "topology_name": value.topology_name,
-                    "desired_state": value.desired_state,
-                    "alias": value.alias,
-                    "nodes": [node.model_dump(mode="json") for node in value.nodes],
-                }
+                json.loads(canonical_message(StoredFleetProfileAssignment(
+                    id=_assignment_id(value), **value.model_dump(mode="python")
+                )))
             )
         return assignments
 
@@ -2470,14 +2469,12 @@ class FleetProfileService:
 
     def _view(self, session: Session, row: FleetProfile) -> FleetProfileView:
         assignments: list[FleetProfileAssignment] = []
-        for raw in row.assignments:
-            if not isinstance(raw, Mapping):
-                raise FleetProfileConflict("stored Fleet profile assignment is invalid")
-            revision_id = raw.get("recipe_revision_id")
-            if not isinstance(revision_id, str):
-                raise FleetProfileConflict(
-                    "stored Fleet profile recipe revision is invalid"
-                )
+        try:
+            stored_assignments = _STORED_ASSIGNMENTS.validate_json(canonical_message(row.assignments))
+        except (TypeError, ValueError) as error:
+            raise FleetProfileConflict("stored Fleet profile assignment is invalid") from error
+        for assignment in stored_assignments:
+            revision_id = assignment.recipe_revision_id
             revision = session.get(CatalogDocumentRevision, revision_id)
             if revision is None:
                 raise FleetProfileConflict(
@@ -2489,18 +2486,10 @@ class FleetProfileService:
             model_title = self._model_title(session, revision.document)
             assignments.append(
                 FleetProfileAssignment(
-                    id=str(raw["id"]),
+                    **assignment.model_dump(mode="python"),
                     recipe_id=recipe.id,
                     recipe_title=recipe.title,
                     model_title=model_title,
-                    recipe_revision_id=revision.id,
-                    topology_name=str(raw["topology_name"]),
-                    desired_state=str(raw["desired_state"]),
-                    alias=raw.get("alias"),
-                    nodes=[
-                        FleetProfileNode.model_validate(item)
-                        for item in raw.get("nodes", [])
-                    ],
                 )
             )
         scope = list(row.scope)

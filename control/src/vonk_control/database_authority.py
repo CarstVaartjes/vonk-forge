@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 
+from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import (
     ControlAuthorityHead,
@@ -22,6 +24,7 @@ from .models import (
 from .serializers import serialize_document
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
+_DEPENDENCIES = TypeAdapter(dict[str, list[str]], config=ConfigDict(strict=True))
 _ALLOWED_ROOTS = ("inventory/", "locks/", "manifests/", "docs/audits/")
 
 
@@ -87,6 +90,13 @@ def _document_map(value: object) -> dict[str, object]:
     return {str(path): document for path, document in value.items()}
 
 
+def _dependency_map(value: object) -> dict[str, list[str]]:
+    try:
+        return _DEPENDENCIES.validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise AuthorityPolicyError("authority dependencies are invalid") from error
+
+
 class DatabaseAuthorityService:
     """Immutable authority revisions with a PostgreSQL-owned current head."""
 
@@ -115,7 +125,7 @@ class DatabaseAuthorityService:
             head = session.get(ControlAuthorityHead, 1)
             if head is not None:
                 return head.revision_id
-            dependencies: dict[str, list[str]] = {}
+            dependencies = _dependency_map({})
             documents: dict[str, object] = {}
             revision_id = _revision(documents, dependencies)
             now = self._clock()
@@ -165,8 +175,7 @@ class DatabaseAuthorityService:
             }
             dependencies = {
                 path: tuple(values)
-                for path, values in _document_map(row.dependencies).items()
-                if isinstance(values, Sequence) and not isinstance(values, (str, bytes))
+                for path, values in _dependency_map(row.dependencies).items()
             }
             return AuthoritySnapshot(
                 row.revision_id,
@@ -233,7 +242,7 @@ class DatabaseAuthorityService:
             documents = _document_map(parent.documents)
             for change in proposal.changes:
                 documents[str(change["path"])] = change["document"]
-            dependencies = _document_map(parent.dependencies)
+            dependencies = _dependency_map(parent.dependencies)
             revision_id = _revision(documents, dependencies)
             existing = session.get(ControlAuthorityRevision, revision_id)
             if existing is None:
