@@ -11,8 +11,8 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
+  from ..models.stored_admission_reason import StoredAdmissionReason
   from ..models.uninstall_active_run_response import UninstallActiveRunResponse
-  from ..models.plan_reason import PlanReason
   from ..models.model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
 
 
@@ -30,7 +30,7 @@ class ModelDeletionPlanResponse:
             active_run_count (int):
             active_runs (list['UninstallActiveRunResponse']):
             allowed (bool):
-            blockers (list['PlanReason']):
+            blockers (list['StoredAdmissionReason']):
             bytes_removed (int): Bytes freed from affected installation copies; shared/global cache bytes are excluded.
             installations (list['ModelDeletionInstallationImpactResponse']):
             model_content_sha256 (str):
@@ -39,13 +39,13 @@ class ModelDeletionPlanResponse:
             plan_digest (str):
             shared_cache_policy (Literal['retain-shared-download-cache']): Shared/global downloaded model caches remain
                 installed.
-            warnings (list['PlanReason']):
+            warnings (list['StoredAdmissionReason']):
      """
 
     active_run_count: int
     active_runs: list['UninstallActiveRunResponse']
     allowed: bool
-    blockers: list['PlanReason']
+    blockers: list['StoredAdmissionReason']
     bytes_removed: int
     installations: list['ModelDeletionInstallationImpactResponse']
     model_content_sha256: str
@@ -53,7 +53,7 @@ class ModelDeletionPlanResponse:
     nodes: list['ModelDeletionNodeImpactResponse']
     plan_digest: str
     shared_cache_policy: Literal['retain-shared-download-cache']
-    warnings: list['PlanReason']
+    warnings: list['StoredAdmissionReason']
 
 
 
@@ -61,8 +61,8 @@ class ModelDeletionPlanResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
-        from ..models.plan_reason import PlanReason
         from ..models.model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
         active_run_count = self.active_run_count
 
@@ -138,8 +138,8 @@ class ModelDeletionPlanResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
-        from ..models.plan_reason import PlanReason
         from ..models.model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
         d = dict(src_dict)
         active_run_count = d.pop("active_run_count")
@@ -159,7 +159,7 @@ class ModelDeletionPlanResponse:
         blockers = []
         _blockers = d.pop("blockers")
         for blockers_item_data in (_blockers):
-            blockers_item = PlanReason.from_dict(blockers_item_data)
+            blockers_item = StoredAdmissionReason.from_dict(blockers_item_data)
 
 
 
@@ -201,7 +201,7 @@ class ModelDeletionPlanResponse:
         warnings = []
         _warnings = d.pop("warnings")
         for warnings_item_data in (_warnings):
-            warnings_item = PlanReason.from_dict(warnings_item_data)
+            warnings_item = StoredAdmissionReason.from_dict(warnings_item_data)
 
 
 

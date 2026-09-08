@@ -12,7 +12,7 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.plan_reason import PlanReason
+  from ..models.stored_admission_reason import StoredAdmissionReason
   from ..models.stop_node_impact_response import StopNodeImpactResponse
 
 
@@ -30,7 +30,7 @@ class StopPlanResponse:
             alias (str):
             allowed (bool):
             authority_digest (str):
-            blockers (list['PlanReason']):
+            blockers (list['StoredAdmissionReason']):
             installation_id (str):
             nodes (list['StopNodeImpactResponse']):
             plan_digest (str):
@@ -40,7 +40,7 @@ class StopPlanResponse:
             run_id (str):
             run_state (str):
             total_active_memory_reservation_bytes (int):
-            warnings (list['PlanReason']):
+            warnings (list['StoredAdmissionReason']):
             route_digest (Union[None, Unset, str]):
             route_generation (Union[None, Unset, int]):
      """
@@ -48,7 +48,7 @@ class StopPlanResponse:
     alias: str
     allowed: bool
     authority_digest: str
-    blockers: list['PlanReason']
+    blockers: list['StoredAdmissionReason']
     installation_id: str
     nodes: list['StopNodeImpactResponse']
     plan_digest: str
@@ -58,7 +58,7 @@ class StopPlanResponse:
     run_id: str
     run_state: str
     total_active_memory_reservation_bytes: int
-    warnings: list['PlanReason']
+    warnings: list['StoredAdmissionReason']
     route_digest: Union[None, Unset, str] = UNSET
     route_generation: Union[None, Unset, int] = UNSET
 
@@ -67,7 +67,7 @@ class StopPlanResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.stop_node_impact_response import StopNodeImpactResponse
         alias = self.alias
 
@@ -154,7 +154,7 @@ class StopPlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.stop_node_impact_response import StopNodeImpactResponse
         d = dict(src_dict)
         alias = d.pop("alias")
@@ -166,7 +166,7 @@ class StopPlanResponse:
         blockers = []
         _blockers = d.pop("blockers")
         for blockers_item_data in (_blockers):
-            blockers_item = PlanReason.from_dict(blockers_item_data)
+            blockers_item = StoredAdmissionReason.from_dict(blockers_item_data)
 
 
 
@@ -202,7 +202,7 @@ class StopPlanResponse:
         warnings = []
         _warnings = d.pop("warnings")
         for warnings_item_data in (_warnings):
-            warnings_item = PlanReason.from_dict(warnings_item_data)
+            warnings_item = StoredAdmissionReason.from_dict(warnings_item_data)
 
 
 

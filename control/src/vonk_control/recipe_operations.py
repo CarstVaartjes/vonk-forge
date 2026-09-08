@@ -79,8 +79,8 @@ from .recipe_execution_contract import (
     parse_stored_build_policy,
     parse_stored_installation_plan,
     parse_stored_run_plan,
-    run_plan_document,
     run_endpoint_document,
+    run_plan_document,
 )
 from .recipe_lifecycle_contract import (
     parse_recipe_lifecycle_result,
@@ -3057,10 +3057,7 @@ class RecipeOperationService:
                 nodes_by_installation.get(installation.id, []),
                 key=lambda item: (item.rank, item.node_id),
             )
-            try:
-                expected = _stored_installation_plan(installation.plan).get("nodes")
-            except RecipeOperationConflict:
-                raise
+            expected = _stored_installation_plan(installation.plan).get("nodes")
             exact = (
                 installation.state == "installed"
                 and isinstance(expected, list)

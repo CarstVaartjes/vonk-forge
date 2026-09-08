@@ -12,7 +12,7 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.plan_reason import PlanReason
+  from ..models.stored_admission_reason import StoredAdmissionReason
   from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
   from ..models.uninstall_active_run_response import UninstallActiveRunResponse
   from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
@@ -35,7 +35,7 @@ class UninstallPlanResponse:
             active_runs (list['UninstallActiveRunResponse']):
             active_runs_truncated (bool):
             allowed (bool):
-            blockers (list['PlanReason']):
+            blockers (list['StoredAdmissionReason']):
             consequences (UninstallConsequencesResponse):
             installation_authority_digest (str):
             installation_id (str):
@@ -48,7 +48,7 @@ class UninstallPlanResponse:
             recipe_content_sha256 (str):
             recipe_id (str):
             recipe_revision_id (str):
-            warnings (list['PlanReason']):
+            warnings (list['StoredAdmissionReason']):
             bytes_removed (Union[None, Unset, int]):
      """
 
@@ -56,7 +56,7 @@ class UninstallPlanResponse:
     active_runs: list['UninstallActiveRunResponse']
     active_runs_truncated: bool
     allowed: bool
-    blockers: list['PlanReason']
+    blockers: list['StoredAdmissionReason']
     consequences: 'UninstallConsequencesResponse'
     installation_authority_digest: str
     installation_id: str
@@ -69,7 +69,7 @@ class UninstallPlanResponse:
     recipe_content_sha256: str
     recipe_id: str
     recipe_revision_id: str
-    warnings: list['PlanReason']
+    warnings: list['StoredAdmissionReason']
     bytes_removed: Union[None, Unset, int] = UNSET
 
 
@@ -77,7 +77,7 @@ class UninstallPlanResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
         from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
@@ -177,7 +177,7 @@ class UninstallPlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
         from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
@@ -203,7 +203,7 @@ class UninstallPlanResponse:
         blockers = []
         _blockers = d.pop("blockers")
         for blockers_item_data in (_blockers):
-            blockers_item = PlanReason.from_dict(blockers_item_data)
+            blockers_item = StoredAdmissionReason.from_dict(blockers_item_data)
 
 
 
@@ -254,7 +254,7 @@ class UninstallPlanResponse:
         warnings = []
         _warnings = d.pop("warnings")
         for warnings_item_data in (_warnings):
-            warnings_item = PlanReason.from_dict(warnings_item_data)
+            warnings_item = StoredAdmissionReason.from_dict(warnings_item_data)
 
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Annotated, Literal, TypeVar
+from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol import (
@@ -22,7 +22,6 @@ from vonk_agent_protocol import (
 
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
-
 
 DateTimeString = Annotated[
     str,
@@ -163,10 +162,9 @@ class StoredBuildPolicyReport(_PersistedModel):
     artifact_format: str = Field(min_length=1, max_length=64)
 
 
-_ModelT = TypeVar("_ModelT", bound=_PersistedModel)
-
-
-def _validate_json(value: object, model: type[_ModelT], label: str) -> _ModelT:
+def _validate_json[ModelT: _PersistedModel](
+    value: object, model: type[ModelT], label: str
+) -> ModelT:
     try:
         # Always take the JSON path.  This keeps decoded DB arrays/objects
         # subject to the same strict semantics as bytes received on the wire.

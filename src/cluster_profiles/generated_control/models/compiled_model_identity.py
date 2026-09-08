@@ -12,17 +12,13 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="ModelCatalogIdentity")
+T = TypeVar("T", bound="CompiledModelIdentity")
 
 
 
 @_attrs_define
-class ModelCatalogIdentity:
-    """ Safe model identity used for display and execution evidence.
-
-    Upstream repository and revision fields deliberately do not exist here.
-    They remain Controller/cache inputs and are never sent to a Spark.
-
+class CompiledModelIdentity:
+    """
         Attributes:
             content_sha256 (str):
             publisher (str):
@@ -66,10 +62,10 @@ class ModelCatalogIdentity:
 
         slug = d.pop("slug")
 
-        model_catalog_identity = cls(
+        compiled_model_identity = cls(
             content_sha256=content_sha256,
             publisher=publisher,
             slug=slug,
         )
 
-        return model_catalog_identity
+        return compiled_model_identity

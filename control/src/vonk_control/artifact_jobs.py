@@ -52,12 +52,12 @@ from .models import (
     RecipeRun,
     RunNode,
 )
-from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
+from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .strict_json import StrictJSONModel
 
 MAX_INPUT_FILES = 32

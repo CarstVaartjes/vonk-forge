@@ -18,7 +18,6 @@ from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
-from .inventory_repository import InventoryRepository
 from .catalog_revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
@@ -27,6 +26,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from .inventory_repository import InventoryRepository
 from .models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -36,7 +36,6 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
-from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -44,6 +43,7 @@ from .recipe_execution_contract import (
     parse_stored_build_plan,
     parse_stored_build_policy,
 )
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,

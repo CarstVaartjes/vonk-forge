@@ -6,8 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.distribution_object_receipt_kind import check_distribution_object_receipt_kind
-from ..models.distribution_object_receipt_kind import DistributionObjectReceiptKind
+from ..models.compiled_distribution_object_kind import check_compiled_distribution_object_kind
+from ..models.compiled_distribution_object_kind import CompiledDistributionObjectKind
 from typing import cast
 
 
@@ -15,23 +15,23 @@ from typing import cast
 
 
 
-T = TypeVar("T", bound="DistributionObjectReceipt")
+T = TypeVar("T", bound="CompiledDistributionObject")
 
 
 
 @_attrs_define
-class DistributionObjectReceipt:
-    """ A verified immutable object served by the Controller.
+class CompiledDistributionObject:
+    """ Distribution objects usable as installed model or runtime inputs.
 
         Attributes:
             bytes_ (int):
-            kind (DistributionObjectReceiptKind):
+            kind (CompiledDistributionObjectKind):
             name (str):
             sha256 (str):
      """
 
     bytes_: int
-    kind: DistributionObjectReceiptKind
+    kind: CompiledDistributionObjectKind
     name: str
     sha256: str
 
@@ -67,7 +67,7 @@ class DistributionObjectReceipt:
         d = dict(src_dict)
         bytes_ = d.pop("bytes")
 
-        kind = check_distribution_object_receipt_kind(d.pop("kind"))
+        kind = check_compiled_distribution_object_kind(d.pop("kind"))
 
 
 
@@ -76,11 +76,11 @@ class DistributionObjectReceipt:
 
         sha256 = d.pop("sha256")
 
-        distribution_object_receipt = cls(
+        compiled_distribution_object = cls(
             bytes_=bytes_,
             kind=kind,
             name=name,
             sha256=sha256,
         )
 
-        return distribution_object_receipt
+        return compiled_distribution_object

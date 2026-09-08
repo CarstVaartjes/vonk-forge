@@ -3210,6 +3210,68 @@
         "title": "CompatibilityPreparation",
         "type": "object"
       },
+      "CompiledArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "distribution_object": {
+            "$ref": "#/components/schemas/CompiledDistributionObject"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "File Id",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/CompiledModelIdentity"
+          },
+          "mount": {
+            "$ref": "#/components/schemas/CompiledArtifactMount"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          },
+          "selection_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Selection Id",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 17592186044416.0,
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selection_id",
+          "file_id",
+          "path",
+          "sha256",
+          "size_bytes",
+          "roles",
+          "mount",
+          "model",
+          "distribution_object"
+        ],
+        "title": "CompiledArtifact",
+        "type": "object"
+      },
       "CompiledArtifactContract": {
         "additionalProperties": false,
         "description": "The canonical typed artifact execution contract.",
@@ -3278,9 +3340,28 @@
         "title": "CompiledArtifactContract",
         "type": "object"
       },
-      "CompiledModelArtifact": {
+      "CompiledArtifactMount": {
         "additionalProperties": false,
-        "description": "One exact model file selected by the canonical runtime compiler.",
+        "properties": {
+          "read_only": {
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "read_only"
+        ],
+        "title": "CompiledArtifactMount",
+        "type": "object"
+      },
+      "CompiledDistributionObject": {
+        "additionalProperties": false,
+        "description": "Distribution objects usable as installed model or runtime inputs.",
         "properties": {
           "bytes": {
             "maximum": 17592186044416.0,
@@ -3288,50 +3369,18 @@
             "title": "Bytes",
             "type": "integer"
           },
-          "distribution_object": {
-            "$ref": "#/components/schemas/DistributionObjectReceipt"
-          },
-          "file_id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
-            "title": "File Id",
+          "kind": {
+            "enum": [
+              "model",
+              "oci-archive"
+            ],
+            "title": "Kind",
             "type": "string"
           },
-          "id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
-            "title": "Id",
-            "type": "string"
-          },
-          "materialized_path": {
-            "maxLength": 1024,
-            "minLength": 1,
-            "title": "Materialized Path",
-            "type": "string"
-          },
-          "model": {
-            "$ref": "#/components/schemas/ModelCatalogIdentity"
-          },
-          "mount": {
-            "$ref": "#/components/schemas/ExecutionMount"
-          },
-          "path": {
+          "name": {
             "maxLength": 512,
             "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          },
-          "roles": {
-            "items": {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
-              "type": "string"
-            },
-            "maxItems": 32,
-            "minItems": 1,
-            "title": "Roles",
-            "type": "array"
-          },
-          "selection_id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
-            "title": "Selection Id",
+            "title": "Name",
             "type": "string"
           },
           "sha256": {
@@ -3341,19 +3390,908 @@
           }
         },
         "required": [
-          "id",
-          "selection_id",
-          "file_id",
-          "path",
+          "name",
           "sha256",
           "bytes",
-          "roles",
-          "mount",
-          "materialized_path",
-          "model",
-          "distribution_object"
+          "kind"
         ],
-        "title": "CompiledModelArtifact",
+        "title": "CompiledDistributionObject",
+        "type": "object"
+      },
+      "CompiledEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "health_path": {
+            "maxLength": 256,
+            "title": "Health Path",
+            "type": "string"
+          },
+          "model_aliases": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Model Aliases",
+            "type": "array"
+          },
+          "port": {
+            "maximum": 65535.0,
+            "minimum": 1024.0,
+            "title": "Port",
+            "type": "integer"
+          },
+          "protocol": {
+            "const": "openai",
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "port",
+          "model_aliases",
+          "health_path"
+        ],
+        "title": "CompiledEndpoint",
+        "type": "object"
+      },
+      "CompiledEnvironmentEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 65536,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "CompiledEnvironmentEntry",
+        "type": "object"
+      },
+      "CompiledExecutionPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledArtifact"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledEndpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/CompiledIdentity"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/CompiledLifecycle"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/CompiledRuntime"
+          },
+          "runtime_image": {
+            "$ref": "#/components/schemas/CompiledRuntimeImage"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "security": {
+            "$ref": "#/components/schemas/CompiledSecurity"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/CompiledTopology"
+          }
+        },
+        "required": [
+          "schema_version",
+          "identity",
+          "runtime",
+          "artifacts",
+          "runtime_image",
+          "security",
+          "topology",
+          "lifecycle",
+          "endpoint",
+          "job"
+        ],
+        "title": "CompiledExecutionPlan",
+        "type": "object"
+      },
+      "CompiledIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Input Sha256"
+          },
+          "execution_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Execution Sha256",
+            "type": "string"
+          },
+          "harness_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Harness Sha256",
+            "type": "string"
+          },
+          "model_artifact_bytes": {
+            "maximum": 17592186044416.0,
+            "minimum": 0.0,
+            "title": "Model Artifact Bytes",
+            "type": "integer"
+          },
+          "model_artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Artifact Set Sha256",
+            "type": "string"
+          },
+          "recipe_revision_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Revision Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_sha256",
+          "execution_sha256",
+          "harness_sha256",
+          "build_input_sha256",
+          "model_artifact_set_sha256",
+          "model_artifact_bytes"
+        ],
+        "title": "CompiledIdentity",
+        "type": "object"
+      },
+      "CompiledJob": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledJobInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interface": {
+            "enum": [
+              "image-job",
+              "audio-job",
+              "video-job",
+              "mesh-job",
+              "artifact-job"
+            ],
+            "title": "Interface",
+            "type": "string"
+          },
+          "output_path": {
+            "const": "/outputs",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interface",
+          "input",
+          "output_path",
+          "timeout_seconds"
+        ],
+        "title": "CompiledJob",
+        "type": "object"
+      },
+      "CompiledJobInput": {
+        "additionalProperties": false,
+        "description": "Typed compiled form of the public ``RecipeJobInput`` declaration.",
+        "properties": {
+          "max_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "path": {
+            "const": "/inputs",
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "slots": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompiledJobInputSlot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slots"
+          }
+        },
+        "required": [
+          "path",
+          "required",
+          "media_types",
+          "max_bytes"
+        ],
+        "title": "CompiledJobInput",
+        "type": "object"
+      },
+      "CompiledJobInputSlot": {
+        "additionalProperties": false,
+        "description": "Agent-side parity model for the public ``RecipeInputSlot`` contract.\n\nThe agent protocol wheel intentionally cannot import the public recipe\ncontracts wheel.  Keep this fixed wire structure in lockstep with that\nsource contract; engine-specific job parameters remain elsewhere in the\njob request and are deliberately extensible.",
+        "properties": {
+          "description": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Extensions",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "max_file_bytes": {
+            "maximum": 536870912.0,
+            "minimum": 1.0,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "min_files": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Min Files",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "media_types",
+          "extensions",
+          "min_files",
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes"
+        ],
+        "title": "CompiledJobInputSlot",
+        "type": "object"
+      },
+      "CompiledLifecycle": {
+        "additionalProperties": false,
+        "properties": {
+          "post_stop": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "maxItems": 16,
+            "title": "Post Stop",
+            "type": "array"
+          },
+          "pre_start": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "maxItems": 16,
+            "title": "Pre Start",
+            "type": "array"
+          },
+          "stop_timeout_seconds": {
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Stop Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pre_start",
+          "post_stop",
+          "stop_timeout_seconds"
+        ],
+        "title": "CompiledLifecycle",
+        "type": "object"
+      },
+      "CompiledModelIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "CompiledModelIdentity",
+        "type": "object"
+      },
+      "CompiledPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Endpoint Address"
+          },
+          "local_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Local Address"
+          },
+          "master_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Master Address"
+          },
+          "master_port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1024.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Master Port"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "reserved_memory_bytes": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 17592186044416.0,
+            "title": "Reserved Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "world_size": {
+            "minimum": 1.0,
+            "title": "World Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint_address",
+          "rank",
+          "role",
+          "world_size",
+          "local_address",
+          "master_address",
+          "master_port",
+          "port",
+          "reserved_memory_bytes"
+        ],
+        "title": "CompiledPlacement",
+        "type": "object"
+      },
+      "CompiledRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 512,
+            "title": "Argv",
+            "type": "array"
+          },
+          "env": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledEnvironmentEntry"
+            },
+            "maxItems": 128,
+            "title": "Env",
+            "type": "array"
+          },
+          "executable": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Executable",
+            "type": "string"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/CompiledPlacement"
+          },
+          "telemetry": {
+            "$ref": "#/components/schemas/CompiledRuntimeTelemetry"
+          }
+        },
+        "required": [
+          "executable",
+          "argv",
+          "env",
+          "image_digest",
+          "placement",
+          "telemetry"
+        ],
+        "title": "CompiledRuntime",
+        "type": "object"
+      },
+      "CompiledRuntimeImage": {
+        "additionalProperties": false,
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "distribution_object": {
+            "$ref": "#/components/schemas/CompiledDistributionObject"
+          },
+          "image_bytes": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 17592186044416.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "local_image_config_id": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Local Image Config Id",
+            "type": "string"
+          },
+          "local_image_reference": {
+            "title": "Local Image Reference",
+            "type": "string"
+          },
+          "oci_layout_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Layout Sha256",
+            "type": "string"
+          },
+          "platform_manifest_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Platform Manifest Digest",
+            "type": "string"
+          },
+          "registry_manifest_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Manifest Digest"
+          },
+          "runtime_interface": {
+            "const": "vonk.runtime.v1",
+            "title": "Runtime Interface",
+            "type": "string"
+          },
+          "runtime_interface_label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Interface Label",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "published",
+              "controller-build"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_digest",
+          "oci_layout_sha256",
+          "image_bytes",
+          "architecture",
+          "runtime_interface",
+          "source",
+          "build_id",
+          "distribution_object",
+          "registry_manifest_digest",
+          "platform_manifest_digest",
+          "local_image_config_id",
+          "local_image_reference",
+          "runtime_interface_label"
+        ],
+        "title": "CompiledRuntimeImage",
+        "type": "object"
+      },
+      "CompiledRuntimeTelemetry": {
+        "additionalProperties": false,
+        "properties": {
+          "engine": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_version": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Version"
+          },
+          "metrics_format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "prometheus",
+                  "comfyui-queue"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics Format"
+          },
+          "metrics_path": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics Path"
+          }
+        },
+        "required": [
+          "engine",
+          "engine_version",
+          "metrics_format",
+          "metrics_path"
+        ],
+        "title": "CompiledRuntimeTelemetry",
+        "type": "object"
+      },
+      "CompiledSecurity": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "host_network": {
+            "title": "Host Network",
+            "type": "boolean"
+          },
+          "mounts": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledSecurityMount"
+            },
+            "title": "Mounts",
+            "type": "array"
+          },
+          "network_mode": {
+            "enum": [
+              "none",
+              "bridge"
+            ],
+            "title": "Network Mode",
+            "type": "string"
+          },
+          "no_new_privileges": {
+            "title": "No New Privileges",
+            "type": "boolean"
+          },
+          "privileged": {
+            "title": "Privileged",
+            "type": "boolean"
+          },
+          "read_only_root": {
+            "title": "Read Only Root",
+            "type": "boolean"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "devices",
+          "capabilities",
+          "network_mode",
+          "host_network",
+          "privileged",
+          "user",
+          "mounts",
+          "read_only_root",
+          "no_new_privileges"
+        ],
+        "title": "CompiledSecurity",
+        "type": "object"
+      },
+      "CompiledSecurityMount": {
+        "additionalProperties": false,
+        "properties": {
+          "read_only": {
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "model",
+              "inputs",
+              "outputs"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "read_only"
+        ],
+        "title": "CompiledSecurityMount",
+        "type": "object"
+      },
+      "CompiledTopology": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Backend",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "single",
+              "distributed",
+              "tensor_parallel",
+              "pipeline_parallel",
+              "data_parallel",
+              "hybrid",
+              "ray",
+              "mpi"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_count": {
+            "exclusiveMinimum": 0.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "world_size": {
+            "exclusiveMinimum": 0.0,
+            "title": "World Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "mode",
+          "backend",
+          "node_count",
+          "world_size",
+          "rank",
+          "role"
+        ],
+        "title": "CompiledTopology",
         "type": "object"
       },
       "ControllerAssetState": {
@@ -3671,45 +4609,6 @@
           "kind"
         ],
         "title": "DistributionObject",
-        "type": "object"
-      },
-      "DistributionObjectReceipt": {
-        "additionalProperties": false,
-        "description": "A verified immutable object served by the Controller.",
-        "properties": {
-          "bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
-            "title": "Bytes",
-            "type": "integer"
-          },
-          "kind": {
-            "enum": [
-              "model",
-              "oci-archive"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Sha256",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "sha256",
-          "bytes",
-          "kind"
-        ],
-        "title": "DistributionObjectReceipt",
         "type": "object"
       },
       "EffectiveParallelism": {
@@ -4321,35 +5220,6 @@
           "source"
         ],
         "title": "EvidenceContext",
-        "type": "object"
-      },
-      "ExecutionMount": {
-        "additionalProperties": false,
-        "description": "The platform-owned mount used by one selected model file.",
-        "properties": {
-          "read_only": {
-            "title": "Read Only",
-            "type": "boolean"
-          },
-          "source": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Source",
-            "type": "string"
-          },
-          "target": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Target",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source",
-          "target",
-          "read_only"
-        ],
-        "title": "ExecutionMount",
         "type": "object"
       },
       "FailureDiagnostics": {
@@ -7291,116 +8161,6 @@
         "title": "ImageDistributionRequest",
         "type": "object"
       },
-      "InstallNodePlanResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "active_reserved_bytes": {
-            "title": "Active Reserved Bytes",
-            "type": "integer"
-          },
-          "allowed": {
-            "title": "Allowed",
-            "type": "boolean"
-          },
-          "blockers": {
-            "items": {
-              "$ref": "#/components/schemas/PlanReason"
-            },
-            "title": "Blockers",
-            "type": "array"
-          },
-          "disk_floor_bytes": {
-            "title": "Disk Floor Bytes",
-            "type": "integer"
-          },
-          "free_after_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Free After Bytes"
-          },
-          "free_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Free Bytes"
-          },
-          "inventory_observed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inventory Observed At"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "rank": {
-            "title": "Rank",
-            "type": "integer"
-          },
-          "required_bytes": {
-            "title": "Required Bytes",
-            "type": "integer"
-          },
-          "required_download_bytes": {
-            "title": "Required Download Bytes",
-            "type": "integer"
-          },
-          "reused_bytes": {
-            "title": "Reused Bytes",
-            "type": "integer"
-          },
-          "role": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Role",
-            "type": "string"
-          },
-          "warnings": {
-            "items": {
-              "$ref": "#/components/schemas/PlanReason"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "node_id",
-          "rank",
-          "role",
-          "allowed",
-          "inventory_observed_at",
-          "free_bytes",
-          "active_reserved_bytes",
-          "reused_bytes",
-          "required_download_bytes",
-          "required_bytes",
-          "disk_floor_bytes",
-          "free_after_bytes",
-          "blockers",
-          "warnings"
-        ],
-        "title": "InstallNodePlanResponse",
-        "type": "object"
-      },
       "InstallPlanResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7411,7 +8171,7 @@
           "compiled_execution_plans": {
             "patternProperties": {
               "^spk_[0-9a-f]{32}$": {
-                "$ref": "#/components/schemas/vonk_control__compiled_execution_plan__CompiledExecutionPlan"
+                "$ref": "#/components/schemas/CompiledExecutionPlan"
               }
             },
             "title": "Compiled Execution Plans",
@@ -7434,7 +8194,7 @@
           },
           "nodes": {
             "items": {
-              "$ref": "#/components/schemas/InstallNodePlanResponse"
+              "$ref": "#/components/schemas/StoredInstallNodePlan"
             },
             "title": "Nodes",
             "type": "array"
@@ -12136,35 +12896,6 @@
         "title": "ModelCapabilityProvenance",
         "type": "object"
       },
-      "ModelCatalogIdentity": {
-        "additionalProperties": false,
-        "description": "Safe model identity used for display and execution evidence.\n\nUpstream repository and revision fields deliberately do not exist here.\nThey remain Controller/cache inputs and are never sent to a Spark.",
-        "properties": {
-          "content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Sha256",
-            "type": "string"
-          },
-          "publisher": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Publisher",
-            "type": "string"
-          },
-          "slug": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "publisher",
-          "slug",
-          "content_sha256"
-        ],
-        "title": "ModelCatalogIdentity",
-        "type": "object"
-      },
       "ModelDefinition": {
         "additionalProperties": false,
         "description": "One exact model version and variant, including its complete manifest.",
@@ -12392,7 +13123,7 @@
           },
           "blockers": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Blockers",
@@ -12444,7 +13175,7 @@
           },
           "warnings": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Warnings",
@@ -15148,29 +15879,6 @@
           "maximum_telemetry_age_seconds"
         ],
         "title": "PlacementScore",
-        "type": "object"
-      },
-      "PlanReason": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Code",
-            "type": "string"
-          },
-          "detail": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Detail",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "detail"
-        ],
-        "title": "PlanReason",
         "type": "object"
       },
       "PlatformBoundary": {
@@ -20024,157 +20732,6 @@
         "title": "RunNodePayload",
         "type": "object"
       },
-      "RunNodePlanResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "active_reserved_bytes": {
-            "title": "Active Reserved Bytes",
-            "type": "integer"
-          },
-          "allowed": {
-            "title": "Allowed",
-            "type": "boolean"
-          },
-          "available_memory_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Available Memory Bytes"
-          },
-          "blockers": {
-            "items": {
-              "$ref": "#/components/schemas/PlanReason"
-            },
-            "title": "Blockers",
-            "type": "array"
-          },
-          "endpoint_owner": {
-            "title": "Endpoint Owner",
-            "type": "boolean"
-          },
-          "fabric_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fabric Address"
-          },
-          "fabric_bandwidth_mbps": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fabric Bandwidth Mbps"
-          },
-          "free_after_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Free After Bytes"
-          },
-          "inventory_observed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inventory Observed At"
-          },
-          "memory_floor_bytes": {
-            "title": "Memory Floor Bytes",
-            "type": "integer"
-          },
-          "memory_kind": {
-            "title": "Memory Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "port": {
-            "title": "Port",
-            "type": "integer"
-          },
-          "rank": {
-            "title": "Rank",
-            "type": "integer"
-          },
-          "rendezvous_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rendezvous Port"
-          },
-          "required_memory_bytes": {
-            "title": "Required Memory Bytes",
-            "type": "integer"
-          },
-          "role": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Role",
-            "type": "string"
-          },
-          "warnings": {
-            "items": {
-              "$ref": "#/components/schemas/PlanReason"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "required": [
-          "node_id",
-          "rank",
-          "role",
-          "endpoint_owner",
-          "port",
-          "allowed",
-          "inventory_observed_at",
-          "memory_kind",
-          "required_memory_bytes",
-          "available_memory_bytes",
-          "active_reserved_bytes",
-          "free_after_bytes",
-          "memory_floor_bytes",
-          "fabric_address",
-          "fabric_bandwidth_mbps",
-          "rendezvous_port",
-          "blockers",
-          "warnings"
-        ],
-        "title": "RunNodePlanResponse",
-        "type": "object"
-      },
       "RunPlanResponse": {
         "additionalProperties": false,
         "properties": {
@@ -20204,7 +20761,7 @@
           },
           "nodes": {
             "items": {
-              "$ref": "#/components/schemas/RunNodePlanResponse"
+              "$ref": "#/components/schemas/StoredRunNodePlan"
             },
             "title": "Nodes",
             "type": "array"
@@ -23934,42 +24491,6 @@
         "title": "SourceCheckRequest",
         "type": "object"
       },
-      "SourcePolicyFindingResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Line"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "path",
-          "line",
-          "detail"
-        ],
-        "title": "SourcePolicyFindingResponse",
-        "type": "object"
-      },
       "SourcePolicyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -23979,7 +24500,7 @@
           },
           "findings": {
             "items": {
-              "$ref": "#/components/schemas/SourcePolicyFindingResponse"
+              "$ref": "#/components/schemas/StoredPolicyFinding"
             },
             "title": "Findings",
             "type": "array"
@@ -24346,7 +24867,7 @@
           },
           "blockers": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Blockers",
@@ -24426,7 +24947,7 @@
           },
           "warnings": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Warnings",
@@ -24486,6 +25007,345 @@
           "request_key"
         ],
         "title": "StopRequest",
+        "type": "object"
+      },
+      "StoredAdmissionReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "StoredAdmissionReason",
+        "type": "object"
+      },
+      "StoredInstallNodePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "active_reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Active Reserved Bytes",
+            "type": "integer"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "disk_floor_bytes": {
+            "minimum": 0.0,
+            "title": "Disk Floor Bytes",
+            "type": "integer"
+          },
+          "free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free After Bytes"
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "required_bytes": {
+            "minimum": 0.0,
+            "title": "Required Bytes",
+            "type": "integer"
+          },
+          "required_download_bytes": {
+            "minimum": 0.0,
+            "title": "Required Download Bytes",
+            "type": "integer"
+          },
+          "reused_bytes": {
+            "minimum": 0.0,
+            "title": "Reused Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "allowed",
+          "inventory_observed_at",
+          "free_bytes",
+          "active_reserved_bytes",
+          "reused_bytes",
+          "required_download_bytes",
+          "required_bytes",
+          "disk_floor_bytes",
+          "free_after_bytes",
+          "blockers",
+          "warnings"
+        ],
+        "title": "StoredInstallNodePlan",
+        "type": "object"
+      },
+      "StoredPolicyFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "line",
+          "detail"
+        ],
+        "title": "StoredPolicyFinding",
+        "type": "object"
+      },
+      "StoredRunNodePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "active_reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Active Reserved Bytes",
+            "type": "integer"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "available_memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Memory Bytes"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "fabric_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Address"
+          },
+          "fabric_bandwidth_mbps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Bandwidth Mbps"
+          },
+          "free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free After Bytes"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "memory_floor_bytes": {
+            "minimum": 0.0,
+            "title": "Memory Floor Bytes",
+            "type": "integer"
+          },
+          "memory_kind": {
+            "enum": [
+              "unified",
+              "host",
+              "accelerator"
+            ],
+            "title": "Memory Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "port": {
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "type": "integer"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rendezvous_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendezvous Port"
+          },
+          "required_memory_bytes": {
+            "minimum": 0.0,
+            "title": "Required Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "endpoint_owner",
+          "port",
+          "allowed",
+          "inventory_observed_at",
+          "memory_kind",
+          "required_memory_bytes",
+          "available_memory_bytes",
+          "active_reserved_bytes",
+          "free_after_bytes",
+          "memory_floor_bytes",
+          "fabric_address",
+          "fabric_bandwidth_mbps",
+          "rendezvous_port",
+          "blockers",
+          "warnings"
+        ],
+        "title": "StoredRunNodePlan",
         "type": "object"
       },
       "StringParameter": {
@@ -26854,7 +27714,7 @@
           },
           "blockers": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Blockers",
@@ -26932,7 +27792,7 @@
           },
           "warnings": {
             "items": {
-              "$ref": "#/components/schemas/PlanReason"
+              "$ref": "#/components/schemas/StoredAdmissionReason"
             },
             "maxItems": 32,
             "title": "Warnings",
@@ -27176,179 +28036,6 @@
           "physical_acceptance"
         ],
         "title": "WorkloadProvenance",
-        "type": "object"
-      },
-      "vonk_control__compiled_execution_plan__CompiledExecutionPlan": {
-        "additionalProperties": false,
-        "description": "Internal verified execution plan consumed by distribution/install.",
-        "properties": {
-          "artifacts": {
-            "items": {
-              "$ref": "#/components/schemas/CompiledModelArtifact"
-            },
-            "maxItems": 4096,
-            "minItems": 1,
-            "title": "Artifacts",
-            "type": "array"
-          },
-          "execution_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Execution Sha256",
-            "type": "string"
-          },
-          "harness_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Harness Sha256",
-            "type": "string"
-          },
-          "model_artifact_set_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
-            "title": "Model Artifact Set Bytes",
-            "type": "integer"
-          },
-          "model_artifact_set_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Artifact Set Sha256",
-            "type": "string"
-          },
-          "recipe_revision_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Revision Sha256",
-            "type": "string"
-          },
-          "runtime_image": {
-            "$ref": "#/components/schemas/vonk_control__compiled_execution_plan__CompiledRuntimeImage"
-          },
-          "schema_version": {
-            "const": 2,
-            "default": 2,
-            "title": "Schema Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recipe_revision_sha256",
-          "harness_sha256",
-          "execution_sha256",
-          "model_artifact_set_sha256",
-          "model_artifact_set_bytes",
-          "artifacts",
-          "runtime_image"
-        ],
-        "title": "CompiledExecutionPlan",
-        "type": "object"
-      },
-      "vonk_control__compiled_execution_plan__CompiledRuntimeImage": {
-        "additionalProperties": false,
-        "description": "The exact OCI archive that the Controller gives to each Spark.",
-        "properties": {
-          "architecture": {
-            "const": "linux-arm64",
-            "title": "Architecture",
-            "type": "string"
-          },
-          "build_id": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Build Id"
-          },
-          "distribution_object": {
-            "$ref": "#/components/schemas/DistributionObjectReceipt"
-          },
-          "image_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 1.0,
-            "title": "Image Bytes",
-            "type": "integer"
-          },
-          "image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image Digest",
-            "type": "string"
-          },
-          "local_image_config_id": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Local Image Config Id",
-            "type": "string"
-          },
-          "local_image_reference": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Image Reference"
-          },
-          "oci_layout_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Oci Layout Sha256",
-            "type": "string"
-          },
-          "platform_manifest_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Platform Manifest Digest",
-            "type": "string"
-          },
-          "registry_manifest_digest": {
-            "anyOf": [
-              {
-                "pattern": "^sha256:[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Registry Manifest Digest"
-          },
-          "runtime_interface": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Runtime Interface",
-            "type": "string"
-          },
-          "runtime_interface_label": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Runtime Interface Label",
-            "type": "string"
-          },
-          "source": {
-            "enum": [
-              "published",
-              "controller-build"
-            ],
-            "title": "Source",
-            "type": "string"
-          }
-        },
-        "required": [
-          "image_digest",
-          "oci_layout_sha256",
-          "image_bytes",
-          "architecture",
-          "runtime_interface",
-          "source",
-          "distribution_object",
-          "platform_manifest_digest",
-          "local_image_config_id",
-          "runtime_interface_label"
-        ],
-        "title": "CompiledRuntimeImage",
         "type": "object"
       },
       "vonk_control__fleet_projection__ProjectionReason": {

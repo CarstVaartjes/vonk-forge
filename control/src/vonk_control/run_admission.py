@@ -27,14 +27,14 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    run_plan_document,
+)
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
     resolve_recipe_entities,
-)
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    run_plan_document,
 )
 from .topology import Placement, TopologyError, validate_topology
 

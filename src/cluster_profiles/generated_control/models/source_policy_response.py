@@ -9,7 +9,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.source_policy_finding_response import SourcePolicyFindingResponse
+  from ..models.stored_policy_finding import StoredPolicyFinding
 
 
 
@@ -24,13 +24,13 @@ class SourcePolicyResponse:
     """
         Attributes:
             dockerfile (str):
-            findings (list['SourcePolicyFindingResponse']):
+            findings (list['StoredPolicyFinding']):
             passed (bool):
             source_bundle_sha256 (str):
      """
 
     dockerfile: str
-    findings: list['SourcePolicyFindingResponse']
+    findings: list['StoredPolicyFinding']
     passed: bool
     source_bundle_sha256: str
 
@@ -39,7 +39,7 @@ class SourcePolicyResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.source_policy_finding_response import SourcePolicyFindingResponse
+        from ..models.stored_policy_finding import StoredPolicyFinding
         dockerfile = self.dockerfile
 
         findings = []
@@ -69,14 +69,14 @@ class SourcePolicyResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.source_policy_finding_response import SourcePolicyFindingResponse
+        from ..models.stored_policy_finding import StoredPolicyFinding
         d = dict(src_dict)
         dockerfile = d.pop("dockerfile")
 
         findings = []
         _findings = d.pop("findings")
         for findings_item_data in (_findings):
-            findings_item = SourcePolicyFindingResponse.from_dict(findings_item_data)
+            findings_item = StoredPolicyFinding.from_dict(findings_item_data)
 
 
 

@@ -6,71 +6,73 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.stored_run_node_plan_memory_kind import check_stored_run_node_plan_memory_kind
+from ..models.stored_run_node_plan_memory_kind import StoredRunNodePlanMemoryKind
 from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.plan_reason import PlanReason
+  from ..models.stored_admission_reason import StoredAdmissionReason
 
 
 
 
 
-T = TypeVar("T", bound="RunNodePlanResponse")
+T = TypeVar("T", bound="StoredRunNodePlan")
 
 
 
 @_attrs_define
-class RunNodePlanResponse:
+class StoredRunNodePlan:
     """
         Attributes:
             active_reserved_bytes (int):
             allowed (bool):
             available_memory_bytes (Union[None, int]):
-            blockers (list['PlanReason']):
+            blockers (list['StoredAdmissionReason']):
             endpoint_owner (bool):
             fabric_address (Union[None, str]):
             fabric_bandwidth_mbps (Union[None, int]):
             free_after_bytes (Union[None, int]):
             inventory_observed_at (Union[None, datetime.datetime]):
             memory_floor_bytes (int):
-            memory_kind (str):
+            memory_kind (StoredRunNodePlanMemoryKind):
             node_id (str):
             port (int):
             rank (int):
             rendezvous_port (Union[None, int]):
             required_memory_bytes (int):
             role (str):
-            warnings (list['PlanReason']):
+            warnings (list['StoredAdmissionReason']):
      """
 
     active_reserved_bytes: int
     allowed: bool
     available_memory_bytes: Union[None, int]
-    blockers: list['PlanReason']
+    blockers: list['StoredAdmissionReason']
     endpoint_owner: bool
     fabric_address: Union[None, str]
     fabric_bandwidth_mbps: Union[None, int]
     free_after_bytes: Union[None, int]
     inventory_observed_at: Union[None, datetime.datetime]
     memory_floor_bytes: int
-    memory_kind: str
+    memory_kind: StoredRunNodePlanMemoryKind
     node_id: str
     port: int
     rank: int
     rendezvous_port: Union[None, int]
     required_memory_bytes: int
     role: str
-    warnings: list['PlanReason']
+    warnings: list['StoredAdmissionReason']
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         active_reserved_bytes = self.active_reserved_bytes
 
         allowed = self.allowed
@@ -104,7 +106,7 @@ class RunNodePlanResponse:
 
         memory_floor_bytes = self.memory_floor_bytes
 
-        memory_kind = self.memory_kind
+        memory_kind: str = self.memory_kind
 
         node_id = self.node_id
 
@@ -156,7 +158,7 @@ class RunNodePlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         d = dict(src_dict)
         active_reserved_bytes = d.pop("active_reserved_bytes")
 
@@ -173,7 +175,7 @@ class RunNodePlanResponse:
         blockers = []
         _blockers = d.pop("blockers")
         for blockers_item_data in (_blockers):
-            blockers_item = PlanReason.from_dict(blockers_item_data)
+            blockers_item = StoredAdmissionReason.from_dict(blockers_item_data)
 
 
 
@@ -226,7 +228,10 @@ class RunNodePlanResponse:
 
         memory_floor_bytes = d.pop("memory_floor_bytes")
 
-        memory_kind = d.pop("memory_kind")
+        memory_kind = check_stored_run_node_plan_memory_kind(d.pop("memory_kind"))
+
+
+
 
         node_id = d.pop("node_id")
 
@@ -249,14 +254,14 @@ class RunNodePlanResponse:
         warnings = []
         _warnings = d.pop("warnings")
         for warnings_item_data in (_warnings):
-            warnings_item = PlanReason.from_dict(warnings_item_data)
+            warnings_item = StoredAdmissionReason.from_dict(warnings_item_data)
 
 
 
             warnings.append(warnings_item)
 
 
-        run_node_plan_response = cls(
+        stored_run_node_plan = cls(
             active_reserved_bytes=active_reserved_bytes,
             allowed=allowed,
             available_memory_bytes=available_memory_bytes,
@@ -277,4 +282,4 @@ class RunNodePlanResponse:
             warnings=warnings,
         )
 
-        return run_node_plan_response
+        return stored_run_node_plan

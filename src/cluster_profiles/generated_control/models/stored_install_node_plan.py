@@ -12,23 +12,23 @@ from typing import cast, Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.plan_reason import PlanReason
+  from ..models.stored_admission_reason import StoredAdmissionReason
 
 
 
 
 
-T = TypeVar("T", bound="InstallNodePlanResponse")
+T = TypeVar("T", bound="StoredInstallNodePlan")
 
 
 
 @_attrs_define
-class InstallNodePlanResponse:
+class StoredInstallNodePlan:
     """
         Attributes:
             active_reserved_bytes (int):
             allowed (bool):
-            blockers (list['PlanReason']):
+            blockers (list['StoredAdmissionReason']):
             disk_floor_bytes (int):
             free_after_bytes (Union[None, int]):
             free_bytes (Union[None, int]):
@@ -39,12 +39,12 @@ class InstallNodePlanResponse:
             required_download_bytes (int):
             reused_bytes (int):
             role (str):
-            warnings (list['PlanReason']):
+            warnings (list['StoredAdmissionReason']):
      """
 
     active_reserved_bytes: int
     allowed: bool
-    blockers: list['PlanReason']
+    blockers: list['StoredAdmissionReason']
     disk_floor_bytes: int
     free_after_bytes: Union[None, int]
     free_bytes: Union[None, int]
@@ -55,14 +55,14 @@ class InstallNodePlanResponse:
     required_download_bytes: int
     reused_bytes: int
     role: str
-    warnings: list['PlanReason']
+    warnings: list['StoredAdmissionReason']
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         active_reserved_bytes = self.active_reserved_bytes
 
         allowed = self.allowed
@@ -133,7 +133,7 @@ class InstallNodePlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.plan_reason import PlanReason
+        from ..models.stored_admission_reason import StoredAdmissionReason
         d = dict(src_dict)
         active_reserved_bytes = d.pop("active_reserved_bytes")
 
@@ -142,7 +142,7 @@ class InstallNodePlanResponse:
         blockers = []
         _blockers = d.pop("blockers")
         for blockers_item_data in (_blockers):
-            blockers_item = PlanReason.from_dict(blockers_item_data)
+            blockers_item = StoredAdmissionReason.from_dict(blockers_item_data)
 
 
 
@@ -200,14 +200,14 @@ class InstallNodePlanResponse:
         warnings = []
         _warnings = d.pop("warnings")
         for warnings_item_data in (_warnings):
-            warnings_item = PlanReason.from_dict(warnings_item_data)
+            warnings_item = StoredAdmissionReason.from_dict(warnings_item_data)
 
 
 
             warnings.append(warnings_item)
 
 
-        install_node_plan_response = cls(
+        stored_install_node_plan = cls(
             active_reserved_bytes=active_reserved_bytes,
             allowed=allowed,
             blockers=blockers,
@@ -224,4 +224,4 @@ class InstallNodePlanResponse:
             warnings=warnings,
         )
 
-        return install_node_plan_response
+        return stored_install_node_plan

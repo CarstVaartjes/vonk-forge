@@ -79,10 +79,6 @@ from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
 from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
 from .download_contract import download_responses, upload_request_body
@@ -121,6 +117,10 @@ from .models import (
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
