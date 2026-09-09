@@ -2153,8 +2153,11 @@ class ModelCacheService:
                                   operation_id: str, completed_artifacts: int) -> bool:
         self._validate_http_download(spec)
         # Range segments and atomic assembly coexist temporarily. Reserve the
-        # worst-case additional footprint across this process's active files;
-        # a tight disk uses the ordinary sequential stream instead.
+        # worst-case additional footprint across this process's active files.
+        # The retained prefix is already excluded from current free space:
+        # peak total is prefix + 2*object, but growth is at most 2*object.
+        # Existing range segments make growth smaller, never larger. A tight
+        # disk uses the ordinary sequential stream instead.
         if (self._http is not None and not self._fixture_sources
             and getattr(self._http, "follow_redirects", False)):
             raise ModelCacheStorageError("model_cache.redirect_forbidden",

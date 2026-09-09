@@ -192,3 +192,40 @@ def test_symlink_cache_paths_cannot_touch_external_file(tmp_path, name):
             lambda value: None,
         )
     assert outside.read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize("resume_prefix", [0, 3 * 1024 * 1024 // 2])
+@pytest.mark.parametrize("retained_segment", [0, 128 * 1024])
+def test_resumed_range_peak_growth_fits_two_object_reservation(
+    tmp_path, monkeypatch, resume_prefix, retained_segment
+):
+    import os
+
+    data = bytes(range(256)) * (2 * 1024 * 1024 // 256)
+    target = tmp_path / "model.part"
+    target.write_bytes(data[:resume_prefix])
+    if retained_segment:
+        start = 3 * len(data) // 4
+        segment = target.with_name(f"{target.name}.range-{start}-{len(data) - 1}")
+        segment.write_bytes(data[start:start + retained_segment])
+    initial_bytes = sum(path.stat().st_size for path in tmp_path.iterdir())
+    observed_peak = []
+    real_replace = os.replace
+
+    def publish(assembly, destination):
+        # Measure real files at maximum coexistence: retained contiguous prefix,
+        # completed range segments and the fully written assembly all exist.
+        observed_peak.append(sum(path.stat().st_size for path in tmp_path.iterdir()))
+        return real_replace(assembly, destination)
+
+    monkeypatch.setattr(os, "replace", publish)
+    assert download_ranges(
+        target, len(data),
+        lambda start, end: response(start, end, len(data), data[start:end + 1]),
+        Event(), lambda value: None,
+    )
+    assert target.read_bytes() == data
+    assert observed_peak == [resume_prefix + 2 * len(data)]
+    assert observed_peak[0] - initial_bytes == 2 * len(data) - retained_segment
+    assert observed_peak[0] - initial_bytes <= 2 * len(data)
+    assert list(tmp_path.iterdir()) == [target]
