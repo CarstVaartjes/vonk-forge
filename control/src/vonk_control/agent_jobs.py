@@ -671,13 +671,23 @@ class AgentJobService:
         if receipt.phase in {"rolled_back", "rollback_failed"}:
             if receipt.phase == "rolled_back" and runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
                 return
+            current = session.scalar(select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt))
+            # The same terminal receipt is reported until the next install.
+            # It must not revoke an operator-authorized retry of that outcome.
+            if (
+                operation.retry_disposition == "retry"
+                and operation.retry_disposition_attempt == operation.current_attempt
+                and current is not None
+                and isinstance(current.result, dict)
+                and current.result.get("package_activation") == receipt.model_dump(mode="json")
+            ):
+                return
             operation.state = "waiting-for-operator"
             operation.retry_disposition = None
             operation.retry_disposition_attempt = None
             operation.updated_at = now
-            current = session.scalar(select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == operation.current_attempt))
             if current is not None:
                 current.state = "failed"
                 current.result = {"reason": "agent package " + receipt.phase, "package_activation": receipt.model_dump(mode="json")}
