@@ -2164,17 +2164,20 @@ class ModelCacheService:
             free = shutil.disk_usage(self._root).free
             if free - self._reserve_bytes - self._range_reserved_bytes < reservation:
                 cleanup_ranges(part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS)
+                self._checkpoint_artifact(
+                    spec, operation_id=operation_id, set_digest=set_digest,
+                    actual_bytes=part.stat().st_size if part.exists() else 0,
+                    state="partial", completed_artifacts=completed_artifacts,
+                )
                 return False
             self._range_reserved_bytes += reservation
         client = self._http
         owns_client = client is None
-        if client is None:
-            client = httpx.Client(follow_redirects=False, timeout=httpx.Timeout(30.0),
-                                  trust_env=False)
-        elif not self._fixture_sources and getattr(client, "follow_redirects", False):
-            raise ModelCacheStorageError("model_cache.redirect_forbidden",
-                                        "production cache HTTP clients must not follow redirects")
         try:
+            if client is None:
+                client = httpx.Client(follow_redirects=False, timeout=httpx.Timeout(30.0),
+                                      trust_env=False)
+
             def open_range(start: int, end: int) -> httpx.Response:
                 return self._open_http_response(
                     client, spec.source,
@@ -2205,7 +2208,7 @@ class ModelCacheService:
             )
             raise
         finally:
-            if owns_client:
+            if owns_client and client is not None:
                 client.close()
             with self._lock:
                 self._range_reserved_bytes -= reservation
