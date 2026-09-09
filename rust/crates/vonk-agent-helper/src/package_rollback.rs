@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,6 +22,8 @@ const STATE: &str = "/var/lib/vonk-forge/package-rollback";
 const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";
 const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
 const PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
+const PROCESS_PROOF_TIMEOUT: Duration = Duration::from_secs(15);
+const PROCESS_PROOF_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -685,16 +687,6 @@ impl Store {
         ] {
             command("/usr/bin/systemctl", &["--system", "restart", unit], false)?;
         }
-        command(
-            "/usr/bin/systemctl",
-            &[
-                "--system",
-                "is-active",
-                "--quiet",
-                "vonk-forge-agent.service",
-            ],
-            false,
-        )?;
         let installed = command(
             "/usr/bin/dpkg-query",
             &[
@@ -707,23 +699,61 @@ impl Store {
         if installed != format!("ii |{}", tx.rollback.source.package_version) {
             return Err("source package is not configured after rollback".into());
         }
-        let pid = command(
-            "/usr/bin/systemctl",
-            &[
-                "--system",
-                "show",
-                "--property=MainPID",
-                "--value",
-                "vonk-forge-agent.service",
-            ],
-            false,
-        )?;
-        let pid: u32 = pid.parse().map_err(|_| "source process unavailable")?;
-        if pid == 0 || digest_process(pid)? != tx.rollback.source.binary_sha256 {
-            return Err("source process identity differs after rollback".into());
-        }
+        prove_running_process(
+            "vonk-forge-agent.service",
+            &tx.rollback.source.binary_sha256,
+        )
+        .map_err(|_| "source process identity differs after rollback".to_owned())?;
         Ok(())
     }
+}
+
+fn retry_process_proof<F>(
+    deadline: Instant,
+    interval: Duration,
+    mut attempt: F,
+) -> Result<(), String>
+where
+    F: FnMut() -> Result<(), String>,
+{
+    loop {
+        let error = match attempt() {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if Instant::now() >= deadline {
+            return Err(error);
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+fn prove_running_process(service: &str, expected_digest: &str) -> Result<(), String> {
+    retry_process_proof(
+        Instant::now() + PROCESS_PROOF_TIMEOUT,
+        PROCESS_PROOF_INTERVAL,
+        || {
+            command(
+                "/usr/bin/systemctl",
+                &["--system", "is-active", "--quiet", service],
+                false,
+            )?;
+            let pid = command(
+                "/usr/bin/systemctl",
+                &["--system", "show", "--property=MainPID", "--value", service],
+                false,
+            )?
+            .parse::<u32>()
+            .map_err(|_| "invalid process id".to_owned())?;
+            if pid <= 1 {
+                return Err("service process is unavailable".into());
+            }
+            if digest_process(pid)? != expected_digest {
+                return Err("service process identity differs".into());
+            }
+            Ok(())
+        },
+    )
 }
 
 fn digest_process(pid: u32) -> Result<String, String> {
@@ -902,5 +932,35 @@ mod tests {
         let mut value = serde_json::to_value(transaction()).unwrap();
         value["schema_version"] = serde_json::json!(2.0);
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn process_proof_retries_transient_identity_failures() {
+        let mut attempts = 0;
+        let result = retry_process_proof(
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err("identity not ready".into())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn process_proof_returns_the_last_error_at_the_deadline() {
+        let mut attempts = 0;
+        let result = retry_process_proof(Instant::now(), Duration::ZERO, || {
+            attempts += 1;
+            Err("identity unavailable".into())
+        });
+        assert_eq!(result, Err("identity unavailable".to_owned()));
+        assert_eq!(attempts, 1);
     }
 }

@@ -99,3 +99,22 @@ baseline is invented. The small service executable and postinst are explicit
 fault-injection fixtures, while adjacent recovery/repair shell lanes exercise
 the complete production maintainer scripts. This is Debian/systemd acceptance,
 not physical Spark, NVIDIA, or live Controller deployment evidence.
+
+## Retry behavior and diagnostics
+
+Package configuration first checks whether rollback service enablement already
+exists. An upgrade does not rewrite that Debian state inside the helper's
+read-only sandbox; a fresh install still enables boot recovery. This follows
+[Debian's idempotent maintainer-script requirement](https://www.debian.org/doc/debian-policy/ch-maintainerscripts.html#maintainer-scripts-idempotency).
+
+After restoring the captured source, the watchdog retries service activity,
+MainPID, and the actual executable digest for up to 15 seconds of polling.
+A transient startup observation does not immediately trigger another reinstall.
+The expected source digest remains mandatory. Failed installation still transfers
+control to rollback, which stops candidate recovery before restoring the source.
+
+The helper passes dpkg stdout and stderr to its service journal rather than
+capturing or discarding them. Inspect `journalctl -u vonk-forge-package-helper`
+for the package configuration error; the API's bounded failure code does not
+contain the full journal. This logging improvement takes effect after the new
+helper is installed and cannot recover output discarded by an older helper.

@@ -190,6 +190,12 @@ impl CommandRunner for ProcessCommandRunner {
             && arguments
                 .iter()
                 .any(|value| value.starts_with("VONK_JOB_TIMEOUT_SECONDS=")));
+        // dpkg maintainer scripts and package configuration emit the details
+        // needed to diagnose activation failures. Inherit both streams so the
+        // service manager records them in its journal. These streams are not
+        // consumed by the helper, so they must not be piped into its bounded
+        // command-output reader.
+        let inherit_output = executable == Path::new("/usr/bin/dpkg");
         let mut command = Command::new(executable);
         command
             .args(arguments)
@@ -199,8 +205,14 @@ impl CommandRunner for ProcessCommandRunner {
             .env("PATH", ROOT_COMMAND_PATH)
             .current_dir("/")
             .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .stdout(if capture_output {
+            .stderr(if inherit_output {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
+            .stdout(if inherit_output {
+                Stdio::inherit()
+            } else if capture_output {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -246,7 +258,14 @@ impl CommandRunner for ProcessCommandRunner {
 
 #[cfg(test)]
 mod process_command_runner_tests {
+    #[cfg(target_os = "linux")]
+    use std::path::Path;
+    #[cfg(target_os = "linux")]
+    use std::time::Duration;
+
     use super::ROOT_COMMAND_PATH;
+    #[cfg(target_os = "linux")]
+    use super::{CommandRunner, ProcessCommandRunner};
 
     #[test]
     fn privileged_command_path_includes_debian_administrative_binaries() {
@@ -254,6 +273,21 @@ mod process_command_runner_tests {
         assert!(entries.contains(&"/usr/sbin"));
         assert!(entries.contains(&"/sbin"));
         assert!(entries.iter().all(|entry| entry.starts_with('/')));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dpkg_diagnostics_use_service_output_without_bounded_capture() {
+        let result = ProcessCommandRunner
+            .run_with_timeout(
+                Path::new("/usr/bin/dpkg"),
+                &["--version".to_owned()],
+                Duration::from_secs(5),
+            )
+            .expect("the Linux test host must provide dpkg");
+
+        assert!(result.success);
+        assert!(result.stdout.is_empty());
     }
 }
 
