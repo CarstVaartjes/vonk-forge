@@ -130,3 +130,10 @@ that group and reaps dpkg before permitting rollback, preventing child maintaine
 scripts from continuing package mutations after their parent times out. Output
 is continuously drained; only the retained diagnostic tail is bounded, not the
 amount a package is allowed to print.
+
+Activation receipts are root-owned, non-secret evidence read by the agent. The
+writer explicitly sets mode 0644 before atomic publication; creation mode alone
+is insufficient under the services' 0077 umask. Private rollback transactions
+remain mode 0600 inside a mode-0700 directory. The receipt regression test runs
+in a child process with the service umask, without changing the test runner's
+process-wide permissions.

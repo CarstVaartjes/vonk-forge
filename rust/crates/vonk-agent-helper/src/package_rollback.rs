@@ -304,6 +304,11 @@ impl Store {
         output
             .write_all(&serde_json::to_vec(&receipt).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
+        // Service UMask=0077 narrows create mode to 0600. This public,
+        // root-owned receipt must be readable by the unprivileged agent.
+        output
+            .set_permissions(fs::Permissions::from_mode(0o644))
+            .map_err(|e| e.to_string())?;
         output.sync_all().map_err(|e| e.to_string())?;
         fs::rename(temporary, parent.join("package-activation.receipt.json"))
             .map_err(|e| e.to_string())?;
@@ -909,6 +914,20 @@ mod tests {
         );
     }
     #[test]
+    fn activation_receipt_permissions_survive_service_umask() {
+        let status = std::process::Command::new("/bin/sh")
+            .args(["-c", "umask 077; exec \"$@\"", "receipt-test"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "package_rollback::tests::durable_transaction_roundtrip_retains_interrupted_rollback",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
     fn durable_transaction_roundtrip_retains_interrupted_rollback() {
         let temporary = tempfile::tempdir().unwrap();
         fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
@@ -920,6 +939,15 @@ mod tests {
         let mut tx = transaction();
         tx.phase = Phase::RollingBack;
         store.write(&tx).unwrap();
+        let receipt = temporary.path().join("package-activation.receipt.json");
+        assert_eq!(fs::metadata(&receipt).unwrap().mode() & 0o777, 0o644);
+        assert_eq!(
+            fs::metadata(store.root.join("transaction.json"))
+                .unwrap()
+                .mode()
+                & 0o777,
+            0o600
+        );
         let recovered = store.read().unwrap();
         assert_eq!(recovered.phase, Phase::RollingBack);
         assert_eq!(recovered.rollback, tx.rollback);
