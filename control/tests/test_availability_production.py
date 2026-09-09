@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -25,6 +26,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
     Base,
+    CatalogDocument,
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
@@ -287,11 +289,14 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         def resolve(self, _revision_id: str):
             return SimpleNamespace(input_intent_sha256="a" * 64)
 
-        def plan(self, *_args, **_kwargs):
+        def prepare_plan(self, *_args, **_kwargs):
             self.plan_calls += 1
             if self.plan_calls > 1:
                 raise AssertionError("selected plan must not be admitted twice")
             return SimpleNamespace(build_input_sha256="b" * 64)
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
 
     class Operations:
         def build(self, *_args, **_kwargs):
@@ -378,7 +383,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
     production.close()
 
 
-def test_postgres_builder_reservations_select_distinct_nodes(
+def test_postgres_builder_transaction_does_not_cross_session_block(
     tmp_path, postgres_engine
 ) -> None:
     recipe = RecipeDefinition.model_validate(
@@ -432,17 +437,70 @@ def test_postgres_builder_reservations_select_distinct_nodes(
                 for operation_id in operation_ids
             ]
         )
+        session.add(
+            CatalogDocument(
+                id="document-builder",
+                kind="recipe",
+                publisher="test",
+                slug="builder",
+                title="Builder test recipe",
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            CatalogDocumentRevision(
+                id="revision-builder",
+                document_id="document-builder",
+                kind="recipe",
+                publisher="test",
+                slug="builder",
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document={},
+                content_digest="e" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
 
     barrier = threading.Barrier(2)
+    persisted_nodes: list[str] = []
 
     class Builds:
         def resolve(self, _revision_id: str):
             return SimpleNamespace(input_intent_sha256="a" * 64)
 
-        def plan(self, _revision_id: str, node_id: str, **_kwargs):
+        def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
             barrier.wait(timeout=5)
             suffix = node_id[-1]
-            return SimpleNamespace(build_input_sha256=(suffix * 64))
+            return SimpleNamespace(
+                build_input_sha256=(suffix * 64), builder_node_id=node_id
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            assert _session.in_transaction()
+            persisted_nodes.append(plan.builder_node_id)
+            build_id = str(uuid.uuid4())
+            _session.add(
+                RecipeBuild(
+                    id=build_id,
+                    recipe_revision_id="revision-builder",
+                    builder_node_id=plan.builder_node_id,
+                    source_bundle_sha256="c" * 64,
+                    build_input_sha256=plan.build_input_sha256,
+                    state="planned",
+                    policy_report={},
+                    plan={"build_id": build_id},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            _session.flush()
+            return plan
 
     class Operations:
         def build(self, *_args, **_kwargs):
@@ -475,10 +533,20 @@ def test_postgres_builder_reservations_select_distinct_nodes(
             progress=lambda _progress: None,
         )
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = tuple(executor.map(dispatch, operation_ids))
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        futures = tuple(
+            executor.submit(dispatch, operation_id) for operation_id in operation_ids
+        )
+        results = tuple(future.result(timeout=8) for future in futures)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     selected = {result["builder_node_id"] for result in results}
     assert selected == set(node_ids)
+    assert set(persisted_nodes) == set(node_ids)
+    with sessions() as session:
+        builds = tuple(session.scalars(select(RecipeBuild)))
+    assert {build.builder_node_id for build in builds} == set(node_ids)
     with sessions() as session:
         assigned = {
             str(session.get(Job, operation_id).payload["runtime"]["builder_node_id"])

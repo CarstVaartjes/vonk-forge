@@ -251,6 +251,23 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
         assert stored is not None and stored.state == "planned"
 
 
+def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    prepared = service.prepare_plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.binary_digest = "2" * 64
+
+    with pytest.raises(RecipeBuildError, match="runtime identity changed"):
+        with sessions.begin() as session:
+            service.persist_plan_in_session(session, prepared, now=now)
+
+    with sessions() as session:
+        assert session.get(RecipeBuild, prepared.build_id) is None
+
+
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
