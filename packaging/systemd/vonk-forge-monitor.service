@@ -50,7 +50,7 @@ RemoveIPC=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadOnlyPaths=/etc/vonk-forge-agent /usr/lib/vonk-forge /var/lib/vonk-forge-agent /run/vonk-forge-agent /proc /sys
-InaccessiblePaths=/home /root /var/lib/vonk-forge/incoming
+InaccessiblePaths=/home /root /var/lib/vonk-forge/incoming /var/lib/vonk-forge-agent/state.sqlite
 
 [Install]
 WantedBy=multi-user.target
