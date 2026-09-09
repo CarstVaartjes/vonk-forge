@@ -47,3 +47,25 @@ credential files, edit `setup-state`, or manually restart the service.
 If readiness fails after certificate replacement, rerun the command: the setup
 marker remains in recovery state and the installer repairs the service without
 asking for another pairing token.
+
+Re-enrollment retains previous rotation directories for audit. If a later
+Controller-issued generation reuses an old number, the agent verifies the full
+stored key, certificate, chain and identity metadata before treating it as a
+replay. Different unselected material is preserved under the private
+`credentials/retired-generations/` directory before the new generation is staged.
+A generation selected by an active or staged pointer is never replaced with
+different material. Do not copy archived directories back into the active
+credential namespace or manually edit its pointers.
+
+Archived material keeps its existing private ownership and permissions and is
+not automatically pruned. Interrupted writes may also leave private temporary
+directories; they are not selected as identities or automatically swept. Treat
+these files as sensitive retained audit material when applying a separate
+operator retention policy.
+
+Incomplete generation directories, unsafe file permissions, symlinks and
+non-directory generation paths fail closed rather than being repaired by
+rotation. Re-enrollment does not repair damaged retained storage. If such a
+condition prevents rotation, preserve the diagnostic state and use a separately
+reviewed storage recovery procedure; do not repeatedly re-enroll or edit pointers
+to bypass the storage checks.

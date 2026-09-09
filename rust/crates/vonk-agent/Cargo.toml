@@ -34,6 +34,8 @@ tempfile.workspace = true
 tar.workspace = true
 
 [dev-dependencies]
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+time.workspace = true
 vonk-agent-helper = { path = "../vonk-agent-helper" }
 
 [lib]

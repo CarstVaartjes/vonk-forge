@@ -116,7 +116,9 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
 ///
 /// Pointer retirement is deliberately last. If the process is interrupted
 /// before that switch, the previous identity remains selected and enrollment
-/// replay can safely finish the replacement.
+/// replay can safely finish the replacement. Retained generation directories are
+/// audit material: a later rotation verifies their contents before reuse and
+/// archives an unselected collision from a previous pairing lineage.
 pub fn persist_paired_identity(
     root: &Path,
     material: &IdentityMaterial,
@@ -204,21 +206,38 @@ pub fn retire_expired_staged(root: &Path, generation: u64) -> Result<(), Identit
 
 pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), IdentityError> {
     ensure_private_directory(root)?;
-    if material.generation == 0 {
+    if material.generation == 0 || !valid_node_id(&material.node_id) {
         return Err(IdentityError::Node);
     }
+    let active = load_pointer(root, "active.json")?;
+    let staged = load_pointer(root, "staged.json")?;
+    if staged.is_some_and(|generation| generation != material.generation) {
+        return Err(std::io::Error::other("another identity generation is staged").into());
+    }
     let destination = root.join(generation_name(material.generation));
-    if !destination.try_exists()? {
-        let temporary = root.join(format!(
-            ".{}.{}.tmp",
-            generation_name(material.generation),
-            std::process::id()
-        ));
-        if temporary.try_exists()? {
-            fs::remove_dir_all(&temporary)?;
+    let exists = match fs::symlink_metadata(&destination) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    let matches = exists && identity_matches(&destination, material)?;
+    if !matches {
+        if active == Some(material.generation) || staged == Some(material.generation) {
+            return Err(std::io::Error::other("selected identity generation differs").into());
         }
-        persist_identity(&temporary, material)?;
-        fs::rename(&temporary, &destination)?;
+        // Write a complete private directory first. A failed write cannot change
+        // the current identity or move the retained generation out of the way.
+        let temporary = tempfile::Builder::new()
+            .prefix(".identity-generation-")
+            .tempdir_in(root)?;
+        persist_identity(temporary.path(), material)?;
+        if exists {
+            archive_unselected_generation(root, &destination)?;
+        }
+        // Neither pointer selects this destination. If interrupted after the
+        // archive, replay installs it anew; if interrupted after this rename,
+        // replay must verify all material before publishing the staged pointer.
+        fs::rename(temporary.path(), &destination)?;
         File::open(root)?.sync_all()?;
     }
     atomic_private_write(
@@ -228,6 +247,48 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
             generation: material.generation,
         })?,
     )?;
+    File::open(root)?.sync_all()?;
+    Ok(())
+}
+
+fn identity_matches(root: &Path, material: &IdentityMaterial) -> Result<bool, IdentityError> {
+    let metadata = fs::symlink_metadata(root)?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other("identity generation is unsafe").into());
+    }
+    let expected_metadata = serde_json::to_vec(&IdentityMetadata {
+        fingerprint: &material.fingerprint,
+        generation: material.generation,
+        node_id: &material.node_id,
+        serial: &material.serial,
+    })?;
+    let mut matches = true;
+    for (name, expected) in [
+        ("private-key.pem", material.private_key_pem.as_slice()),
+        ("certificate.pem", material.certificate_pem.as_slice()),
+        ("chain.pem", material.chain_pem.as_slice()),
+        ("identity.json", expected_metadata.as_slice()),
+    ] {
+        // Read every file even after a mismatch so an unsafe or incomplete
+        // retained directory fails closed rather than being silently replaced.
+        matches &= read_private(&root.join(name))? == expected;
+    }
+    Ok(matches)
+}
+
+fn archive_unselected_generation(root: &Path, generation: &Path) -> Result<(), IdentityError> {
+    let retired = root.join("retired-generations");
+    ensure_private_directory(&retired)?;
+    let archive = tempfile::Builder::new()
+        .prefix("identity-")
+        .tempdir_in(&retired)?
+        .keep();
+    // Keep the archive even if a later operation fails. Old key/certificate
+    // bytes must never be removed by a temporary-directory destructor.
+    fs::rename(generation, archive.join("identity"))?;
+    File::open(&archive)?.sync_all()?;
+    File::open(&retired)?.sync_all()?;
+    File::open(root)?.sync_all()?;
     Ok(())
 }
 
@@ -394,6 +455,7 @@ fn valid_node_id(value: &str) -> bool {
 mod tests {
     use super::*;
     use rcgen::{CertificateParams, KeyPair, PKCS_ED25519, date_time_ymd};
+    use std::os::unix::fs::{MetadataExt, symlink};
     use tempfile::tempdir;
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
@@ -411,14 +473,17 @@ mod tests {
     }
 
     fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
+        certificate_material_until(
+            generation,
+            if expired { (2026, 8, 2) } else { (2026, 8, 4) },
+        )
+    }
+
+    fn certificate_material_until(generation: u64, not_after: (i32, u8, u8)) -> IdentityMaterial {
         let key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
         let mut parameters = CertificateParams::default();
         parameters.not_before = date_time_ymd(2026, 8, 1);
-        parameters.not_after = if expired {
-            date_time_ymd(2026, 8, 2)
-        } else {
-            date_time_ymd(2026, 8, 4)
-        };
+        parameters.not_after = date_time_ymd(not_after.0, not_after.1, not_after.2);
         let certificate = parameters.self_signed(&key).unwrap();
         IdentityMaterial {
             node_id: NODE_ID.to_owned(),
@@ -501,5 +566,276 @@ mod tests {
             fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
             vec![b'n', b'c'],
         );
+    }
+
+    fn retired_identities(root: &Path) -> Vec<PathBuf> {
+        let retired = root.join("retired-generations");
+        if !retired.exists() {
+            return Vec::new();
+        }
+        fs::read_dir(retired)
+            .unwrap()
+            .map(|entry| entry.unwrap().path().join("identity"))
+            .collect()
+    }
+
+    #[test]
+    fn rotation_after_reenrollment_archives_a_different_pairing_lineage() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        // The previous Controller's generation need not be expired to collide.
+        let old = certificate_material_until(2, (2099, 1, 1));
+        stage_identity(&root, &old).unwrap();
+        publish_staged(&root, 2).unwrap();
+        assert!(!identity_expired(&active_identity_paths(&root).unwrap(), Utc::now()).unwrap());
+        let paired = certificate_material_until(1, (2099, 1, 1));
+        persist_paired_identity(&root, &paired).unwrap();
+        let rotated = certificate_material_until(2, (2099, 1, 1));
+
+        stage_identity(&root, &rotated).unwrap();
+
+        let staged = staged_identity_paths(&root).unwrap().unwrap().1;
+        assert_eq!(
+            fs::read(staged.certificate).unwrap(),
+            rotated.certificate_pem
+        );
+        assert_eq!(
+            fs::read(staged.private_key).unwrap(),
+            rotated.private_key_pem
+        );
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            paired.certificate_pem,
+        );
+        let archives = retired_identities(&root);
+        assert_eq!(archives.len(), 1);
+        assert_eq!(
+            fs::read(archives[0].join("certificate.pem")).unwrap(),
+            old.certificate_pem
+        );
+        assert_eq!(
+            fs::read(archives[0].join("private-key.pem")).unwrap(),
+            old.private_key_pem
+        );
+        assert_eq!(fs::metadata(&archives[0]).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(archives[0].join("private-key.pem"))
+                .unwrap()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        publish_staged(&root, 2).unwrap();
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            rotated.certificate_pem,
+        );
+    }
+
+    #[test]
+    fn exact_replay_preserves_generation_files_and_does_not_archive() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        let issued = certificate_material(2, false);
+        stage_identity(&root, &issued).unwrap();
+        let path = staged_identity_paths(&root).unwrap().unwrap().1.private_key;
+        let before = fs::metadata(&path).unwrap();
+
+        stage_identity(&root, &issued).unwrap();
+
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(
+            (before.ino(), before.mtime(), before.mtime_nsec()),
+            (after.ino(), after.mtime(), after.mtime_nsec())
+        );
+        assert_eq!(fs::read(path).unwrap(), issued.private_key_pem);
+        assert!(retired_identities(&root).is_empty());
+    }
+
+    #[test]
+    fn selected_generation_rejects_every_material_mismatch_without_mutation() {
+        for active in [false, true] {
+            for field in ["key", "certificate", "chain", "metadata"] {
+                let temporary = tempdir().unwrap();
+                let root = temporary.path().join("credentials");
+                let original = certificate_material(2, false);
+                stage_identity(&root, &original).unwrap();
+                if active {
+                    publish_staged(&root, 2).unwrap();
+                }
+                let mut different = original.clone();
+                let other = certificate_material(2, false);
+                match field {
+                    "key" => different.private_key_pem = other.private_key_pem,
+                    "certificate" => different.certificate_pem = other.certificate_pem,
+                    "chain" => different.chain_pem = other.chain_pem,
+                    "metadata" => different.serial = "different-serial".to_owned(),
+                    _ => unreachable!(),
+                }
+                assert!(
+                    stage_identity(&root, &different).is_err(),
+                    "{field}, active={active}"
+                );
+                let directory = root.join(generation_name(2));
+                assert_eq!(
+                    fs::read(directory.join("private-key.pem")).unwrap(),
+                    original.private_key_pem
+                );
+                assert_eq!(
+                    fs::read(directory.join("certificate.pem")).unwrap(),
+                    original.certificate_pem
+                );
+                assert_eq!(
+                    load_pointer(&root, "active.json").unwrap(),
+                    active.then_some(2)
+                );
+                assert_eq!(
+                    load_pointer(&root, "staged.json").unwrap(),
+                    (!active).then_some(2)
+                );
+                assert!(retired_identities(&root).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn interrupted_collision_replays_before_and_after_replacement_rename() {
+        for replacement_written in [false, true] {
+            let temporary = tempdir().unwrap();
+            let root = temporary.path().join("credentials");
+            let paired = certificate_material(1, false);
+            persist_paired_identity(&root, &paired).unwrap();
+            let destination = root.join(generation_name(2));
+            let old = certificate_material(2, true);
+            persist_identity(&destination, &old).unwrap();
+            // Simulate process loss after archiving the unselected collision,
+            // optionally after installing the new directory but before staging.
+            archive_unselected_generation(&root, &destination).unwrap();
+            let issued = certificate_material(2, false);
+            if replacement_written {
+                persist_identity(&destination, &issued).unwrap();
+            }
+            stage_identity(&root, &issued).unwrap();
+            assert_eq!(retired_identities(&root).len(), 1);
+            assert_eq!(
+                fs::read(staged_identity_paths(&root).unwrap().unwrap().1.certificate).unwrap(),
+                issued.certificate_pem
+            );
+            assert_eq!(
+                fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+                paired.certificate_pem
+            );
+        }
+    }
+
+    #[test]
+    fn archive_failure_preserves_unselected_material_and_active_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        let paired = certificate_material(1, false);
+        persist_paired_identity(&root, &paired).unwrap();
+        let destination = root.join(generation_name(2));
+        let old = certificate_material(2, true);
+        persist_identity(&destination, &old).unwrap();
+        symlink(temporary.path(), root.join("retired-generations")).unwrap();
+
+        assert!(stage_identity(&root, &certificate_material(2, false)).is_err());
+
+        assert_eq!(
+            fs::read(destination.join("private-key.pem")).unwrap(),
+            old.private_key_pem
+        );
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            paired.certificate_pem
+        );
+        assert!(!root.join("staged.json").exists());
+    }
+
+    #[test]
+    fn unsafe_generation_and_conflicting_staged_pointer_fail_closed() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_paired_identity(&root, &certificate_material(1, false)).unwrap();
+        let destination = root.join(generation_name(2));
+        symlink(root.join("absent"), &destination).unwrap();
+        assert!(stage_identity(&root, &certificate_material(2, false)).is_err());
+        assert!(
+            fs::symlink_metadata(&destination)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        fs::remove_file(destination).unwrap();
+        stage_identity(&root, &certificate_material(2, false)).unwrap();
+
+        assert!(stage_identity(&root, &certificate_material(3, false)).is_err());
+        assert_eq!(load_pointer(&root, "staged.json").unwrap(), Some(2));
+        assert!(!root.join(generation_name(3)).exists());
+    }
+
+    #[test]
+    fn damaged_unselected_generations_leave_both_pointers_unchanged() {
+        for damage in ["missing-chain", "unsafe-mode", "regular-file"] {
+            let temporary = tempdir().unwrap();
+            let root = temporary.path().join("credentials");
+            let active = certificate_material(1, false);
+            stage_identity(&root, &active).unwrap();
+            publish_staged(&root, 1).unwrap();
+            let destination = root.join(generation_name(2));
+            let old = certificate_material(2, false);
+            persist_identity(&destination, &old).unwrap();
+            match damage {
+                "missing-chain" => fs::remove_file(destination.join("chain.pem")).unwrap(),
+                "unsafe-mode" => fs::set_permissions(
+                    destination.join("chain.pem"),
+                    fs::Permissions::from_mode(0o644),
+                )
+                .unwrap(),
+                "regular-file" => {
+                    fs::remove_dir_all(&destination).unwrap();
+                    fs::write(&destination, b"damaged-generation").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let identity_before = fs::read(root.join("active.json")).unwrap();
+
+            assert!(
+                stage_identity(&root, &certificate_material(2, false)).is_err(),
+                "{damage}"
+            );
+
+            assert_eq!(fs::read(root.join("active.json")).unwrap(), identity_before);
+            assert!(!root.join("staged.json").exists());
+            assert_eq!(
+                fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+                active.certificate_pem
+            );
+            assert!(retired_identities(&root).is_empty());
+            assert!(destination.exists());
+        }
+    }
+
+    #[test]
+    fn interrupted_private_temporary_directory_is_not_selected_or_removed() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_paired_identity(&root, &certificate_material(1, false)).unwrap();
+        let abandoned = root.join(".identity-generation-interrupted");
+        let old = certificate_material(2, false);
+        persist_identity(&abandoned, &old).unwrap();
+        let issued = certificate_material(2, false);
+
+        stage_identity(&root, &issued).unwrap();
+
+        assert_eq!(
+            fs::read(abandoned.join("private-key.pem")).unwrap(),
+            old.private_key_pem
+        );
+        assert_eq!(
+            fs::read(staged_identity_paths(&root).unwrap().unwrap().1.certificate).unwrap(),
+            issued.certificate_pem
+        );
+        assert!(retired_identities(&root).is_empty());
     }
 }
