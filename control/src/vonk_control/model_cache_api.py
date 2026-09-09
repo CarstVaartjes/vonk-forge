@@ -60,6 +60,8 @@ MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/v1/model-cache/operations"): "listModelCacheOperations",
     ("get", "/api/v1/model-cache/operations/{operation_id}"):
         "getModelCacheOperation",
+    ("post", "/api/v1/model-cache/operations/{operation_id}/cancel"):
+        "cancelModelCacheOperation",
     ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
         "retryModelCacheOperation",
     ("post", "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume"):
@@ -492,6 +494,27 @@ def install_model_cache_routes(
             raise
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise error(exc, "model cache operation unavailable") from None
+
+    @app.post(
+        "/api/v1/model-cache/operations/{operation_id}/cancel",
+        response_model=ModelCacheOperationResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="cancelModelCacheOperation",
+    )
+    def cancel_operation(
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=_UUID)],
+        actor: Actor = authenticated,
+    ) -> ModelCacheOperationResponse:
+        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/cancel")
+        try:
+            result = cache().cancel_operation(operation_id)
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise error(exc, "model cache operation cancellation unavailable") from None
+        audit(request, actor, "model-cache.cancel", operation_id)
+        return operation_response(result)
 
     @app.post(
         "/api/v1/model-cache/operations/{operation_id}/retry",

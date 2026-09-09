@@ -141,6 +141,9 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),
+    ("POST", "/api/v1/model-cache/operations/{operation_id}/cancel"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/model-cache/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),
