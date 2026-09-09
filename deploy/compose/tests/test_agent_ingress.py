@@ -98,7 +98,7 @@ def _rendered(*files: str, environment: dict[str, str] | None = None) -> dict:
     return json.loads(result.stdout)
 
 
-def _adapted_caddy(environment: dict[str, str]) -> dict:
+def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) -> dict:
     _require_docker_runtime()
     result = subprocess.run(
         [
@@ -129,7 +129,11 @@ def _adapted_caddy(environment: dict[str, str]) -> dict:
         check=True,
         capture_output=True,
         text=True,
-        input=(ROOT / "deploy/compose/Caddyfile").read_text(),
+        input=(
+            caddyfile
+            if caddyfile is not None
+            else (ROOT / "deploy/compose/Caddyfile").read_text()
+        ),
     )
     return json.loads(result.stdout)
 
@@ -579,6 +583,23 @@ def test_agent_package_relay_matches_only_digest_bound_package_documents() -> No
         assert re.fullmatch(matcher, denied) is None
     assert package_route["match"][0]["method"] == ["GET"]
     assert "install.vonkforge.ai:443" in json.dumps(package_route)
+
+
+def test_canonical_canary_overlay_validates_with_recipe_raw_relay() -> None:
+    caddyfile = (ROOT / "deploy/compose/Caddyfile").read_text(encoding="utf-8")
+    adapted = _adapted_caddy(
+        _environment(),
+        caddyfile
+        + "\n"
+        + "http://:8086 {\n"
+        + "\troot * /srv/vonk-recipe-library\n"
+        + "\t@canary_package path "
+        + "/tests/fixtures/canonical-synthetic-canary/package/canary.tar.gz\n"
+        + "\tfile_server\n"
+        + "}\n",
+    )
+    assert _server_on_port(adapted, 8085)["listen"] == [":8085"]
+    assert _server_on_port(adapted, 8086)["listen"] == [":8086"]
 
 
 def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> (
