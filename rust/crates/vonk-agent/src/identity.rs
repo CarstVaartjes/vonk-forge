@@ -226,6 +226,14 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
                 std::io::Error::other("cannot replace the active identity generation").into(),
             );
         }
+        // Do not leave a durable staged pointer referencing the directory
+        // while that directory is being archived.  If the process stops in
+        // the replacement gap, the pending CSR remains available and the
+        // next renewal replay can restage the Controller's exact response.
+        if load_pointer(root, "staged.json")? == Some(material.generation) {
+            fs::remove_file(root.join("staged.json"))?;
+            File::open(root)?.sync_all()?;
+        }
         let expected_metadata = identity_metadata(material)?;
         let matches = [
             &(
