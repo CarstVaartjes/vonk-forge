@@ -62,6 +62,11 @@ publish, or after a new paired identity is durably installed, unreferenced
 generated directories are removed while the active and staged pointers remain
 the only selectable credentials.
 
+Renewal generation admission is monotonic: a staged generation must be greater
+than the selected active generation.  A lower or equal response is rejected
+without changing the active files; only explicit re-enrollment may reset the
+pointer lineage.
+
 ## Conflict recovery
 
 The recovery operation is authenticated with the currently active certificate
