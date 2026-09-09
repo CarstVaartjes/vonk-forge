@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.enrollment import (
     EnrollmentDenied,
     EnrollmentService,
+    RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
@@ -649,6 +650,93 @@ def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_vali
         assert expired.revoked_at is not None
         assert expired.revoked_at.replace(tzinfo=UTC) == clock.now
         assert replacement_row is not None and replacement_row.state == "staged"
+
+
+def test_recovery_retires_conflicting_staged_csr_before_reissuing(
+    service,
+) -> None:
+    enrollment, sessions, _clock, authority = service
+    source = enroll(enrollment)
+    obsolete = enrollment.renew(NODE_ID, source.serial, csr())
+    pending_csr = csr()
+
+    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    replay = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+
+    assert recovered == replay
+    assert recovered.serial != obsolete.serial
+    assert authority.revocations == [obsolete.serial]
+    assert len(authority.renew_request_ids) == 2
+    with sessions() as session:
+        old_staged = session.get(AgentCertificate, obsolete.serial)
+        new_staged = session.get(AgentCertificate, recovered.serial)
+        assert old_staged is not None
+        assert old_staged.state == "revoked"
+        assert old_staged.revoked_at is not None
+        assert old_staged.ca_revoked_at is not None
+        assert new_staged is not None and new_staged.state == "staged"
+        assert new_staged.csr_public_key_fingerprint == public_key_fingerprint(
+            pending_csr
+        )
+        assert session.get(AgentCertificateRotation, NODE_ID) is None
+
+
+def test_recovery_conflict_revocation_is_durable_across_response_loss(
+    service,
+) -> None:
+    enrollment, sessions, _clock, authority = service
+    source = enroll(enrollment)
+    obsolete = enrollment.renew(NODE_ID, source.serial, csr())
+    pending_csr = csr()
+    authority.revoke_failures.add(obsolete.serial)
+
+    with pytest.raises(
+        RenewalConflictRevocationUncertain, match="retry recovery"
+    ):
+        enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    with sessions() as session:
+        old_staged = session.get(AgentCertificate, obsolete.serial)
+        intent = session.get(AgentCertificateRotation, NODE_ID)
+        assert old_staged is not None
+        assert old_staged.state == "revoked"
+        assert old_staged.revoked_at is not None
+        assert old_staged.ca_revoked_at is None
+        assert intent is not None and intent.state == "revocation-pending"
+
+    authority.revoke_failures.clear()
+    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    restarted = EnrollmentService(sessions, authority, clock=_clock)
+    assert restarted.recover_rotation(NODE_ID, source.serial, pending_csr) == recovered
+    assert authority.revocations == [obsolete.serial, obsolete.serial]
+    assert len(authority.renew_request_ids) == 2
+
+
+def test_recovery_does_not_discard_unknown_issuing_intent(service) -> None:
+    enrollment, sessions, clock, authority = service
+    source = enroll(enrollment)
+    obsolete_csr = csr()
+    pending_csr = csr()
+    with sessions.begin() as session:
+        session.add(
+            AgentCertificateRotation(
+                node_id=NODE_ID,
+                source_serial=source.serial,
+                generation=2,
+                csr_pem=obsolete_csr.decode("ascii"),
+                csr_public_key_fingerprint=public_key_fingerprint(obsolete_csr),
+                provider_request_id="r" * 43,
+                state="manual-recovery",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+
+    with pytest.raises(RenewalIssuanceUncertain, match="manual recovery"):
+        enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    assert authority.renew_request_ids == []
+    with sessions() as session:
+        intent = session.get(AgentCertificateRotation, NODE_ID)
+        assert intent is not None and intent.state == "manual-recovery"
 
 
 def test_renewal_intent_is_committed_before_provider_call(service) -> None:

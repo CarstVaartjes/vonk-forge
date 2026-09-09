@@ -69,6 +69,10 @@ class RenewalIssuanceUncertain(EnrollmentDenied):
     """Renewal issuance is terminal until an operator reconciles the intent."""
 
 
+class RenewalConflictRevocationUncertain(EnrollmentDenied):
+    """An obsolete staged certificate is denied locally but CA revocation is pending."""
+
+
 @dataclass(frozen=True)
 class EnrollmentGrant:
     id: str
@@ -96,6 +100,12 @@ class _RotationClaim:
     provider_request_id: str
     state: str
     owner: bool
+
+
+@dataclass(frozen=True)
+class _RotationRecoveryClaim:
+    claim: _RotationClaim
+    retiring_serial: str
 
 
 class EnrollmentService:
@@ -404,10 +414,210 @@ class EnrollmentService:
                     "certificate rotation requires manual recovery"
                 )
             raise RenewalInProgress("certificate rotation issuance is in progress")
+        return self._issue_rotation_claim(claim, now)
+
+    def recover_rotation(
+        self, node_id: str, serial: str, csr: bytes
+    ) -> IssuedCertificate:
+        """Recover an unactivated staged certificate for the durable pending CSR.
+
+        The caller must still authenticate with the active source certificate.
+        A conflicting staged certificate is denied locally first, then revoked
+        at the CA before the new CSR is issued.  The revocation-pending intent
+        is durable so a lost response or process restart cannot cause a second
+        issuance or allow an unrevoked alternative identity to remain admitted.
+        """
+        with self._rotation_lock:
+            _validate_node_id(node_id)
+            if not serial.strip():
+                raise ValueError("certificate serial is required")
+            normalized_csr, _, csr_fingerprint, _ = _load_csr(node_id, csr)
+            now = _utc(self._clock())
+            recovery = self._prepare_rotation_recovery(
+                node_id,
+                serial,
+                normalized_csr,
+                csr_fingerprint,
+                now,
+            )
+            if recovery is None:
+                return self._renew_locked(node_id, serial, normalized_csr)
+            try:
+                self._authority.revoke_node(recovery.retiring_serial, now)
+            except RuntimeError as error:
+                raise RenewalConflictRevocationUncertain(
+                    "obsolete staged certificate revocation is uncertain; retry recovery"
+                ) from error
+            owns_issuance = self._finish_rotation_recovery(
+                node_id,
+                recovery.retiring_serial,
+                recovery.claim,
+                now,
+            )
+            if not owns_issuance:
+                return self._renew_locked(node_id, serial, normalized_csr)
+            return self._issue_rotation_claim(recovery.claim, now)
+
+    def _prepare_rotation_recovery(
+        self,
+        node_id: str,
+        serial: str,
+        normalized_csr: bytes,
+        csr_fingerprint: str,
+        now: datetime,
+    ) -> _RotationRecoveryClaim | None:
+        with self._sessions.begin() as session:
+            node = session.scalar(
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
+            )
+            if node is None:
+                raise EnrollmentDenied("certificate serial does not identify node")
+            certificates = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(AgentCertificate.node_id == node_id)
+                    .order_by(AgentCertificate.generation, AgentCertificate.serial)
+                    .with_for_update(of=AgentCertificate)
+                )
+            )
+            source = next(
+                (candidate for candidate in certificates if candidate.serial == serial),
+                None,
+            )
+            if source is None:
+                raise EnrollmentDenied("certificate serial does not identify node")
+            if (
+                node.state != "active"
+                or node.revoked_at is not None
+                or source.revoked_at is not None
+                or source.state != "active"
+                or _stored_utc(source.not_before) > now
+                or _stored_utc(source.not_after) <= now
+            ):
+                raise EnrollmentDenied("node identity is retired or revoked")
+
+            intent = session.scalar(
+                select(AgentCertificateRotation)
+                .where(AgentCertificateRotation.node_id == node_id)
+                .with_for_update(of=AgentCertificateRotation)
+            )
+            if intent is not None:
+                if (
+                    intent.source_serial != serial
+                    or intent.csr_public_key_fingerprint != csr_fingerprint
+                    or intent.csr_pem != normalized_csr.decode("ascii")
+                ):
+                    if intent.state in {"issuing", "manual-recovery"}:
+                        raise RenewalIssuanceUncertain(
+                            "certificate rotation requires manual recovery"
+                        )
+                    raise EnrollmentDenied("certificate rotation state is invalid")
+                if intent.state == "revocation-pending":
+                    retiring = next(
+                        (
+                            candidate
+                            for candidate in certificates
+                            if candidate.generation == intent.generation - 1
+                            and candidate.state == "revoked"
+                            and candidate.revoked_at is not None
+                            and candidate.ca_revoked_at is None
+                        ),
+                        None,
+                    )
+                    if retiring is None:
+                        raise RenewalConflictRevocationUncertain(
+                            "obsolete staged certificate revocation requires reconciliation"
+                        )
+                    return _RotationRecoveryClaim(
+                        _rotation_claim(intent, owner=True), retiring.serial
+                    )
+                if intent.state in {"issuing", "manual-recovery"}:
+                    return None
+                raise EnrollmentDenied("certificate rotation state is invalid")
+
+            staged = next(
+                (
+                    candidate
+                    for candidate in certificates
+                    if candidate.state == "staged" and candidate.revoked_at is None
+                ),
+                None,
+            )
+            if staged is None or staged.csr_public_key_fingerprint == csr_fingerprint:
+                return None
+            staged.state = "revoked"
+            staged.revoked_at = staged.revoked_at or now
+            intent = AgentCertificateRotation(
+                node_id=node_id,
+                source_serial=serial,
+                generation=staged.generation + 1,
+                csr_pem=normalized_csr.decode("ascii"),
+                csr_public_key_fingerprint=csr_fingerprint,
+                provider_request_id=secrets.token_urlsafe(32),
+                state="revocation-pending",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(intent)
+            session.flush()
+            return _RotationRecoveryClaim(
+                _rotation_claim(intent, owner=True), staged.serial
+            )
+
+    def _finish_rotation_recovery(
+        self,
+        node_id: str,
+        retiring_serial: str,
+        claim: _RotationClaim,
+        now: datetime,
+    ) -> bool:
+        with self._sessions.begin() as session:
+            certificate = session.scalar(
+                select(AgentCertificate)
+                .where(
+                    AgentCertificate.node_id == node_id,
+                    AgentCertificate.serial == retiring_serial,
+                )
+                .with_for_update(of=AgentCertificate)
+            )
+            intent = session.scalar(
+                select(AgentCertificateRotation)
+                .where(
+                    AgentCertificateRotation.node_id == node_id,
+                    AgentCertificateRotation.provider_request_id
+                    == claim.provider_request_id,
+                )
+                .with_for_update(of=AgentCertificateRotation)
+            )
+            if (
+                certificate is None
+                or certificate.state != "revoked"
+                or certificate.revoked_at is None
+                or intent is None
+            ):
+                raise RenewalConflictRevocationUncertain(
+                    "obsolete staged certificate recovery state changed"
+                )
+            if intent.state == "issuing" and certificate.ca_revoked_at is not None:
+                return False
+            if intent.state != "revocation-pending":
+                raise RenewalConflictRevocationUncertain(
+                    "obsolete staged certificate recovery state changed"
+                )
+            certificate.ca_revoked_at = certificate.ca_revoked_at or now
+            intent.state = "issuing"
+            intent.updated_at = now
+            return True
+
+    def _issue_rotation_claim(
+        self, claim: _RotationClaim, now: datetime
+    ) -> IssuedCertificate:
         try:
             issued = self._authority.renew_node(
-                node_id,
-                normalized_csr,
+                claim.node_id,
+                claim.csr_pem,
                 now,
                 request_id=claim.provider_request_id,
             )
