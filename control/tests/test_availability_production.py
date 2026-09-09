@@ -468,6 +468,8 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         )
 
     barrier = threading.Barrier(2)
+    preparation_lock = threading.Lock()
+    prepared_threads: set[int] = set()
     persisted_nodes: list[str] = []
 
     class Builds:
@@ -475,7 +477,12 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
             return SimpleNamespace(input_intent_sha256="a" * 64)
 
         def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
-            barrier.wait(timeout=5)
+            thread_id = threading.get_ident()
+            with preparation_lock:
+                first_preparation = thread_id not in prepared_threads
+                prepared_threads.add(thread_id)
+            if first_preparation:
+                barrier.wait(timeout=5)
             suffix = node_id[-1]
             return SimpleNamespace(
                 build_input_sha256=(suffix * 64), builder_node_id=node_id
@@ -630,11 +637,14 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 image_digest=None,
             )
 
-        def plan(self, _revision_id: str, node_id: str, **_kwargs):
+        def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
             return SimpleNamespace(
                 build_input_sha256=final_input,
                 builder_node_id=node_id,
             )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
 
     class Operations:
         def build(self, plan, *, build_input_sha256: str, **_kwargs):
