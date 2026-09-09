@@ -24,7 +24,7 @@ futures-util = "0.3.31"
 base64ct = { version = "1.8.0", features = ["alloc"] }
 chrono = { version = "0.4.41", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4.5.45", features = ["derive"] }
-ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core"] }
+ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "rand_core"] }
 hex = "0.4.3"
 p256 = { version = "0.13.2", features = ["ecdsa"] }
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
