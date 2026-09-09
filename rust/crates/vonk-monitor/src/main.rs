@@ -33,7 +33,9 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         match read_boot_id(Path::new("/proc/sys/kernel/random/boot_id")) {
             Ok(value) => break value,
             Err(error) => {
-                eprintln!("vonk-monitor: boot identity unavailable: {error}");
+                eprintln!(
+                    "vonk-monitor: operation=boot_identity.read endpoint=/proc/sys/kernel/random/boot_id error={error}; decision=defer-until-next-interval"
+                );
                 tokio::time::sleep(INTERVAL).await;
             }
         }
@@ -72,7 +74,9 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         })
         .await;
         let Ok((returned_collector, prior, result)) = collection else {
-            eprintln!("vonk-monitor: collector task stopped; retrying next interval");
+            eprintln!(
+                "vonk-monitor: operation=telemetry.collect endpoint=local error=collector-task-stopped; decision=discard-and-collect-next-interval"
+            );
             collector = Some(TelemetryCollector::new(
                 SystemProcessRunner,
                 SystemFileSystemProvider,
@@ -107,7 +111,9 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(error) => {
                 previous = prior;
-                eprintln!("vonk-monitor: snapshot unavailable: {error}");
+                eprintln!(
+                    "vonk-monitor: operation=telemetry.collect endpoint=local error={error}; decision=discard-and-collect-next-interval"
+                );
             }
         }
         next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
