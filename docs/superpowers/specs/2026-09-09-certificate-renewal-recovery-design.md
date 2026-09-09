@@ -53,6 +53,15 @@ CSR, staged generation, or active pointer.  It never generates a replacement
 key merely because a response or process was lost.  A staged certificate that
 has expired is retired and the old active identity is retained.
 
+Generation numbers are storage slots, not identity.  Before reusing an
+existing slot, the agent compares the private key, leaf, chain, and metadata
+with the requested material.  An exact match is a replay; a mismatch is moved
+to a uniquely named replacement directory and the new files are written.  The
+active generation is immutable and can never be replaced.  After a successful
+publish, or after a new paired identity is durably installed, unreferenced
+generated directories are removed while the active and staged pointers remain
+the only selectable credentials.
+
 ## Conflict recovery
 
 The recovery operation is authenticated with the currently active certificate

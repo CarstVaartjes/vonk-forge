@@ -129,6 +129,7 @@ pub fn persist_paired_identity(
     archive_pointer(root, "staged.json", "pre-reenroll-staged.json")?;
     archive_pointer(root, "active.json", "pre-reenroll-active.json")?;
     clear_pending(root)?;
+    cleanup_abandoned_generations(root, None)?;
     File::open(root)?.sync_all()?;
     Ok(())
 }
@@ -314,19 +315,22 @@ pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError>
         Err(error) => return Err(error.into()),
     }
     clear_pending(root)?;
-    cleanup_abandoned_generations(root, generation)?;
+    cleanup_abandoned_generations(root, Some(generation))?;
     File::open(root)?.sync_all()?;
     Ok(())
 }
 
-fn cleanup_abandoned_generations(root: &Path, active_generation: u64) -> Result<(), IdentityError> {
-    let active_name = generation_name(active_generation);
+fn cleanup_abandoned_generations(
+    root: &Path,
+    active_generation: Option<u64>,
+) -> Result<(), IdentityError> {
+    let active_name = active_generation.map(generation_name);
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if (name.starts_with("generation-") || name.starts_with("replaced-generation-"))
-            && name != active_name
+            && active_name.as_deref() != Some(name.as_ref())
         {
             let metadata = fs::symlink_metadata(entry.path())?;
             if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
@@ -591,7 +595,10 @@ mod tests {
             fs::read(root.join("pre-reenroll-active.json")).unwrap(),
             br#"{"generation":3}"#,
         );
-        assert!(root.join(generation_name(3)).is_dir());
+        assert!(
+            !root.join(generation_name(3)).exists(),
+            "re-enrollment must retire obsolete generated credentials after the new flat identity is durable",
+        );
         assert_eq!(
             fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
             vec![b'n', b'c'],
