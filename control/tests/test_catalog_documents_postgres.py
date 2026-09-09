@@ -78,7 +78,7 @@ def test_fresh_postgres_migration_builds_canonical_schema(postgres_engine) -> No
         "recipe_revisions",
     }.isdisjoint(inspector.get_table_names())
     with postgres_engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0024_failure_evidence"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0025_remove_telemetry_sequence"
 
 
 def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> None:

@@ -196,7 +196,7 @@ def test_current_telemetry_defaults_preserve_rows_and_require_metrics(
     with postgres_engine.begin() as connection:
         connection.execute(insert_sample, values)
         before = connection.execute(
-            text("SELECT id, node_id, boot_id, sequence, metrics FROM node_telemetry_samples")
+            text("SELECT id, node_id, boot_id, observed_at, metrics FROM node_telemetry_samples")
         ).one()
 
     command.upgrade(config, "head")
