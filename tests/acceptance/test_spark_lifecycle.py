@@ -86,6 +86,7 @@ PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # of a certificate lifetime and its independent rotation lane polls on a bounded
 # interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
 CERTIFICATE_LIFETIME_SECONDS = 90
+CANARY_PACKAGE_PORT = 8086
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
 REGISTRY_HOST = "registry.spark.localhost"
@@ -585,7 +586,7 @@ def _configure_canonical_canary_library(
     if (
         not isinstance(control_environment, dict)
         or not isinstance(caddy_service, dict)
-        or "http://:8085" in caddy
+        or f"http://:{CANARY_PACKAGE_PORT}" in caddy
     ):
         raise LifecycleError("canonical canary Controller package boundary is invalid")
     serving_root = bundle / "secrets/synthetic-recipe-library"
@@ -622,7 +623,9 @@ def _configure_canonical_canary_library(
         or package_target.read_bytes() != fixture.package_bytes
     ):
         raise LifecycleError("canonical canary staged package bytes differ")
-    control_environment["VONK_RECIPE_LIBRARY_PACKAGE_URL"] = "http://caddy:8085"
+    control_environment["VONK_RECIPE_LIBRARY_PACKAGE_URL"] = (
+        f"http://caddy:{CANARY_PACKAGE_PORT}"
+    )
     volumes = caddy_service.setdefault("volumes", [])
     if not isinstance(volumes, list):
         raise LifecycleError("canonical canary Caddy volumes are invalid")
@@ -631,7 +634,7 @@ def _configure_canonical_canary_library(
     )
     caddy_path.write_text(
         caddy.rstrip()
-        + "\n\nhttp://:8085 {\n"
+        + f"\n\nhttp://:{CANARY_PACKAGE_PORT} {{\n"
         + "\troot * /srv/vonk-recipe-library\n"
         + f"\t@canary_package path /{fixture.package_path.as_posix()}\n"
         + "\theader @canary_package Content-Type application/octet-stream\n"
