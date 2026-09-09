@@ -1015,6 +1015,8 @@ impl AgentHttpClient {
         }
 
         progress(offset, "copying");
+        let mut last_progress = tokio::time::Instant::now();
+        let mut retries = 0_u32;
         while offset < expected_bytes {
             let end = expected_bytes
                 .saturating_sub(1)
@@ -1022,47 +1024,62 @@ impl AgentHttpClient {
             let mut url = self.endpoint(&format!("/agent/v1/distribution/objects/{sha256}"))?;
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
-            let response = self
-                .current_client()
-                .get(url)
-                .header("range", format!("bytes={offset}-{end}"))
-                .header("if-range", format!("\"sha256:{sha256}\""))
-                .send()
-                .await?;
-            let expected_etag = format!("\"sha256:{sha256}\"");
-            let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
-            if response.status() != StatusCode::PARTIAL_CONTENT
-                || response.content_length() != Some(end - offset + 1)
-                || response
-                    .headers()
-                    .get("etag")
-                    .and_then(|value| value.to_str().ok())
-                    != Some(expected_etag.as_str())
-                || response
-                    .headers()
-                    .get("content-range")
-                    .and_then(|value| value.to_str().ok())
-                    != Some(expected_range.as_str())
-            {
+            let attempt: Result<(), ClientError> = async {
+                let mut response = self
+                    .current_client()
+                    .get(url)
+                    .header("range", format!("bytes={offset}-{end}"))
+                    .header("if-range", format!("\"sha256:{sha256}\""))
+                    .send()
+                    .await?;
                 classify_status(response.status())?;
-                return Err(ClientError::Protocol);
-            }
-            let mut copied = 0_u64;
-            let expected_chunk = end - offset + 1;
-            let mut response = response;
-            while let Some(chunk) = response.chunk().await? {
-                copied = copied.saturating_add(chunk.len() as u64);
-                if copied > expected_chunk {
+                let expected_etag = format!("\"sha256:{sha256}\"");
+                let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
+                if response.status() != StatusCode::PARTIAL_CONTENT
+                    || response.content_length() != Some(end - offset + 1)
+                    || response
+                        .headers()
+                        .get("etag")
+                        .and_then(|value| value.to_str().ok())
+                        != Some(expected_etag.as_str())
+                    || response
+                        .headers()
+                        .get("content-range")
+                        .and_then(|value| value.to_str().ok())
+                        != Some(expected_range.as_str())
+                {
                     return Err(ClientError::Protocol);
                 }
-                output.write_all(&chunk).await?;
+                while let Some(chunk) = response.chunk().await? {
+                    if chunk.len() as u64 > end + 1 - offset {
+                        return Err(ClientError::Protocol);
+                    }
+                    output.write_all(&chunk).await?;
+                    // Resume from bytes actually appended, including when the
+                    // connection fails halfway through this ranged response.
+                    offset += chunk.len() as u64;
+                    if last_progress.elapsed() >= Duration::from_millis(200) {
+                        progress(offset, "copying");
+                        last_progress = tokio::time::Instant::now();
+                    }
+                }
+                if offset != end + 1 {
+                    return Err(ClientError::Protocol);
+                }
+                Ok(())
             }
-            if copied != expected_chunk {
-                return Err(ClientError::Protocol);
+            .await;
+            match attempt {
+                Ok(()) => retries = 0,
+                Err(error) if error.retryable() && retries < 4 => {
+                    progress(offset, "copying");
+                    tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
+                    retries += 1;
+                }
+                Err(error) => return Err(error),
             }
-            offset = end + 1;
-            progress(offset, "copying");
         }
+        progress(offset, "copying");
         output.sync_all().await?;
         drop(output);
         tokio::fs::rename(&partial, destination).await?;
@@ -2041,6 +2058,8 @@ mod tests {
     enum DistributionFixtureMode {
         Good,
         WrongEtagFirstObject,
+        InterruptFirstObject,
+        UnavailableFirstObject,
     }
 
     fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
@@ -2119,6 +2138,12 @@ mod tests {
                     stream.write_all(&manifest).unwrap();
                     continue;
                 }
+                if matches!(mode, DistributionFixtureMode::UnavailableFirstObject)
+                    && requests.len() == 1
+                {
+                    write!(stream, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                    continue;
+                }
                 let (path, query) = target.split_once('?').unwrap();
                 assert!(path.starts_with("/agent/v1/distribution/objects/"));
                 assert!(query == format!("plan_digest={}", assignment.plan_digest));
@@ -2157,6 +2182,14 @@ mod tests {
                     body.len(), start, end, source.len(), response_digest
                 )
                 .unwrap();
+                if matches!(mode, DistributionFixtureMode::InterruptFirstObject)
+                    && requests.len() == 1
+                {
+                    stream.write_all(&body[..5]).unwrap();
+                    stream.flush().unwrap();
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
                 stream.write_all(&body).unwrap();
             }
             requests
@@ -2531,6 +2564,76 @@ mod tests {
         assert_eq!(std::fs::read(&destination).unwrap(), model);
         assert!(!partial.exists());
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_retries_interrupted_body_from_appended_offset() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            2,
+            DistributionFixtureMode::InterruptFirstObject,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("image.tar");
+        let mut updates = Vec::new();
+        client
+            .download_trusted_distribution_object_with_progress(
+                &assignment.plan_digest,
+                &hex_sha256(model),
+                model.len() as u64,
+                &destination,
+                root.path(),
+                |bytes, phase| updates.push((bytes, phase)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert!(!partial_path(&destination).exists());
+        let requests = server.join().unwrap();
+        assert!(
+            String::from_utf8_lossy(&requests[1])
+                .to_lowercase()
+                .contains("range: bytes=5-")
+        );
+        assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert_eq!(updates.last(), Some(&(model.len() as u64, "verifying")));
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_retries_service_unavailability_but_not_bad_identity() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        for (mode, request_count, succeeds) in [
+            (DistributionFixtureMode::UnavailableFirstObject, 2, true),
+            (DistributionFixtureMode::WrongEtagFirstObject, 1, false),
+        ] {
+            let mut objects = HashMap::new();
+            objects.insert(hex_sha256(model), model.to_vec());
+            let (client, server) =
+                distribution_fixture_server(assignment.clone(), objects, request_count, mode);
+            let root = tempfile::tempdir().unwrap();
+            let result = client
+                .download_distribution_object(
+                    &assignment.plan_digest,
+                    &hex_sha256(model),
+                    model.len() as u64,
+                    &root.path().join("image.tar"),
+                )
+                .await;
+            if succeeds {
+                result.unwrap();
+            } else {
+                assert!(matches!(result, Err(ClientError::Protocol)));
+            }
+            assert_eq!(server.join().unwrap().len(), request_count);
+        }
     }
 
     #[test]
