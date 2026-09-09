@@ -72,7 +72,11 @@ from .recipe_execution_contract import (
     parse_stored_build_plan,
     run_plan_document,
 )
-from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .recipe_operations import (
+    RecipeInstallPreflightExpired,
+    RecipeOperationConflict,
+    RecipeOperationService,
+)
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .resource_planning import (
     CapacitySnapshot,
@@ -125,6 +129,16 @@ from .runtime_image_preparation import (
 
 class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
+
+
+class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
+    """A cold compile outlived the runtime preflight window it was admitted on.
+
+    Nothing was accepted.  ``_advance`` holds the runtime-plan checkpoint so the
+    next tick re-enters ``LifecyclePreflight.ensure`` for a bounded refresh;
+    any handler that does not know this subclass keeps
+    failing the phase, which is the safe reading.
+    """
 
 
 def _active_recipe_revision(
@@ -258,6 +272,7 @@ _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset({"recipe.run-switch.v2", "recipe.stop.v2"})
 _MAX_RETRY_ATTEMPTS = 3
+_INSTALL_PREFLIGHT_REFRESH_REASON = "runtime preflight expired during install compilation"
 _TERMINAL_RETRY_MARKERS = (
     "digest",
     "integrity",
@@ -1150,6 +1165,14 @@ class RecipeLifecyclePhaseExecutor:
                     install_plan,
                     actor=actor,
                 )
+            except RecipeInstallPreflightExpired as error:
+                # Compiling the launch document above can outlast the runtime
+                # preflight window this phase was admitted on.  Nothing else
+                # about the install changed, so ask the caller to rerun the
+                # ordinary probe rather than failing an identical plan.
+                raise RunSwitchInstallPreflightExpired(
+                    f"run-switch.install-preflight-expired: {error}"
+                ) from error
             except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-preparation-failed: {error}"
@@ -4291,6 +4314,10 @@ class RunSwitchOperationService:
                     request_key=request_key,
                     progress=progress,
                 )
+            except RunSwitchInstallPreflightExpired:
+                return self._hold_for_preflight_refresh(
+                    operation_id, phase_index, item_index
+                )
             except RunSwitchOperationConflict as error:
                 fail(str(error))
                 return True
@@ -4407,6 +4434,72 @@ class RunSwitchOperationService:
             job.updated_at = now
             if progress.get("cancellation") and not progress.get("child_operation_id"):
                 _complete_cancellation(job, progress, now)
+        return True
+
+    def _hold_for_preflight_refresh(
+        self,
+        operation_id: str,
+        phase_index: int,
+        item_index: int,
+    ) -> bool:
+        """Keep the runtime-plan checkpoint so the existing gate reprobes.
+
+        Acceptance rolled its transaction back, so no installation, reservation
+        or agent child exists.  Leaving ``phase_index`` and ``item_index``
+        untouched sends the next tick back through ``LifecyclePreflight.ensure``.
+        Bound these retries independently: the gate's cached receipt may still
+        be fresh while admission selects a different, expired database receipt.
+        The existing typed retry fields retain the compilation attempt and its
+        cause even when the gate does not spend another probe attempt.
+
+        A hold never advances a cancelled operation into a subsequent
+        acceptance.  Cancellation racing a successful acceptance is unchanged.
+        """
+
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, None):
+                return False
+            # Compilation may have taken minutes; persist the actual hold time.
+            now = _now(self._clock)
+            if progress.get("cancellation"):
+                _complete_cancellation(job, progress, now)
+                return True
+            attempt = (
+                int(progress["retry_attempt"])
+                if progress.get("retry_reason") == _INSTALL_PREFLIGHT_REFRESH_REASON
+                and progress.get("retry_attempt") is not None
+                else 1
+            )
+            progress["retry_reason"] = _INSTALL_PREFLIGHT_REFRESH_REASON
+            progress["operation_phase_index"] = phase_index
+            progress["operation"] = observe_progress(
+                _progress_mapping(progress.get("operation")),
+                {
+                    "phase": "install-preflight-refresh",
+                    "completed_items": attempt,
+                    "total_items": _MAX_RETRY_ATTEMPTS,
+                    "completed_bytes": 0,
+                    "total_bytes_known": False,
+                },
+                now,
+            )
+            if attempt >= _MAX_RETRY_ATTEMPTS:
+                self._mark_failed(
+                    job,
+                    "run-switch.install-preflight-refresh-exhausted: "
+                    f"{attempt} install compilation attempts ended with expired preflight",
+                    now=now,
+                    progress=progress,
+                )
+                return True
+            progress["retry_attempt"] = attempt + 1
+            job.state = "running"
+            job.result = _persisted_result(progress)
+            job.updated_at = now
         return True
 
     def _get_child_operation(self, operation_id: str) -> Any:

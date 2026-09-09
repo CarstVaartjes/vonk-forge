@@ -4,7 +4,7 @@ import errno
 import hashlib
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +22,7 @@ from vonk_control.inventory_repository import (
 from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
 from vonk_control.models import (
     AgentNode,
+    AgentOperation,
     CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
@@ -65,7 +66,10 @@ from vonk_control.runtime_image_preparation import (
     PulledImageEvidence,
     prepare_runtime_image,
 )
+from vonk_control.runtime_preflight import latest_result
 
+from .preflight_fixtures import record_passing_preflight
+from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,
     _CanonicalModelCache,
@@ -1185,6 +1189,410 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         "start",
         None,
     }
+
+
+class _AdvancingClock:
+    """Controller clock a caller can move forward inside one phase."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now = self.now + timedelta(seconds=seconds)
+
+
+class _SlowColdCompiler:
+    """Real compiled-plan provider whose cold compiles take minutes.
+
+    Only the elapsed time is simulated.  The compiled launch documents are the
+    canonical ones the ordinary provider produces, and ordinary agent inventory
+    keeps arriving while the Controller compiles, exactly as it does on a live
+    Spark node.  ``slow_compiles`` bounds how many compiles pay that cost, so a
+    caller can model one cold compile or a Controller that stays slow.
+    """
+
+    def __init__(self, delegate, clock, seconds, during_compile, slow_compiles=1) -> None:
+        self._delegate = delegate
+        self._clock = clock
+        self._seconds = seconds
+        self._during_compile = during_compile
+        self._slow_compiles = slow_compiles
+        self.compiles = 0
+
+    def __call__(self, **kwargs):
+        compiled = self._delegate(**kwargs)
+        self.compiles += 1
+        if self.compiles <= self._slow_compiles:
+            self._clock.advance(self._seconds)
+            self._during_compile()
+        return compiled
+
+
+class _ColdCompileExecutor:
+    """Real runtime-plan/install admission with value-bearing neighbours."""
+
+    def __init__(self, lifecycle, sessions, clock) -> None:
+        self.events: list[str] = []
+        self.delegate = RecipeLifecyclePhaseExecutor(
+            lifecycle,
+            sessions,
+            ClusterMappingService(sessions),
+            clock,
+        )
+
+    def preflight(self, plan, phase, *, actor, request_key, progress):
+        return self.delegate.preflight(
+            plan,
+            phase,
+            actor=actor,
+            request_key=request_key,
+            progress=progress,
+        )
+
+    def execute(self, plan, phase, *, item_index, actor, request_key, progress):
+        identity = phase.subphase or phase.kind
+        self.events.append(identity)
+        if phase.subphase in {"runtime-plan", "runtime-install"}:
+            return self.delegate.execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+        if phase.subphase == "runtime-image":
+            return PhaseExecution(
+                result={
+                    "runtime_image": _runtime_receipt(plan),
+                    "image_digest": plan.build.image_digest,
+                    "oci_layout_sha256": plan.build.oci_layout_sha256,
+                    "image_bytes": plan.build.image_bytes,
+                }
+            )
+        if phase.kind == "transfer":
+            return PhaseExecution(result=_target_copy_evidence(plan, phase))
+        if phase.kind == "verify":
+            return PhaseExecution(
+                result={
+                    "verified": True,
+                    "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_build_id": getattr(plan, "recipe_build_id", None),
+                    "verified_image_digest": plan.image_digest,
+                    "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
+                }
+            )
+        return PhaseExecution(result={"phase": phase.kind})
+
+    def get(self, operation_id: str):
+        return self.delegate.get(operation_id)
+
+
+def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: int = 1):
+    """Start a real Run/Switch whose cold compile outlives the preflight window.
+
+    The phase gate, ``LifecyclePreflight``, install admission and compiled launch
+    documents use production code; adjacent artifact phases use test adapters.
+    ``hooks`` lets a caller run its own step inside the
+    expensive compile, the way an operator acts while the Controller works.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    clock = _AdvancingClock(NOW)
+    lifecycle._clock = clock
+    admission = lifecycle._install_admission
+    inventory = InventoryRepository(sessions, clock=clock)
+    hooks: list = []
+
+    def during_compile() -> None:
+        # The agent keeps reporting the same authenticated capacity; only the
+        # observation time moves, so inventory freshness is never the blocker.
+        for node_id in nodes:
+            inventory.record(
+                InventorySnapshotInput(
+                    node_id,
+                    clock.now,
+                    10_000,
+                    8_000,
+                    10_000,
+                    8_000,
+                    10_000,
+                    8_000,
+                    1,
+                    False,
+                    ("runtime.vonk.v1", "recipe.operations.v1"),
+                )
+            )
+        for hook in hooks:
+            hook()
+
+    compiler = _SlowColdCompiler(
+        admission._compiled_plan_provider,
+        clock,
+        seconds,
+        during_compile,
+        slow_compiles,
+    )
+    executor = _ColdCompileExecutor(lifecycle, sessions, clock)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=clock,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        phase_executor=executor,
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    admitted = admission.plan_install(mapping_id, build_id, now=clock.now)
+    assert admitted.allowed
+    admission._compiled_plan_provider = compiler
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+
+    def drive() -> None:
+        """Advance one phase, answering any ordinary preflight probe."""
+        service.tick()
+        view = service.get(operation.operation_id)
+        checkpoint = view.result.preflight
+        if checkpoint is not None and checkpoint.pending_job_id:
+            _finish(sessions, checkpoint, clock.now)
+
+    return SimpleNamespace(
+        sessions=sessions,
+        lifecycle=lifecycle,
+        admission=admission,
+        mapping_id=mapping_id,
+        build_id=build_id,
+        nodes=nodes,
+        clock=clock,
+        compiler=compiler,
+        executor=executor,
+        service=service,
+        operation=operation,
+        admitted=admitted,
+        hooks=hooks,
+        drive=drive,
+    )
+
+
+def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
+    tmp_path: Path,
+) -> None:
+    """A cold compile longer than the preflight window must not fail the run.
+
+    A cold ``prepare/runtime-plan`` phase measured 716s: the phase gate admits
+    the node against fresh preflight receipts, ``preview_install`` reads the
+    same fresh receipts, and only then does the Controller compile the exact
+    launch document.  ``prepare_installation`` re-plans with a fresh clock, by
+    which time the 300s runtime preflight window has closed, so admission
+    refuses the identical plan with ``install.plan_stale_or_blocked``.  Nothing
+    about the installation changed: inventory stays fresh, and the plan digest,
+    mapping generation and recipe/build authority are identical.  The switch
+    must refresh the ordinary preflight probe and still create exactly one
+    installation.
+    """
+
+    switch = _cold_compile_switch(tmp_path)
+    sessions, clock, admission = switch.sessions, switch.clock, switch.admission
+    service, executor, compiler = switch.service, switch.executor, switch.compiler
+    admitted, drive = switch.admitted, switch.drive
+
+    for _ in range(8):
+        if "runtime-plan" in executor.events:
+            break
+        drive()
+    assert "runtime-plan" in executor.events, executor.events
+    assert compiler.compiles >= 1
+    assert (clock.now - NOW).total_seconds() == 716
+
+    # Isolate the blocker: only the runtime preflight receipt expired.  The
+    # compiled plan identity, mapping generation, recipe/build authority and
+    # inventory freshness are all unchanged across the compile.
+    replanned = admission.plan_install(
+        switch.mapping_id, switch.build_id, now=clock.now
+    )
+    assert replanned.plan_digest == admitted.plan_digest
+    assert replanned.mapping_generation == admitted.mapping_generation
+    assert replanned.recipe_build_id == admitted.recipe_build_id
+    assert replanned.recipe_content_sha256 == admitted.recipe_content_sha256
+    assert replanned.image_digest == admitted.image_digest
+    assert not replanned.allowed
+    assert {reason.code for node in replanned.nodes for reason in node.blockers} == {
+        "runtime_preflight.stale"
+    }
+
+    # Desired behaviour: the expired ordinary preflight is refreshed and the
+    # switch still reaches exactly one installation of the identical plan.
+    failure = service.get(switch.operation.operation_id)
+    assert failure.state != "failed", failure.status_reason
+    assert failure.result.retry_attempt == 2
+    assert failure.result.retry_reason == "runtime preflight expired during install compilation"
+    assert failure.progress.operation.phase == "install-preflight-refresh"
+    assert failure.progress.operation.completed_items == 1
+    assert failure.progress.operation.observed_at == clock.now.isoformat()
+    with switch.sessions() as session:
+        held = session.get(Job, switch.operation.operation_id)
+        assert held.updated_at.replace(tzinfo=UTC) == switch.clock.now
+
+    for _ in range(8):
+        view = service.get(switch.operation.operation_id)
+        if view.state != "running" or view.progress.subphase == "runtime-install":
+            break
+        drive()
+
+    with sessions() as session:
+        installations = list(session.scalars(select(RecipeInstallation)))
+    assert len(installations) == 1
+    assert installations[0].plan_digest == admitted.plan_digest
+    assert installations[0].mapping_generation == admitted.mapping_generation
+    assert installations[0].plan["compiled_execution_plans"]
+
+
+def test_preflight_refresh_after_a_cold_compile_stays_bounded(tmp_path: Path) -> None:
+    """A Controller that never fits the window must exhaust, not loop.
+
+    Every compile here outlives the preflight receipt it was admitted on, so
+    each refreshed probe is stale again by the time acceptance re-plans.  The
+    The compilation retry budget must terminate the phase independently of
+    the ordinary probe budget, with no installation or queued install child.
+    """
+
+    switch = _cold_compile_switch(tmp_path, slow_compiles=99)
+    service, operation = switch.service, switch.operation
+
+    for _ in range(40):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        switch.drive()
+
+    view = service.get(operation.operation_id)
+    assert view.state == "failed"
+    assert view.status_reason == (
+        "run-switch.install-preflight-refresh-exhausted: "
+        "3 install compilation attempts ended with expired preflight"
+    )
+    assert switch.executor.events.count("runtime-plan") == 3
+    assert view.result.retry_attempt == 3
+    assert view.result.operation.completed_items == 3
+    assert "runtime-install" not in switch.executor.events
+    with switch.sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+        assert list(session.scalars(select(ResourceReservation))) == []
+
+
+def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
+    tmp_path: Path,
+) -> None:
+    """Cancellation on the expiry path prevents another compilation attempt.
+
+    The cancellation lands while the Controller is compiling, so the expired
+    preflight hold is the first code to see it.  It has to finish the
+    cancellation under the same checkpoint guard the executing path uses
+    instead of queueing another probe or accepting the identical plan later.
+    This does not exercise cancellation racing a successful acceptance.
+    """
+
+    switch = _cold_compile_switch(tmp_path, slow_compiles=99)
+    service, operation = switch.service, switch.operation
+    switch.hooks.append(
+        lambda: service.cancel(
+            operation.operation_id,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            reason="Operator changed their mind during the cold compile",
+        )
+    )
+
+    for _ in range(20):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        switch.drive()
+
+    view = service.get(operation.operation_id)
+    assert view.state == "cancelled"
+    assert switch.executor.events.count("runtime-plan") == 1
+    assert "runtime-install" not in switch.executor.events
+    with switch.sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+        assert list(session.scalars(select(ResourceReservation))) == []
+
+
+def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
+    tmp_path: Path,
+) -> None:
+    """Repeated DB ordering races cannot evade the gate's probe counter.
+
+    Preview sees the fresh result cached by the gate.  During each compilation,
+    another writer touches an older operation, so acceptance selects its stale
+    receipt by updated_at.  Before the next tick the fresh row wins again.  A
+    persistently stale DB result would simply block the next preview; this
+    regression exercises the repeated interleaving that can otherwise hold
+    forever without the gate ever requesting a probe.
+    """
+    switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=99)
+    stale_time = switch.clock.now - timedelta(seconds=301)
+    record_passing_preflight(switch.sessions, stale_time)
+    with switch.sessions() as session:
+        stale_ids = list(session.scalars(
+            select(AgentOperation.id).where(
+                AgentOperation.kind == "runtime.preflight.v1",
+                AgentOperation.created_at == stale_time,
+            )
+        ))
+    assert stale_ids
+
+    def order_stale_receipts(*, latest: bool) -> None:
+        with switch.sessions.begin() as session:
+            for operation_id in stale_ids:
+                operation = session.get(AgentOperation, operation_id)
+                operation.updated_at = (
+                    switch.clock.now + timedelta(seconds=1) if latest else stale_time
+                )
+
+    switch.hooks.append(lambda: order_stale_receipts(latest=True))
+    for _ in range(20):
+        view = switch.service.get(switch.operation.operation_id)
+        if view.state not in {"queued", "running"}:
+            break
+        order_stale_receipts(latest=False)
+        switch.drive()
+        if switch.compiler.compiles:
+            view = switch.service.get(switch.operation.operation_id)
+            assert view.result.preflight.pending_job_id is None
+            assert not view.result.preflight.attempts
+            for node_id, receipt in view.result.preflight.receipts.items():
+                assert receipt.observed_at == int(NOW.timestamp())
+                with switch.sessions() as session:
+                    selected = latest_result(
+                        session, node_id, requirements_sha256=receipt.request_sha256
+                    )
+                assert selected.observed_at == int(stale_time.timestamp()), (
+                    view.state, view.status_reason, switch.executor.events,
+                    switch.compiler.compiles, receipt.request_sha256,
+                )
+
+    view = switch.service.get(switch.operation.operation_id)
+    assert view.state == "failed"
+    assert view.status_reason.startswith("run-switch.install-preflight-refresh-exhausted:")
+    assert switch.executor.events.count("runtime-plan") == 3
+    assert view.result.retry_attempt == 3
+    assert view.result.operation.completed_items == 3
+    assert "runtime-install" not in switch.executor.events
+    with switch.sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+        assert list(session.scalars(select(ResourceReservation))) == []
 
 
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
