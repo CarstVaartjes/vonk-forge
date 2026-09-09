@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
-BINARIES = ("vonk-agent", "vonk-agent-helper", "oras")
+BINARIES = ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "oras")
 EGRESS_BINARY = "vonk-build-egress"
 RUNTIME_PROBE_BINARY = "vonk-runtime-probe"
 ORAS_VERSION = "1.3.2"
@@ -1006,6 +1006,12 @@ def build(
         )
         install_file(
             stage,
+            "usr/lib/vonk-forge/vonk-monitor",
+            binaries["vonk-monitor"],
+            0o555,
+        )
+        install_file(
+            stage,
             "usr/lib/vonk-forge/vonk-agent-helper",
             binaries["vonk-agent-helper"],
             0o555,
@@ -1238,6 +1244,7 @@ def build(
             )
         for name in (
             "vonk-forge-agent.service",
+            "vonk-forge-monitor.service",
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",

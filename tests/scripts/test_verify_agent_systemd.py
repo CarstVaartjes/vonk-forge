@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-agent-systemd"
 PACKAGED_UNITS = [
     "vonk-forge-agent.service",
+    "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",

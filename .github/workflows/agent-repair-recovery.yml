@@ -10,6 +10,7 @@ on:
       - packaging/debian/postinst-repair
       - packaging/debian/preinst-repair
       - rust/crates/vonk-build-egress/**
+      - rust/crates/vonk-monitor/**
       - rust/crates/vonk-repair-helper-probe/**
       - scripts/build-agent-deb
       - scripts/verify-agent-deb

@@ -171,7 +171,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras"):
+    for name in ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras"):
         raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
@@ -736,7 +736,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert compile_step.count("cargo build --release --locked") == 2
     assert "--package vonk-build-egress" in compile_step
     assert "target-feature=+crt-static" in compile_step
-    assert "--package vonk-agent --package vonk-agent-helper" in compile_step
+    assert "--package vonk-agent --package vonk-monitor --package vonk-agent-helper" in compile_step
     assert "--workspace" not in compile_step
     assert "vonk-nas-setup" not in compile_step
     assert "vonk-spark-setup" not in compile_step
@@ -751,6 +751,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert "overwrite: false" in upload
     assert "compiled/${{ inputs.binary_set }}.json" in upload
     assert "compiled/${{ inputs.binary_set }}/vonk-agent" in upload
+    assert "compiled/${{ inputs.binary_set }}/vonk-monitor" in upload
     assert "compiled/${{ inputs.binary_set }}/vonk-agent-helper" in upload
     assert "path: compiled\n" not in upload
     assert (

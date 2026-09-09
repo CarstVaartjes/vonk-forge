@@ -11,6 +11,7 @@ on:
       - control/src/vonk_control/host_helper_authority.py
       - packaging/**
       - rust/crates/vonk-agent/**
+      - rust/crates/vonk-monitor/**
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
       - rust/crates/vonk-build-egress/**

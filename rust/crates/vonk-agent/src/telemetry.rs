@@ -170,7 +170,7 @@ pub struct TelemetryCollector<R, F> {
     filesystem: F,
     paths: TelemetryPaths,
     boot_id: Uuid,
-    sequences: DurableSequenceAllocator,
+    sequences: SequenceAllocator,
     disk_counters: BTreeMap<String, DiskCounters>,
     interface_counters: BTreeMap<String, NetworkInterfaceCounters>,
     cpu_power_counter: Option<EnergyCounter>,
@@ -190,6 +190,28 @@ struct DurableSequenceAllocator {
     boot_id: Uuid,
     next_sequence: u64,
     reserved_until: u64,
+}
+
+enum SequenceAllocator {
+    Durable(DurableSequenceAllocator),
+    /// Monitor samples never use filesystem or database sequence state.
+    Ephemeral(u64),
+}
+
+impl SequenceAllocator {
+    fn next(&mut self) -> Result<i64, TelemetryError> {
+        match self {
+            Self::Durable(value) => value.next(),
+            Self::Ephemeral(value) => {
+                let current =
+                    i64::try_from(*value).map_err(|_| TelemetryError::SequenceExhausted)?;
+                *value = value
+                    .checked_add(1)
+                    .ok_or(TelemetryError::SequenceExhausted)?;
+                Ok(current)
+            }
+        }
+    }
 }
 
 impl DurableSequenceAllocator {
@@ -321,7 +343,32 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             filesystem,
             paths,
             boot_id,
-            sequences,
+            sequences: SequenceAllocator::Durable(sequences),
+            disk_counters: BTreeMap::new(),
+            interface_counters: BTreeMap::new(),
+            cpu_power_counter: None,
+            runtime_counters: BTreeMap::new(),
+            last_observed_at: None,
+        })
+    }
+
+    /// Construct a collector for the standalone monitor without opening a
+    /// telemetry state file. Rate counters remain process-local.
+    pub fn new_ephemeral(
+        runner: R,
+        filesystem: F,
+        paths: TelemetryPaths,
+        boot_id: Uuid,
+    ) -> Result<Self, TelemetryError> {
+        if boot_id.is_nil() || boot_id.to_string() != boot_id.hyphenated().to_string() {
+            return Err(TelemetryError::InvalidBootId);
+        }
+        Ok(Self {
+            runner,
+            filesystem,
+            paths,
+            boot_id,
+            sequences: SequenceAllocator::Ephemeral(0),
             disk_counters: BTreeMap::new(),
             interface_counters: BTreeMap::new(),
             cpu_power_counter: None,

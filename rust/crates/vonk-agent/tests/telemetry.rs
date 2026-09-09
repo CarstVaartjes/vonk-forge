@@ -135,6 +135,26 @@ fn next_boot_id() -> Uuid {
     Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap()
 }
 
+#[test]
+fn standalone_monitor_collector_does_not_create_telemetry_state() {
+    let fixtures = Fixtures::new();
+    let state_path = fixtures.directory.path().join(TELEMETRY_STATE_FILENAME);
+    let mut collector = TelemetryCollector::new_ephemeral(
+        runner(b""),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 9_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let _ = collector.sample_at(None, Utc.timestamp_opt(1_000, 0).unwrap());
+    assert!(!state_path.exists());
+}
+
 const INSTALLATION_ID: &str = "cb555393-764b-4eb6-8f15-b416d289428f";
 
 fn runtime_plan(engine: &str) -> CompiledExecutionPlan {
