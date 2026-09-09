@@ -109,6 +109,16 @@ fn command_with_nonce(
     if let Some(nonce) = nonce {
         cmd.env("VONK_FORGE_PACKAGE_ROLLBACK_NONCE", nonce);
     }
+    if path == "/usr/bin/dpkg" {
+        let output = crate::package_command::run(&mut cmd, Duration::from_secs(180))?;
+        if !output.status.success() || output.timed_out {
+            return Err(format!(
+                "package command failed: {path}: {}",
+                String::from_utf8_lossy(&output.diagnostic)
+            ));
+        }
+        return Ok(String::new());
+    }
     let mut child = cmd
         .spawn()
         .map_err(|_| format!("required executable unavailable: {path}"))?;

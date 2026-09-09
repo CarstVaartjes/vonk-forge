@@ -99,7 +99,7 @@ impl HelperRejection {
             OperationError::PackageMetadataInvalid if package_install => {
                 ("package_metadata_failed", None)
             }
-            OperationError::PackageInstallFailed { exit_code } if package_install => (
+            OperationError::PackageInstallFailed { exit_code, .. } if package_install => (
                 "package_install_failed",
                 exit_code.filter(|code| (0..=255).contains(code)),
             ),
@@ -240,6 +240,8 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         return;
     };
     let response = HelperResponse {
+        diagnostic: (error.error_code == "package_install_failed")
+            .then(|| error.detail.chars().take(8192).collect()),
         schema_version: 1,
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
@@ -344,6 +346,7 @@ fn handle(
         }
     };
     let response = HelperResponse {
+        diagnostic: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status.parse().map_err(|_| {
@@ -647,6 +650,7 @@ mod tests {
     #[test]
     fn rejection_response_contains_only_stable_diagnostics() {
         let response = HelperResponse {
+            diagnostic: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "rejected".parse().expect("declared helper response status"),
@@ -666,6 +670,7 @@ mod tests {
     #[test]
     fn success_response_omits_unused_optional_fields() {
         let response = HelperResponse {
+            diagnostic: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "package-installed".parse().unwrap(),
@@ -715,6 +720,7 @@ mod tests {
             &operation,
             OperationError::PackageInstallFailed {
                 exit_code: Some(75),
+                diagnostic: "configuration failed".into(),
             },
         );
         assert_eq!(install.error_code, "package_install_failed");
@@ -725,6 +731,7 @@ mod tests {
             &operation,
             OperationError::PackageInstallFailed {
                 exit_code: Some(512),
+                diagnostic: "configuration failed".into(),
             },
         );
         assert_eq!(unbounded.error_code, "package_install_failed");

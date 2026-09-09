@@ -20,7 +20,7 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
     assert json.loads(canonical_message(model)) == value
     assert (
         HostHelperResponse.model_validate(
-            value | {"exit_code": None, "error_code": None, "observation_receipt": None}
+            value | {"exit_code": None, "error_code": None, "observation_receipt": None, "diagnostic": None}
         )
         == model
     )

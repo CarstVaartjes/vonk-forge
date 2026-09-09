@@ -50,8 +50,11 @@ pub enum OperationError {
     PackageMetadataInvalid,
     #[error("package activation prerequisites failed")]
     PackagePreflightFailed,
-    #[error("package installation failed")]
-    PackageInstallFailed { exit_code: Option<i32> },
+    #[error("package installation failed: {diagnostic}")]
+    PackageInstallFailed {
+        exit_code: Option<i32>,
+        diagnostic: String,
+    },
     #[error("compiled command failed")]
     CommandFailed,
     #[error("runtime image load failed")]
@@ -217,6 +220,14 @@ impl CommandRunner for ProcessCommandRunner {
             } else {
                 Stdio::null()
             });
+        if inherit_output {
+            let result = crate::package_command::run(&mut command, timeout)?;
+            return Ok(CommandOutput {
+                success: result.status.success() && !result.timed_out,
+                stdout: result.diagnostic,
+                exit_code: result.status.code(),
+            });
+        }
         let mut child = command
             .spawn()
             .map_err(|_| "compiled command could not start".to_owned())?;
@@ -287,7 +298,7 @@ mod process_command_runner_tests {
             .expect("the Linux test host must provide dpkg");
 
         assert!(result.success);
-        assert!(result.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&result.stdout).contains("Debian"));
     }
 }
 
@@ -733,11 +744,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     package_name,
                 ],
             )
-            .map_err(|_| OperationError::PackageInstallFailed { exit_code: None })?;
+            .map_err(|diagnostic| OperationError::PackageInstallFailed {
+                exit_code: None,
+                diagnostic,
+            })?;
         if !result.success {
             let _ = self.runner.package_activation_failed();
             return Err(OperationError::PackageInstallFailed {
                 exit_code: result.exit_code,
+                diagnostic: String::from_utf8_lossy(&result.stdout).into_owned(),
             });
         }
         package.cleanup()?;
