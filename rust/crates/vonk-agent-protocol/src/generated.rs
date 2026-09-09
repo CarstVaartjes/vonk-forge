@@ -1864,6 +1864,8 @@ pub struct HostHelperGrantResponse {
 #[derive(Eq)]
 pub struct HostHelperResponse {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub diagnostic: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub error_code: ::std::option::Option<::std::string::String>,
     pub evidence_sha256: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -7903,6 +7905,8 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
         #[derive(Eq)]
         struct Raw {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub diagnostic: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub error_code: ::std::option::Option<::std::string::String>,
             pub evidence_sha256: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -7915,6 +7919,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            diagnostic: raw.diagnostic,
             error_code: raw.error_code,
             evidence_sha256: raw.evidence_sha256,
             exit_code: raw.exit_code,

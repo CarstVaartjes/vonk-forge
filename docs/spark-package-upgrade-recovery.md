@@ -113,8 +113,20 @@ A transient startup observation does not immediately trigger another reinstall.
 The expected source digest remains mandatory. Failed installation still transfers
 control to rollback, which stops candidate recovery before restoring the source.
 
-The helper passes dpkg stdout and stderr to its service journal rather than
-capturing or discarding them. Inspect `journalctl -u vonk-forge-package-helper`
+The helper streams dpkg stdout and stderr to its service journal while retaining
+a short diagnostic tail. Inspect `journalctl -u vonk-forge-package-helper`
 for the package configuration error; the API's bounded failure code does not
 contain the full journal. This logging improvement takes effect after the new
 helper is installed and cannot recover output discarded by an older helper.
+
+Both installation and rollback stream dpkg output into their service journals.
+The install rejection additionally carries an optional bounded diagnostic in the
+canonical helper response. The agent sanitizes it before publishing the failure
+reason and diagnostic log tail, so the existing Controller job UI can show the
+cause without requiring SSH.
+
+Timed-out dpkg commands run in a dedicated process group. The helper terminates
+that group and reaps dpkg before permitting rollback, preventing child maintainer
+scripts from continuing package mutations after their parent times out. Output
+is continuously drained; only the retained diagnostic tail is bounded, not the
+amount a package is allowed to print.

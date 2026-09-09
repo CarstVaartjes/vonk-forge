@@ -3069,6 +3069,19 @@
       "additionalProperties": false,
       "description": "Shared response shape; consumers also enforce their grant/action context.",
       "properties": {
+        "diagnostic": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diagnostic"
+        },
         "error_code": {
           "anyOf": [
             {

@@ -211,7 +211,17 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                     body: json!({"reason": "agent upgrade did not restart the service"}),
                 },
                 Err(error) => {
-                    let mut body = json!({"reason": error.to_string()});
+                    let reason = match error.diagnostic() {
+                        Some(detail) if !detail.is_empty() => format!("{error}: {detail}"),
+                        _ => error.to_string(),
+                    };
+                    let mut body = json!({"reason": reason});
+                    if let Some(detail) = error.diagnostic() {
+                        body["diagnostic_logs"] = json!({
+                            "stdout": crate::failure_evidence::log_tail(&[]),
+                            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
+                        });
+                    }
                     if let Some((code, exit_code)) = error.helper_diagnostics() {
                         body["helper_error_code"] = json!(code);
                         if let Some(exit_code) = exit_code {

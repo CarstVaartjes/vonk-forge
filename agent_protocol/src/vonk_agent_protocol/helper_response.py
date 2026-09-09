@@ -26,3 +26,4 @@ class HostHelperResponse(WireModel):
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
     error_code: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")] | None = None
     observation_receipt: SignedRecipeRunObservationReceipt | None = None
+    diagnostic: Annotated[str, Field(max_length=8192)] | None = None

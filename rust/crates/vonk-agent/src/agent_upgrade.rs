@@ -32,6 +32,7 @@ pub enum AgentUpgradeError {
     HelperRejectedWithCode {
         code: String,
         exit_code: Option<i32>,
+        diagnostic: Option<String>,
     },
     #[error("agent upgrade helper response is invalid")]
     HelperResponseInvalid,
@@ -48,9 +49,18 @@ pub enum AgentUpgradeError {
 }
 
 impl AgentUpgradeError {
+    pub fn diagnostic(&self) -> Option<&str> {
+        match self {
+            Self::HelperRejectedWithCode { diagnostic, .. } => diagnostic.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn helper_diagnostics(&self) -> Option<(&str, Option<i32>)> {
         match self {
-            Self::HelperRejectedWithCode { code, exit_code } => Some((code.as_str(), *exit_code)),
+            Self::HelperRejectedWithCode {
+                code, exit_code, ..
+            } => Some((code.as_str(), *exit_code)),
             _ => None,
         }
     }
@@ -282,6 +292,10 @@ pub(crate) fn validate_helper_response(
             Some(error_code) => AgentUpgradeError::HelperRejectedWithCode {
                 code: error_code.to_owned(),
                 exit_code: response.exit_code.map(|code| code as i32),
+                diagnostic: response
+                    .diagnostic
+                    .as_deref()
+                    .map(crate::failure_evidence::sanitize_text),
             },
             None => AgentUpgradeError::HelperRejected,
         });
@@ -335,6 +349,7 @@ mod tests {
 
     fn response(status: &str) -> HelperResponse {
         HelperResponse {
+            diagnostic: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: status.parse().unwrap(),
@@ -343,6 +358,23 @@ mod tests {
             exit_code: None,
             observation_receipt: None,
         }
+    }
+
+    #[test]
+    fn package_failure_detail_survives_wire_roundtrip_and_redacts_secrets() {
+        let mut response = response("rejected");
+        response.error_code = Some("package_install_failed".into());
+        response.exit_code = Some(1);
+        response.diagnostic = Some("permission denied\npassword=do-not-expose".into());
+        let response = parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
+        let error = validate_helper_response(
+            &response,
+            "10000000-0000-4000-8000-000000000001",
+            PACKAGE_SHA256,
+        )
+        .unwrap_err();
+        assert!(error.diagnostic().unwrap().contains("permission denied"));
+        assert!(!error.diagnostic().unwrap().contains("do-not-expose"));
     }
 
     #[test]
