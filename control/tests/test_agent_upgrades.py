@@ -1869,3 +1869,39 @@ def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(t
         assert session.get(AgentOperation, claim.operation_id).state == "succeeded"
         assert session.get(AgentOperation, old_claim.operation_id).state == "waiting-for-operator"
     assert set(_operation_nodes(sessions, current.id)) == {NODE_A, NODE_B}
+
+
+def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(tmp_path, monkeypatch):
+    clock = Clock()
+    sessions, operations, upgrades, job = _rollout(tmp_path, "rollback-retry", clock=clock)
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    rolled_back = {**ACTIVATION_RECEIPT, "phase": "rolled_back", "outcome": "source_restored_and_restarted"}
+    def contact(identity):
+        return operations.claim(NODE_A, "serial-a", 30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=identity)
+    source = {**OLD_IDENTITY, "package_activation": rolled_back}
+    assert contact(source) is None
+    upgrades.resume(job.id)
+    for _ in range(2):
+        assert contact(source) is None
+        with sessions() as session:
+            operation = session.get(AgentOperation, first.operation_id)
+            assert operation.retry_disposition == "retry"
+            assert operation.current_attempt == 1
+            assert session.get(Job, job.id).state == "queued"
+    clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
+    monkeypatch.setattr("vonk_control.agent_upgrades.secrets.token_hex", lambda _: "8" * 64)
+    # The second Spark continues reporting while the first waits out recovery.
+    assert operations.claim(NODE_B, "serial-b", 30,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity=OLD_IDENTITY) is None
+    second = contact(source)
+    assert second is not None
+    assert second.attempt == 2
+    assert contact(source) is None
+    acknowledged = {**ACTIVATION_RECEIPT, "attempt_nonce": "8" * 64,
+        "created_at": int(clock().timestamp()), "updated_at": int(clock().timestamp())}
+    assert contact({**NEW_IDENTITY, "package_activation": acknowledged}) is None
+    with sessions() as session:
+        assert session.get(AgentOperation, first.operation_id).state == "succeeded"
+    assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
