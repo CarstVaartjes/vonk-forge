@@ -2240,6 +2240,16 @@
       "BoundedErrorResponse": {
         "additionalProperties": false,
         "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorContextResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "detail": {
             "maxLength": 256,
             "minLength": 1,
@@ -5097,6 +5107,94 @@
           "default"
         ],
         "title": "EnumParameter",
+        "type": "object"
+      },
+      "ErrorContextResponse": {
+        "additionalProperties": false,
+        "description": "Safe context shared by public errors and generated clients.",
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "retry",
+              "defer",
+              "exit"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "pattern": "^/[^?#\\x00\\r\\n]{0,511}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "maximum": 599.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "operation": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "remote_rejection",
+              "transport",
+              "local_io",
+              "protocol",
+              "unknown"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "code",
+          "source",
+          "decision"
+        ],
+        "title": "ErrorContextResponse",
         "type": "object"
       },
       "EvidenceAge": {
@@ -20488,6 +20586,16 @@
       "RequestValidationProblem": {
         "additionalProperties": false,
         "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorContextResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "detail": {
             "maxLength": 256,
             "minLength": 1,

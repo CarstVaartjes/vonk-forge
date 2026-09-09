@@ -37,6 +37,32 @@ pub enum HelperError {
     Io(#[from] std::io::Error),
 }
 
+impl HelperError {
+    /// Stable, bounded diagnostics for the response and service log.
+    /// Underlying I/O text can contain paths or other host details.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidMessage => "helper.message_invalid",
+            Self::InvalidOperation => "helper.operation_invalid",
+            Self::InvalidAuthorization => "helper.authorization_invalid",
+            Self::InvalidPeer => "helper.peer_invalid",
+            Self::InvalidFrame => "helper.frame_invalid",
+            Self::Io(_) => "helper.io_failed",
+        }
+    }
+
+    pub fn safe_detail(&self) -> &'static str {
+        match self {
+            Self::InvalidMessage => "helper message is invalid",
+            Self::InvalidOperation => "helper operation is invalid",
+            Self::InvalidAuthorization => "helper authorization is invalid",
+            Self::InvalidPeer => "helper peer is not authorized",
+            Self::InvalidFrame => "helper framing is invalid",
+            Self::Io(_) => "helper I/O failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerIdentity {
     pub uid: u32,
@@ -198,7 +224,7 @@ fn valid_signature(value: &str) -> bool {
 
 #[cfg(test)]
 mod receipt_tests {
-    use super::sign_observation_receipt;
+    use super::{HelperError, sign_observation_receipt};
     use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey};
     use uuid::Uuid;
     use vonk_agent_protocol::{
@@ -266,5 +292,16 @@ mod receipt_tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn helper_io_errors_have_stable_redacted_diagnostics() {
+        let error = HelperError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "/var/lib/vonk-forge/private-key.pem",
+        ));
+        assert_eq!(error.code(), "helper.io_failed");
+        assert_eq!(error.safe_detail(), "helper I/O failed");
+        assert!(!error.safe_detail().contains("private-key"));
     }
 }

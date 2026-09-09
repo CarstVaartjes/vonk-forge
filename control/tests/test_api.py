@@ -181,6 +181,42 @@ def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None
     assert BoundedErrorResponse.model_validate_json(response.content).detail == (
         "authentication required"
     )
+    assert response.headers["x-request-id"]
+    assert response.headers["x-vonk-error-code"] == "controller.authentication_required"
+
+
+def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
+    client, headers, _, _ = _client("viewer")
+
+    response = client.post(
+        "/api/v1/model-cache/operations/00000000-0000-4000-8000-000000000001/cancel",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.headers["x-vonk-error-code"] == "controller.request_rejected"
+    assert response.headers["x-request-id"]
+
+
+def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
+    client, headers, jobs, _ = _client("viewer")
+
+    def fail(_job_id):
+        raise RuntimeError("private token and request body must stay server-side")
+
+    jobs.get = fail
+    response = client.get("/api/v1/jobs/job-1", headers=headers)
+
+    assert response.status_code == 500
+    problem = BoundedErrorResponse.model_validate_json(response.content)
+    assert problem.detail == "internal server error"
+    assert problem.context is not None
+    assert problem.context.code == "controller.internal_error"
+    assert problem.context.http_status == 500
+    assert problem.context.endpoint == "/api/v1/jobs/job-1"
+    assert problem.context.request_id == response.headers["x-request-id"]
+    assert response.headers["x-vonk-error-code"] == "controller.internal_error"
+    assert b"private token" not in response.content
 
 
 def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:

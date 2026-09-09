@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fmt, fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
@@ -55,10 +55,10 @@ pub enum ClientError {
     Identity,
     #[error("controller transport failed")]
     Transport(#[from] reqwest::Error),
+    #[error("controller rejected: {0}")]
+    Controller(ControllerError),
     #[error("controller temporarily rejected the request")]
     Retryable,
-    #[error("agent identity is not authorized")]
-    Authentication,
     #[error("controller protocol response is invalid")]
     Protocol,
     #[error("exact recipe run observation is not ready for authorization")]
@@ -67,9 +67,101 @@ pub enum ClientError {
     Pin,
 }
 
+#[derive(Debug)]
+pub struct ControllerError {
+    pub operation: String,
+    pub endpoint: String,
+    pub status: u16,
+    pub code: String,
+    pub request_id: Option<String>,
+    pub decision: &'static str,
+}
+
+impl fmt::Display for ControllerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} {} HTTP {} [{}]",
+            self.operation, self.code, self.status, self.decision
+        )?;
+        if let Some(request_id) = &self.request_id {
+            write!(formatter, " request_id={request_id}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ControllerError {}
+
+impl ControllerError {
+    pub fn from_status(status: u16) -> Self {
+        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        controller_error(status, "/", "controller.request", None, None)
+    }
+
+    fn retryable(&self) -> bool {
+        matches!(self.status, 408 | 429 | 500..=599)
+    }
+}
+
 impl ClientError {
     pub fn retryable(&self) -> bool {
         matches!(self, Self::Transport(_) | Self::Retryable)
+            || matches!(self, Self::Controller(error) if error.retryable())
+    }
+
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Controller(error) => Some(error.status),
+            _ => None,
+        }
+    }
+
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Controller(error) => Some(&error.code),
+            _ => None,
+        }
+    }
+
+    pub fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::Controller(error) => error.request_id.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Return the safe transport boundary when reqwest reliably identified it.
+    /// A broad `connect` label is preferred to guessing DNS, TCP, or TLS.
+    pub fn transport_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Transport(error) if error.is_timeout() => Some("timeout"),
+            Self::Transport(error) if error.is_connect() => Some("connect"),
+            Self::Transport(error) if error.is_body() => Some("body"),
+            Self::Transport(error) if error.is_decode() => Some("protocol"),
+            Self::Transport(_) => Some("unknown"),
+            _ => None,
+        }
+    }
+
+    /// Return only the URL path captured by reqwest; queries and credentials
+    /// are intentionally unavailable to callers of the diagnostic surface.
+    pub fn endpoint(&self) -> Option<&str> {
+        match self {
+            Self::Controller(error) => Some(&error.endpoint),
+            _ => None,
+        }
+    }
+
+    pub fn transport_endpoint(&self) -> Option<String> {
+        match self {
+            Self::Transport(error) => error.url().map(|url| url.path().to_owned()),
+            _ => None,
+        }
+    }
+
+    pub fn decision(&self) -> &'static str {
+        if self.retryable() { "retry" } else { "exit" }
     }
 }
 
@@ -303,7 +395,7 @@ impl AgentHttpClient {
         if status == StatusCode::NO_CONTENT {
             return Ok(None);
         }
-        classify_status(status)?;
+        classify_response(&response)?;
         let body = bounded_claim_body(response).await?;
         parse_claim_response(status.as_u16(), &body)
     }
@@ -324,7 +416,7 @@ impl AgentHttpClient {
         ) {
             Ok(())
         } else {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             Err(ClientError::Protocol)
         }
     }
@@ -388,7 +480,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let directive = parse_strict::<AgentDirective>(&body).map_err(|_| ClientError::Protocol)?;
         directive.validate().map_err(|_| ClientError::Protocol)?;
@@ -434,7 +526,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -499,7 +591,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::TOO_EARLY {
             return Err(ClientError::ObservationNotReady);
         }
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let response: RecipeRunObservationGrantWire =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -559,7 +651,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -600,7 +692,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -621,7 +713,7 @@ impl AgentHttpClient {
             ))?)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_claim_body(response).await?;
         let spec: CompiledExecutionPlan =
             serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
@@ -647,7 +739,7 @@ impl AgentHttpClient {
             .get(self.endpoint(&format!("/agent/v1/source-bundles/{source_sha256}"))?)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
             return Err(ClientError::Protocol);
         }
@@ -670,7 +762,7 @@ impl AgentHttpClient {
             .get(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}"))?)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
             return Err(ClientError::Protocol);
         }
@@ -746,7 +838,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             Err(ClientError::Protocol)
         }
     }
@@ -789,7 +881,7 @@ impl AgentHttpClient {
                     return Err(ClientError::Retryable);
                 }
                 if status.status() != StatusCode::OK {
-                    classify_status(status.status())?;
+                    classify_response(&status)?;
                     return Err(ClientError::Protocol);
                 }
                 let offset = status
@@ -840,7 +932,7 @@ impl AgentHttpClient {
                 } else if response.status() == StatusCode::CONFLICT {
                     Err(ClientError::Retryable)
                 } else {
-                    classify_status(response.status())?;
+                    classify_response(&response)?;
                     Err(ClientError::Protocol)
                 }
             }
@@ -909,7 +1001,7 @@ impl AgentHttpClient {
             .get(self.endpoint(&format!("/agent/v1/distribution/manifests/{plan_digest}"))?)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let assignment: DistributionAssignment =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -1131,7 +1223,7 @@ impl AgentHttpClient {
                     .header("if-range", format!("\"sha256:{sha256}\""))
                     .send()
                     .await?;
-                classify_status(response.status())?;
+                classify_response(&response)?;
                 let expected_etag = format!("\"sha256:{sha256}\"");
                 let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
                 if response.status() != StatusCode::PARTIAL_CONTENT
@@ -1279,7 +1371,7 @@ impl AgentHttpClient {
                     .and_then(|value| value.to_str().ok())
                     != Some(expected_range.as_str())
             {
-                classify_status(response.status())?;
+                classify_response(&response)?;
                 return Err(ClientError::Protocol);
             }
             let mut copied = 0_u64;
@@ -1338,7 +1430,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             Err(ClientError::Protocol)
         }
     }
@@ -1360,7 +1452,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             Err(ClientError::Protocol)
         }
     }
@@ -1377,7 +1469,7 @@ impl AgentHttpClient {
         let response = self
             .current_client()
             .post(self.endpoint("/agent/v1/telemetry")?)
-            .timeout(Duration::from_secs(1))
+            .timeout(Duration::from_secs(2))
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1385,7 +1477,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             Err(ClientError::Protocol)
         }
     }
@@ -1408,7 +1500,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_status(response.status())?;
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -1436,7 +1528,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         if response.status() != StatusCode::NO_CONTENT {
-            classify_status(response.status())?;
+            classify_response(&response)?;
             return Err(ClientError::Protocol);
         }
         Ok(())
@@ -1471,19 +1563,105 @@ pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClai
             claim.validate().map_err(|_| ClientError::Protocol)?;
             Ok(Some(claim))
         }
-        401 | 403 => Err(ClientError::Authentication),
-        408 | 429 | 500..=599 => Err(ClientError::Retryable),
-        _ => Err(ClientError::Protocol),
+        status => {
+            let status_code =
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            if status_code.is_success() {
+                Err(ClientError::Protocol)
+            } else {
+                classify_status(status_code).map(|_| None)
+            }
+        }
     }
 }
 
 fn classify_status(status: StatusCode) -> Result<(), ClientError> {
-    match status.as_u16() {
-        200..=299 => Ok(()),
-        401 | 403 => Err(ClientError::Authentication),
-        408 | 429 | 500..=599 => Err(ClientError::Retryable),
-        _ => Err(ClientError::Protocol),
+    if status.is_success() {
+        return Ok(());
     }
+    Err(ClientError::Controller(controller_error(
+        status,
+        "/",
+        "controller.request",
+        None,
+        None,
+    )))
+}
+
+fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
+    if response.status().is_success() {
+        return Ok(());
+    }
+    let endpoint = response.url().path();
+    let operation = format!("controller.request {endpoint}");
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| valid_error_token(value))
+        .map(str::to_owned);
+    let code = response
+        .headers()
+        .get("x-vonk-error-code")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| valid_error_code(value))
+        .map(str::to_owned);
+    Err(ClientError::Controller(controller_error(
+        response.status(),
+        endpoint,
+        &operation,
+        request_id,
+        code,
+    )))
+}
+
+fn controller_error(
+    status: StatusCode,
+    endpoint: &str,
+    operation: &str,
+    request_id: Option<String>,
+    supplied_code: Option<String>,
+) -> ControllerError {
+    let status_code = status.as_u16();
+    let code = supplied_code.unwrap_or_else(|| match status_code {
+        401 => "controller.authentication_required".to_owned(),
+        403 => "controller.request_rejected".to_owned(),
+        408 => "controller.timeout".to_owned(),
+        429 => "controller.rate_limited".to_owned(),
+        500..=599 => "controller.unavailable".to_owned(),
+        _ => format!("controller.http_{status_code}"),
+    });
+    let decision = if matches!(status_code, 408 | 429 | 500..=599) {
+        "retry"
+    } else {
+        "exit"
+    };
+    ControllerError {
+        operation: operation.to_owned(),
+        endpoint: endpoint.to_owned(),
+        status: status_code,
+        code,
+        request_id,
+        decision,
+    }
+}
+
+fn valid_error_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+}
+
+fn valid_error_code(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || (index > 0 && b"_.:-".contains(&byte))
+        })
 }
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
@@ -2768,7 +2946,7 @@ mod tests {
             unauthorized_client
                 .distribution_manifest(&assignment.plan_digest)
                 .await,
-            Err(ClientError::Authentication)
+            Err(ClientError::Controller(error)) if error.status == 401
         ));
         assert_eq!(authorized_server.join().unwrap().len(), 1);
 
@@ -3459,6 +3637,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telemetry_allows_the_two_second_controller_budget() {
+        let sample = telemetry_sample(1);
+        let (client, server) = request_capture_client(
+            204,
+            Vec::new(),
+            Vec::new(),
+            Some(Duration::from_millis(1_500)),
+        );
+
+        client
+            .report_telemetry(std::slice::from_ref(&sample))
+            .await
+            .expect("telemetry should allow the two-second controller budget");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport() {
         let client = AgentHttpClient {
             client: Arc::new(RwLock::new(reqwest::Client::new())),
@@ -3488,16 +3683,46 @@ mod tests {
             let (client, server) = observation_client(status);
             let error = client.report_telemetry(&samples).await.unwrap_err();
             server.join().unwrap();
-            assert!(
-                matches!(
-                    (&error, expected),
-                    (ClientError::Protocol, "protocol")
-                        | (ClientError::Authentication, "authentication")
-                        | (ClientError::Retryable, "retryable")
-                ),
-                "status {status} classified as {error:?}"
-            );
+            match expected {
+                "protocol" => assert!(matches!(error, ClientError::Protocol)),
+                "authentication" => {
+                    assert_eq!(error.status(), Some(401));
+                    assert!(!error.retryable());
+                }
+                "retryable" => {
+                    assert_eq!(error.status(), Some(429));
+                    assert!(error.retryable());
+                }
+                _ => unreachable!("unexpected expected classification"),
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn controller_rejection_preserves_safe_status_code_and_request_id() {
+        let sample = telemetry_sample(1);
+        let (client, server) = request_capture_client(
+            403,
+            vec![
+                "X-Request-ID: 00000000-0000-4000-8000-000000000099".to_owned(),
+                "X-Vonk-Error-Code: controller.request_rejected".to_owned(),
+            ],
+            Vec::new(),
+            None,
+        );
+
+        let error = client
+            .report_telemetry(std::slice::from_ref(&sample))
+            .await
+            .expect_err("Controller rejection should be surfaced");
+        server.join().unwrap();
+        assert_eq!(error.status(), Some(403));
+        assert_eq!(error.code(), Some("controller.request_rejected"));
+        assert_eq!(
+            error.request_id(),
+            Some("00000000-0000-4000-8000-000000000099")
+        );
+        assert!(!error.retryable());
     }
 
     #[tokio::test]

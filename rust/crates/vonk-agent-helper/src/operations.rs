@@ -71,6 +71,44 @@ pub enum OperationError {
     Io(#[from] std::io::Error),
 }
 
+impl OperationError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidOperation => "helper.operation_invalid",
+            Self::UnsafePath => "helper.unsafe_path",
+            Self::InvalidArtifact => "helper.artifact_invalid",
+            Self::PackageMetadataInvalid => "helper.package_metadata_invalid",
+            Self::PackagePreflightFailed => "helper.package_preflight_failed",
+            Self::PackageInstallFailed { .. } => "helper.package_install_failed",
+            Self::CommandFailed => "helper.command_failed",
+            Self::RuntimeImageLoadFailed => "helper.runtime_image_load_failed",
+            Self::RuntimeImageInspectFailed => "helper.runtime_image_inspect_failed",
+            Self::RuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
+            Self::RuntimeImageReceiptFailed => "helper.runtime_image_receipt_failed",
+            Self::StopUncertain => "helper.stop_uncertain",
+            Self::Io(_) => "helper.io_failed",
+        }
+    }
+
+    pub fn safe_detail(&self) -> &'static str {
+        match self {
+            Self::InvalidOperation => "managed operation is invalid",
+            Self::UnsafePath => "managed path is unsafe",
+            Self::InvalidArtifact => "artifact verification failed",
+            Self::PackageMetadataInvalid => "package metadata verification failed",
+            Self::PackagePreflightFailed => "package activation prerequisites failed",
+            Self::PackageInstallFailed { .. } => "package installation failed",
+            Self::CommandFailed => "compiled command failed",
+            Self::RuntimeImageLoadFailed => "runtime image load failed",
+            Self::RuntimeImageInspectFailed => "runtime image inspection failed",
+            Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
+            Self::RuntimeImageReceiptFailed => "runtime image receipt could not be written",
+            Self::StopUncertain => "one-shot runtime could not be stopped safely",
+            Self::Io(_) => "host mutation I/O failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ManagedRoots {
     pub data: PathBuf,

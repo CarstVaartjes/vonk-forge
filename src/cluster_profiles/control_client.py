@@ -35,6 +35,16 @@ from .generated_control.models.endpoint_response import EndpointResponse
 from .generated_control.models.fleet_snapshot import FleetSnapshot
 from .generated_control.models.job_detail_response import JobDetailResponse
 from .generated_control.types import Response as GeneratedResponse
+from .error_reporting import (
+    ErrorContext,
+    decision_for,
+    local_io_context,
+    protocol_context,
+    safe_code,
+    safe_endpoint,
+    safe_request_id,
+    transport_context,
+)
 
 _MAX_RESPONSE = 1_048_576
 _MAX_ARTIFACT_INPUT = 512 * 1024**2
@@ -68,7 +78,21 @@ _ControlValidator = validators.extend(
 
 
 class ControlClientError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, context: ErrorContext | None = None) -> None:
+        self.context = context
+        super().__init__(message)
+
+    @property
+    def operation(self) -> str | None:
+        return self.context.operation if self.context else None
+
+    @property
+    def endpoint(self) -> str | None:
+        return self.context.endpoint if self.context else None
+
+    @property
+    def request_id(self) -> str | None:
+        return self.context.request_id if self.context else None
 
 
 class ControlMalformedResponse(ControlClientError):
@@ -80,7 +104,8 @@ class ControlResponseTooLarge(ControlClientError):
 
 
 class ControlTransportError(ControlClientError):
-    pass
+    def __init__(self, message: str = "control API request failed", *, context: ErrorContext | None = None) -> None:
+        super().__init__(message, context=context)
 
 
 class ControlTimeout(ControlClientError):
@@ -139,9 +164,12 @@ class ControlHTTPError(ControlClientError):
         shortfall_bytes: int | None = None,
         log_excerpt: str | None = None,
         sensitive_values: tuple[str, ...] = (),
+        operation: str | None = None,
+        endpoint: str | None = None,
+        request_id: str | None = None,
     ) -> None:
         self.status_code = status_code
-        self.code = code or f"http.{status_code}"
+        self.code = safe_code(code, f"http.{status_code}")
         self.recovery = recovery
         self.retryable = retryable
         self.retry_time = retry_time
@@ -156,7 +184,23 @@ class ControlHTTPError(ControlClientError):
             sensitive_values=sensitive_values,
         )
         self.retry_after_seconds = retry_after_seconds
-        super().__init__(f"control API returned HTTP {status_code}: {self.detail}")
+        source = "remote_rejection"
+        retry_decision = decision_for(
+            retryable=retryable,
+            retry_after_seconds=retry_after_seconds,
+            source=source,
+        )
+        context = ErrorContext(
+            operation=operation or "control.http",
+            endpoint=safe_endpoint(endpoint),
+            code=safe_code(code, f"http.{status_code}"),
+            source=source,
+            decision=retry_decision,
+            retryable=retryable,
+            http_status=status_code,
+            request_id=safe_request_id(request_id),
+        )
+        super().__init__(context.render(self.detail), context=context)
 
 
 class ControlUnauthorized(ControlHTTPError):
@@ -435,6 +479,9 @@ def _structured_http_error_fields(problem: object) -> dict[str, object]:
     if not isinstance(problem, Mapping):
         return {}
     code = problem.get("code", problem.get("error_code"))
+    context = problem.get("context")
+    if (not isinstance(code, str) or not code) and isinstance(context, Mapping):
+        code = context.get("code")
     recovery = problem.get("recovery_actions", problem.get("recovery", ()))
     if isinstance(recovery, str):
         recovery = (recovery,)
@@ -516,9 +563,13 @@ def _read_token_file(token_file: Path) -> str:
             raise ControlClientError("control token file is invalid") from None
     except ControlClientError:
         raise
-    except OSError:
+    except OSError as error:
+        context = local_io_context(
+            operation="read control token", path=token_file, error=error
+        )
         raise ControlClientError(
-            "control token must be a regular non-symlink file"
+            context.render("control token must be a regular non-symlink file"),
+            context=context,
         ) from None
     finally:
         if descriptor >= 0:
@@ -550,8 +601,13 @@ class _OpenerTransport(httpx.BaseTransport):
         except urllib.error.HTTPError as error:
             response_context = error
         except (OSError, urllib.error.URLError) as error:
+            context = transport_context(
+                operation=f"{request.method} {safe_endpoint(str(request.url)) or '/'}",
+                endpoint=str(request.url),
+                error=error,
+            )
             raise ControlTransportError(
-                f"control API request failed: {type(error).__name__}"
+                context.render("control API request failed"), context=context
             ) from None
         with response_context as response:  # type: ignore[attr-defined]
             content = response.read(_MAX_RESPONSE + 1)  # type: ignore[attr-defined]
@@ -649,16 +705,24 @@ class ControlClient:
         status_code: int,
         parsed: object,
         headers: Mapping[str, str],
+        *,
+        operation: str = "control.http",
+        endpoint: str | None = None,
     ) -> None:
-        error_type = _STATUS_ERRORS.get(status_code)
-        if error_type is None:
+        if status_code < 400:
             return
+        error_type = _STATUS_ERRORS.get(status_code, ControlHTTPError)
         detail = getattr(parsed, "detail", "control API request failed")
         if not isinstance(detail, str):
             detail = "control API request failed"
+        context = getattr(parsed, "context", None)
         code = getattr(parsed, "code", None)
         if not isinstance(code, str) or not code:
             code = getattr(parsed, "error_code", None)
+        if (not isinstance(code, str) or not code) and context is not None:
+            code = getattr(context, "code", None)
+        if not isinstance(code, str) or not code:
+            code = headers.get("x-vonk-error-code")
         if not isinstance(code, str) or not code:
             code = None
         recovery_value = getattr(parsed, "recovery_actions", getattr(parsed, "recovery", ()))
@@ -701,6 +765,10 @@ class ControlClient:
             **numeric_fields,
             log_excerpt=log_excerpt,
             sensitive_values=(self._token,),
+            operation=operation,
+            endpoint=endpoint,
+            request_id=headers.get("x-request-id")
+            or getattr(context, "request_id", None),
         )
 
     def _call_generated(
@@ -720,9 +788,15 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
-                "control API response exceeds the nesting limit"
+                "control API response exceeds the nesting limit",
+                context=protocol_context(
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
+                ),
             ) from None
         except (UnicodeDecodeError, json.JSONDecodeError):
             if transport.response is not None:
@@ -730,9 +804,15 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
-                "control API returned invalid JSON"
+                "control API returned invalid JSON",
+                context=protocol_context(
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
+                ),
             ) from None
         except (AttributeError, KeyError, TypeError, ValueError):
             if transport.response is not None:
@@ -740,11 +820,24 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
-                "control API response does not match the generated schema"
+                "control API response does not match the generated schema",
+                context=protocol_context(
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    endpoint=str(transport.request.url) if transport.request else None,
+                ),
             ) from None
-        self._raise_http_status(response.status_code, response.parsed, response.headers)
+        request = transport.request
+        self._raise_http_status(
+            response.status_code,
+            response.parsed,
+            response.headers,
+            operation=f"{request.method} {safe_endpoint(str(request.url))}" if request else "control.http",
+            endpoint=str(request.url) if request else None,
+        )
         if 200 <= response.status_code < 300 and response.parsed is not None:
             media_type = response.headers.get("content-type", "").split(";", 1)[0]
             if media_type.strip().lower() != "application/json":
@@ -806,8 +899,11 @@ class ControlClient:
             status = error.code
             response_headers = error.headers
         except (OSError, urllib.error.URLError) as error:
-            raise ControlClientError(
-                f"control API request failed: {type(error).__name__}"
+            context = transport_context(
+                operation=f"{method} {route_path}", endpoint=route_path, error=error
+            )
+            raise ControlTransportError(
+                context.render("control API request failed"), context=context
             ) from None
         if len(content) > _MAX_RESPONSE:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
@@ -835,8 +931,11 @@ class ControlClient:
                     )
                 _response_contract(route_path, method, status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
+            problem_context = problem.get("context") if isinstance(problem, Mapping) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
             fields = _structured_http_error_fields(problem)
+            if fields.get("code") is None:
+                fields["code"] = response_headers.get("x-vonk-error-code")
             retry_after = _bounded_retry_after(response_headers.get("retry-after"))
             body_retry_after = fields.pop("retry_after_seconds", None)
             if retry_after is None and type(body_retry_after) is int:
@@ -847,6 +946,14 @@ class ControlClient:
                 retry_after,
                 **fields,
                 sensitive_values=(self._token,),
+                operation=f"{method} {route_path}",
+                endpoint=route_path,
+                request_id=response_headers.get("x-request-id")
+                or (
+                    problem_context.get("request_id")
+                    if isinstance(problem_context, Mapping)
+                    else None
+                ),
             )
         if status == 204 or not content:
             _response_contract(route_path, method, status, {})
@@ -935,14 +1042,21 @@ class ControlClient:
                     status = error.code
                     response_headers = error.headers
                 except (OSError, urllib.error.URLError) as error:
-                    raise ControlClientError(
-                        f"control API request failed: {type(error).__name__}"
+                    context = transport_context(
+                        operation=f"PUT {path}", endpoint=path, error=error
+                    )
+                    raise ControlTransportError(
+                        context.render("control API request failed"), context=context
                     ) from None
         except ControlClientError:
             raise
-        except OSError:
+        except OSError as error:
+            context = local_io_context(
+                operation="read artifact input", path=source, error=error
+            )
             raise ControlClientError(
-                "artifact input must be a readable regular non-symlink file"
+                context.render("artifact input must be a readable regular non-symlink file"),
+                context=context,
             ) from None
         finally:
             if descriptor >= 0:
@@ -974,11 +1088,22 @@ class ControlClient:
                 _response_contract(path, "PUT", status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+            fields = _structured_http_error_fields(problem)
+            if fields.get("code") is None:
+                fields["code"] = response_headers.get("x-vonk-error-code")
+            body_retry_after = fields.pop("retry_after_seconds", None)
+            retry_after = _bounded_retry_after(response_headers.get("retry-after"))
+            if retry_after is None and type(body_retry_after) is int:
+                retry_after = body_retry_after
             raise error_type(
                 status,
                 detail if isinstance(detail, str) else "control API request failed",
-                _bounded_retry_after(response_headers.get("retry-after")),
+                retry_after,
+                **fields,
                 sensitive_values=(self._token,),
+                operation=f"PUT {path}",
+                endpoint=path,
+                request_id=response_headers.get("x-request-id"),
             )
         try:
             decoded = json.loads(content)
@@ -1065,6 +1190,8 @@ class ControlClient:
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
                 fields = _structured_http_error_fields(problem)
+                if fields.get("code") is None:
+                    fields["code"] = error.headers.get("x-vonk-error-code")
                 retry_after = _bounded_retry_after(error.headers.get("retry-after"))
                 body_retry_after = fields.pop("retry_after_seconds", None)
                 if retry_after is None and type(body_retry_after) is int:
@@ -1075,10 +1202,16 @@ class ControlClient:
                     retry_after,
                     **fields,
                     sensitive_values=(self._token,),
+                    operation=f"GET {path}",
+                    endpoint=path,
+                    request_id=error.headers.get("x-request-id"),
                 ) from None
             except (OSError, urllib.error.URLError) as error:
-                raise ControlClientError(
-                    f"control API request failed: {type(error).__name__}"
+                context = transport_context(
+                    operation=f"GET {path}", endpoint=path, error=error
+                )
+                raise ControlTransportError(
+                    context.render("control API request failed"), context=context
                 ) from None
             with response_context as response:
                 if not 200 <= response.status < 300:
@@ -1096,6 +1229,9 @@ class ControlClient:
                         response.status,
                         "control API request failed",
                         sensitive_values=(self._token,),
+                        operation=f"GET {path}",
+                        endpoint=path,
+                        request_id=response.headers.get("x-request-id"),
                     )
                 _response_definition(path, "GET", response.status)
                 response_type = response.headers.get("content-type", "").split(";", 1)[

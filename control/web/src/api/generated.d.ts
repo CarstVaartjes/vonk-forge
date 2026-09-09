@@ -2457,6 +2457,7 @@ export interface components {
         };
         /** BoundedErrorResponse */
         BoundedErrorResponse: {
+            context?: components["schemas"]["ErrorContextResponse"] | null;
             /** Detail */
             detail: string;
         };
@@ -3404,6 +3405,37 @@ export interface components {
              * @enum {string}
              */
             type: "enum";
+        };
+        /**
+         * ErrorContextResponse
+         * @description Safe context shared by public errors and generated clients.
+         */
+        ErrorContextResponse: {
+            /** Code */
+            code: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "retry" | "defer" | "exit";
+            /** Endpoint */
+            endpoint?: string | null;
+            /** Http Status */
+            http_status?: number | null;
+            /** Operation */
+            operation: string;
+            /** Request Id */
+            request_id?: string | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "remote_rejection" | "transport" | "local_io" | "protocol" | "unknown";
         };
         /** EvidenceAge */
         EvidenceAge: {
@@ -8301,6 +8333,7 @@ export interface components {
         };
         /** RequestValidationProblem */
         RequestValidationProblem: {
+            context?: components["schemas"]["ErrorContextResponse"] | null;
             /** Detail */
             detail: string;
             /** Issues */

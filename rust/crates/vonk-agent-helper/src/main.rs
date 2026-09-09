@@ -122,7 +122,7 @@ impl HelperRejection {
             request_id: Some(request_id.into()),
             error_code,
             exit_code,
-            detail: error.to_string(),
+            detail: error.safe_detail().to_owned(),
         }
     }
 }
@@ -265,16 +265,20 @@ fn handle(
 ) -> Result<(), HelperRejection> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
-        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
+        .map_err(|_| {
+            HelperRejection::new("request_invalid", "helper socket configuration failed")
+        })?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
-        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
+        .map_err(|_| {
+            HelperRejection::new("request_invalid", "helper socket configuration failed")
+        })?;
     let peer = peer_identity(stream)
         .map_err(|error| HelperRejection::new("peer_identity_invalid", error))?;
     let raw = read_frame(stream)
-        .map_err(|error| HelperRejection::new("request_invalid", display(error)))?;
+        .map_err(|error| HelperRejection::new("request_invalid", error.safe_detail()))?;
     let request = parse_request(&raw)
-        .map_err(|error| HelperRejection::new("grant_invalid", display(error)))?;
+        .map_err(|error| HelperRejection::new("grant_invalid", error.safe_detail()))?;
     let request_id = request.claims.request_id.to_string();
     if request.claims.node_id != node_id {
         return Err(HelperRejection::new(
@@ -284,11 +288,11 @@ fn handle(
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|error| HelperRejection::new("grant_invalid", display(error)))?
+        .map_err(|_| HelperRejection::new("grant_invalid", "system clock is unavailable"))?
         .as_secs() as i64;
     verifier
         .authorize(&request, &peer, now)
-        .map_err(|error| HelperRejection::new("grant_unauthorized", display(error)))?;
+        .map_err(|error| HelperRejection::new("grant_unauthorized", error.safe_detail()))?;
     claim_once(&request_id).map_err(|error| {
         let error_code = if error == "request grant was already consumed" {
             "request_replayed"
@@ -323,17 +327,17 @@ fn handle(
                 observation_outcome,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .map_err(|error| {
+                    .map_err(|_error| {
                         HelperRejection::for_request(
                             &request_id,
                             "operation_failed",
-                            display(error),
+                            "system clock is unavailable",
                         )
                     })?
                     .as_secs() as i64,
             )
             .map_err(|error| {
-                HelperRejection::for_request(&request_id, "operation_failed", display(error))
+                HelperRejection::for_request(&request_id, "operation_failed", error.safe_detail())
             })?,
         ),
         (_, None) => None,
@@ -371,17 +375,22 @@ fn handle(
         error_code: None,
         observation_receipt,
     };
-    let body = vonk_agent_protocol::canonical_generated_json(&response).map_err(|error| {
-        HelperRejection::for_request(&request_id, "operation_failed", display(error))
+    let body = vonk_agent_protocol::canonical_generated_json(&response).map_err(|_error| {
+        HelperRejection::for_request(
+            &request_id,
+            "operation_failed",
+            "helper response encoding failed",
+        )
     })?;
     write_frame(stream, &body).map_err(|error| {
-        HelperRejection::for_request(&request_id, "operation_failed", display(error))
+        HelperRejection::for_request(&request_id, "operation_failed", error.safe_detail())
     })
 }
 
 fn claim_once(request_id: &str) -> Result<(), String> {
     let root = Path::new(REQUEST_LEDGER);
-    let metadata = fs::symlink_metadata(root).map_err(display)?;
+    let metadata = fs::symlink_metadata(root)
+        .map_err(|_| "request ledger could not be inspected".to_owned())?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.uid() != 0 {
         return Err("request ledger is unsafe".to_owned());
     }
@@ -392,13 +401,15 @@ fn claim_once(request_id: &str) -> Result<(), String> {
         .mode(0o600)
         .open(&marker)
         .map_err(|_| "request grant was already consumed".to_owned())?;
-    file.write_all(b"pending\n").map_err(display)?;
-    file.sync_all().map_err(display)?;
+    file.write_all(b"pending\n")
+        .map_err(|_| "request ledger could not be updated".to_owned())?;
+    file.sync_all()
+        .map_err(|_| "request ledger could not be synchronized".to_owned())?;
     OpenOptions::new()
         .read(true)
         .open(root)
         .and_then(|directory| directory.sync_all())
-        .map_err(display)
+        .map_err(|_| "request ledger could not be synchronized".to_owned())
 }
 
 fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, String> {
@@ -571,8 +582,10 @@ fn node_id_from_config(config: &str) -> Result<String, String> {
     node_id.ok_or_else(|| "agent configuration has no node ID".to_owned())
 }
 
-fn display(error: impl std::fmt::Display) -> String {
-    error.to_string()
+fn display(_error: impl std::fmt::Display) -> String {
+    // Startup and local I/O errors can carry credential paths or command
+    // arguments. Keep the service boundary useful without serializing them.
+    "helper local operation failed".to_owned()
 }
 
 #[allow(dead_code)]
@@ -725,6 +738,8 @@ mod tests {
         );
         assert_eq!(install.error_code, "package_install_failed");
         assert_eq!(install.exit_code, Some(75));
+        assert_eq!(install.detail, "package installation failed");
+        assert!(!install.detail.contains("configuration"));
 
         let unbounded = HelperRejection::for_operation(
             "request-1",
