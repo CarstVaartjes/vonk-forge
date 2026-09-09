@@ -1868,22 +1868,22 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
         client.close()
 
 
-def test_slow_fragmented_http_checkpoints_before_one_mib(cache, tmp_path, monkeypatch):
-    import vonk_control.model_cache as model_cache_mod
+def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monkeypatch):
+    import threading
 
     _existing, sessions = cache
     payload = b"s" * 8192
-    elapsed = [0.0]
-    monkeypatch.setattr(model_cache_mod.time, "monotonic", lambda: elapsed[0])
+    sampled = threading.Event()
     checkpoints = []
 
     class SlowStream(httpx.SyncByteStream):
         def __iter__(self):
             yield payload[:4096]
-            assert checkpoints == []
-            elapsed[0] = 1.0
+            # The socket has supplied no new fragment. Progress still advances
+            # on its own sampler, without forcing buffered data to stable disk.
+            assert sampled.wait(3)
+            assert checkpoints == [4096]
             yield payload[4096:]
-            assert checkpoints == [8192]
 
     def handler(request):
         return httpx.Response(200, request=request, stream=SlowStream())
@@ -1892,9 +1892,11 @@ def test_slow_fragmented_http_checkpoints_before_one_mib(cache, tmp_path, monkey
     real_checkpoint = service._checkpoint_artifact
 
     def checkpoint(spec, **kwargs):
-        if not kwargs.get("force_progress", True):
+        result = real_checkpoint(spec, **kwargs)
+        if threading.current_thread().name == "vonk-model-progress":
             checkpoints.append(kwargs["actual_bytes"])
-        return real_checkpoint(spec, **kwargs)
+            sampled.set()
+        return result
 
     monkeypatch.setattr(service, "_checkpoint_artifact", checkpoint)
     try:
@@ -1983,3 +1985,152 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
     finally:
         service.close()
         client.close()
+
+
+def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
+    service, sessions = cache
+    artifact = _artifact(tmp_path, b"cancel me")
+    preview = service.download_preview(model_content_sha256="a" * 64, artifacts=[artifact])
+    operation = service.start_download(
+        actor="test", request_key="00000000-0000-4000-8000-000000001010",
+        plan_digest=str(preview["plan_digest"]), model_content_sha256="a" * 64,
+        artifacts=[artifact],
+    )
+    assert service.cancel_operation(operation.id).state == "cancelled"
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    try:
+        assert restarted.run_pending() == 0
+        assert restarted.cancel_operation(operation.id).state == "cancelled"
+        assert not service._object_path(artifact["sha256"]).exists()
+    finally:
+        restarted.close()
+
+
+def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cache, tmp_path):
+    _existing, sessions = cache
+    payload = b"c" * 8192
+    operation_id = []
+    api = ModelCacheService(sessions, tmp_path / "http-nas-cache", reserve_bytes=0,
+                            fixture_sources=True)
+
+    class CancelStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield payload[:4096]
+            api.cancel_operation(operation_id[0])
+            # Another service instance owns cancellation; sampler reads its DB
+            # state even when the network cannot supply a fragment yet.
+            assert service._transfer_stop(operation_id[0]).wait(3)
+            yield payload[4096:]
+
+    def handler(request):
+        return httpx.Response(200, request=request, stream=CancelStream())
+
+    service, client = _http_cache_service(tmp_path, sessions, handler)
+    artifact = _http_artifact(payload)
+    preview = service.download_preview(model_content_sha256="b" * 64, artifacts=[artifact])
+    operation = service.start_download(
+        actor="test", request_key="00000000-0000-4000-8000-000000001011",
+        plan_digest=str(preview["plan_digest"]), model_content_sha256="b" * 64,
+        artifacts=[artifact],
+    )
+    operation_id.append(operation.id)
+    try:
+        service.run_pending()
+        assert service.get_operation(operation.id).state == "cancelled"
+        assert not service._object_path(artifact["sha256"]).exists()
+        partials = list((service.root / "partials").rglob("*.part"))
+        assert len(partials) == 1
+        assert partials[0].read_bytes() == payload
+        service._set_operation_state(operation.id, "succeeded")
+        assert service.get_operation(operation.id).state == "cancelled"
+    finally:
+        service.close()
+        api.close()
+        client.close()
+
+
+@pytest.mark.parametrize("range_supported", [True, False])
+def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monkeypatch,
+                                                        range_supported):
+    import threading
+
+    import vonk_control.model_cache as module
+
+    _existing, sessions = cache
+    payload = bytes(range(256)) * 256
+    monkeypatch.setattr(module, "_PARALLEL_RANGE_MIN_BYTES", 1)
+    barrier = threading.Barrier(4)
+    requests = []
+
+    def handler(request):
+        requested = request.headers.get("range")
+        requests.append(requested)
+        if requested:
+            barrier.wait(timeout=3)
+        if requested and range_supported:
+            start, end = map(int, requested.removeprefix("bytes=").split("-"))
+            return httpx.Response(
+                206, request=request, content=payload[start:end + 1],
+                headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
+            )
+        return httpx.Response(200, request=request, content=payload)
+
+    service, client = _http_cache_service(tmp_path, sessions, handler)
+    artifact = _http_artifact(payload)
+    try:
+        operation = _download(
+            service, [artifact], model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000001020",
+        )
+        assert operation.state == "succeeded", operation.last_error
+        assert operation.progress["downloaded_bytes"] == len(payload)
+        assert service._object_path(artifact["sha256"]).read_bytes() == payload
+        assert len([request for request in requests if request]) == 4
+        assert (None in requests) == (not range_supported)
+        assert not list((service.root / "partials").rglob("*.range-*"))
+    finally:
+        service.close()
+        client.close()
+
+
+def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatch):
+    service, sessions = cache
+    artifact = _artifact(tmp_path, b"verified but cancelled")
+    preview = service.download_preview(model_content_sha256="a" * 64, artifacts=[artifact])
+    operation = service.start_download(
+        actor="test", request_key="00000000-0000-4000-8000-000000001021",
+        plan_digest=str(preview["plan_digest"]), model_content_sha256="a" * 64,
+        artifacts=[artifact],
+    )
+    api = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    real_verify = service._verify_file
+
+    def verify(path, spec):
+        result = real_verify(path, spec)
+        if path.suffix == ".part" and result:
+            api.cancel_operation(operation.id)
+        return result
+
+    monkeypatch.setattr(service, "_verify_file", verify)
+    try:
+        service.run_pending()
+        assert service.get_operation(operation.id).state == "cancelled"
+        assert not service._object_path(artifact["sha256"]).exists()
+    finally:
+        api.close()
+
+
+def test_range_disk_reservation_falls_back_without_source_io(cache, tmp_path, monkeypatch):
+    import shutil
+
+    service, _sessions = cache
+    spec = ArtifactSpec.from_manifest(_manifest_document(tmp_path)["artifacts"][0])
+    partial = service._partial_path("b" * 64, spec.sha256)
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"m")
+    usage = shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: type(usage)(100, 99, 1))
+    monkeypatch.setattr(service, "_validate_http_download", lambda spec: None)
+    assert not service._download_parallel_ranges(spec, partial, "b" * 64, "unused", 0)
+    assert partial.read_bytes() == b"m"
+    assert service._range_reserved_bytes == 0

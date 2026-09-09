@@ -22,14 +22,30 @@ Preview distinguishes cached bytes from remaining upstream bytes and checks
 actual filesystem free space against the configured reserve. Insufficient space
 blocks preparation; it does not redirect Sparks to upstream. Concurrent workers
 share one digest transfer. Partial files remain outside the published object
-namespace and resume from durable byte checkpoints. Once all declared files
+namespace and resume from their actual retained file lengths. Once all declared files
 match their pinned sizes and SHA-256 identities, the cache entry is usable.
 
-Active downloads sync partial bytes after 1 MiB or when a received fragment
-crosses the one-second checkpoint interval. Progress samples are limited to
-once per second per operation. Shutdown, source failures, and verification
-force the final durable counter; a failed disk sync never advances that counter.
-An abrupt process or host failure can require downloading an unsynced tail again.
+Transfers use ordinary buffered file writes. A separate sampler updates progress
+once per second even when the next network read is blocked; no database session
+or disk fsync runs per fragment. Progress describes observed received bytes, not
+a promise of power-loss durability. Completion and interruption sync the file;
+a restart reads the actual partial-file length and uses HTTP Range to resume.
+
+Files download in parallel through the existing Controller-wide pool. HTTP files
+of at least 64 MiB can use four concurrent byte ranges. Range segments resume
+individually and are assembled before final verification. If the server ignores
+Range, the downloader preserves the contiguous prefix and falls back to a normal
+stream. Malformed ranges cannot be published, and truncated ranges remain
+retryable. HF rate-limit cooldown is shared across new segment requests.
+
+Range assembly requires temporary extra disk space. The worker reserves the
+worst-case footprint across active range files and falls back to sequential
+transfer when that footprint would consume the configured free-space reserve.
+
+Cancel stops queued or active Model transfers and preserves partial files. The
+API persists cancellation; the worker observes it independently, stops its active
+streams, and cannot overwrite cancellation with a late progress or success update.
+A new download request can reuse the retained files.
 
 Successful verification is reused while a file's filesystem identity remains
 unchanged, including during inventory reconciliation and LAN serving. A changed
