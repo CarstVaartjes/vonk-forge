@@ -25,6 +25,8 @@ pub enum IdentityError {
     Node,
     #[error("identity metadata serialization failed")]
     Json(#[from] serde_json::Error),
+    #[error("cannot replace the active identity generation")]
+    ActiveGeneration,
 }
 
 #[derive(Debug)]
@@ -223,9 +225,7 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
             return Err(std::io::Error::other("identity generation is unsafe").into());
         }
         if load_pointer(root, "active.json")? == Some(material.generation) {
-            return Err(
-                std::io::Error::other("cannot replace the active identity generation").into(),
-            );
+            return Err(IdentityError::ActiveGeneration);
         }
         // Do not leave a durable staged pointer referencing the directory
         // while that directory is being archived.  If the process stops in
