@@ -19,6 +19,20 @@ PACKAGED_UNITS = [
 ]
 
 
+def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
+    unit = (ROOT / "packaging/systemd/vonk-forge-monitor.service").read_text()
+    inaccessible = next(
+        line.removeprefix("InaccessiblePaths=")
+        for line in unit.splitlines()
+        if line.startswith("InaccessiblePaths=")
+    ).split()
+
+    assert "-/var/lib/vonk-forge-agent/state.sqlite" in inaccessible
+    assert "-/var/lib/vonk-forge/incoming" in inaccessible
+    assert "/var/lib/vonk-forge-agent/state.sqlite" not in inaccessible
+    assert "/var/lib/vonk-forge/incoming" not in inaccessible
+
+
 @pytest.mark.skipif(
     shutil.which("systemd-analyze") is None,
     reason="systemd-analyze is required for installed-root verification",

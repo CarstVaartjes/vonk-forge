@@ -717,7 +717,8 @@ def _verify_payload(
         or "User=vonk-agent" not in monitor_unit
         or "NoNewPrivileges=yes" not in monitor_unit
         or "ReadWritePaths=" in monitor_unit
-        or "/var/lib/vonk-forge-agent/state.sqlite" not in monitor_unit
+        or "-/var/lib/vonk-forge-agent/state.sqlite" not in monitor_unit
+        or "-/var/lib/vonk-forge/incoming" not in monitor_unit
         or "telemetry-state.sqlite" in monitor_unit
     ):
         raise VerificationError("monitor unit is invalid")
