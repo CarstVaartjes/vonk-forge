@@ -12,9 +12,18 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.catalog_repository import CatalogRepository
+from vonk_control.catalog_revision_contract import read_catalog_projection
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
-from vonk_control.models import Base, CatalogDocumentRevision, RecipeLibrarySyncRun
+from vonk_control.library_projection import LibraryProjection
+from vonk_control.model_cache import ModelCacheService
+from vonk_control.models import (
+    Base,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    RecipeLibrarySyncRun,
+)
 from vonk_control.recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -133,6 +142,94 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         revisions = session.scalars(select(CatalogDocumentRevision)).all()
         assert len([row for row in revisions if row.kind == "model"]) == 92
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
+
+
+def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_head(tmp_path: Path) -> None:
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    library = LibraryProjection(sessions, cursors=catalog._cursors, clock=catalog._clock)
+
+    def apply(item, commit):
+        item = replace(item, library_commit=commit)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=(item,))
+        return sync.sync(
+            request_key=str(uuid.uuid4()), trigger="manual", actor="test",
+            expected_commit=commit,
+        )
+
+    first_result = apply(original, "1" * 40)
+    assert first_result.state == "current"
+    assert first_result.imported_count == 1
+    first = library.recipes().recipes[0]
+
+    changed = deepcopy(original.document)
+    changed["metadata"]["title"] = "Accepted recipe successor"
+    replacement = _item_with_document(original, changed)
+    second_result = apply(replacement, "2" * 40)
+    assert second_result.state == "current"
+    assert second_result.updated_count == 1
+    second = library.detail(first.recipe_id).recipe
+    assert second.content_sha256 == replacement.content_sha256
+    assert second.recipe_revision_id != first.recipe_revision_id
+
+    invalid = deepcopy(changed)
+    invalid["models"][0]["model"]["content_sha256"] = "f" * 64
+    failed_result = apply(_item_with_document(original, invalid), "3" * 40)
+    assert failed_result.state == "partial"
+    assert failed_result.problems
+    assert library.detail(first.recipe_id).recipe.recipe_revision_id == second.recipe_revision_id
+
+    # A newer Model head is independent of this recipe's immutable dependency.
+    reference = RecipeDefinition.model_validate(original.document).models[0].model
+    old_model = catalog.entities.resolve_reference(reference)
+    newer_model = deepcopy(old_model.document)
+    newer_model["metadata"]["description"] = "New Model metadata"
+    draft = catalog.entities.revise(old_model.document_id, newer_model, actor="test")
+    model_head = catalog.entities.resolve(draft.id, actor="test")
+
+    pending_document = deepcopy(changed)
+    pending_document["metadata"]["title"] = "Pending local candidate"
+    pending = catalog.entities.revise(first.recipe_id, pending_document, actor="test")
+
+    rollback_result = apply(original, "4" * 40)
+    assert rollback_result.state == "current"
+    assert rollback_result.updated_count == 1
+    assert library.detail(first.recipe_id).recipe.recipe_revision_id == first.recipe_revision_id
+    assert catalog.get_recipe(first.recipe_id).id == first.recipe_revision_id
+    assert catalog.get_recipe(second.recipe_revision_id).id == second.recipe_revision_id
+    current = catalog.recipe_catalog_local_revisions([(original.publisher, original.slug)])
+    assert current[(original.publisher, original.slug)].content_sha256 == original.content_sha256
+    assert catalog.entities.get_entity(old_model.document_id).id == model_head.id
+    assert catalog.entities.resolve_reference(reference).id == old_model.id
+
+    with sessions() as session:
+        head = session.scalar(select(CatalogDocumentHead).where(
+            CatalogDocumentHead.kind == "recipe",
+            CatalogDocumentHead.publisher == original.publisher,
+            CatalogDocumentHead.slug == original.slug,
+        ))
+        assert head.active_revision_id == first.recipe_revision_id
+        assert head.candidate_revision_id is None
+        assert head.generation == 3
+        assert CatalogRepository().active_revision(session, first.recipe_id).id == first.recipe_revision_id
+        assert ModelCacheService._latest_recipe_digest(session, second.content_sha256) == first.content_sha256
+        revisions = list(session.scalars(select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.document_id == first.recipe_id
+        )))
+        assert {row.id for row in revisions if row.state == "active"} == {
+            first.recipe_revision_id, second.recipe_revision_id,
+        }
+        assert {row.id for row in revisions if row.state == "failed"} == {pending.id}
+        assert read_catalog_projection(session.get(CatalogDocumentRevision, pending.id)).failure_reason == (
+            f"Superseded by imported recipe {original.content_sha256}."
+        )
+
+    repeated = apply(original, "5" * 40)
+    assert repeated.state == "current"
+    assert repeated.unchanged_count == 1
+    assert repeated.updated_count == 0
+    with sessions() as session:
+        assert session.get(CatalogDocumentHead, head.id).generation == 3
 
 
 def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None:
