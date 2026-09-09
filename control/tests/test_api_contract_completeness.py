@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 from vonk_control.contract_graph import (
     ContractGraphError,
@@ -225,3 +225,40 @@ def test_custom_transport_cannot_hide_behind_a_framework_documentation_path():
     app.add_route("/docs", raw_reader)
     with pytest.raises(ContractGraphError, match="Unregistered transport: /docs"):
         discover_contracts(app)
+
+
+@pytest.mark.parametrize("invalid", [None, "body", "header"])
+def test_head_response_uses_typed_headers_without_a_body(invalid):
+    app = FastAPI()
+    response = {
+        "description": "Upload cursor",
+        "headers": {"x-upload-offset": {"schema": {"type": "integer", "minimum": 0}}},
+    }
+    if invalid == "body":
+        response["content"] = {"application/json": {"schema": {"type": "object"}}}
+    elif invalid == "header":
+        response["headers"]["x-upload-offset"] = {}
+
+    def head():
+        return Response(headers={"x-upload-offset": "0"})
+
+    app.add_api_route(
+        "/upload",
+        head,
+        methods=["HEAD"],
+        response_class=Response,
+        responses={200: response},
+    )
+    if invalid:
+        with pytest.raises(
+            ContractGraphError,
+            match=(
+                "No-content response"
+                if invalid == "body"
+                else "Untyped response header"
+            ),
+        ):
+            discover_contracts(app)
+    else:
+        operations, _ = discover_contracts(app)
+        assert operations[0]["method"] == "HEAD"

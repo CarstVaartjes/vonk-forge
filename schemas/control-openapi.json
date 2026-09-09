@@ -33964,7 +33964,8 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Cancel Operation"
+        "summary": "Cancel Operation",
+        "x-vonk-request-body": "none"
       }
     },
     "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume": {

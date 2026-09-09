@@ -500,6 +500,7 @@ def install_model_cache_routes(
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelModelCacheOperation",
+        openapi_extra={"x-vonk-request-body": "none"},
     )
     def cancel_operation(
         request: Request,
