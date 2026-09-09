@@ -1067,6 +1067,10 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         write_new_file(&staging.join(".env"), environment.as_bytes(), 0o600)?;
         let secret_directory = staging.join("secrets");
         create_secure_directory(&secret_directory)?;
+        // Compose bind mounts the backup directory from the bundle. Create it
+        // while the installer is still running as the invoking user so Docker
+        // cannot materialize a root-owned host directory on first start.
+        create_secure_directory(&staging.join("backups"))?;
         for (name, value) in secret_values {
             let content = secret_file_content(value);
             write_secret_file(&secret_directory, &name, &content)?;
@@ -1736,6 +1740,9 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
     validate_existing_bundle(bundle)?;
+    // Older bundles may predate the visible backup bind mount. Add the private
+    // directory before Compose is started, preserving its invoking-user owner.
+    ensure_secure_directory(&bundle.join("backups"))?;
     let mut environment = parse_environment(&bundle.join(".env"))?;
     for internal in &payload.internal_values {
         set_environment_value(&mut environment, &internal.env, internal.value.clone());
@@ -2187,7 +2194,8 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
                 }
             }
         }
-        if name != ".env" && name != "docker-compose.yaml" && name != "secrets" {
+        if name != ".env" && name != "docker-compose.yaml" && name != "secrets" && name != "backups"
+        {
             return Err(SetupError::UnsafeDestination(format!(
                 "{} is an unexpected top-level entry",
                 entry.path().display()
@@ -2199,6 +2207,9 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     let secrets = bundle.join("secrets");
     require_real_directory(&secrets)?;
     validate_secret_tree(&secrets)?;
+    if fs::symlink_metadata(bundle.join("backups")).is_ok() {
+        require_real_directory(&bundle.join("backups"))?;
+    }
     Ok(())
 }
 
@@ -2290,6 +2301,21 @@ fn create_secure_directory(path: &Path) -> Result<(), SetupError> {
     fs::create_dir(path)?;
     set_directory_mode(path)?;
     Ok(())
+}
+
+fn ensure_secure_directory(path: &Path) -> Result<(), SetupError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            set_directory_mode(path)?;
+            Ok(())
+        }
+        Ok(_) => Err(SetupError::UnsafeDestination(format!(
+            "{} is not a real directory",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => create_secure_directory(path),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn write_secret_file(root: &Path, relative: &str, content: &[u8]) -> Result<(), SetupError> {

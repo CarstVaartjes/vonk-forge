@@ -21,7 +21,8 @@ else locally, and creates exactly:
 vonk-forge/
 ├── docker-compose.yaml
 ├── .env
-└── secrets/
+├── secrets/
+└── backups/
 ```
 
 No Docker daemon, Git checkout, root access, SSH connection, mounted share, or
@@ -29,7 +30,7 @@ repository file is needed on the preparation workstation. Keep the whole
 `vonk-forge/` directory on this computer or move it to another local controller
 host without changing its internal layout. Start `docker-compose.yaml` with the
 host's shell or Docker/Compose application. The Compose file uses relative paths,
-so the three entries must remain together.
+so the four entries must remain together.
 
 The `/nas` segment in the public installer URL is historical; it is not a
 hardware restriction.

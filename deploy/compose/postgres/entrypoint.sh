@@ -70,7 +70,17 @@ backup_loop() (
   if [ "$interval" -eq 0 ] || [ "$keep" -eq 0 ]; then
     echo "Backup interval and retention must be positive" >&2; exit 1
   fi
-  mkdir -p /backups
+  if [ ! -d /backups ]; then
+    echo "PostgreSQL backup directory /backups is missing; prepare the NAS bundle before starting Compose" >&2
+    exit 1
+  fi
+  backup_owner=$(stat -c '%u:%g' /backups 2>/dev/null || true)
+  case "$backup_owner" in
+    ''|*[!0-9:]*|*:*:*)
+      echo "PostgreSQL backup directory owner cannot be determined" >&2
+      exit 1
+      ;;
+  esac
   temporary=/backups/.postgres-backup.tmp
   trap 'rm -f "$temporary" "$temporary.gz"; exit 0' TERM INT
   while :; do
@@ -78,6 +88,11 @@ backup_loop() (
        gzip -c "$temporary" > "$temporary.gz" && gzip -t "$temporary.gz"; then
       destination=/backups/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
       mv "$temporary.gz" "$destination"
+      # The entrypoint runs as root so the postgres process can write through a
+      # private host bind mount. Return completed dumps to the bundle owner's
+      # UID/GID so the invoking user can inspect and prune them safely.
+      chown "$backup_owner" "$destination"
+      chmod 0600 "$destination"
       rm -f "$temporary"
       echo "PostgreSQL backup completed: $destination"
       # Filenames are generated above and contain neither spaces nor newlines.

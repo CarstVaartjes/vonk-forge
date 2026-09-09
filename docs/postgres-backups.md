@@ -8,6 +8,10 @@ and retry after five minutes. An incomplete dump never replaces a completed
 backup. Dumps contain all databases, roles and password hashes: keep the folder
 private and include it in your NAS backup alongside `.env`, `secrets/`, and the
 Compose file. Copy backups off the NAS too. Model and image caches are excluded.
+The NAS installer creates `backups/` before Docker starts with mode `0700` and
+the invoking user's ownership. Completed dumps are returned to that owner with
+mode `0600`; do not create the directory as root or replace it with a broader
+shared-permission directory.
 
 A dump is consistent within each database; it is not an atomic snapshot across
 all databases. For a coordinated maintenance snapshot, stop application writers
