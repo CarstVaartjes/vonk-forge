@@ -191,6 +191,7 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
     bundle = tmp_path / "vonk-forge"
     secrets = bundle / "secrets"
     secrets.mkdir(parents=True)
+    (bundle / "backups").mkdir(mode=0o700)
     (bundle / "docker-compose.yaml").write_text(
         "services:\n  api:\n    secrets: [token]\nsecrets:\n  token:\n    file: ./secrets/token\n"
     )
@@ -203,6 +204,11 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
 
     assert_bundle_contract(bundle)
 
+    (bundle / "backups").chmod(0o755)
+    with pytest.raises(AcceptanceError, match="backups has unsafe permissions"):
+        assert_bundle_contract(bundle)
+    (bundle / "backups").chmod(0o700)
+
     (bundle / "README.md").write_text("extra")
     with pytest.raises(AcceptanceError, match="exactly"):
         assert_bundle_contract(bundle)
@@ -214,6 +220,7 @@ def test_bundle_contract_allows_empty_optional_hugging_face_token(
     bundle = tmp_path / "vonk-forge"
     secrets = bundle / "secrets"
     secrets.mkdir(parents=True)
+    (bundle / "backups").mkdir(mode=0o700)
     (bundle / "docker-compose.yaml").write_text(
         "services: {}\nsecrets:\n  hf-token:\n    file: ./secrets/hf-token\n"
     )
