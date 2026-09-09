@@ -106,3 +106,8 @@ Generated deployment Compose and the NAS curl installer payload use floating ima
 tags: Vonk images follow `:dev` or production `:latest`; upstream services follow
 `:latest`. Every service pulls on startup/redeploy. The source templates and pinned
 publication artifact provide evidence inputs, not the installed image policy.
+
+## Database backups
+
+PostgreSQL writes automatic dumps to `./backups/` in the project folder. See
+[backup settings and restoration](../../docs/postgres-backups.md).
