@@ -494,6 +494,12 @@ for generation in old target next; do
   esac
   build_agent "$test_root/$generation-bin/vonk-agent" "$semantic" "$digest" "$marker"
   build_helper "$test_root/$generation-bin/vonk-agent-helper" "$marker"
+  # The package contract includes the monitor service binary. This fixture
+  # does not exercise monitor telemetry, so use the generation's valid agent
+  # fixture as a harmless long-running monitor stand-in. The exact binary set
+  # remains present for every package build without weakening validation.
+  cp -- "$test_root/$generation-bin/vonk-agent" \
+    "$test_root/$generation-bin/vonk-monitor"
   cp -- "$test_root/$generation-bin/vonk-agent-helper" \
     "$test_root/$generation-bin/oras"
   cp -- "$build_egress_fixture" \
@@ -503,7 +509,7 @@ for generation in old target next; do
   printf '%s fixture license\n' "$generation" \
     > "$test_root/$generation-bin/oras.LICENSE"
   chmod 0555 \
-    "$test_root/$generation-bin/"{vonk-agent,vonk-agent-helper,vonk-build-egress,vonk-runtime-probe,oras}
+    "$test_root/$generation-bin/"{vonk-agent,vonk-monitor,vonk-agent-helper,vonk-build-egress,vonk-runtime-probe,oras}
   fixture_agent=$test_root/$generation-bin/vonk-agent
   fixture_agent_sha=$(sha256sum "$fixture_agent" | cut -d' ' -f1)
   fixture_self_test=$("$fixture_agent" --config /dev/null self-test)

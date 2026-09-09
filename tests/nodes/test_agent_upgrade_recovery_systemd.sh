@@ -234,6 +234,12 @@ SOURCE
 gcc -O2 -o "$test_root/baseline-bin/vonk-agent" \
   "$test_root/baseline-agent.c"
 gcc -O2 -o "$test_root/target-bin/vonk-agent-helper" "$test_root/helper.c"
+# The package contract includes the monitor service binary. This fixture does
+# not exercise monitor telemetry, so use each package's valid agent fixture as
+# a harmless long-running monitor stand-in. Keeping it in both binary sets
+# matches the exact release set accepted by the package builder.
+cp -- "$test_root/target-bin/vonk-agent" "$test_root/target-bin/vonk-monitor"
+cp -- "$test_root/baseline-bin/vonk-agent" "$test_root/baseline-bin/vonk-monitor"
 if [[ -n "${BUILD_EGRESS_BINARY:-}" ]]; then
   build_egress_fixture=$(realpath -e -- "$BUILD_EGRESS_BINARY")
   test "$build_egress_fixture" = \
@@ -254,7 +260,8 @@ for binary_dir in "$test_root/target-bin" "$test_root/baseline-bin"; do
   cp -- "$build_egress_fixture" "$binary_dir/vonk-build-egress"
   cp -- "$(dirname "$build_egress_fixture")/vonk-runtime-probe" "$binary_dir/vonk-runtime-probe"
   printf '%s\n' 'ORAS recovery fixture license' > "$binary_dir/oras.LICENSE"
-  chmod 0555 "$binary_dir/vonk-agent" "$binary_dir/vonk-agent-helper" \
+  chmod 0555 "$binary_dir/vonk-agent" "$binary_dir/vonk-monitor" \
+    "$binary_dir/vonk-agent-helper" \
     "$binary_dir/vonk-build-egress" "$binary_dir/vonk-runtime-probe" "$binary_dir/oras"
 done
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
