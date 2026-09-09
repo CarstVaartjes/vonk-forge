@@ -25,6 +25,10 @@ pub enum IdentityError {
     Node,
     #[error("identity metadata serialization failed")]
     Json(#[from] serde_json::Error),
+    #[error("cannot replace the active identity generation")]
+    ActiveGeneration,
+    #[error("identity generation would move backwards")]
+    GenerationRollback,
 }
 
 #[derive(Debug)]
@@ -58,7 +62,8 @@ struct GenerationPointer {
     generation: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IdentityMetadata<'a> {
     fingerprint: &'a str,
     generation: u64,
@@ -93,12 +98,7 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
         return Err(IdentityError::Node);
     }
     ensure_private_directory(root)?;
-    let metadata = serde_json::to_vec(&IdentityMetadata {
-        fingerprint: &material.fingerprint,
-        generation: material.generation,
-        node_id: &material.node_id,
-        serial: &material.serial,
-    })?;
+    let metadata = identity_metadata(material)?;
     for (name, value) in [
         ("private-key.pem", material.private_key_pem.as_slice()),
         ("certificate.pem", material.certificate_pem.as_slice()),
@@ -109,6 +109,15 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
     }
     File::open(root)?.sync_all()?;
     Ok(())
+}
+
+fn identity_metadata(material: &IdentityMaterial) -> Result<Vec<u8>, IdentityError> {
+    Ok(serde_json::to_vec(&IdentityMetadata {
+        fingerprint: &material.fingerprint,
+        generation: material.generation,
+        node_id: &material.node_id,
+        serial: &material.serial,
+    })?)
 }
 
 /// Persist a newly paired identity and select it even when a previous
@@ -125,6 +134,7 @@ pub fn persist_paired_identity(
     archive_pointer(root, "staged.json", "pre-reenroll-staged.json")?;
     archive_pointer(root, "active.json", "pre-reenroll-active.json")?;
     clear_pending(root)?;
+    cleanup_abandoned_generations(root, None)?;
     File::open(root)?.sync_all()?;
     Ok(())
 }
@@ -187,8 +197,12 @@ pub fn staged_identity_paths(root: &Path) -> Result<Option<(u64, IdentityPaths)>
 }
 
 pub fn identity_expired(paths: &IdentityPaths, now: DateTime<Utc>) -> Result<bool, IdentityError> {
-    let (_, not_after) = certificate_validity(&paths.certificate)?;
-    Ok(now >= not_after)
+    for path in [&paths.certificate, &paths.chain] {
+        if certificate_expired(path, now)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn retire_expired_staged(root: &Path, generation: u64) -> Result<(), IdentityError> {
@@ -207,7 +221,56 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
     if material.generation == 0 {
         return Err(IdentityError::Node);
     }
+    let active_generation = match load_pointer(root, "active.json")? {
+        Some(generation) => Some(generation),
+        None => flat_generation(root)?,
+    };
+    if let Some(active_generation) = active_generation {
+        if material.generation == active_generation {
+            return Err(IdentityError::ActiveGeneration);
+        }
+        if material.generation < active_generation {
+            return Err(IdentityError::GenerationRollback);
+        }
+    }
     let destination = root.join(generation_name(material.generation));
+    if destination.try_exists()? {
+        let metadata = fs::symlink_metadata(&destination)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other("identity generation is unsafe").into());
+        }
+        if load_pointer(root, "active.json")? == Some(material.generation) {
+            return Err(IdentityError::ActiveGeneration);
+        }
+        // Do not leave a durable staged pointer referencing the directory
+        // while that directory is being archived.  If the process stops in
+        // the replacement gap, the pending CSR remains available and the
+        // next renewal replay can restage the Controller's exact response.
+        if load_pointer(root, "staged.json")? == Some(material.generation) {
+            fs::remove_file(root.join("staged.json"))?;
+            File::open(root)?.sync_all()?;
+        }
+        let expected_metadata = identity_metadata(material)?;
+        let matches = [
+            &(
+                destination.join("private-key.pem"),
+                material.private_key_pem.as_slice(),
+            ),
+            &(
+                destination.join("certificate.pem"),
+                material.certificate_pem.as_slice(),
+            ),
+            &(destination.join("chain.pem"), material.chain_pem.as_slice()),
+        ]
+        .iter()
+        .all(|(path, expected)| read_private(path).is_ok_and(|actual| actual == *expected))
+            && read_private(&destination.join("identity.json"))
+                .is_ok_and(|actual| actual == expected_metadata);
+        if !matches {
+            let archive = replacement_archive_path(root, material.generation)?;
+            fs::rename(&destination, archive)?;
+        }
+    }
     if !destination.try_exists()? {
         let temporary = root.join(format!(
             ".{}.{}.tmp",
@@ -228,7 +291,38 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
             generation: material.generation,
         })?,
     )?;
+    File::open(root)?.sync_all()?;
     Ok(())
+}
+
+fn flat_generation(root: &Path) -> Result<Option<u64>, IdentityError> {
+    let path = root.join("identity.json");
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    let raw = read_private(&path)?;
+    let metadata: IdentityMetadata<'_> = serde_json::from_slice(&raw)
+        .map_err(|_| std::io::Error::other("flat identity metadata is invalid"))?;
+    Ok(Some(metadata.generation))
+}
+
+fn replacement_archive_path(root: &Path, generation: u64) -> Result<PathBuf, IdentityError> {
+    let base = format!(
+        "replaced-generation-{generation:020}-{}",
+        std::process::id()
+    );
+    for suffix in 0..1000_u16 {
+        let name = if suffix == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{suffix}")
+        };
+        let path = root.join(name);
+        if !path.try_exists()? {
+            return Ok(path);
+        }
+    }
+    Err(std::io::Error::other("identity replacement archive is exhausted").into())
 }
 
 pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError> {
@@ -247,7 +341,30 @@ pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError>
         Err(error) => return Err(error.into()),
     }
     clear_pending(root)?;
+    cleanup_abandoned_generations(root, Some(generation))?;
     File::open(root)?.sync_all()?;
+    Ok(())
+}
+
+fn cleanup_abandoned_generations(
+    root: &Path,
+    active_generation: Option<u64>,
+) -> Result<(), IdentityError> {
+    let active_name = active_generation.map(generation_name);
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with("generation-") || name.starts_with("replaced-generation-"))
+            && active_name.as_deref() != Some(name.as_ref())
+        {
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(std::io::Error::other("identity generation is unsafe").into());
+            }
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
     Ok(())
 }
 
@@ -276,6 +393,35 @@ fn certificate_validity(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), I
         .single()
         .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
     Ok((not_before, not_after))
+}
+
+fn certificate_expired(path: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
+    let raw = read_private(path)?;
+    let mut remaining = raw.as_slice();
+    let mut found = false;
+    while !remaining.iter().all(u8::is_ascii_whitespace) {
+        let (rest, pem) = parse_x509_pem(remaining)
+            .map_err(|_| std::io::Error::other("identity certificate chain is invalid"))?;
+        let (_, certificate) = parse_x509_certificate(&pem.contents)
+            .map_err(|_| std::io::Error::other("identity certificate chain is invalid"))?;
+        let not_before = Utc
+            .timestamp_opt(certificate.validity().not_before.timestamp(), 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
+        let not_after = Utc
+            .timestamp_opt(certificate.validity().not_after.timestamp(), 0)
+            .single()
+            .ok_or_else(|| std::io::Error::other("identity certificate validity is invalid"))?;
+        found = true;
+        if now < not_before || now >= not_after {
+            return Ok(true);
+        }
+        remaining = rest;
+    }
+    if !found {
+        return Err(std::io::Error::other("identity certificate chain is empty").into());
+    }
+    Ok(false)
 }
 
 fn load_pointer(root: &Path, name: &str) -> Result<Option<u64>, IdentityError> {
@@ -475,7 +621,10 @@ mod tests {
             fs::read(root.join("pre-reenroll-active.json")).unwrap(),
             br#"{"generation":3}"#,
         );
-        assert!(root.join(generation_name(3)).is_dir());
+        assert!(
+            !root.join(generation_name(3)).exists(),
+            "re-enrollment must retire obsolete generated credentials after the new flat identity is durable",
+        );
         assert_eq!(
             fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
             vec![b'n', b'c'],
@@ -501,5 +650,98 @@ mod tests {
             fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
             vec![b'n', b'c'],
         );
+    }
+
+    #[test]
+    fn replacing_an_existing_non_active_generation_does_not_reuse_stale_material() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'o')).unwrap();
+        stage_identity(&root, &material(2, b'n')).unwrap();
+
+        let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
+        assert_eq!(fs::read(paths.certificate).unwrap(), vec![b'n', b'c']);
+        assert!(fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("replaced-generation-00000000000000000002-")
+        }));
+    }
+
+    #[test]
+    fn successful_publish_cleans_replaced_and_old_generation_directories() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'o')).unwrap();
+        stage_identity(&root, &material(2, b'n')).unwrap();
+        stage_identity(&root, &material(3, b't')).unwrap();
+        publish_staged(&root, 3).unwrap();
+
+        assert!(root.join(generation_name(3)).is_dir());
+        assert!(!root.join(generation_name(2)).exists());
+        assert!(!fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("replaced-generation-")
+        }));
+    }
+
+    #[test]
+    fn active_generation_cannot_be_replaced_by_later_staging() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'o')).unwrap();
+        publish_staged(&root, 2).unwrap();
+
+        let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
+        assert!(error.to_string().contains("active identity generation"));
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+        );
+    }
+
+    #[test]
+    fn lower_generation_cannot_downgrade_the_active_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(3, b'o')).unwrap();
+        publish_staged(&root, 3).unwrap();
+
+        let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
+        assert!(error.to_string().contains("move backwards"));
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+        );
+    }
+
+    #[test]
+    fn flat_identity_generation_also_blocks_downgrade() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_paired_identity(&root, &material(3, b'o')).unwrap();
+
+        let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
+        assert!(error.to_string().contains("move backwards"));
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+        );
+    }
+
+    #[test]
+    fn expired_chain_certificate_invalidates_a_staged_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        let mut staged = certificate_material(2, false);
+        staged.chain_pem = certificate_material(3, true).chain_pem;
+        stage_identity(&root, &staged).unwrap();
+        let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+
+        assert!(identity_expired(&paths, now).unwrap());
     }
 }

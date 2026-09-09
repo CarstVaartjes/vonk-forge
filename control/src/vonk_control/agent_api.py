@@ -2398,6 +2398,32 @@ def install_agent_routes(
             raise HTTPException(status_code=403, detail=str(error)) from None
         return _json_response(_issued_response(issued))
 
+    @agent.post("/renew/recover", response_model=IssuedCertificateResponse)
+    def recover_renewal(body: RenewRequest, request: Request) -> Response:
+        """Recover a staged certificate that was created for another CSR.
+
+        The active source identity is deliberately used for admission.  The
+        Controller retires and CA-revokes the conflicting staged identity
+        before issuing the durable pending CSR.
+        """
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        _body_node_matches(body.node_id, identity)
+        try:
+            issued = required.enrollment.recover_rotation(
+                identity.node_id, identity.certificate_serial, body.csr.encode("ascii")
+            )
+        except UnicodeEncodeError:
+            raise HTTPException(
+                status_code=422, detail="CSR must be ASCII PEM"
+            ) from None
+        except RenewalInProgress as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentDenied, ValueError) as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
+        return _json_response(_issued_response(issued))
+
     @agent.post("/renew/activate", status_code=status.HTTP_204_NO_CONTENT)
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)

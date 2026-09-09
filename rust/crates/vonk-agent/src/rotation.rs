@@ -78,9 +78,23 @@ pub async fn rotate_if_due(
             value
         }
     };
-    let issued = AgentHttpClient::from_config(config)?
-        .renew(&pending.csr_pem)
-        .await?;
+    let active_client = AgentHttpClient::from_config(config)?;
+    let issued = match active_client.renew(&pending.csr_pem).await {
+        Ok(issued) => issued,
+        // A controller-side staged CSR conflict is a typed denial.  The
+        // recovery endpoint is authenticated with the same still-active
+        // source identity and is bounded to this one durable CSR.  Actual
+        // Only the exact Controller context emitted for a staged CSR
+        // conflict can enter recovery. Other authentication or rejection
+        // responses retain their original status, code, and decision.
+        Err(error)
+            if error.status() == Some(403)
+                && error.code() == Some("agent.certificate.rotation.conflict") =>
+        {
+            active_client.recover_renewal(&pending.csr_pem).await?
+        }
+        Err(error) => return Err(error.into()),
+    };
     validate_issued(&issued, &pending, &config.node_id)?;
     let generation = issued.generation;
     stage_identity(

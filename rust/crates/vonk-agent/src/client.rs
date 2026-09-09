@@ -1500,6 +1500,71 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
+        if !response.status().is_success() {
+            // Renewal can identify one narrowly defined recovery case from
+            // its bounded, safe error body. Keep the status, path, request ID,
+            // and canonical code in the contextual Controller error for all
+            // outcomes; generic 401/403 responses remain rejections.
+            let status = response.status();
+            let endpoint = response.url().path().to_owned();
+            let operation = format!("controller.request {endpoint}");
+            let request_id = response
+                .headers()
+                .get("x-request-id")
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| valid_error_token(value))
+                .map(str::to_owned);
+            let header_code = response
+                .headers()
+                .get("x-vonk-error-code")
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| valid_error_code(value))
+                .map(str::to_owned);
+            let body = bounded_body(response).await?;
+            let code = if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
+                Some("agent.certificate.rotation.conflict".to_owned())
+            } else {
+                header_code
+            };
+            return Err(ClientError::Controller(controller_error(
+                status, &endpoint, &operation, request_id, code,
+            )));
+        }
+        let body = bounded_body(response).await?;
+        let issued: IssuedCertificateResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        if issued.node_id != self.node_id || issued.generation == 0 {
+            return Err(ClientError::Protocol);
+        }
+        Ok(issued)
+    }
+
+    /// Request recovery of an unactivated staged certificate whose CSR does
+    /// not match the durable pending CSR.  The endpoint is authenticated with
+    /// this client's active identity and is intentionally separate from the
+    /// normal renewal operation so a 403 cannot silently become a replacement
+    /// request.
+    pub async fn recover_renewal(
+        &self,
+        csr: &[u8],
+    ) -> Result<IssuedCertificateResponse, ClientError> {
+        let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
+        if csr.is_empty() || csr.len() > 16 * 1024 {
+            return Err(ClientError::Protocol);
+        }
+        let request = RenewRequest {
+            csr: csr.to_owned(),
+            node_id: self.node_id.clone(),
+        };
+        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
+        let response = self
+            .current_client()
+            .post(self.endpoint("/agent/v1/renew/recover")?)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
         classify_response(&response)?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
@@ -1662,6 +1727,21 @@ fn valid_error_code(value: &str) -> bool {
                 || byte.is_ascii_digit()
                 || (index > 0 && b"_.:-".contains(&byte))
         })
+}
+
+fn is_rotation_conflict(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    let code = value.get("code").and_then(serde_json::Value::as_str);
+    let detail = value.get("detail").and_then(serde_json::Value::as_str);
+    matches!(
+        code,
+        Some("agent.certificate.rotation.conflict") | Some("agent_certificate_rotation_conflict")
+    ) || matches!(
+        detail,
+        Some("a different certificate rotation is already staged")
+    )
 }
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
@@ -1890,8 +1970,8 @@ fn valid_oci_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentHttpClient, ClientError, ExactRecipeRunObservation, partial_path,
-        valid_reported_hostname,
+        AgentHttpClient, ClientError, ExactRecipeRunObservation, is_rotation_conflict,
+        partial_path, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
@@ -1927,6 +2007,19 @@ mod tests {
     };
 
     struct NoProcess;
+
+    #[test]
+    fn renewal_conflict_is_distinguished_from_revoked_identity() {
+        assert!(is_rotation_conflict(
+            br#"{"detail":"a different certificate rotation is already staged"}"#
+        ));
+        assert!(is_rotation_conflict(
+            br#"{"code":"agent.certificate.rotation.conflict"}"#
+        ));
+        assert!(!is_rotation_conflict(
+            br#"{"detail":"agent certificate is not active"}"#
+        ));
+    }
 
     impl ProcessRunner for NoProcess {
         fn run(
