@@ -85,13 +85,35 @@ from .compatibility_preparation import CompatibilityPreparation
 from .compatibility_preparation_kind import CompatibilityPreparationKind
 from .compatibility_preparation_stage import CompatibilityPreparationStage
 from .compatibility_preparation_state import CompatibilityPreparationState
+from .compiled_artifact import CompiledArtifact
 from .compiled_artifact_contract import CompiledArtifactContract
 from .compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
 from .compiled_artifact_contract_interface import CompiledArtifactContractInterface
+from .compiled_artifact_mount import CompiledArtifactMount
+from .compiled_distribution_object import CompiledDistributionObject
+from .compiled_distribution_object_kind import CompiledDistributionObjectKind
+from .compiled_endpoint import CompiledEndpoint
+from .compiled_environment_entry import CompiledEnvironmentEntry
 from .compiled_execution_plan import CompiledExecutionPlan
-from .compiled_model_artifact import CompiledModelArtifact
+from .compiled_identity import CompiledIdentity
+from .compiled_job import CompiledJob
+from .compiled_job_input import CompiledJobInput
+from .compiled_job_input_slot import CompiledJobInputSlot
+from .compiled_job_interface import CompiledJobInterface
+from .compiled_lifecycle import CompiledLifecycle
+from .compiled_model_identity import CompiledModelIdentity
+from .compiled_placement import CompiledPlacement
+from .compiled_runtime import CompiledRuntime
 from .compiled_runtime_image import CompiledRuntimeImage
 from .compiled_runtime_image_source import CompiledRuntimeImageSource
+from .compiled_runtime_telemetry import CompiledRuntimeTelemetry
+from .compiled_runtime_telemetry_metrics_format_type_0 import CompiledRuntimeTelemetryMetricsFormatType0
+from .compiled_security import CompiledSecurity
+from .compiled_security_mount import CompiledSecurityMount
+from .compiled_security_mount_source import CompiledSecurityMountSource
+from .compiled_security_network_mode import CompiledSecurityNetworkMode
+from .compiled_topology import CompiledTopology
+from .compiled_topology_mode import CompiledTopologyMode
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
@@ -100,8 +122,6 @@ from .deployment_provenance import DeploymentProvenance
 from .distribution_assignment import DistributionAssignment
 from .distribution_object import DistributionObject
 from .distribution_object_kind import DistributionObjectKind
-from .distribution_object_receipt import DistributionObjectReceipt
-from .distribution_object_receipt_kind import DistributionObjectReceiptKind
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
 from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
@@ -119,7 +139,6 @@ from .evidence_age import EvidenceAge
 from .evidence_age_freshness import EvidenceAgeFreshness
 from .evidence_context import EvidenceContext
 from .evidence_context_source import EvidenceContextSource
-from .execution_mount import ExecutionMount
 from .failure_diagnostics import FailureDiagnostics
 from .failure_diagnostics_category import FailureDiagnosticsCategory
 from .failure_evidence_bundle import FailureEvidenceBundle
@@ -209,7 +228,6 @@ from .image_distribution_preview_input import ImageDistributionPreviewInput
 from .image_distribution_preview_request import ImageDistributionPreviewRequest
 from .image_distribution_preview_target import ImageDistributionPreviewTarget
 from .image_distribution_request import ImageDistributionRequest
-from .install_node_plan_response import InstallNodePlanResponse
 from .install_plan_response import InstallPlanResponse
 from .install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
 from .install_preview_input import InstallPreviewInput
@@ -335,7 +353,6 @@ from .model_capability_fact_capability import ModelCapabilityFactCapability
 from .model_capability_fact_evidence_status import ModelCapabilityFactEvidenceStatus
 from .model_capability_fact_support import ModelCapabilityFactSupport
 from .model_capability_provenance import ModelCapabilityProvenance
-from .model_catalog_identity import ModelCatalogIdentity
 from .model_definition import ModelDefinition
 from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
@@ -405,7 +422,6 @@ from .placement_recommendation import PlacementRecommendation
 from .placement_recommendation_install_state import PlacementRecommendationInstallState
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
-from .plan_reason import PlanReason
 from .platform_boundary import PlatformBoundary
 from .platform_boundary_boundary import PlatformBoundaryBoundary
 from .platform_boundary_state import PlatformBoundaryState
@@ -541,7 +557,6 @@ from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvide
 from .rollout_preparation import RolloutPreparation
 from .run_node_change import RunNodeChange
 from .run_node_payload import RunNodePayload
-from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
 from .run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
@@ -636,7 +651,6 @@ from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
 from .runtime_preflight_result import RuntimePreflightResult
 from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
-from .source_policy_finding_response import SourcePolicyFindingResponse
 from .source_policy_response import SourcePolicyResponse
 from .spark_fit import SparkFit
 from .spark_fit_node import SparkFitNode
@@ -647,6 +661,11 @@ from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
 from .stop_request import StopRequest
+from .stored_admission_reason import StoredAdmissionReason
+from .stored_install_node_plan import StoredInstallNodePlan
+from .stored_policy_finding import StoredPolicyFinding
+from .stored_run_node_plan import StoredRunNodePlan
+from .stored_run_node_plan_memory_kind import StoredRunNodePlanMemoryKind
 from .string_parameter import StringParameter
 from .target_asset_state import TargetAssetState
 from .target_asset_state_state import TargetAssetStateState
@@ -782,13 +801,35 @@ __all__ = (
     "CompatibilityPreparationKind",
     "CompatibilityPreparationStage",
     "CompatibilityPreparationState",
+    "CompiledArtifact",
     "CompiledArtifactContract",
     "CompiledArtifactContractEngineType0",
     "CompiledArtifactContractInterface",
+    "CompiledArtifactMount",
+    "CompiledDistributionObject",
+    "CompiledDistributionObjectKind",
+    "CompiledEndpoint",
+    "CompiledEnvironmentEntry",
     "CompiledExecutionPlan",
-    "CompiledModelArtifact",
+    "CompiledIdentity",
+    "CompiledJob",
+    "CompiledJobInput",
+    "CompiledJobInputSlot",
+    "CompiledJobInterface",
+    "CompiledLifecycle",
+    "CompiledModelIdentity",
+    "CompiledPlacement",
+    "CompiledRuntime",
     "CompiledRuntimeImage",
     "CompiledRuntimeImageSource",
+    "CompiledRuntimeTelemetry",
+    "CompiledRuntimeTelemetryMetricsFormatType0",
+    "CompiledSecurity",
+    "CompiledSecurityMount",
+    "CompiledSecurityMountSource",
+    "CompiledSecurityNetworkMode",
+    "CompiledTopology",
+    "CompiledTopologyMode",
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
@@ -797,8 +838,6 @@ __all__ = (
     "DistributionAssignment",
     "DistributionObject",
     "DistributionObjectKind",
-    "DistributionObjectReceipt",
-    "DistributionObjectReceiptKind",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
     "EffectiveSettingsSelectionChangeEffects",
@@ -816,7 +855,6 @@ __all__ = (
     "EvidenceAgeFreshness",
     "EvidenceContext",
     "EvidenceContextSource",
-    "ExecutionMount",
     "FailureDiagnostics",
     "FailureDiagnosticsCategory",
     "FailureEvidenceBundle",
@@ -908,7 +946,6 @@ __all__ = (
     "ImageDistributionRequest",
     "InstallationNodeChange",
     "InstallationNodePayload",
-    "InstallNodePlanResponse",
     "InstallPlanResponse",
     "InstallPlanResponseCompiledExecutionPlans",
     "InstallPreviewInput",
@@ -1032,7 +1069,6 @@ __all__ = (
     "ModelCapabilityFactEvidenceStatus",
     "ModelCapabilityFactSupport",
     "ModelCapabilityProvenance",
-    "ModelCatalogIdentity",
     "ModelDefinition",
     "ModelDefinitionModalitiesItem",
     "ModelDeletionInstallationImpactResponse",
@@ -1102,7 +1138,6 @@ __all__ = (
     "PlacementRecommendationInstallState",
     "PlacementRecommendationLoadState",
     "PlacementScore",
-    "PlanReason",
     "PlatformBoundary",
     "PlatformBoundaryBoundary",
     "PlatformBoundaryState",
@@ -1238,7 +1273,6 @@ __all__ = (
     "RolloutPreparation",
     "RunNodeChange",
     "RunNodePayload",
-    "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",
     "RunPresenceDegradedReasonType0",
@@ -1333,7 +1367,6 @@ __all__ = (
     "RuntimePreflightResult",
     "SourceBundleResponse",
     "SourceCheckRequest",
-    "SourcePolicyFindingResponse",
     "SourcePolicyResponse",
     "SparkFit",
     "SparkFitNode",
@@ -1344,6 +1377,11 @@ __all__ = (
     "StopPlanResponse",
     "StopPreviewRequest",
     "StopRequest",
+    "StoredAdmissionReason",
+    "StoredInstallNodePlan",
+    "StoredPolicyFinding",
+    "StoredRunNodePlan",
+    "StoredRunNodePlanMemoryKind",
     "StringParameter",
     "TargetAssetState",
     "TargetAssetStateState",

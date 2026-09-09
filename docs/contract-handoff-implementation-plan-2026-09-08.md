@@ -27,20 +27,67 @@ The partial-receipt audit found no defect: those internal fragments preserve
 field presence so an absent measurement does not become an observed zero.
 Strict persistence and public model serialization retain their respective roles.
 
+## Consolidated integration — 8 September
+
+PR #629 is merged into `main` at `b99ef271`; all required PR checks passed.
+The completed contract branches are included in that merge. Combined Linux
+verification covered 488 Rust cases across the workspace run and the necessary
+unprivileged setup reruns. The connected suite initially reported 656 passes,
+six failures and 17 skips; all six failures passed focused reruns after fixture
+and local probe-wrapper corrections. These are separate runs, not a claimed
+single all-green connected-suite execution.
+
+Both LTX adapters now consume the shared compiled-plan and job-input models.
+The complete recipe catalog contains 85 recipes and 92 models. Recipe PRs #77
+and #78 are merged; release `v1.0.6` is published from `6001adcb`, with its
+publication workflow passing. The release uses an annotated Git tag; no
+cryptographic release signature has been established.
+
+Generated clients, schemas, protocol/public-contract wheels, locks and
+supply-chain evidence were refreshed before the platform merge. A second
+client generation left all 811 inspected files unchanged. Public-contract
+packaging pins its build backend so production and local wheel bytes agree.
+
+The routing follow-up is integrated in the PR #630 branch. Controller and
+supervisor share finite transition budgets and a typed acknowledgement; initial
+bootstrap also observes the first real activation correctly. The engineering
+replay at `44839a5e`, with the corrected synthetic request fixture, reached
+inference through the proxy, then stopped the runtime and withdrew its route.
+Uninstall failed because the unprivileged agent could not remove helper-owned
+runtime-cache directories. This is not a completed clean lifecycle replay.
+
+Recipe PR #79 removes obsolete package-test skips. PR #80 makes the synthetic
+acceptance server consume a nested Pydantic request model, accept declared
+defaults and extensions, and serve both JSON and SSE. Its offline ARM64 image
+passed probes as UID 10001 with a read-only root and no capabilities. These
+fixture probes do not replace the final proxy-to-runtime replay.
+
+A separate current source-build defect is fixed in `f12a34b8`: the producer
+copied the child job state `running` into a receipt that requires the build
+state `building`. The producer now constructs the canonical phase model from
+the persisted build. A real build-service/queue/executor regression passes its
+output to the actual receipt consumer for dispatch, retry and completion, and
+rejects incomplete success evidence. The focused suite passed 36 tests. A fast
+build can finish before the invalid intermediate state is observed, so an
+earlier successful replay did not exclude this defect.
+
 Remaining work has explicit owners:
 
-- Runtime owner: verify the final combined Linux protocol/helper/agent suites.
-- Parent: finish both LTX adapters using shared input and compiled-plan models,
-  refresh their bundled protocol wheel and recipe packages, and validate the
-  complete catalog against the final platform.
-- Parent: regenerate clients, schemas, wheels, locks and supply-chain evidence
-  after source changes settle; verify a second generation is unchanged.
-- Canary owner: replay the local connected lifecycle after combined artifacts
-  are available. The earlier Controller-startup timeout is not a passing run.
+- Helper owner: finish the signed installation-scoped runtime-cache cleanup
+  across the shared contract, Controller, generated Rust and helper. Verify
+  private directories, exact installation authority, outside-path isolation
+  and idempotent retries; preserve shared model/image caches.
+- Canary owner: rebuild production images and ARM64 agent/helper from the
+  final packaged checkpoint. Run a clean source-image build, both JSON and SSE
+  inference through the proxy, stop, uninstall, certificate renewal and cleanup.
+- Parent: integrate tested follow-ups, regenerate derived contracts and
+  packaged artifacts, and merge after green PR CI. Verify signed development
+  publication, refresh the NAS bundle, upgrade Sparks through the Controller,
+  and verify physical serving separately.
 
-Final integration, green PR CI, publication, deployment and physical Spark
-acceptance remain outstanding. Do not mark the audit complete solely because
-individual branch tests pass.
+Signed platform publication, Controller deployment and physical Spark
+acceptance remain separate evidence boundaries. The engineering replay does
+not establish signed-candidate or physical hardware acceptance.
 
 ## Contract decisions
 
@@ -78,9 +125,10 @@ individual branch tests pass.
 
 ## Work packages and exclusive ownership
 
-All new platform branches start from refreshed `origin/main` (`1b178ebe`),
-then whole-merge integration checkpoint `7bca86ee` so completed fixes are
-present. No cherry-picks. Each agent has one isolated branch and worktree.
+The original work packages started from refreshed `origin/main` (`1b178ebe`)
+and whole-merged integration checkpoint `7bca86ee`. They are now consolidated
+in `b99ef271`. Follow-up work uses the latest `origin/main` and existing owned
+worktrees where possible. No cherry-picks or stranded completed branches.
 
 | Package | Owner | Branch | Scope and acceptance |
 | --- | --- | --- | --- |

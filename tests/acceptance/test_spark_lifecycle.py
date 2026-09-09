@@ -83,9 +83,8 @@ UUID = re.compile(
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # Exercise the production-supported lower bound.  The agent renews at two thirds
-# of a certificate lifetime and checks renewal on its 60-second inventory tick,
-# so 90 seconds preserves a real scheduled rotation while avoiding three idle
-# inventory intervals in every ARM64 publication gate.
+# of a certificate lifetime and its independent rotation lane polls on a bounded
+# interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
 CERTIFICATE_LIFETIME_SECONDS = 90
 ENROLLMENT_HOST = "enroll.spark.localhost"
 AGENT_HOST = "agents.spark.localhost"
@@ -940,6 +939,7 @@ class SparkLifecycle:
         cwd: Path,
         timeout: int = 300,
         report_failure_output: bool = False,
+        allowed_returncodes: tuple[int, ...] = (0,),
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
@@ -959,7 +959,7 @@ class SparkLifecycle:
             ) from error
         except (OSError, subprocess.SubprocessError) as error:
             raise LifecycleError("acceptance command could not execute") from error
-        if result.returncode != 0:
+        if result.returncode not in allowed_returncodes:
             detail = (
                 "; " + self._redact_diagnostics(result.stderr or result.stdout)
                 if report_failure_output else ""
@@ -2390,7 +2390,13 @@ class SparkLifecycle:
             or operation.get("plan_digest") != plan_digest
             or operation.get("nodes") != [node_id]
         ):
-            raise LifecycleError("synthetic canary uninstall evidence is incomplete")
+            details = self._redact_diagnostics(json.dumps({
+                key: operation.get(key)
+                for key in ("id", "kind", "state", "owner_id", "plan_digest", "nodes", "result")
+            }))
+            raise LifecycleError(
+                f"synthetic canary uninstall evidence is incomplete; operation evidence: {details}"
+            )
         return operation
 
     @staticmethod
@@ -2467,12 +2473,56 @@ class SparkLifecycle:
             raise LifecycleError("certificate serial proof is invalid")
         return encoded
 
-    def _old_certificate_rejected(self, serial_before: str) -> bool:
+    def _old_certificate_rejected(self, serial_before: str, serial_after: str) -> bool:
+        if (
+            SERIAL.fullmatch(serial_before) is None
+            or SERIAL.fullmatch(serial_after) is None
+        ):
+            raise LifecycleError("certificate probe identity is invalid")
+        rows = self._psql(
+            "SELECT generation FROM agent_certificates "
+            f"WHERE serial='{serial_after}' AND state='active'"
+        )
+        if len(rows) != 1 or len(rows[0]) != 1 or not rows[0][0].isdigit():
+            raise LifecycleError("active certificate probe generation is invalid")
+        generation = int(rows[0][0])
+        if not 1 < generation <= 2**64 - 1:
+            raise LifecycleError("active certificate probe generation is invalid")
+        root = AGENT_DATA / "credentials"
+        current = self._certificate_probe(
+            serial_after, root / f"generation-{generation:020}", retired=False
+        )
+        # This authenticated endpoint returns 404 only after accepting the current
+        # identity. A missing all-zero source bundle is the deliberate control.
+        if current.returncode != 0 or current.stdout != "404":
+            raise LifecycleError(
+                "current certificate did not pass the authenticated probe"
+            )
+        retired = self._certificate_probe(serial_before, root, retired=True)
+        if retired.returncode == 0:
+            return retired.stdout == "401"
+        # A complete cold build may outlast the original short-lived certificate.
+        # Accept only the peer's explicit expiry alert, never generic curl 56,
+        # local CA/hostname/key failures, timeouts or other connection errors.
+        return (
+            retired.returncode == 56
+            and retired.stdout == "000"
+            and re.search(
+                r"SSL_read:.*SSL routines::sslv3 alert certificate expired(?:,|\s)",
+                retired.stderr,
+            )
+            is not None
+        )
+
+    def _certificate_probe(
+        self, serial: str, credential_root: Path, *, retired: bool
+    ) -> subprocess.CompletedProcess[str]:
         assert self.temporary_root is not None
-        if SERIAL.fullmatch(serial_before) is None:
+        if SERIAL.fullmatch(serial) is None:
             raise LifecycleError("retired agent certificate serial is invalid")
-        credential_root = AGENT_DATA / "credentials"
-        probe = self.temporary_root / "retired-agent-probe"
+        probe = self.temporary_root / (
+            "retired-agent-probe" if retired else "active-agent-probe"
+        )
         probe.mkdir(mode=0o700)
         leaf = probe / "certificate.pem"
         chain = probe / "chain.pem"
@@ -2505,10 +2555,7 @@ class SparkLifecycle:
                 metadata = json.loads(identity.read_bytes())
             except (OSError, json.JSONDecodeError) as error:
                 raise LifecycleError("retired agent identity is invalid") from error
-            if (
-                not isinstance(metadata, dict)
-                or metadata.get("serial") != serial_before
-            ):
+            if not isinstance(metadata, dict) or metadata.get("serial") != serial:
                 raise LifecycleError("retired agent identity serial changed")
             bundle.write_bytes(leaf.read_bytes() + chain.read_bytes())
             key_v1.write_bytes(
@@ -2539,8 +2586,10 @@ class SparkLifecycle:
                 ],
                 cwd=Path("/"),
                 timeout=40,
+                report_failure_output=True,
+                allowed_returncodes=(0, 56) if retired else (0,),
             )
-            return result.stdout == "401"
+            return result
         finally:
             shutil.rmtree(probe)
 
@@ -2574,7 +2623,7 @@ class SparkLifecycle:
                     or identity.get("serial") != serial_after
                 ):
                     raise LifecycleError("renewed agent identity is inconsistent")
-                if not self._old_certificate_rejected(serial_before):
+                if not self._old_certificate_rejected(serial_before, serial_after):
                     raise LifecycleError("retired agent certificate was not rejected")
                 before_proof = self._serial_proof(serial_before)
                 return {

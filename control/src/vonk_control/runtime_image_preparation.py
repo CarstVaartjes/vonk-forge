@@ -32,6 +32,7 @@ from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition
 
 from .cached_file_verification import verified_files
+from .catalog_revision_contract import read_catalog_document, read_catalog_projection
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 
@@ -536,18 +537,19 @@ def _authorize_current_revision(
             "runtime_image.authorization_invalid",
             "current recipe revision authority is unavailable or inactive",
         )
-    execution = revision.document.get("execution") if isinstance(revision.document, Mapping) else None
-    mode = execution.get("mode") if isinstance(execution, Mapping) else None
+    try:
+        recipe = read_catalog_document(revision)
+    except ValueError as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.authorization_invalid",
+            "current recipe document is not valid persisted contract JSON",
+        ) from error
+    execution = recipe.execution if hasattr(recipe, "execution") else None
+    mode = execution.mode if execution is not None else None
     if mode == "image":
-        image = execution.get("image")
-        raw_digest = image.get("digest") if isinstance(image, Mapping) else None
-        expected = (
-            raw_digest
-            if isinstance(raw_digest, str) and raw_digest.startswith("sha256:")
-            else f"sha256:{raw_digest}"
-            if isinstance(raw_digest, str)
-            else None
-        )
+        image = execution.image
+        raw_digest = image.digest
+        expected = f"sha256:{raw_digest}"
         if receipt.source != "published" or expected != receipt.registry_manifest_digest:
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
@@ -571,12 +573,8 @@ def _authorize_current_revision(
                 "runtime_image.authorization_invalid",
                 "source-build receipt is not backed by the exact succeeded build",
             )
-        projected = revision.projected if isinstance(revision.projected, Mapping) else {}
-        source_bundle_sha256 = projected.get("source_bundle_sha256")
-        if (
-            isinstance(source_bundle_sha256, str)
-            and build.source_bundle_sha256 != source_bundle_sha256
-        ):
+        source_bundle_sha256 = read_catalog_projection(revision).source_bundle_sha256
+        if source_bundle_sha256 is None or build.source_bundle_sha256 != source_bundle_sha256:
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
                 "source-build receipt does not match the current build input",
@@ -650,8 +648,12 @@ def _validate_revision_reuse_identity(
             "runtime_image.authorization_invalid",
             "current recipe execution or artifact identity changed",
         )
-    current_projected = current.projected if isinstance(current.projected, Mapping) else {}
-    original_projected = original.projected if isinstance(original.projected, Mapping) else {}
+    current_projected = read_catalog_projection(current).model_dump(
+        mode="json", exclude_none=True
+    )
+    original_projected = read_catalog_projection(original).model_dump(
+        mode="json", exclude_none=True
+    )
     for key in (
         "source_bundle_sha256",
         "build_model_artifacts",
@@ -951,7 +953,7 @@ def prepare_runtime_image(
     """
 
     parsed = _canonical_recipe(recipe)
-    projection = _runtime_projection(runtime)
+    projection = runtime_image_expectations(runtime)
     source_build = parsed.execution.mode == "build"
     if source_build != (build_receipt is not None):
         raise RuntimeImagePreparationError(
@@ -1184,14 +1186,19 @@ def _canonical_recipe(value: RecipeDefinition | Mapping[str, object] | object) -
         ) from error
 
 
-def _runtime_projection(value: Mapping[str, object] | object) -> dict[str, str]:
+def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str, str]:
+    """Read image verification expectations from the current compiler projection."""
     raw = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
     if not isinstance(raw, Mapping):
         raise RuntimeImagePreparationError(
             "runtime_image.runtime_invalid", "canonical runtime projection is unavailable"
         )
+    if "runtime_interface" in raw:
+        raise RuntimeImagePreparationError(
+            "runtime_image.runtime_invalid", "runtime projection contains retired runtime_interface"
+        )
     architecture = raw.get("architecture")
-    interface = raw.get("interface", raw.get("runtime_interface"))
+    interface = raw.get("interface")
     if not isinstance(architecture, str) or not architecture or not isinstance(interface, str) or not interface:
         raise RuntimeImagePreparationError(
             "runtime_image.runtime_invalid", "runtime projection lacks observed architecture/interface expectations"
@@ -1454,4 +1461,5 @@ __all__ = [
     "persist_runtime_image_receipt",
     "prepare_runtime_image",
     "resolve_persisted_runtime_image_receipt",
+    "runtime_image_expectations",
 ]

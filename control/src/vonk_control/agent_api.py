@@ -56,6 +56,7 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
+from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
@@ -78,8 +79,9 @@ from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
+from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
-from .download_contract import download_responses
+from .download_contract import download_responses, upload_request_body
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -115,6 +117,10 @@ from .models import (
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
@@ -447,8 +453,17 @@ class AgentGrantRequest(StrictJSONModel):
 
 
 class HostRuntimeGrantRequest(AgentGrantRequest):
-    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+
+    @model_validator(mode="after")
+    def installation_cleanup_binding(self) -> HostRuntimeGrantRequest:
+        if (self.installation_id is not None) != (
+            self.action == "installation-cleanup"
+        ):
+            raise ValueError("host runtime installation binding is invalid")
+        return self
 
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -1384,6 +1399,7 @@ def install_agent_routes(
 
     @human.post(
         "/nodes/{node_id}/revoke",
+        openapi_extra={"x-vonk-request-body": "none"},
         status_code=status.HTTP_204_NO_CONTENT,
         responses=bounded_error_responses(401, 403, 404, 503),
     )
@@ -1454,6 +1470,7 @@ def install_agent_routes(
         )
 
     @agent.post("/enroll", response_model=IssuedCertificateResponse)
+    @raw_json_body(EnrollmentSubmitRequest)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1967,23 +1984,24 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification installation authority is stale",
                 )
-            if not isinstance(installation.plan, Mapping):
+            try:
+                stored_installation_plan = parse_stored_installation_plan(
+                    installation.plan
+                )
+            except RecipeExecutionContractError:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is invalid",
+                ) from None
+            candidate_model = stored_installation_plan.compiled_execution_plans.get(
+                identity.node_id
+            )
+            if candidate_model is None:
                 raise HTTPException(
                     status_code=409,
                     detail="recipe specification compiled execution plan is unavailable",
                 )
-            compiled_plans = installation.plan.get("compiled_execution_plans")
-            if not isinstance(compiled_plans, Mapping):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
-            candidate = compiled_plans.get(identity.node_id)
-            if not isinstance(candidate, Mapping):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
+            candidate = candidate_model.model_dump(mode="json")
             candidate_identity = candidate.get("identity")
             candidate_runtime_image = candidate.get("runtime_image")
             effective_execution_key = (
@@ -2170,6 +2188,7 @@ def install_agent_routes(
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
+                installation_id=body.installation_id,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
@@ -2352,7 +2371,9 @@ def install_agent_routes(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.put(
-        "/recipe-builds/{build_id}/image", status_code=status.HTTP_204_NO_CONTENT
+        "/recipe-builds/{build_id}/image",
+        status_code=status.HTTP_204_NO_CONTENT,
+        openapi_extra=upload_request_body("application/x-tar"),
     )
     async def upload_recipe_image(build_id: str, request: Request) -> Response:
         _scope_identity(request)

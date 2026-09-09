@@ -86,6 +86,7 @@ mod tests {
             fence: uuid::Uuid::new_v4(),
             arguments: vec![],
             observation: None,
+            installation_id: None,
         };
         assert!(request.validate().is_ok());
         request.arguments = vec!["--privileged".into()];

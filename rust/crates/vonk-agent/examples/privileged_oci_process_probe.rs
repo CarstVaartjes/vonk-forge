@@ -93,6 +93,7 @@ fn main() {
         fence,
         arguments: arguments.clone(),
         observation: None,
+        installation_id: None,
     };
     request.validate().unwrap();
     let body = canonical_json(&request).unwrap();
@@ -125,6 +126,7 @@ fn main() {
             fence,
             request_sha256: request_sha.clone(),
             observation_identity_sha256: None,
+            installation_id: None,
         },
     );
     let claims = GrantClaims {

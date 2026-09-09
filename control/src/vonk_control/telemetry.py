@@ -12,6 +12,7 @@ from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import (
     AgentNode,
@@ -20,7 +21,7 @@ from .models import (
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
 )
-from .telemetry_contract import TelemetryMetrics
+from .telemetry_contract import TelemetryDetails, TelemetryMetrics
 from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -363,8 +364,16 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
 
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
-    details = dict(row.details)
-    metrics = TelemetryMetrics.model_validate(row.metrics)
+    try:
+        details_document = canonical_message(row.details)
+    except (TypeError, ValueError) as error:
+        raise ValueError("telemetry details are invalid") from error
+    details = TelemetryDetails.model_validate_json(details_document)
+    try:
+        metrics_document = canonical_message(row.metrics)
+    except (TypeError, ValueError) as error:
+        raise ValueError("telemetry metrics are invalid") from error
+    metrics = TelemetryMetrics.model_validate_json(metrics_document)
     return TelemetrySampleView(
         id=row.id,
         node_id=row.node_id,
@@ -387,8 +396,8 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
         network_transmit_bytes_per_second=row.network_transmit_bytes_per_second,
         gap_samples=row.gap_samples,
         details=TelemetryDetailsInput(
-            accelerator_name=details.get("accelerator_name"),
-            accelerator_performance_state=details.get("accelerator_performance_state"),
+            accelerator_name=details.accelerator_name,
+            accelerator_performance_state=details.accelerator_performance_state,
         ),
         metrics=metrics,
     )

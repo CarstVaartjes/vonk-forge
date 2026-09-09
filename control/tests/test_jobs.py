@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs import JobService, StaleAttempt
-from vonk_control.models import Base
+from vonk_control.models import Base, Job
+from vonk_control.operation_api import JobProgress, OperationPage, job_response
 
 
 class Clock:
@@ -200,6 +201,81 @@ def test_payload_is_bounded_and_rejects_credential_fields(service) -> None:
         jobs.enqueue("probe", "admin", "abc", [], {"value": "x" * 70_000})
     with pytest.raises(TypeError, match="keys"):
         jobs.enqueue("probe", "admin", "abc", [], {1: "not-a-string-key"})
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_job_payload_and_result_reject_nonfinite_json_numbers(service, value) -> None:
+    jobs, _ = service
+    with pytest.raises(ValueError):
+        jobs.enqueue("probe", "admin", "abc", [], {"nested": [value]})
+
+    job = jobs.enqueue("probe", "admin", "abc", [], {})
+    attempt = jobs.claim("worker", 30)
+    assert attempt is not None and attempt.job_id == job.id
+    with pytest.raises(ValueError):
+        jobs.succeed(attempt, {"nested": [value]})
+    assert jobs.get(job.id).state == "running"
+
+
+def test_job_json_values_targets_and_projection_survive_store_load(service) -> None:
+    jobs, _ = service
+    payload = {
+        "empty": "",
+        "false": False,
+        "zero": 0,
+        "none": None,
+        "engine_extension": {"enabled": False, "values": []},
+    }
+    result = {
+        "empty": "",
+        "false": False,
+        "zero": 0,
+        "none": None,
+        "engine_extension": {"enabled": False, "values": []},
+    }
+    job = jobs.enqueue(
+        "probe", "admin", "abc", ("target-a", "target-b"), payload
+    )
+    loaded = jobs.get(job.id)
+    assert loaded.payload == payload
+    assert loaded.targets == ["target-a", "target-b"]
+    attempt = jobs.claim("worker", 30)
+    assert attempt is not None
+    assert attempt.payload == payload
+    assert attempt.targets == ("target-a", "target-b")
+    jobs.succeed(attempt, result)
+    loaded = jobs.get(job.id)
+    assert loaded.result == result
+    projected = job_response(
+        loaded,
+        OperationPage(
+            items=[],
+            next_cursor=None,
+            progress=JobProgress(completed=0, failed=0, running=0, total=0),
+        ),
+        target_cursor=0,
+        limit=100,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+    assert projected.targets == ["target-a", "target-b"]
+
+
+@pytest.mark.parametrize("targets", [[1], ["target", 1], "target", None])
+def test_job_targets_reject_non_string_json_members_on_enqueue(service, targets) -> None:
+    jobs, _ = service
+    with pytest.raises(ValueError, match="job targets"):
+        jobs.enqueue("probe", "admin", "abc", targets, {})
+
+
+def test_job_targets_reject_malformed_persisted_json_on_read(service) -> None:
+    jobs, _ = service
+    job = jobs.enqueue("probe", "admin", "abc", ["target"], {})
+    with jobs._sessions.begin() as session:
+        row = session.get(Job, job.id)
+        assert row is not None
+        row.targets = [1]
+    with pytest.raises(ValueError, match="job targets"):
+        jobs.get(job.id)
 
 
 

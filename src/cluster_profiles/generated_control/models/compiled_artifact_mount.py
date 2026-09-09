@@ -12,36 +12,36 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="PlanReason")
+T = TypeVar("T", bound="CompiledArtifactMount")
 
 
 
 @_attrs_define
-class PlanReason:
+class CompiledArtifactMount:
     """
         Attributes:
-            code (str):
-            detail (str):
+            read_only (bool):
+            target (str):
      """
 
-    code: str
-    detail: str
+    read_only: bool
+    target: str
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        code = self.code
+        read_only = self.read_only
 
-        detail = self.detail
+        target = self.target
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "code": code,
-            "detail": detail,
+            "read_only": read_only,
+            "target": target,
         })
 
         return field_dict
@@ -51,13 +51,13 @@ class PlanReason:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        code = d.pop("code")
+        read_only = d.pop("read_only")
 
-        detail = d.pop("detail")
+        target = d.pop("target")
 
-        plan_reason = cls(
-            code=code,
-            detail=detail,
+        compiled_artifact_mount = cls(
+            read_only=read_only,
+            target=target,
         )
 
-        return plan_reason
+        return compiled_artifact_mount

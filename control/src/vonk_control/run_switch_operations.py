@@ -32,6 +32,7 @@ from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
     ClusterMappingService,
+    validate_mapping_parameters,
 )
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .model_cache import ModelCacheService
@@ -65,6 +66,12 @@ from .preparation_contract import (
     TargetAssetState,
 )
 from .recipe_builds import RecipeBuildPlan
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    parse_stored_build_plan,
+    run_plan_document,
+)
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .resource_planning import (
@@ -90,6 +97,7 @@ from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchBuildEvidence,
     RunSwitchCancellation,
+    RunSwitchContainerBuildResult,
     RunSwitchMemberProgress,
     RunSwitchOperation,
     RunSwitchOperationResult,
@@ -820,6 +828,27 @@ class DatabaseRunSwitchArtifactInspector:
         )
 
 
+def _container_build_result(build: RecipeBuild) -> dict[str, object]:
+    """Project the authoritative build record into its phase receipt."""
+    succeeded = build.state == "succeeded"
+    try:
+        receipt = RunSwitchContainerBuildResult(
+            phase="prepare",
+            subphase="container-build",
+            build_id=build.id,
+            build_input_sha256=build.build_input_sha256,
+            state=build.state,
+            image_digest=build.image_digest if succeeded else None,
+            oci_layout_sha256=build.oci_layout_sha256 if succeeded else None,
+            image_bytes=build.image_bytes if succeeded else None,
+        )
+    except ValidationError as error:
+        raise RunSwitchOperationConflict(
+            "run-switch.container-build-evidence-invalid"
+        ) from error
+    return json.loads(canonical_message(receipt))
+
+
 class RecipeLifecyclePhaseExecutor:
     """Default executor for phases covered by existing recipe primitives."""
 
@@ -885,26 +914,7 @@ class RecipeLifecyclePhaseExecutor:
                     "run-switch.container-build-receipt-unavailable"
                 )
             if build.state == "succeeded":
-                if (
-                    not isinstance(build.image_digest, str)
-                    or not _is_oci_digest(build.image_digest)
-                    or not _is_hex_digest(build.oci_layout_sha256)
-                    or type(build.image_bytes) is not int
-                    or build.image_bytes < 1
-                ):
-                    raise RunSwitchOperationConflict(
-                        "run-switch.container-build-evidence-invalid"
-                    )
-                return PhaseExecution(
-                    result={
-                        "build_id": build.id,
-                        "build_input_sha256": build.build_input_sha256,
-                        "image_digest": build.image_digest,
-                        "oci_layout_sha256": build.oci_layout_sha256,
-                        "image_bytes": build.image_bytes,
-                        "state": "succeeded",
-                    }
-                )
+                return PhaseExecution(result=_container_build_result(build))
             if build.state not in {"planned", "building", "failed"}:
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-state-invalid"
@@ -922,18 +932,16 @@ class RecipeLifecyclePhaseExecutor:
                 .limit(1)
             )
             if active is not None:
-                return PhaseExecution(
-                    active.id,
-                    {
-                        "build_id": build.id,
-                        "build_input_sha256": build.build_input_sha256,
-                        "state": build.state,
-                    },
-                )
+                return PhaseExecution(active.id, _container_build_result(build))
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
             source_bundle_sha256 = build.source_bundle_sha256
-            stored_plan = build.plan
+            try:
+                stored_plan = build_plan_document(build.plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                ) from error
             if (
                 expected_build_input is not None
                 and expected_build_input != build_input_sha256
@@ -955,16 +963,21 @@ class RecipeLifecyclePhaseExecutor:
         # it queues the child.
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, revision_id)
+            try:
+                parsed_plan = parse_stored_build_plan(stored_plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                ) from error
             if (
-                not isinstance(stored_plan, Mapping)
-                or stored_plan.get("build_id") != build_id
-                or stored_plan.get("recipe_revision_id") != revision_id
-                or stored_plan.get("source_bundle_sha256") != source_bundle_sha256
-                or stored_plan.get("build_input_sha256") != build_input_sha256
+                parsed_plan.build_id != build_id
+                or parsed_plan.recipe_revision_id != revision_id
+                or parsed_plan.source_bundle_sha256 != source_bundle_sha256
+                or parsed_plan.build_input_sha256 != build_input_sha256
                 or revision is None
                 or revision.kind != "recipe"
                 or revision.state != "active"
-                or stored_plan.get("recipe_content_sha256") != revision.content_digest
+                or parsed_plan.recipe_content_sha256 != revision.content_digest
             ):
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-plan-invalid"
@@ -995,27 +1008,22 @@ class RecipeLifecyclePhaseExecutor:
             raise RunSwitchOperationConflict(
                 f"run-switch.container-build-start-unavailable: {error}"
             ) from error
-        result = {
-            "build_id": build_id,
-            "build_input_sha256": build_input_sha256,
-            "state": getattr(value, "state", "unknown"),
-        }
-        if getattr(value, "state", None) == "succeeded":
-            with self._sessions() as session:
-                completed = session.get(RecipeBuild, build_id)
-                if completed is None:
-                    raise RunSwitchOperationConflict(
-                        "run-switch.container-build-receipt-unavailable"
-                    )
-                result.update(
-                    {
-                        "image_digest": completed.image_digest,
-                        "oci_layout_sha256": completed.oci_layout_sha256,
-                        "image_bytes": completed.image_bytes,
-                        "state": completed.state,
-                    }
+        with self._sessions() as session:
+            persisted = session.get(RecipeBuild, build_id)
+            if persisted is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-receipt-unavailable"
                 )
-            return PhaseExecution(result=result)
+            if (
+                persisted.recipe_revision_id != revision_id
+                or persisted.build_input_sha256 != build_input_sha256
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-plan-invalid"
+                )
+            result = _container_build_result(persisted)
+            if persisted.state == "succeeded":
+                return PhaseExecution(result=result)
         return PhaseExecution(value.id, result)
 
     def execute(
@@ -1377,9 +1385,15 @@ class RunSwitchOperationService:
             run = session.get(RecipeRun, run_id)
             if run is None:
                 raise KeyError(run_id)
+            try:
+                stored_run_plan = run_plan_document(run.plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchOperationConflict(
+                    "run-switch.run-plan-invalid"
+                ) from error
             installation = session.get(RecipeInstallation, run.installation_id)
             revision = _active_recipe_revision(
-                session, run.plan.get("recipe_revision_id")
+                session, stored_run_plan.get("recipe_revision_id")
             )
             mapping = session.get(ClusterMapping, run.mapping_id)
             mapping_nodes = tuple(
@@ -1403,7 +1417,7 @@ class RunSwitchOperationService:
             model_digest = (
                 installation.model_content_sha256
                 if installation is not None
-                else _string_or_none(run.plan.get("model_content_sha256"))
+                else _string_or_none(stored_run_plan.get("model_content_sha256"))
             )
             recipe_digest = revision.content_digest if revision is not None else None
             _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
@@ -2691,12 +2705,22 @@ class RunSwitchOperationService:
             ),
         )
         observed_architecture: str | None = None
+        candidate_plan_valid = True
         if candidate is not None:
-            candidate_plan = candidate.plan if isinstance(candidate.plan, Mapping) else {}
-            raw_observed = candidate_plan.get("platform")
-            if isinstance(raw_observed, str) and raw_observed:
-                observed_architecture = raw_observed
-            if observed_architecture is None:
+            try:
+                candidate_plan = parse_stored_build_plan(candidate.plan)
+            except RecipeExecutionContractError:
+                candidate_plan_valid = False
+                blockers.append(
+                    _as_reason(
+                        "run-switch.container-build-plan-invalid",
+                        "The persisted source-build plan is invalid.",
+                        scope="operation",
+                    )
+                )
+            else:
+                observed_architecture = candidate_plan.platform
+            if candidate_plan_valid and observed_architecture is None:
                 builder = session.get(AgentNode, candidate.builder_node_id)
                 if builder is not None and isinstance(builder.architecture, str):
                     observed_architecture = _normalise_architecture(builder.architecture)
@@ -3854,7 +3878,7 @@ class RunSwitchOperationService:
             mapping_id=mapping.id,
             mapping_generation=mapping.generation,
             topology_name=mapping.topology_name,
-            parameters=dict(mapping.parameters),
+            parameters=validate_mapping_parameters(mapping.parameters),
             placement_digest=mapping.placement_digest,
             action="reuse",
             nodes=[

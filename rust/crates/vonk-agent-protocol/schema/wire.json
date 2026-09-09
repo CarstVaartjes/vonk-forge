@@ -1086,6 +1086,22 @@
       "title": "ArtifactDistributionResult",
       "type": "object"
     },
+    "BoundedErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "BoundedErrorResponse",
+      "type": "object"
+    },
     "ClaimRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2743,7 +2759,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -2758,6 +2775,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3195,7 +3225,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3216,6 +3247,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3262,7 +3306,8 @@
             "image-inspect",
             "run-inspect",
             "start",
-            "stop"
+            "stop",
+            "installation-cleanup"
           ],
           "title": "Action",
           "type": "string"
@@ -3288,6 +3333,19 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Fence",
           "type": "string"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
         },
         "job_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3357,6 +3415,393 @@
         "rollback"
       ],
       "title": "InstallVonkDebOperation",
+      "type": "object"
+    },
+    "InstallerAcceptanceBaselineRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_only": {
+          "const": true,
+          "title": "Acceptance Only",
+          "type": "boolean"
+        },
+        "artifacts": {
+          "$ref": "#/$defs/InstallerBaselineArtifacts"
+        },
+        "bootstraps": {
+          "$ref": "#/$defs/InstallerBaselineBootstraps"
+        },
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version",
+        "acceptance_only",
+        "artifacts",
+        "bootstraps"
+      ],
+      "title": "InstallerAcceptanceBaselineRelease",
+      "type": "object"
+    },
+    "InstallerBaselineArtifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "agent-package-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "agent-package-linux-arm64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-arm64"
+      ],
+      "title": "InstallerBaselineArtifacts",
+      "type": "object"
+    },
+    "InstallerBaselineBootstraps": {
+      "additionalProperties": false,
+      "properties": {
+        "spark": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "spark"
+      ],
+      "title": "InstallerBaselineBootstraps",
+      "type": "object"
+    },
+    "InstallerCandidateArtifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "agent-package-linux-arm64": {
+          "$ref": "#/$defs/InstallerPackageArtifact"
+        },
+        "agent-package-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-payload": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-darwin-amd64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-darwin-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-linux-amd64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "nas-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark-setup-signature-linux-arm64": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "agent-package-linux-arm64",
+        "agent-package-signature-linux-arm64",
+        "spark-setup-linux-arm64",
+        "spark-setup-signature-linux-arm64",
+        "nas-payload",
+        "nas-setup-darwin-amd64",
+        "nas-setup-darwin-arm64",
+        "nas-setup-linux-amd64",
+        "nas-setup-linux-arm64"
+      ],
+      "title": "InstallerCandidateArtifacts",
+      "type": "object"
+    },
+    "InstallerCandidateBootstraps": {
+      "additionalProperties": false,
+      "properties": {
+        "nas": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
+        "spark": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        }
+      },
+      "required": [
+        "spark",
+        "nas"
+      ],
+      "title": "InstallerCandidateBootstraps",
+      "type": "object"
+    },
+    "InstallerCandidateRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "$ref": "#/$defs/InstallerCandidateArtifacts"
+        },
+        "bootstraps": {
+          "$ref": "#/$defs/InstallerCandidateBootstraps"
+        },
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version",
+        "artifacts",
+        "bootstraps"
+      ],
+      "title": "InstallerCandidateRelease",
+      "type": "object"
+    },
+    "InstallerPackageArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "const": "linux-arm64",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "host_signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Host Signature",
+          "type": "string"
+        },
+        "package_version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Package Version",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        },
+        "target_binary_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Binary Digest",
+          "type": "string"
+        },
+        "target_build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Target Build Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "architecture",
+        "host_signature",
+        "package_version",
+        "target_binary_digest",
+        "target_build_digest"
+      ],
+      "title": "InstallerPackageArtifact",
+      "type": "object"
+    },
+    "InstallerReleaseIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "images": {
+          "$ref": "#/$defs/InstallerReleaseImages"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "generation",
+        "images",
+        "schema_version",
+        "source_sha",
+        "version"
+      ],
+      "title": "InstallerReleaseIdentity",
+      "type": "object"
+    },
+    "InstallerReleaseImages": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Api",
+          "type": "string"
+        },
+        "hermes": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Hermes",
+          "type": "string"
+        },
+        "litellm": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Litellm",
+          "type": "string"
+        },
+        "worker": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Worker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api",
+        "worker",
+        "hermes",
+        "litellm"
+      ],
+      "title": "InstallerReleaseImages",
+      "type": "object"
+    },
+    "InstallerReleaseManifest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InstallerCandidateRelease"
+        },
+        {
+          "$ref": "#/$defs/InstallerAcceptanceBaselineRelease"
+        }
+      ],
+      "description": "Candidate and acceptance-only baseline are the two current graph roles.",
+      "title": "InstallerReleaseManifest"
+    },
+    "InstallerReleaseObject": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "title": "InstallerReleaseObject",
       "type": "object"
     },
     "InventoryRequest": {
@@ -7899,6 +8344,65 @@
       "title": "RenewRequest",
       "type": "object"
     },
+    "RequestValidationIssue": {
+      "additionalProperties": false,
+      "description": "A structural input error without the submitted input or validator context.",
+      "properties": {
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Loc",
+          "type": "array"
+        },
+        "msg": {
+          "title": "Msg",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "loc",
+        "msg"
+      ],
+      "title": "RequestValidationIssue",
+      "type": "object"
+    },
+    "RequestValidationProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/RequestValidationIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "detail",
+        "issues"
+      ],
+      "title": "RequestValidationProblem",
+      "type": "object"
+    },
     "Resolver": {
       "additionalProperties": false,
       "properties": {
@@ -8426,6 +8930,171 @@
         "signature"
       ],
       "title": "SignedRecipeRunObservationReceipt",
+      "type": "object"
+    },
+    "SourceBundleDigestManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes"
+      ],
+      "title": "SourceBundleDigestManifest",
+      "type": "object"
+    },
+    "SourceBundleFile": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            420,
+            493
+          ],
+          "title": "Mode",
+          "type": "integer"
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 33554432,
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "size",
+        "sha256"
+      ],
+      "title": "SourceBundleFile",
+      "type": "object"
+    },
+    "SourceBundleManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/SourceBundleFile"
+          },
+          "maxItems": 4096,
+          "title": "Files",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "total_bytes": {
+          "maximum": 268435456,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "files",
+        "total_bytes",
+        "sha256"
+      ],
+      "title": "SourceBundleManifest",
+      "type": "object"
+    },
+    "SupervisorAcknowledgement": {
+      "additionalProperties": false,
+      "description": "One live, ready child acknowledging an exact finite route activation.",
+      "properties": {
+        "acknowledged_at": {
+          "title": "Acknowledged At",
+          "type": "string"
+        },
+        "activation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Activation Sha256",
+          "type": "string"
+        },
+        "child_pid": {
+          "exclusiveMinimum": 0,
+          "title": "Child Pid",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "generation": {
+          "exclusiveMinimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "litellm_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Litellm Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "maintenance",
+            "published"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "acknowledged_at",
+        "activation_sha256",
+        "child_pid",
+        "expires_at",
+        "generation",
+        "litellm_sha256",
+        "state"
+      ],
+      "title": "SupervisorAcknowledgement",
       "type": "object"
     },
     "TelemetryCapability": {
@@ -10167,6 +10836,18 @@
     "CompiledDistributionObject": [
       "DistributionObject"
     ],
+    "InstallerAcceptanceBaselineRelease": [
+      "InstallerReleaseIdentity"
+    ],
+    "InstallerCandidateBootstraps": [
+      "InstallerBaselineBootstraps"
+    ],
+    "InstallerCandidateRelease": [
+      "InstallerReleaseIdentity"
+    ],
+    "InstallerPackageArtifact": [
+      "InstallerReleaseObject"
+    ],
     "RecipeJobOutputManifest": [
       "RecipeJobOutputManifestContent"
     ],
@@ -10180,7 +10861,178 @@
     "RecipeRunObservationWire": [
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
+    ],
+    "RequestValidationProblem": [
+      "BoundedErrorResponse"
+    ],
+    "SourceBundleManifest": [
+      "SourceBundleDigestManifest"
     ]
+  },
+  "x-vonk-model-sources": {
+    "ActivateRequest": "vonk_agent_protocol.enrollment.ActivateRequest",
+    "ActivationMarker": "vonk_agent_protocol.route_activation.ActivationMarker",
+    "AgentClaim": "vonk_agent_protocol.contracts.AgentClaim",
+    "AgentDirective": "vonk_agent_protocol.contracts.AgentDirective",
+    "AgentFailureResult": "vonk_agent_protocol.contracts.AgentFailureResult",
+    "AgentInstallResult": "vonk_agent_protocol.contracts.AgentInstallResult",
+    "AgentPackageSource": "vonk_agent_protocol.package_source.AgentPackageSource",
+    "AgentProgress": "vonk_agent_protocol.contracts.AgentProgress",
+    "AgentResult": "vonk_agent_protocol.contracts.AgentResult",
+    "AgentRuntimeIdentity": "vonk_agent_protocol.claims.AgentRuntimeIdentity",
+    "AgentUpgradeGrantRequest": "vonk_control.agent_api.AgentUpgradeGrantRequest",
+    "AgentUpgradePayload": "vonk_agent_protocol.contracts.AgentUpgradePayload",
+    "AgentUpgradeResult": "vonk_agent_protocol.contracts.AgentUpgradeResult",
+    "ArtifactDistributionPayload": "vonk_agent_protocol.contracts.ArtifactDistributionPayload",
+    "ArtifactDistributionResult": "vonk_agent_protocol.contracts.ArtifactDistributionResult",
+    "BoundedErrorResponse": "vonk_control.operation_api.BoundedErrorResponse",
+    "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
+    "Compatibility": "vonk_agent_protocol.workload_packages.Compatibility",
+    "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
+    "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
+    "CompiledDistributionObject": "vonk_agent_protocol.compiled_execution_plan.CompiledDistributionObject",
+    "CompiledEndpoint": "vonk_agent_protocol.compiled_execution_plan.CompiledEndpoint",
+    "CompiledEnvironmentEntry": "vonk_agent_protocol.compiled_execution_plan.CompiledEnvironmentEntry",
+    "CompiledExecutionPlan": "vonk_agent_protocol.compiled_execution_plan.CompiledExecutionPlan",
+    "CompiledIdentity": "vonk_agent_protocol.compiled_execution_plan.CompiledIdentity",
+    "CompiledJob": "vonk_agent_protocol.compiled_execution_plan.CompiledJob",
+    "CompiledJobInput": "vonk_agent_protocol.compiled_execution_plan.CompiledJobInput",
+    "CompiledJobInputSlot": "vonk_agent_protocol.compiled_execution_plan.CompiledJobInputSlot",
+    "CompiledLifecycle": "vonk_agent_protocol.compiled_execution_plan.CompiledLifecycle",
+    "CompiledModelIdentity": "vonk_agent_protocol.compiled_execution_plan.CompiledModelIdentity",
+    "CompiledPlacement": "vonk_agent_protocol.compiled_execution_plan.CompiledPlacement",
+    "CompiledRuntime": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntime",
+    "CompiledRuntimeImage": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeImage",
+    "CompiledRuntimeTelemetry": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeTelemetry",
+    "CompiledSecurity": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurity",
+    "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
+    "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
+    "ComponentDescriptor": "vonk_agent_protocol.workload_packages.ComponentDescriptor",
+    "ComponentEvidence": "vonk_agent_protocol.workload_packages.ComponentEvidence",
+    "ConfirmPackageActivationOperation": "vonk_agent_protocol.host_helper.ConfirmPackageActivationOperation",
+    "DistributionAssignment": "vonk_agent_protocol.distribution.DistributionAssignment",
+    "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
+    "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
+    "EnrollmentEvidence": "vonk_agent_protocol.enrollment.EnrollmentEvidence",
+    "EnrollmentSubmitRequest": "vonk_agent_protocol.enrollment.EnrollmentSubmitRequest",
+    "ExecuteContainerRuntimeRequestOperation": "vonk_agent_protocol.host_helper.ExecuteContainerRuntimeRequestOperation",
+    "FailureDiagnostics": "vonk_agent_protocol.failure_evidence.FailureDiagnostics",
+    "FailureLogTail": "vonk_agent_protocol.failure_evidence.FailureLogTail",
+    "FailureProperty": "vonk_agent_protocol.failure_evidence.FailureProperty",
+    "HostHelperGrantClaims": "vonk_agent_protocol.host_helper.HostHelperGrantClaims",
+    "HostHelperGrantResponse": "vonk_control.agent_api.HostHelperGrantResponse",
+    "HostHelperResponse": "vonk_agent_protocol.helper_response.HostHelperResponse",
+    "HostHelperSignature": "vonk_agent_protocol.host_helper.HostHelperSignature",
+    "HostRuntimeGrantRequest": "vonk_control.agent_api.HostRuntimeGrantRequest",
+    "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
+    "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
+    "InstallerAcceptanceBaselineRelease": "vonk_agent_protocol.installer_release.InstallerAcceptanceBaselineRelease",
+    "InstallerBaselineArtifacts": "vonk_agent_protocol.installer_release.InstallerBaselineArtifacts",
+    "InstallerBaselineBootstraps": "vonk_agent_protocol.installer_release.InstallerBaselineBootstraps",
+    "InstallerCandidateArtifacts": "vonk_agent_protocol.installer_release.InstallerCandidateArtifacts",
+    "InstallerCandidateBootstraps": "vonk_agent_protocol.installer_release.InstallerCandidateBootstraps",
+    "InstallerCandidateRelease": "vonk_agent_protocol.installer_release.InstallerCandidateRelease",
+    "InstallerPackageArtifact": "vonk_agent_protocol.installer_release.InstallerPackageArtifact",
+    "InstallerReleaseIdentity": "vonk_agent_protocol.installer_release.InstallerReleaseIdentity",
+    "InstallerReleaseImages": "vonk_agent_protocol.installer_release.InstallerReleaseImages",
+    "InstallerReleaseManifest": "vonk_agent_protocol.installer_release.InstallerReleaseManifest",
+    "InstallerReleaseObject": "vonk_agent_protocol.installer_release.InstallerReleaseObject",
+    "InventoryRequest": "vonk_agent_protocol.inventory.InventoryRequest",
+    "IssuedCertificateResponse": "vonk_agent_protocol.enrollment.IssuedCertificateResponse",
+    "OciBundleMetadata": "vonk_agent_protocol.workload_packages.OciBundleMetadata",
+    "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
+    "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
+    "OperationProgress": "vonk_agent_protocol.wire_model.OperationProgress",
+    "PackageActivationGrantRequest": "vonk_control.agent_api.PackageActivationGrantRequest",
+    "PackageActivationReceipt": "vonk_agent_protocol.package_upgrade.PackageActivationReceipt",
+    "PackageHelperGrantClaims": "vonk_agent_protocol.workload_packages.PackageHelperGrantClaims",
+    "PackageHelperGrantRequest": "vonk_control.agent_api.PackageHelperGrantRequest",
+    "PackageHelperGrantResponse": "vonk_control.agent_api.PackageHelperGrantResponse",
+    "PackageHelperReceiptsRequest": "vonk_control.agent_api.PackageHelperReceiptsRequest",
+    "PackageHelperReceiptsResponse": "vonk_control.agent_api.PackageHelperReceiptsResponse",
+    "PackageHelperSignature": "vonk_agent_protocol.workload_packages.PackageHelperSignature",
+    "PackageObjectReceiptClaims": "vonk_agent_protocol.workload_packages.PackageObjectReceiptClaims",
+    "PackageReleaseGraph": "vonk_agent_protocol.workload_packages.PackageReleaseGraph",
+    "PackageReleaseLock": "vonk_agent_protocol.workload_packages.PackageReleaseLock",
+    "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
+    "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
+    "PythonRuntimeMetadata": "vonk_agent_protocol.workload_packages.PythonRuntimeMetadata",
+    "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
+    "RecipeBuildArgument": "vonk_agent_protocol.build_import.RecipeBuildArgument",
+    "RecipeBuildBaseImage": "vonk_agent_protocol.build_import.RecipeBuildBaseImage",
+    "RecipeBuildEnvironmentArgument": "vonk_agent_protocol.build_import.RecipeBuildEnvironmentArgument",
+    "RecipeBuildEvidence": "vonk_agent_protocol.build_import.RecipeBuildEvidence",
+    "RecipeBuildLimits": "vonk_agent_protocol.build_import.RecipeBuildLimits",
+    "RecipeBuildMetadata": "vonk_agent_protocol.build_import.RecipeBuildMetadata",
+    "RecipeBuildNetwork": "vonk_agent_protocol.build_import.RecipeBuildNetwork",
+    "RecipeBuildOptions": "vonk_agent_protocol.build_import.RecipeBuildOptions",
+    "RecipeBuildPolicy": "vonk_agent_protocol.build_import.RecipeBuildPolicy",
+    "RecipeBuildPolicyFinding": "vonk_agent_protocol.build_import.RecipeBuildPolicyFinding",
+    "RecipeBuildRequest": "vonk_agent_protocol.build_import.RecipeBuildRequest",
+    "RecipeImageImportEvidence": "vonk_agent_protocol.build_import.RecipeImageImportEvidence",
+    "RecipeImageImportRequest": "vonk_agent_protocol.build_import.RecipeImageImportRequest",
+    "RecipeInstallPayload": "vonk_agent_protocol.recipe_operations.RecipeInstallPayload",
+    "RecipeJobEvidence": "vonk_agent_protocol.recipe_jobs.RecipeJobEvidence",
+    "RecipeJobFile": "vonk_agent_protocol.recipe_jobs.RecipeJobFile",
+    "RecipeJobInputFile": "vonk_agent_protocol.recipe_jobs.RecipeJobInputFile",
+    "RecipeJobInputManifest": "vonk_agent_protocol.job_inputs.RecipeJobInputManifest",
+    "RecipeJobOutputLimits": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputLimits",
+    "RecipeJobOutputManifest": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputManifest",
+    "RecipeJobOutputManifestContent": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputManifestContent",
+    "RecipeJobOutputMapping": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputMapping",
+    "RecipeJobRunRequest": "vonk_agent_protocol.recipe_jobs.RecipeJobRunRequest",
+    "RecipeJobRunResult": "vonk_agent_protocol.recipe_jobs.RecipeJobRunResult",
+    "RecipeModelCleanupInstallation": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupInstallation",
+    "RecipeModelCleanupPayload": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupPayload",
+    "RecipeModelCleanupResult": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupResult",
+    "RecipeOperationRequest": "vonk_agent_protocol.recipe_operations.RecipeOperationRequest",
+    "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
+    "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
+    "RecipeRunObservationGrantWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantWire",
+    "RecipeRunObservationIdentity": "vonk_agent_protocol.recipe_observations.RecipeRunObservationIdentity",
+    "RecipeRunObservationReceiptClaims": "vonk_agent_protocol.host_helper.RecipeRunObservationReceiptClaims",
+    "RecipeRunObservationWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationWire",
+    "RecipeRunObservationsWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationsWire",
+    "RecipeStartCollectiveReadinessEvidence": "vonk_agent_protocol.contracts.RecipeStartCollectiveReadinessEvidence",
+    "RecipeStartPayload": "vonk_agent_protocol.recipe_operations.RecipeStartPayload",
+    "RecipeStartRankLaunchEvidence": "vonk_agent_protocol.contracts.RecipeStartRankLaunchEvidence",
+    "RecipeStartResult": "vonk_agent_protocol.contracts.RecipeStartResult",
+    "RecipeStartSingleEvidence": "vonk_agent_protocol.contracts.RecipeStartSingleEvidence",
+    "RecipeStopPayload": "vonk_agent_protocol.recipe_operations.RecipeStopPayload",
+    "RecipeStopResult": "vonk_agent_protocol.recipe_operations.RecipeStopResult",
+    "RecipeUninstallPayload": "vonk_agent_protocol.recipe_operations.RecipeUninstallPayload",
+    "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
+    "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
+    "RequestValidationProblem": "vonk_control.operation_api.RequestValidationProblem",
+    "Resolver": "vonk_agent_protocol.workload_packages.Resolver",
+    "ResourceEnvelope": "vonk_agent_protocol.workload_packages.ResourceEnvelope",
+    "ResourceFabric": "vonk_agent_protocol.workload_packages.ResourceFabric",
+    "ResourceRank": "vonk_agent_protocol.workload_packages.ResourceRank",
+    "ResourceValues": "vonk_agent_protocol.workload_packages.ResourceValues",
+    "RestartVonkUnitOperation": "vonk_agent_protocol.host_helper.RestartVonkUnitOperation",
+    "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
+    "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
+    "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
+    "ScheduleRebootOperation": "vonk_agent_protocol.host_helper.ScheduleRebootOperation",
+    "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
+    "SignedPackageHelperGrant": "vonk_agent_protocol.workload_packages.SignedPackageHelperGrant",
+    "SignedPackageObjectReceipt": "vonk_agent_protocol.workload_packages.SignedPackageObjectReceipt",
+    "SignedRecipeRunObservationReceipt": "vonk_agent_protocol.host_helper.SignedRecipeRunObservationReceipt",
+    "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
+    "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
+    "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
+    "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
+    "TelemetryCapability": "vonk_agent_protocol.telemetry.TelemetryCapability",
+    "TelemetryDetails": "vonk_agent_protocol.telemetry.TelemetryDetails",
+    "TelemetryMetrics": "vonk_agent_protocol.telemetry.TelemetryMetrics",
+    "TelemetryProvenance": "vonk_agent_protocol.telemetry.TelemetryProvenance",
+    "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
+    "TelemetryRuntime": "vonk_agent_protocol.telemetry.TelemetryRuntime",
+    "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
+    "TelemetrySeries": "vonk_agent_protocol.telemetry.TelemetrySeries",
+    "TelemetryWorkload": "vonk_agent_protocol.telemetry.TelemetryWorkload",
+    "TensorParallelStartEvidence": "vonk_agent_protocol.contracts.TensorParallelStartEvidence",
+    "ValidationRecord": "vonk_agent_protocol.workload_packages.ValidationRecord"
   },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
@@ -10198,6 +11050,7 @@
     "AgentUpgradeResult": "#/$defs/AgentUpgradeResult",
     "ArtifactDistributionPayload": "#/$defs/ArtifactDistributionPayload",
     "ArtifactDistributionResult": "#/$defs/ArtifactDistributionResult",
+    "BoundedErrorResponse": "#/$defs/BoundedErrorResponse",
     "ClaimRequest": "#/$defs/ClaimRequest",
     "Compatibility": "#/$defs/Compatibility",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
@@ -10238,6 +11091,17 @@
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
+    "InstallerAcceptanceBaselineRelease": "#/$defs/InstallerAcceptanceBaselineRelease",
+    "InstallerBaselineArtifacts": "#/$defs/InstallerBaselineArtifacts",
+    "InstallerBaselineBootstraps": "#/$defs/InstallerBaselineBootstraps",
+    "InstallerCandidateArtifacts": "#/$defs/InstallerCandidateArtifacts",
+    "InstallerCandidateBootstraps": "#/$defs/InstallerCandidateBootstraps",
+    "InstallerCandidateRelease": "#/$defs/InstallerCandidateRelease",
+    "InstallerPackageArtifact": "#/$defs/InstallerPackageArtifact",
+    "InstallerReleaseIdentity": "#/$defs/InstallerReleaseIdentity",
+    "InstallerReleaseImages": "#/$defs/InstallerReleaseImages",
+    "InstallerReleaseManifest": "#/$defs/InstallerReleaseManifest",
+    "InstallerReleaseObject": "#/$defs/InstallerReleaseObject",
     "InventoryRequest": "#/$defs/InventoryRequest",
     "IssuedCertificateResponse": "#/$defs/IssuedCertificateResponse",
     "OciBundleMetadata": "#/$defs/OciBundleMetadata",
@@ -10304,6 +11168,7 @@
     "RecipeUninstallPayload": "#/$defs/RecipeUninstallPayload",
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
+    "RequestValidationProblem": "#/$defs/RequestValidationProblem",
     "Resolver": "#/$defs/Resolver",
     "ResourceEnvelope": "#/$defs/ResourceEnvelope",
     "ResourceFabric": "#/$defs/ResourceFabric",
@@ -10318,6 +11183,10 @@
     "SignedPackageHelperGrant": "#/$defs/SignedPackageHelperGrant",
     "SignedPackageObjectReceipt": "#/$defs/SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
+    "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
+    "SourceBundleFile": "#/$defs/SourceBundleFile",
+    "SourceBundleManifest": "#/$defs/SourceBundleManifest",
+    "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryCapability": "#/$defs/TelemetryCapability",
     "TelemetryDetails": "#/$defs/TelemetryDetails",
     "TelemetryMetrics": "#/$defs/TelemetryMetrics",

@@ -9,7 +9,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.run_node_plan_response import RunNodePlanResponse
+  from ..models.stored_run_node_plan import StoredRunNodePlan
 
 
 
@@ -28,7 +28,7 @@ class RunPlanResponse:
             installation_id (str):
             mapping_generation (int):
             mapping_id (str):
-            nodes (list['RunNodePlanResponse']):
+            nodes (list['StoredRunNodePlan']):
             plan_digest (str):
             recipe_revision_id (str):
      """
@@ -38,7 +38,7 @@ class RunPlanResponse:
     installation_id: str
     mapping_generation: int
     mapping_id: str
-    nodes: list['RunNodePlanResponse']
+    nodes: list['StoredRunNodePlan']
     plan_digest: str
     recipe_revision_id: str
 
@@ -47,7 +47,7 @@ class RunPlanResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_node_plan_response import RunNodePlanResponse
+        from ..models.stored_run_node_plan import StoredRunNodePlan
         alias = self.alias
 
         allowed = self.allowed
@@ -89,7 +89,7 @@ class RunPlanResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_node_plan_response import RunNodePlanResponse
+        from ..models.stored_run_node_plan import StoredRunNodePlan
         d = dict(src_dict)
         alias = d.pop("alias")
 
@@ -104,7 +104,7 @@ class RunPlanResponse:
         nodes = []
         _nodes = d.pop("nodes")
         for nodes_item_data in (_nodes):
-            nodes_item = RunNodePlanResponse.from_dict(nodes_item_data)
+            nodes_item = StoredRunNodePlan.from_dict(nodes_item_data)
 
 
 

@@ -12,6 +12,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from .api_response_witness import (  # noqa: F401 - pytest discovers imported hooks.
+    pytest_addoption,
+    pytest_configure,
+    pytest_runtest_setup,
+    pytest_runtest_teardown,
+    pytest_sessionfinish,
+    pytest_terminal_summary,
+)
+
 POSTGRES_IMAGE = (
     "postgres:18.3@sha256:"
     "7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"

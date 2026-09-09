@@ -2,7 +2,7 @@ use std::{
     fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -41,6 +41,10 @@ use crate::{
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+// Renewal has to finish before the active certificate expires. Keep each
+// controller call bounded so a stalled endpoint cannot consume the entire
+// remaining validity window of the 90-second acceptance certificate.
+const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
 #[derive(Debug, Error)]
@@ -189,7 +193,7 @@ pub struct DistributionProgress {
 
 #[derive(Clone)]
 pub struct AgentHttpClient {
-    client: Client,
+    client: Arc<RwLock<Client>>,
     controller: Url,
     node_id: String,
     progress_phase: Arc<Mutex<Option<(uuid::Uuid, String)>>>,
@@ -199,7 +203,7 @@ impl AgentHttpClient {
     #[cfg(test)]
     pub(crate) fn for_http_test(controller: &str, node_id: &str) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: Arc::new(RwLock::new(reqwest::Client::new())),
             controller: Url::parse(controller).expect("test controller URL must be valid"),
             node_id: node_id.to_owned(),
             progress_phase: Arc::new(Mutex::new(None)),
@@ -220,6 +224,16 @@ impl AgentHttpClient {
         config: &AgentConfig,
         paths: &IdentityPaths,
     ) -> Result<Self, ClientError> {
+        let client = Self::build_client(config, paths)?;
+        Ok(Self {
+            client: Arc::new(RwLock::new(client)),
+            controller: config.controller_url.clone(),
+            node_id: config.node_id.clone(),
+            progress_phase: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn build_client(config: &AgentConfig, paths: &IdentityPaths) -> Result<Client, ClientError> {
         let ca_pem = fs::read(&config.ca_path)?;
         verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
         let mut identity_pem = fs::read(&paths.certificate)?;
@@ -235,12 +249,27 @@ impl AgentHttpClient {
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(75))
             .build()?;
-        Ok(Self {
-            client,
-            controller: config.controller_url.clone(),
-            node_id: config.node_id.clone(),
-            progress_phase: Arc::new(Mutex::new(None)),
-        })
+        Ok(client)
+    }
+
+    pub(crate) fn replace_identity(
+        &self,
+        config: &AgentConfig,
+        paths: &IdentityPaths,
+    ) -> Result<(), ClientError> {
+        let client = Self::build_client(config, paths)?;
+        *self
+            .client
+            .write()
+            .expect("agent client lock is not poisoned") = client;
+        Ok(())
+    }
+
+    fn current_client(&self) -> Client {
+        self.client
+            .read()
+            .expect("agent client lock is not poisoned")
+            .clone()
     }
 
     pub async fn claim(
@@ -258,7 +287,7 @@ impl AgentHttpClient {
             runtime_identity.ok_or(ClientError::Protocol)?,
         )?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/claim")?)
             .header("content-type", "application/json")
             .body(body)
@@ -277,7 +306,7 @@ impl AgentHttpClient {
         result.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_json(result).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/result")?)
             .header("content-type", "application/json")
             .body(body)
@@ -320,7 +349,7 @@ impl AgentHttpClient {
         }
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/heartbeat")?)
             .header("content-type", "application/json")
             .timeout(Duration::from_secs(15))
@@ -349,6 +378,7 @@ impl AgentHttpClient {
         claim: &AgentClaim,
         action: HostRuntimeAction,
         request_sha256: &str,
+        installation_id: Option<uuid::Uuid>,
     ) -> Result<SignedHostHelperGrant, ClientError> {
         if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
             return Err(ClientError::Protocol);
@@ -362,10 +392,11 @@ impl AgentHttpClient {
             action: host_runtime_grant_action(action),
             request_sha256: request_sha256.to_owned(),
             expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+            installation_id,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/host-runtime/grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -427,7 +458,7 @@ impl AgentHttpClient {
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/recipe-runs/observation-grants")?)
             .header("content-type", "application/json")
             .body(body)
@@ -490,7 +521,7 @@ impl AgentHttpClient {
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -531,7 +562,7 @@ impl AgentHttpClient {
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/agent-upgrade/grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -552,7 +583,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let response = self
-            .client
+            .current_client()
             .get(self.endpoint(&format!(
                 "/agent/v1/recipe-installations/{installation_id}/spec"
             ))?)
@@ -580,7 +611,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let response = self
-            .client
+            .current_client()
             .get(self.endpoint(&format!("/agent/v1/source-bundles/{source_sha256}"))?)
             .send()
             .await?;
@@ -603,7 +634,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let mut response = self
-            .client
+            .current_client()
             .get(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}"))?)
             .send()
             .await?;
@@ -671,7 +702,7 @@ impl AgentHttpClient {
         }
         let file = tokio::fs::File::open(path).await?;
         let response = self
-            .client
+            .current_client()
             .put(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/outputs/{sha256}"))?)
             .header("x-vonk-artifact-name", name)
             .header("content-type", media_type)
@@ -705,7 +736,7 @@ impl AgentHttpClient {
         }
         let file = tokio::fs::File::open(path).await?;
         let response = self
-            .client
+            .current_client()
             .put(self.endpoint(&format!("/agent/v1/recipe-builds/{build_id}/image"))?)
             // The historical evidence field names the immutable layout digest,
             // while Spark's native Docker runtime consumes a docker-save tar.
@@ -775,7 +806,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let response = self
-            .client
+            .current_client()
             .get(self.endpoint(&format!("/agent/v1/distribution/manifests/{plan_digest}"))?)
             .send()
             .await?;
@@ -992,7 +1023,7 @@ impl AgentHttpClient {
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
             let response = self
-                .client
+                .current_client()
                 .get(url)
                 .header("range", format!("bytes={offset}-{end}"))
                 .header("if-range", format!("\"sha256:{sha256}\""))
@@ -1111,7 +1142,7 @@ impl AgentHttpClient {
                     .append_pair("plan_digest", plan_digest);
             }
             let response = self
-                .client
+                .current_client()
                 .get(url)
                 .header("range", format!("bytes={offset}-{end}"))
                 .header("if-range", format!("\"sha256:{sha256}\""))
@@ -1182,7 +1213,7 @@ impl AgentHttpClient {
         request.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/inventory")?)
             .header("content-type", "application/json")
             .body(body)
@@ -1204,7 +1235,7 @@ impl AgentHttpClient {
             build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
             .header("content-type", "application/json")
             .body(body)
@@ -1228,7 +1259,7 @@ impl AgentHttpClient {
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
             .header("content-type", "application/json")
@@ -1254,8 +1285,9 @@ impl AgentHttpClient {
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/renew")?)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1280,8 +1312,9 @@ impl AgentHttpClient {
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
-            .client
+            .current_client()
             .post(self.endpoint("/agent/v1/renew/activate")?)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1308,6 +1341,9 @@ fn host_runtime_grant_action(action: HostRuntimeAction) -> HostRuntimeGrantReque
         HostRuntimeAction::RunInspect => HostRuntimeGrantRequestAction::RunInspect,
         HostRuntimeAction::Start => HostRuntimeGrantRequestAction::Start,
         HostRuntimeAction::Stop => HostRuntimeGrantRequestAction::Stop,
+        HostRuntimeAction::InstallationCleanup => {
+            HostRuntimeGrantRequestAction::InstallationCleanup
+        }
     }
 }
 
@@ -1577,6 +1613,7 @@ mod tests {
         net::TcpListener,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
+        sync::{Arc, RwLock},
         thread,
         time::Duration,
     };
@@ -1716,7 +1753,7 @@ mod tests {
         });
         (
             AgentHttpClient {
-                client: reqwest::Client::new(),
+                client: Arc::new(RwLock::new(reqwest::Client::new())),
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
                 progress_phase: Default::default(),
@@ -1733,6 +1770,53 @@ mod tests {
         assert!(!valid_reported_hostname("-spark"));
         assert!(!valid_reported_hostname("spark_3542"));
         assert!(!valid_reported_hostname(&"a".repeat(256)));
+    }
+
+    #[test]
+    fn cloned_clients_share_the_rotatable_transport() {
+        let client = AgentHttpClient::for_http_test(
+            "http://127.0.0.1/",
+            "spk_0123456789abcdef0123456789abcdef",
+        );
+        let operation_client = client.clone();
+        assert!(Arc::ptr_eq(&client.client, &operation_client.client));
+
+        let replacement = reqwest::Client::builder().build().unwrap();
+        *client
+            .client
+            .write()
+            .expect("agent client lock is not poisoned") = replacement;
+        assert!(Arc::ptr_eq(&client.client, &operation_client.client));
+    }
+
+    #[tokio::test]
+    async fn cloned_operation_client_sends_through_replaced_transport() {
+        let (client, server) = request_capture_client(204, Vec::new(), Vec::new(), None);
+        let operation_client = client.clone();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-rotation-marker",
+            reqwest::header::HeaderValue::from_static("fresh"),
+        );
+        let replacement = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        *client
+            .client
+            .write()
+            .expect("agent client lock is not poisoned") = replacement;
+
+        operation_client
+            .report_telemetry(&[telemetry_sample(1)])
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        assert!(
+            String::from_utf8_lossy(&request)
+                .to_ascii_lowercase()
+                .contains("x-rotation-marker: fresh")
+        );
     }
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
@@ -1966,10 +2050,12 @@ mod tests {
             reqwest::header::HeaderValue::from_static("enrolled-agent"),
         );
         AgentHttpClient {
-            client: reqwest::Client::builder()
-                .default_headers(headers)
-                .build()
-                .unwrap(),
+            client: Arc::new(RwLock::new(
+                reqwest::Client::builder()
+                    .default_headers(headers)
+                    .build()
+                    .unwrap(),
+            )),
             controller: Url::parse(controller).unwrap(),
             node_id: node_id.to_owned(),
             progress_phase: Default::default(),
@@ -2547,7 +2633,7 @@ mod tests {
         });
         (
             AgentHttpClient {
-                client: reqwest::Client::new(),
+                client: Arc::new(RwLock::new(reqwest::Client::new())),
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
                 progress_phase: Default::default(),
@@ -2626,7 +2712,7 @@ mod tests {
             .unwrap();
         (
             AgentHttpClient {
-                client: http_client,
+                client: Arc::new(RwLock::new(http_client)),
                 controller: base_client.controller,
                 node_id: base_client.node_id,
                 progress_phase: Default::default(),
@@ -2807,7 +2893,12 @@ mod tests {
         let (client, server) = host_runtime_grant_client();
 
         client
-            .host_runtime_grant(&claim, HostRuntimeAction::ImageImport, &"c".repeat(64))
+            .host_runtime_grant(
+                &claim,
+                HostRuntimeAction::ImageImport,
+                &"c".repeat(64),
+                None,
+            )
             .await
             .unwrap();
         let request = server.join().unwrap();
@@ -2833,6 +2924,7 @@ mod tests {
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
+            installation_id: None,
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
         let request_id = Uuid::new_v4();
@@ -2951,6 +3043,7 @@ mod tests {
                             fence: Uuid::new_v4(),
                             request_sha256: helper_receipt.claims.request_sha256.clone(),
                             observation_identity_sha256: Some("e".repeat(64)),
+                            installation_id: None,
                         },
                     ),
                 },
@@ -3094,7 +3187,7 @@ mod tests {
     #[tokio::test]
     async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport() {
         let client = AgentHttpClient {
-            client: reqwest::Client::new(),
+            client: Arc::new(RwLock::new(reqwest::Client::new())),
             controller: Url::parse("http://127.0.0.1:9/").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             progress_phase: Default::default(),

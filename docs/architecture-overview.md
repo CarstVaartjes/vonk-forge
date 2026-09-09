@@ -261,6 +261,15 @@ active through one atomic marker. LiteLLM mounts the publication volume read-onl
 and falls back to an empty bootstrap on malformed, unacknowledged, restored,
 expired, or withdrawn state.
 
+The shared route activation contract allows 30 seconds to stop and reap the old
+LiteLLM child, then 120 seconds for all replacement preparation, startup retries,
+and readiness checks. The Controller waits up to 165 seconds for the exact
+generation acknowledgement. Each publication has a finite 180-second lease,
+capped at 300 seconds after its oldest admitted observation; observations must
+be at most 120 seconds old when admitted. This covers the permitted transition
+without requiring renewal during the acknowledgement wait. Expiry still denies
+serving, and an expired generation cannot restart its startup budget.
+
 ## Scaling and networking
 
 Adding a GPU node repeats the same install/enroll operation and adds a stable node

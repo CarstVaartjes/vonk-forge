@@ -51,10 +51,27 @@ exposes them. Use model validators for relationships between fields and
 execution/security rules. Wrapping a handwritten parser in a mostly untyped
 Pydantic class does not create an authoritative structural contract.
 
+Fixtures, acceptance servers and health probes must follow the same rule.
+A hand-written expected dictionary is an assertion about test content, not a
+replacement request/response schema. Validate through the shared model first,
+then check the meaningful values for the test. External protocol fixtures must
+accept declared optional defaults and supported extensions, and exercise both
+streaming and non-streaming when supported. Structural rejection and security
+validation must not depend on whether a client spelled out a default value.
+
 Ordinary internal records and database tables can use dataclasses and ORM
 models. A JSON contract document loaded from a database must still be parsed
 with its canonical model before use. A database row is not proof that the
 document satisfies the contract.
+
+Use JSON validation semantics for wire documents and persisted JSON, even when
+the database driver has already decoded them into dictionaries and lists.
+Pydantic's strict Python-object validation has different rules for tuples,
+UUIDs and datetimes; applying it to decoded JSON can reject the model's own
+serialized output. Pass the JSON representation to `model_validate_json`
+instead of relaxing types with `strict=False`. Connected persistence tests
+must serialize the producer, store and load the document, then run the real
+consumer.
 
 Persisted progress is a contract too. Validate the complete stored document
 before interpreting a missing child or adapter state. Only a declared optional
@@ -281,3 +298,99 @@ and semantic validation; schema equality alone does not prove runtime behavior.
 
 These checks establish source and interface consistency. Publication, Controller
 deployment and physical Spark execution remain separate verification steps.
+
+### Persisted execution and cache documents
+
+PostgreSQL JSON columns store current documents, not alternate API formats.
+Their owners validate the complete document in JSON mode before writing it and
+before a later operation consumes it:
+
+| Stored document | Authoritative contract |
+| --- | --- |
+| Installation and run plans, node admission details, run endpoints | `recipe_execution_contract.py` |
+| Build requests | Protocol `RecipeBuildRequest`, reused by `recipe_execution_contract.py` |
+| Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
+| Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
+| Catalog projections | `catalog_revision_contract.py`, composed from public model/topology and protocol build-option types |
+| Cache manifests, download/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
+
+A required nullable value remains present; unused optional fields are omitted.
+Malformed stored documents produce a controlled error instead of becoming empty
+state. Engine-owned extension values retain their declared flexibility. Unused
+parallel copies have no persistence contract: remove their column and writer.
+
+Structure validation does not replace transaction semantics. Cache workers
+refresh the database row when acquiring its lock, so a prior cooldown scan
+cannot hide another worker's newly committed claim. The PostgreSQL regression
+forces that interleaving and verifies that workers claim different operations.
+
+## Discovered HTTP completeness gate
+
+`scripts/tests/check_api_contract_completeness.py` constructs both supported
+browser-auth configurations and discovers mounted FastAPI routes, including
+child applications. Every operation must have an OpenAPI declaration; hidden
+or opaque transports fail rather than disappearing from the inventory. The
+report records canonical model owners, path/query/header/cookie parameters,
+request media and successful response media. Agent artifact streams and metrics
+belong to this full transport inventory; the admin client schema still excludes
+agent routes and metrics.
+
+Ordinary JSON bodies use FastAPI's typed bindings. A bounded raw JSON reader
+uses `raw_json_body` with its existing canonical model, and its declaration must
+match that model. Raw uploads declare bytes, without changing their runtime
+limits or parsing. Mutating handlers that accept a raw Request but no body
+explicitly declare `x-vonk-request-body: none`; this prevents a delegated reader
+from silently avoiding body classification. Exact-byte responses declare their
+streaming transport. No-content responses remain explicitly bodyless.
+
+The wire exporter derives API-owned models from these actual agent bindings,
+including declared error responses, instead of maintaining a separate model
+name list. Fully qualified owners and referenced definitions are checked against
+the generated export. Protocol module discovery still supplies internal models.
+The required Controller/Spark CI lane runs discovery, schema freshness and
+mutation tests that add hidden routes, omit exports and misdeclare raw bodies.
+
+This first gate proves declaration coverage and model ownership. It does not
+prove that every handler emitted a valid successful response, every client used
+its generated parser, or every database/file handoff preserved meaning. The
+next gate must collect real ASGI producer/consumer witnesses and join them back
+to this discovered operation inventory, then apply independent SQLAlchemy and
+runtime-I/O discovery to persistence. Engine-owned extension values and signed
+passthrough bytes keep their declared semantics.
+
+## Executed response witnesses
+
+Controller tests can collect the actual successful bytes emitted by production
+ASGI routes, including response middleware, with:
+
+```sh
+uv run --project control --frozen --with-editable . pytest -q control/tests \
+  --api-response-witness=/tmp/controller-response-witnesses.json
+```
+
+Run this collector without xdist. It reports the discovered operation inventory,
+the executed method/path/status/media combinations and their test IDs, plus every
+operation lacking a successful response witness in that test selection. Missing
+operations remain explicit; there is no maintained exception list or claim that
+declarations constitute execution. A failing test run is recorded in the report.
+The recorder's deliberate mutation tests are excluded from application evidence.
+
+Validation uses the response's declared JSON Schema and actual media type.
+Structured bodies and SSE data frames are validated after each test so schema
+generation cannot change endpoint timeouts. Binary transfers preserve bytes;
+the observer checks the media declaration and bodyless status rules, while
+individual upload/download tests compare actual bytes and digests. Structured
+capture is bounded to 16 MiB per response. Reports contain counts and test IDs,
+not payload values, credentials, or payload hashes. Mounted applications are
+validated once against the owning application's schema.
+
+These are response-producer witnesses. They do not establish downstream parsing,
+authorization correctness, business transitions, all streaming timing behavior,
+or persistence coverage. Existing tests vary in their application and service
+fixture setup; a handler witness does not imply the full deployed application
+configuration was exercised. The source-bundle client handoff separately exercises
+the generated admin upload client, actual route/storage service, generated
+response parser and exact-byte download. Artifact transport tests additionally
+consume actual JSON with the generated client and verify declared optional
+null/omission equivalence. Other consumer and storage edges still require their
+own connected evidence; raw engine extensions are not exhaustively enumerated.

@@ -4,7 +4,6 @@ import copy
 import hashlib
 import io
 import json
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -138,7 +137,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 total_bytes=bundle.manifest.total_bytes,
                 file_count=len(bundle.manifest.files),
                 storage_key=f"{bundle.sha256[:2]}/{bundle.sha256}.tar",
-                manifest={"files": [asdict(item) for item in bundle.manifest.files]},
+                manifest=bundle.manifest.model_dump(mode="json"),
                 verified_at=now,
             )
         )
@@ -1248,3 +1247,84 @@ def test_image_distribution_requires_the_previewed_plan_digest(
     assert operation.kind == "recipe.image.import.v1"
     assert operation.plan_digest == preview.plan_digest
     assert operation.nodes == (builder, target)
+
+
+@pytest.mark.parametrize("settings", [
+    {"kind": "generation", "context_tokens": 4096, "change_effects": {"context_tokens": "rebuild"}},
+    None,
+])
+def test_build_readers_reject_retired_or_null_persisted_settings(tmp_path, settings) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        row = session.get(CatalogDocumentRevision, revision.id)
+        document = copy.deepcopy(row.document)
+        document["settings"] = settings
+        # Corrupt stored JSON directly so the read boundary is exercised;
+        # ordinary catalog writes independently enforce immutability.
+        session.execute(
+            CatalogDocumentRevision.__table__.update()
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(document=document)
+        )
+    service = RecipeBuildService(sessions, bundles=bundles)
+    for action in (
+        lambda: service.resolve(revision.id),
+        lambda: service.plan(revision.id, node_id, now=now),
+    ):
+        with pytest.raises(RecipeBuildError, match="stored recipe") as error:
+            action()
+        assert error.value.code == "build.contract_invalid"
+    with sessions() as session:
+        assert session.scalar(select(RecipeBuild)) is None
+
+
+def test_build_readers_require_persisted_settings(tmp_path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        row = session.get(CatalogDocumentRevision, revision.id)
+        document = copy.deepcopy(row.document)
+        document.pop("settings")
+        # Corrupt stored JSON directly so the read boundary is exercised;
+        # ordinary catalog writes independently enforce immutability.
+        session.execute(
+            CatalogDocumentRevision.__table__.update()
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(document=document)
+        )
+    service = RecipeBuildService(sessions, bundles=bundles)
+    with pytest.raises(RecipeBuildError, match="stored recipe"):
+        service.resolve(revision.id)
+    with pytest.raises(RecipeBuildError, match="stored recipe"):
+        service.plan(revision.id, node_id, now=now)
+
+
+def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_changes(tmp_path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    catalog = CatalogEntityService(sessions, clock=lambda: now)
+    document = copy.deepcopy(revision.document)
+    document["settings"]["knobs"] = {
+        "compiler": {"value": "clang", "change_effect": "rebuild"},
+        "enabled": {"value": False, "change_effect": "rebuild"},
+        "count": {"value": 0, "change_effect": "rebuild"},
+        "label": {"value": "", "change_effect": "rebuild"},
+    }
+    canonical = RecipeDefinition.model_validate(document)
+
+    def publish(document):
+        draft = catalog.revise(revision.document_id, document, actor="admin")
+        with sessions.begin() as session:
+            stored = session.get(CatalogDocumentRevision, draft.id)
+            stored.projected = copy.deepcopy(revision.projected)
+        return catalog.resolve(draft.id, actor="admin")
+
+    selected = publish(canonical.model_dump(mode="json"))
+    service = RecipeBuildService(sessions, bundles=bundles)
+    first = service.plan(selected.id, node_id, now=now)
+    assert recipe_builds_module._build_effective_settings(canonical.settings) == {
+        "values": {"knobs.compiler": "clang", "knobs.enabled": False, "knobs.count": 0, "knobs.label": ""},
+        "change_effects": {name: "rebuild" for name in ("knobs.compiler", "knobs.enabled", "knobs.count", "knobs.label")},
+    }
+    assert service.plan(selected.id, node_id, now=now).build_input_sha256 == first.build_input_sha256
+    document["settings"]["knobs"]["compiler"]["value"] = "gcc"
+    changed = publish(document)
+    assert service.plan(changed.id, node_id, now=now).build_input_sha256 != first.build_input_sha256

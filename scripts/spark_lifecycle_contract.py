@@ -8,8 +8,18 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+
+if TYPE_CHECKING:
+    from vonk_agent_protocol.installer_release import (
+        InstallerAcceptanceBaselineRelease,
+        InstallerCandidateRelease,
+    )
 
 PLATFORMS = ("linux-arm64",)
 GATES = {
@@ -163,7 +173,10 @@ def _safe_object_bytes(
 
 
 def _safe_release_document(
-    object_root: Path, relative_path: str, label: str
+    object_root: Path,
+    relative_path: str,
+    label: str,
+    model: type[InstallerCandidateRelease | InstallerAcceptanceBaselineRelease],
 ) -> dict[str, Any]:
     raw, _ = _safe_object_bytes(
         object_root,
@@ -174,8 +187,8 @@ def _safe_release_document(
     if raw is None:
         raise ContractError(f"{label} is unavailable")
     try:
-        document = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        document = model.model_validate_json(raw).model_dump(mode="json", by_alias=True)
+    except (UnicodeDecodeError, ValueError) as error:
         raise ContractError(f"{label} is invalid") from error
     if not isinstance(document, dict) or raw != _canonical(document):
         raise ContractError(f"{label} is not canonical JSON")
@@ -222,6 +235,11 @@ def recompute_publication_graphs(
     generation: str,
 ) -> dict[str, dict[str, Any]]:
     """Verify immutable authority objects and return exact per-platform graphs."""
+    from vonk_agent_protocol.installer_release import (
+        InstallerAcceptanceBaselineRelease,
+        InstallerCandidateRelease,
+    )
+
     release_prefix = f"artifacts/{channel}/releases/{generation}"
     candidate_relative = f"{release_prefix}/release.json"
     baseline_relative = f"{release_prefix}/acceptance-baseline/release.json"
@@ -236,39 +254,13 @@ def recompute_publication_graphs(
             "publication release paths do not match the candidate generation"
         )
     candidate = _safe_release_document(
-        root, candidate_relative, "candidate release object"
+        root, candidate_relative, "candidate release object", InstallerCandidateRelease
     )
     baseline = _safe_release_document(
-        root, baseline_relative, "acceptance baseline release object"
-    )
-    _exact(
-        candidate,
-        {
-            "artifacts",
-            "bootstraps",
-            "channel",
-            "generation",
-            "images",
-            "schema_version",
-            "source_sha",
-            "version",
-        },
-        "candidate release object",
-    )
-    _exact(
-        baseline,
-        {
-            "acceptance_only",
-            "artifacts",
-            "bootstraps",
-            "channel",
-            "generation",
-            "images",
-            "schema_version",
-            "source_sha",
-            "version",
-        },
+        root,
+        baseline_relative,
         "acceptance baseline release object",
+        InstallerAcceptanceBaselineRelease,
     )
     expected_identity = {
         "channel": channel,
@@ -598,9 +590,7 @@ def _validate_canary(proof: dict[str, Any], *, platform: str) -> None:
         },
         f"{architecture} synthetic device proof",
     )
-    _digest(
-        synthetic.get("fixture_sha256"), f"{architecture} synthetic CDI fixture"
-    )
+    _digest(synthetic.get("fixture_sha256"), f"{architecture} synthetic CDI fixture")
     if synthetic != {
         "architecture": platform,
         "cdi_name": "nvidia.com/gpu=all",

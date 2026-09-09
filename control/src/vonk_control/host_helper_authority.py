@@ -10,6 +10,7 @@ from typing import ClassVar
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, canonical_message
@@ -34,7 +35,10 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
-from pydantic import ValidationError
+from vonk_agent_protocol.recipe_operations import (
+    RecipeModelCleanupPayload,
+    RecipeUninstallPayload,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .models import (
@@ -51,6 +55,10 @@ from .models import (
 )
 from .models import AgentOperation as StoredAgentOperation
 from .package_activation import matches_receipt
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
 from .workload_helper_authority import _load_private_key
 
 
@@ -200,6 +208,9 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.STOP: frozenset(
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
+        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset(
+            {"recipe.uninstall", "recipe.model-uninstall.v1"}
+        ),
     }
 
     def __init__(
@@ -234,6 +245,7 @@ class HostRuntimeAuthorityService:
         action: ContainerRuntimeAction,
         request_sha256: str,
         certificate_serial: str,
+        installation_id: str | None = None,
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
@@ -245,6 +257,7 @@ class HostRuntimeAuthorityService:
             attempt=attempt,
             fence=fence,
             action=action,
+            installation_id=installation_id,
             certificate_serial=certificate_serial,
         )
         grant = self._issuer.issue_grant(
@@ -257,6 +270,7 @@ class HostRuntimeAuthorityService:
                 attempt=attempt,
                 fence=fence,
                 request_sha256=request_sha256,
+                installation_id=installation_id,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -480,6 +494,14 @@ class HostRuntimeAuthorityService:
         )
         node = session.get(AgentNode, node_id)
         certificate = session.get(AgentCertificate, certificate_serial)
+        try:
+            exact_observations = (
+                parse_stored_run_plan(run.plan).observation_schema_version == 2
+                if run is not None
+                else False
+            )
+        except RecipeExecutionContractError:
+            exact_observations = False
         if (
             run is None
             or installation is None
@@ -490,7 +512,7 @@ class HostRuntimeAuthorityService:
             or certificate is None
             or run.state != "running"
             or run_node.state != "running"
-            or run.plan.get("observation_schema_version") != 2
+            or not exact_observations
             or installation.state != "installed"
             or revision.kind != "recipe"
             or revision.schema_version != 2
@@ -661,6 +683,7 @@ class HostRuntimeAuthorityService:
         attempt: int,
         fence: str,
         action: ContainerRuntimeAction,
+        installation_id: str | None,
         certificate_serial: str,
     ) -> datetime:
         now = self._clock()
@@ -699,5 +722,32 @@ class HostRuntimeAuthorityService:
             ):
                 raise HostHelperAuthorityError(
                     "container runtime action authority is stale"
+                )
+            if action is ContainerRuntimeAction.INSTALLATION_CLEANUP:
+                try:
+                    if operation.kind == "recipe.uninstall":
+                        authorized = {
+                            RecipeUninstallPayload.model_validate_json(
+                                canonical_message(operation.payload)
+                            ).installation_id
+                        }
+                    else:
+                        authorized = {
+                            item.installation_id
+                            for item in RecipeModelCleanupPayload.model_validate_json(
+                                canonical_message(operation.payload)
+                            ).installations
+                        }
+                except (TypeError, ValueError) as error:
+                    raise HostHelperAuthorityError(
+                        "container runtime cleanup authority is invalid"
+                    ) from error
+                if installation_id is None or installation_id not in authorized:
+                    raise HostHelperAuthorityError(
+                        "container runtime cleanup installation is unauthorized"
+                    )
+            elif installation_id is not None:
+                raise HostHelperAuthorityError(
+                    "container runtime installation binding is invalid"
                 )
             return lease_deadline

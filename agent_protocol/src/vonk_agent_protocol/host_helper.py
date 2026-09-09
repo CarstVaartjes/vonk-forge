@@ -35,6 +35,15 @@ Uuid4Text = Annotated[
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     ),
 ]
+ContainerRuntimeActionName = Literal[
+    "runtime-preflight",
+    "image-import",
+    "image-inspect",
+    "run-inspect",
+    "start",
+    "stop",
+    "installation-cleanup",
+]
 
 
 class RecipeRunInspectionBinding(WireModel):
@@ -82,18 +91,26 @@ class HostRuntimeRequest(WireModel):
     """The complete bytes hashed by the agent and admitted by the root helper."""
 
     schema_version: Literal[1]
-    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: ContainerRuntimeActionName
     job_id: Uuid4Text
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
     arguments: list[Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]] = Field(max_length=512)
     observation: RecipeRunInspectionBinding | None = None
+    installation_id: Uuid4Text | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bind_runtime_inspection(self) -> HostRuntimeRequest:
-        if (not self.arguments) != (self.action == "runtime-preflight"):
+        argument_free = self.action in {"runtime-preflight", "installation-cleanup"}
+        if (not self.arguments) != argument_free:
             raise ValueError("runtime arguments do not match the action")
+        if (self.installation_id is not None) != (
+            self.action == "installation-cleanup"
+        ):
+            raise ValueError("runtime installation identity does not match the action")
         if self.observation is not None:
             import hashlib
             if self.action != "run-inspect" or self.job_id != self.observation.run_id or self.attempt != self.observation.run_generation or hashlib.sha256(canonical_message(self.arguments)).hexdigest() != self.observation.runtime_arguments_sha256:
@@ -113,6 +130,7 @@ class ContainerRuntimeAction(StrEnum):
     RUN_INSPECT = "run-inspect"
     START = "start"
     STOP = "stop"
+    INSTALLATION_CLEANUP = "installation-cleanup"
 
 
 class HostOperationKind(StrEnum):
@@ -153,13 +171,16 @@ class ScheduleRebootOperation(_HostOperation):
 
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
-    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: ContainerRuntimeActionName
     job_id: Uuid4Text
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
     fence: Uuid4Text
     request_sha256: Digest
     observation_identity_sha256: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -172,6 +193,10 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
             and self.action != "run-inspect"
         ):
             raise ValueError("container runtime observation identity is invalid")
+        if (self.installation_id is not None) != (
+            self.action == "installation-cleanup"
+        ):
+            raise ValueError("container runtime installation identity is invalid")
         return self
 
 

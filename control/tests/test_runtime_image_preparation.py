@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from vonk_control.catalog_entities import _build_projection
 from vonk_control.compiled_execution_plan import CompiledRuntimeImage
 from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_control.models import (
@@ -21,6 +22,7 @@ from vonk_control.models import (
     RuntimeImageAuthorization,
 )
 from vonk_control.models import RuntimeImageReceipt as RuntimeImageReceiptRow
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -31,7 +33,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_IMAGE_DIGEST = "sha256:" + "e" * 64
@@ -49,6 +51,18 @@ def _runtime() -> dict[str, str]:
     return {"architecture": "linux/arm64", "interface": "vonk.runtime.v1"}
 
 
+def _projection(recipe: RecipeDefinition) -> dict[str, object]:
+    value: dict[str, object] = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    value.update(_build_projection(recipe))
+    return value
+
+
 def _add_revision(
     session: Session,
     revision_id: str,
@@ -57,6 +71,9 @@ def _add_revision(
     number: int = 1,
     state: str = "active",
 ) -> None:
+    projected = _projection(recipe)
+    if recipe.execution.mode == "build":
+        projected["source_bundle_sha256"] = "c" * 64
     session.add(
         CatalogDocumentRevision(
             id=revision_id,
@@ -71,7 +88,7 @@ def _add_revision(
             content_digest=content_sha256(recipe),
             artifact_key="b" * 64,
             execution_key="a" * 64,
-            projected={},
+            projected=projected,
             created_by="test",
             created_at=datetime.now(UTC),
         )
@@ -290,9 +307,17 @@ def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_ide
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    raw_recipe = _recipe("recipe-image.json").model_dump(mode="json")
+    raw_recipe["runtime"]["engine"] = "vllm"
+    raw_recipe["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
+    recipe = RecipeDefinition.model_validate(raw_recipe)
+    model = ModelDefinition.model_validate_json(
+        files("vonk_forge_contracts").joinpath("examples", "model-definition.json").read_bytes()
+    )
+    runtime = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)["runtime"]
     produced = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+        recipe,
+        runtime=runtime,
         storage=storage,
         transport=TinyTransport(),
     )
@@ -714,10 +739,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                     state="active",
                     document=original.model_dump(mode="json"),
                     content_digest=old_digest,
-                    projected={
-                        "source_bundle_sha256": "c" * 64,
-                        "package_handle": {"sha256": "1" * 64},
-                    },
+                        projected=_projection(original) | {"source_bundle_sha256": "c" * 64},
                     artifact_key="b" * 64,
                     execution_key="a" * 64,
                     created_by="test",
@@ -734,10 +756,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                     state="active",
                     document=revised.model_dump(mode="json"),
                     content_digest=new_digest,
-                    projected={
-                        "source_bundle_sha256": "c" * 64,
-                        "package_handle": {"sha256": "2" * 64},
-                    },
+                        projected=_projection(revised) | {"source_bundle_sha256": "c" * 64},
                     artifact_key="b" * 64,
                     execution_key="a" * 64,
                     created_by="test",
@@ -944,3 +963,18 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
     assert retry.registry_manifest_digest == IMAGE_DIGEST
     assert attempts == 2
     assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("include_interface", [False, True])
+def test_image_preparation_rejects_retired_runtime_interface_before_transport(tmp_path, include_interface) -> None:
+    runtime = _runtime()
+    runtime["runtime_interface"] = runtime["interface"]
+    if not include_interface:
+        runtime.pop("interface")
+    transport = TinyTransport()
+    with pytest.raises(RuntimeImagePreparationError, match="retired runtime_interface"):
+        prepare_runtime_image(
+            _recipe("recipe-image.json"), runtime=runtime,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "objects"), transport=transport,
+        )
+    assert transport.calls == []

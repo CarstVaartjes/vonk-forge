@@ -169,6 +169,40 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
         assert failed.status_reason == "Persisted Fleet profile plan is invalid"
 
 
+def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+
+    class Operations:
+        def get(self, _operation_id):
+            return FleetProfileChildOperation(id=_uuid(704), state="running")
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, recipe_operations=Operations()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(705),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.current_operation_id = _uuid(706)
+        row.progress = "corrupt-json"
+
+    assert service.tick() is True
+    with sessions() as session:
+        failed = session.get(FleetProfileApplication, application.id)
+        assert failed is not None
+        assert failed.state == "failed"
+        assert failed.status_reason == "Persisted Fleet profile progress is invalid"
+
+
 def test_profile_application_read_requires_result_for_succeeded_state() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -2431,3 +2465,26 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     back_to_a = service.preview(profile_a.id)
     assert [step.kind for step in back_to_a.steps] == ["start"]
     assert back_to_a.summary.installs == 0
+
+
+@pytest.mark.parametrize("damage", ["numeric-topology", "missing-nodes", "extra", "invalid-root"])
+def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(_input(revision_id), actor="admin")
+    assert service.get(created.id) == created
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assignments = deepcopy(row.assignments)
+        if damage == "invalid-root":
+            assignments = {}
+        elif damage == "numeric-topology":
+            assignments[0]["topology_name"] = 123
+        elif damage == "missing-nodes":
+            del assignments[0]["nodes"]
+        else:
+            assignments[0]["undeclared"] = None
+        row.assignments = assignments
+    with pytest.raises(FleetProfileConflict, match="stored Fleet profile assignment is invalid"):
+        service.get(created.id)

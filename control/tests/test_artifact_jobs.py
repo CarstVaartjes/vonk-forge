@@ -22,6 +22,7 @@ from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
+    ArtifactJobResultEvidence,
     ArtifactJobService,
     CompiledArtifactContract,
     _effective_parameters,
@@ -404,6 +405,42 @@ def test_artifact_job_persisted_contract_is_validated_before_projection(
 
     with pytest.raises(ArtifactJobError, match="compiled artifact contract"):
         service.get(created.id)
+
+
+def test_artifact_job_persisted_parameters_are_validated_before_compilation(
+    tmp_path,
+) -> None:
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000119")
+    created = service.create(**request)
+    content = b"png"
+    digest = hashlib.sha256(content).hexdigest()
+    service.put_input(
+        created.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=digest,
+        content=content,
+    )
+    service.finalize(created.id)
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        row.parameters = {"prompt": "fox", "seed": "0"}
+
+    with pytest.raises(ArtifactJobError, match="stored artifact job parameters"):
+        service.submit(
+            created.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000120",
+        )
+    with sessions() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        assert row.state == "ready"
+        assert row.operation_id is None
 
 
 def test_artifact_job_create_exact_concurrent_replay_has_one_identity(
@@ -1008,13 +1045,12 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
 
     view = service.get(submitted.id)
     assert view.state == "waiting-for-operator"
-    assert view.result_evidence == {
-        "failure_kind": "cancellation-stop-uncertain",
-        "recoverable": True,
-        "active_scope_may_remain": True,
-        "elapsed_milliseconds": 10,
-        "peak_memory_bytes": None,
-    }
+    assert ArtifactJobResultEvidence.model_validate(view.result_evidence) == ArtifactJobResultEvidence(
+        failure_kind="cancellation-stop-uncertain",
+        recoverable=True,
+        active_scope_may_remain=True,
+        elapsed_milliseconds=10,
+    )
     with pytest.raises(Exception, match="active job"):
         recipe_operations.preview_stop(run_id)
 
@@ -1300,3 +1336,55 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
         attached = session.scalar(select(ArtifactJob).where(ArtifactJob.id == job.id))
         assert attached is not None
         assert service.get(job.id).input_files[0]["sha256"] == digest
+
+
+@pytest.mark.parametrize("damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest", "extra"])
+def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(tmp_path, damage):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
+    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000151"))
+    assert service.get(created.id).input_declarations == created.input_declarations
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        manifest = dict(row.input_manifest)
+        if damage == "missing-files":
+            del manifest["files"]
+        elif damage == "invalid-file":
+            manifest["files"] = [*manifest["files"], "invalid"]
+        elif damage == "wrong-total":
+            manifest["total_bytes"] += 1
+        elif damage == "wrong-digest":
+            row.input_manifest_sha256 = "f" * 64
+        else:
+            manifest["undeclared"] = None
+        row.input_manifest = manifest
+    with pytest.raises(ArtifactJobError, match="stored artifact input manifest"):
+        service.get(created.id)
+    with pytest.raises(ArtifactJobError, match="stored artifact input manifest"):
+        service.finalize(created.id)
+
+
+@pytest.mark.parametrize("evidence", [[], "invalid", {"elapsed_milliseconds": "1"}])
+def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(tmp_path, evidence):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
+    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152"))
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        row.result_evidence = evidence
+    with pytest.raises(ArtifactJobError, match="stored artifact result evidence"):
+        service.cancel(created.id, actor="operator", request_id="cancel-corrupt", reason="stop")
+    with sessions() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row.result_evidence == evidence
+        assert row.state == created.state
+
+
+def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(tmp_path):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
+    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"))
+    evidence = {"elapsed_milliseconds": 0, "engine": {"null": None, "empty": [], "enabled": False}}
+    with sessions.begin() as session:
+        session.get(ArtifactJob, created.id).result_evidence = evidence
+    cancelled = service.cancel(created.id, actor="operator", request_id="cancel-evidence", reason="stop")
+    for key, value in evidence.items():
+        assert cancelled.result_evidence[key] == value
+    assert service.get(created.id).result_evidence == cancelled.result_evidence

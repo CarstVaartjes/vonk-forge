@@ -16,6 +16,10 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.route_activation import (
+    ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+    recipe_route_lease_expiry,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .distributed_lifecycle import DistributedLifecycleError
@@ -34,6 +38,11 @@ from .models import (
     RunNode,
 )
 from .presence import ManagementAddressPolicy, PresenceError
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_endpoint,
+    run_plan_document,
+)
 from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from .routes import RouteState
 
@@ -307,9 +316,9 @@ class RecipeRouteService:
         publisher: object,
         management_policy: ManagementAddressPolicy,
         clock: Callable[[], datetime],
-        maximum_age_seconds: int = 300,
+        maximum_age_seconds: int = ROUTE_EVIDENCE_MAX_AGE_SECONDS,
     ) -> None:
-        if not 1 <= maximum_age_seconds <= 300:
+        if not 1 <= maximum_age_seconds <= ROUTE_EVIDENCE_MAX_AGE_SECONDS:
             raise ValueError("recipe route evidence age is invalid")
         self.sessions = sessions
         self._publisher = publisher
@@ -719,7 +728,7 @@ class RecipeRouteService:
         publish_empty = self._publisher.publish_empty
         if isinstance(self._publisher, AtomicRecipeRoutePublisher):
             return publish_empty(
-                route_digest, expires_at=_aware(self._clock()) + self._maximum_age
+                route_digest, expires_at=recipe_route_lease_expiry(_aware(self._clock()))
             )
         return publish_empty(route_digest)
 
@@ -833,7 +842,13 @@ class RecipeRouteService:
                 )
             if tuple(node.rank for node in nodes) != tuple(range(len(nodes))):
                 raise RecipeRouteError("recipe rank set is not exact", run_id=run.id)
-            expected = run.plan.get("nodes") if isinstance(run.plan, dict) else None
+            try:
+                stored_run_plan = run_plan_document(run.plan)
+            except RecipeExecutionContractError as error:
+                raise RecipeRouteError(
+                    "stored recipe run plan is invalid", run_id=run.id
+                ) from error
+            expected = stored_run_plan.get("nodes")
             if isinstance(expected, list):
                 expected_identity = (
                     {
@@ -852,8 +867,7 @@ class RecipeRouteService:
                         run_id=run.id,
                     )
             exact_observations = (
-                isinstance(run.plan, Mapping)
-                and run.plan.get("observation_schema_version") == 2
+                stored_run_plan.get("observation_schema_version") == 2
             )
             if len(nodes) > 1 and not exact_observations:
                 raise RecipeRouteError(
@@ -996,10 +1010,8 @@ class RecipeRouteService:
                 for alias in aliases
             }
         )
-        expires_at = (
-            min(observed + self._maximum_age for observed in evidence_times)
-            if evidence_times
-            else _aware(now) + self._maximum_age
+        expires_at = recipe_route_lease_expiry(
+            _aware(now), min(evidence_times) if evidence_times else None
         )
         return _RecipeCandidate(
             state,
@@ -1081,9 +1093,13 @@ def _endpoint(
     *,
     operation_id: str,
 ) -> _RecipeEndpoint:
-    raw = node.endpoint.get("url") if isinstance(node.endpoint, dict) else None
-    if not isinstance(raw, str):
+    try:
+        endpoint = parse_stored_run_endpoint(node.endpoint)
+    except RecipeExecutionContractError as error:
+        raise RecipeRouteError("entrypoint endpoint is invalid") from error
+    if endpoint is None:
         raise RecipeRouteError("entrypoint endpoint evidence is missing")
+    raw = endpoint.url
     try:
         parsed = urlsplit(raw)
         raw_address = parsed.hostname or ""

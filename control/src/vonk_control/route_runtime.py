@@ -18,22 +18,17 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.route_activation import (
+    ROUTE_ACK_TIMEOUT_SECONDS,
+    ROUTE_MAXIMUM_LEASE_SECONDS,
+    ActivationMarker,
+    SupervisorAcknowledgement,
+)
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 RECIPE_ROUTE_AUTHORITY_ID = str(
     uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
 )
-_ACK_FIELDS = {
-    "acknowledged_at",
-    "activation_sha256",
-    "child_pid",
-    "expires_at",
-    "generation",
-    "litellm_sha256",
-    "schema_version",
-    "state",
-}
 _UPDATE_BOUNDARY_FIELDS = {"key", "schema_version"}
 
 
@@ -82,7 +77,7 @@ class FileSupervisorAcknowledger:
         path: Path,
         *,
         clock: Callable[[], datetime],
-        timeout_seconds: float = 30,
+        timeout_seconds: float = ROUTE_ACK_TIMEOUT_SECONDS,
         maximum_ack_age_seconds: float = 5,
         poll_seconds: float = 0.1,
         monotonic: Callable[[], float] = time.monotonic,
@@ -129,25 +124,24 @@ class FileSupervisorAcknowledger:
             raw: Any = json.loads(content)
         except (OSError, json.JSONDecodeError):
             return False
+        if len(content) > 4096:
+            return False
+        try:
+            acknowledgement = SupervisorAcknowledgement.model_validate(raw)
+        except ValidationError:
+            return False
         if (
-            len(content) > 4096
-            or not isinstance(raw, dict)
-            or set(raw) != _ACK_FIELDS
-            or content != _encoded(raw)
-            or raw.get("schema_version") != 1
-            or raw.get("state") != marker.state
-            or raw.get("generation") != marker.generation
-            or raw.get("activation_sha256") != marker.digest
-            or raw.get("litellm_sha256") != marker.litellm_sha256
-            or raw.get("expires_at") != marker.expires_at
-            or isinstance(raw.get("child_pid"), bool)
-            or not isinstance(raw.get("child_pid"), int)
-            or raw["child_pid"] <= 0
+            content != acknowledgement.canonical_bytes()
+            or acknowledgement.state != marker.state
+            or acknowledgement.generation != marker.generation
+            or acknowledgement.activation_sha256 != marker.digest
+            or acknowledgement.litellm_sha256 != marker.litellm_sha256
+            or acknowledgement.expires_at != marker.expires_at
         ):
             return False
         try:
             acknowledged = _parse_time(
-                raw.get("acknowledged_at"), "acknowledgement timestamp"
+                acknowledgement.acknowledged_at, "acknowledgement timestamp"
             )
             issued = _parse_time(marker.issued_at, "issued timestamp")
             expires = _parse_time(marker.expires_at, "expiry timestamp")
@@ -191,14 +185,14 @@ class AtomicRouteBundlePublisher:
         root: Path,
         *,
         clock: Callable[[], datetime],
-        maximum_lease_seconds: int = 300,
+        maximum_lease_seconds: int = ROUTE_MAXIMUM_LEASE_SECONDS,
         validate_routes: Callable[[bytes], bool] | None = None,
         validate_litellm: Callable[[bytes], bool] | None = None,
         await_supervisor_ack: Callable[[ActivationMarker], None] | None = None,
     ) -> None:
         if root.is_symlink():
             raise RouteRuntimeError("route runtime root must not be a symlink")
-        if not 1 <= maximum_lease_seconds <= 3600:
+        if not 1 <= maximum_lease_seconds <= ROUTE_MAXIMUM_LEASE_SECONDS:
             raise RouteRuntimeError("route lease bound is invalid")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         root.chmod(0o750)
@@ -593,20 +587,22 @@ class AtomicRouteBundlePublisher:
     @staticmethod
     def _validate_marker(marker: ActivationMarker) -> None:
         if marker.directory != f"{marker.generation:08d}-{marker.manifest_sha256}":
-            raise RouteRuntimeError("route activation marker directory binding is invalid")
+            raise RouteRuntimeError(
+                "route activation marker directory binding is invalid"
+            )
 
 
 def verify_active_route_bundle(
     root: Path,
     *,
     clock: Callable[[], datetime],
-    maximum_lease_seconds: int = 300,
+    maximum_lease_seconds: int = ROUTE_MAXIMUM_LEASE_SECONDS,
 ) -> VerifiedRouteBundle:
     """Read and authenticate the complete active bundle without mutating it."""
 
     if root.is_symlink() or not root.is_dir():
         raise RouteRuntimeError("route runtime root is unavailable")
-    if not 1 <= maximum_lease_seconds <= 3600:
+    if not 1 <= maximum_lease_seconds <= ROUTE_MAXIMUM_LEASE_SECONDS:
         raise RouteRuntimeError("route lease bound is invalid")
     generations = root / "generations"
     if generations.is_symlink() or not generations.is_dir():

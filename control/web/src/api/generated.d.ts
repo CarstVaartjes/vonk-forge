@@ -2772,6 +2772,24 @@ export interface components {
              */
             state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
         };
+        /** CompiledArtifact */
+        CompiledArtifact: {
+            distribution_object: components["schemas"]["CompiledDistributionObject"];
+            /** File Id */
+            file_id: string;
+            model: components["schemas"]["CompiledModelIdentity"];
+            mount: components["schemas"]["CompiledArtifactMount"];
+            /** Path */
+            path: string;
+            /** Roles */
+            roles: string[];
+            /** Selection Id */
+            selection_id: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /**
          * CompiledArtifactContract
          * @description The canonical typed artifact execution contract.
@@ -2799,30 +2817,312 @@ export interface components {
              */
             schema_version: 1;
         };
+        /** CompiledArtifactMount */
+        CompiledArtifactMount: {
+            /** Read Only */
+            read_only: boolean;
+            /** Target */
+            target: string;
+        };
         /**
-         * CompiledModelArtifact
-         * @description One exact model file selected by the canonical runtime compiler.
+         * CompiledDistributionObject
+         * @description Distribution objects usable as installed model or runtime inputs.
          */
-        CompiledModelArtifact: {
+        CompiledDistributionObject: {
             /** Bytes */
             bytes: number;
-            distribution_object: components["schemas"]["DistributionObjectReceipt"];
-            /** File Id */
-            file_id: string;
-            /** Id */
-            id: string;
-            /** Materialized Path */
-            materialized_path: string;
-            model: components["schemas"]["ModelCatalogIdentity"];
-            mount: components["schemas"]["ExecutionMount"];
-            /** Path */
-            path: string;
-            /** Roles */
-            roles: string[];
-            /** Selection Id */
-            selection_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model" | "oci-archive";
+            /** Name */
+            name: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** CompiledEndpoint */
+        CompiledEndpoint: {
+            /** Health Path */
+            health_path: string;
+            /** Model Aliases */
+            model_aliases: string[];
+            /** Port */
+            port: number;
+            /**
+             * Protocol
+             * @constant
+             */
+            protocol: "openai";
+        };
+        /** CompiledEnvironmentEntry */
+        CompiledEnvironmentEntry: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** CompiledExecutionPlan */
+        CompiledExecutionPlan: {
+            /** Artifacts */
+            artifacts: components["schemas"]["CompiledArtifact"][];
+            endpoint: components["schemas"]["CompiledEndpoint"] | null;
+            identity: components["schemas"]["CompiledIdentity"];
+            job: components["schemas"]["CompiledJob"] | null;
+            lifecycle: components["schemas"]["CompiledLifecycle"];
+            runtime: components["schemas"]["CompiledRuntime"];
+            runtime_image: components["schemas"]["CompiledRuntimeImage"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            security: components["schemas"]["CompiledSecurity"];
+            topology: components["schemas"]["CompiledTopology"];
+        };
+        /** CompiledIdentity */
+        CompiledIdentity: {
+            /** Build Input Sha256 */
+            build_input_sha256: string | null;
+            /** Execution Sha256 */
+            execution_sha256: string;
+            /** Harness Sha256 */
+            harness_sha256: string;
+            /** Model Artifact Bytes */
+            model_artifact_bytes: number;
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string;
+        };
+        /** CompiledJob */
+        CompiledJob: {
+            input: components["schemas"]["CompiledJobInput"] | null;
+            /**
+             * Interface
+             * @enum {string}
+             */
+            interface: "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job";
+            /**
+             * Output Path
+             * @constant
+             */
+            output_path: "/outputs";
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
+        /**
+         * CompiledJobInput
+         * @description Typed compiled form of the public ``RecipeJobInput`` declaration.
+         */
+        CompiledJobInput: {
+            /** Max Bytes */
+            max_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /**
+             * Path
+             * @constant
+             */
+            path: "/inputs";
+            /** Required */
+            required: boolean;
+            /** Slots */
+            slots?: components["schemas"]["CompiledJobInputSlot"][] | null;
+        };
+        /**
+         * CompiledJobInputSlot
+         * @description Agent-side parity model for the public ``RecipeInputSlot`` contract.
+         *
+         *     The agent protocol wheel intentionally cannot import the public recipe
+         *     contracts wheel.  Keep this fixed wire structure in lockstep with that
+         *     source contract; engine-specific job parameters remain elsewhere in the
+         *     job request and are deliberately extensible.
+         */
+        CompiledJobInputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+        };
+        /** CompiledLifecycle */
+        CompiledLifecycle: {
+            /** Post Stop */
+            post_stop: string[][];
+            /** Pre Start */
+            pre_start: string[][];
+            /** Stop Timeout Seconds */
+            stop_timeout_seconds: number;
+        };
+        /** CompiledModelIdentity */
+        CompiledModelIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** CompiledPlacement */
+        CompiledPlacement: {
+            /**
+             * Endpoint Address
+             * Format: ip
+             */
+            endpoint_address: string | null;
+            /**
+             * Local Address
+             * Format: ip
+             */
+            local_address: string | null;
+            /**
+             * Master Address
+             * Format: ip
+             */
+            master_address: string | null;
+            /** Master Port */
+            master_port: number | null;
+            /** Port */
+            port: number | null;
+            /** Rank */
+            rank: number;
+            /** Reserved Memory Bytes */
+            reserved_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** CompiledRuntime */
+        CompiledRuntime: {
+            /** Argv */
+            argv: string[];
+            /** Env */
+            env: components["schemas"]["CompiledEnvironmentEntry"][];
+            /** Executable */
+            executable: string;
+            /** Image Digest */
+            image_digest: string;
+            placement: components["schemas"]["CompiledPlacement"];
+            telemetry: components["schemas"]["CompiledRuntimeTelemetry"];
+        };
+        /** CompiledRuntimeImage */
+        CompiledRuntimeImage: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Build Id */
+            build_id: string | null;
+            distribution_object: components["schemas"]["CompiledDistributionObject"];
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Image Config Id */
+            local_image_config_id: string;
+            /** Local Image Reference */
+            local_image_reference: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /** Platform Manifest Digest */
+            platform_manifest_digest: string;
+            /** Registry Manifest Digest */
+            registry_manifest_digest: string | null;
+            /**
+             * Runtime Interface
+             * @constant
+             */
+            runtime_interface: "vonk.runtime.v1";
+            /** Runtime Interface Label */
+            runtime_interface_label: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "controller-build";
+        };
+        /** CompiledRuntimeTelemetry */
+        CompiledRuntimeTelemetry: {
+            /** Engine */
+            engine: string;
+            /** Engine Version */
+            engine_version: string | null;
+            /** Metrics Format */
+            metrics_format: ("prometheus" | "comfyui-queue") | null;
+            /** Metrics Path */
+            metrics_path: string | null;
+        };
+        /** CompiledSecurity */
+        CompiledSecurity: {
+            /** Capabilities */
+            capabilities: string[];
+            /** Devices */
+            devices: string[];
+            /** Host Network */
+            host_network: boolean;
+            /** Mounts */
+            mounts: components["schemas"]["CompiledSecurityMount"][];
+            /**
+             * Network Mode
+             * @enum {string}
+             */
+            network_mode: "none" | "bridge";
+            /** No New Privileges */
+            no_new_privileges: boolean;
+            /** Privileged */
+            privileged: boolean;
+            /** Read Only Root */
+            read_only_root: boolean;
+            /** User */
+            user: string;
+        };
+        /** CompiledSecurityMount */
+        CompiledSecurityMount: {
+            /** Read Only */
+            read_only: boolean;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "inputs" | "outputs";
+            /** Target */
+            target: string;
+        };
+        /** CompiledTopology */
+        CompiledTopology: {
+            /** Backend */
+            backend: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "single" | "distributed" | "tensor_parallel" | "pipeline_parallel" | "data_parallel" | "hybrid" | "ray" | "mpi";
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** World Size */
+            world_size: number;
         };
         /**
          * ControllerAssetState
@@ -2940,23 +3240,6 @@ export interface components {
              * @enum {string}
              */
             kind: "model" | "oci-archive" | "oci-layer";
-            /** Name */
-            name: string;
-            /** Sha256 */
-            sha256: string;
-        };
-        /**
-         * DistributionObjectReceipt
-         * @description A verified immutable object served by the Controller.
-         */
-        DistributionObjectReceipt: {
-            /** Bytes */
-            bytes: number;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "model" | "oci-archive";
             /** Name */
             name: string;
             /** Sha256 */
@@ -3150,18 +3433,6 @@ export interface components {
             source: "agent" | "controller";
             /** Updated At */
             updated_at: string;
-        };
-        /**
-         * ExecutionMount
-         * @description The platform-owned mount used by one selected model file.
-         */
-        ExecutionMount: {
-            /** Read Only */
-            read_only: boolean;
-            /** Source */
-            source: string;
-            /** Target */
-            target: string;
         };
         /** FailureDiagnostics */
         FailureDiagnostics: {
@@ -4139,44 +4410,13 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
-        /** InstallNodePlanResponse */
-        InstallNodePlanResponse: {
-            /** Active Reserved Bytes */
-            active_reserved_bytes: number;
-            /** Allowed */
-            allowed: boolean;
-            /** Blockers */
-            blockers: components["schemas"]["PlanReason"][];
-            /** Disk Floor Bytes */
-            disk_floor_bytes: number;
-            /** Free After Bytes */
-            free_after_bytes: number | null;
-            /** Free Bytes */
-            free_bytes: number | null;
-            /** Inventory Observed At */
-            inventory_observed_at: string | null;
-            /** Node Id */
-            node_id: string;
-            /** Rank */
-            rank: number;
-            /** Required Bytes */
-            required_bytes: number;
-            /** Required Download Bytes */
-            required_download_bytes: number;
-            /** Reused Bytes */
-            reused_bytes: number;
-            /** Role */
-            role: string;
-            /** Warnings */
-            warnings: components["schemas"]["PlanReason"][];
-        };
         /** InstallPlanResponse */
         InstallPlanResponse: {
             /** Allowed */
             allowed: boolean;
             /** Compiled Execution Plans */
             compiled_execution_plans?: {
-                [key: string]: components["schemas"]["vonk_control__compiled_execution_plan__CompiledExecutionPlan"];
+                [key: string]: components["schemas"]["CompiledExecutionPlan"];
             };
             /** Image Digest */
             image_digest: string;
@@ -4185,7 +4425,7 @@ export interface components {
             /** Mapping Id */
             mapping_id: string;
             /** Nodes */
-            nodes: components["schemas"]["InstallNodePlanResponse"][];
+            nodes: components["schemas"]["StoredInstallNodePlan"][];
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Build Id */
@@ -5769,21 +6009,6 @@ export interface components {
             source_url: string;
         };
         /**
-         * ModelCatalogIdentity
-         * @description Safe model identity used for display and execution evidence.
-         *
-         *     Upstream repository and revision fields deliberately do not exist here.
-         *     They remain Controller/cache inputs and are never sent to a Spark.
-         */
-        ModelCatalogIdentity: {
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Publisher */
-            publisher: string;
-            /** Slug */
-            slug: string;
-        };
-        /**
          * ModelDefinition
          * @description One exact model version and variant, including its complete manifest.
          */
@@ -5854,7 +6079,7 @@ export interface components {
             /** Allowed */
             allowed: boolean;
             /** Blockers */
-            blockers: components["schemas"]["PlanReason"][];
+            blockers: components["schemas"]["StoredAdmissionReason"][];
             /**
              * Bytes Removed
              * @description Bytes freed from affected installation copies; shared/global cache bytes are excluded.
@@ -5877,7 +6102,7 @@ export interface components {
              */
             shared_cache_policy: "retain-shared-download-cache";
             /** Warnings */
-            warnings: components["schemas"]["PlanReason"][];
+            warnings: components["schemas"]["StoredAdmissionReason"][];
         };
         /** ModelDeletionPreviewRequest */
         ModelDeletionPreviewRequest: {
@@ -6695,13 +6920,6 @@ export interface components {
             /** Minimum Memory Headroom Bytes */
             minimum_memory_headroom_bytes: number;
         };
-        /** PlanReason */
-        PlanReason: {
-            /** Code */
-            code: string;
-            /** Detail */
-            detail: string;
-        };
         /** PlatformBoundary */
         PlatformBoundary: {
             /**
@@ -6736,7 +6954,10 @@ export interface components {
              */
             severity: "blocker" | "warning" | "info";
         };
-        /** ProposalChangeRequest */
+        /**
+         * ProposalChangeRequest
+         * @description Canonical persisted and API proposal change envelope.
+         */
         ProposalChangeRequest: {
             /** Document */
             document: {
@@ -8167,45 +8388,6 @@ export interface components {
             /** State */
             state: string;
         };
-        /** RunNodePlanResponse */
-        RunNodePlanResponse: {
-            /** Active Reserved Bytes */
-            active_reserved_bytes: number;
-            /** Allowed */
-            allowed: boolean;
-            /** Available Memory Bytes */
-            available_memory_bytes: number | null;
-            /** Blockers */
-            blockers: components["schemas"]["PlanReason"][];
-            /** Endpoint Owner */
-            endpoint_owner: boolean;
-            /** Fabric Address */
-            fabric_address: string | null;
-            /** Fabric Bandwidth Mbps */
-            fabric_bandwidth_mbps: number | null;
-            /** Free After Bytes */
-            free_after_bytes: number | null;
-            /** Inventory Observed At */
-            inventory_observed_at: string | null;
-            /** Memory Floor Bytes */
-            memory_floor_bytes: number;
-            /** Memory Kind */
-            memory_kind: string;
-            /** Node Id */
-            node_id: string;
-            /** Port */
-            port: number;
-            /** Rank */
-            rank: number;
-            /** Rendezvous Port */
-            rendezvous_port: number | null;
-            /** Required Memory Bytes */
-            required_memory_bytes: number;
-            /** Role */
-            role: string;
-            /** Warnings */
-            warnings: components["schemas"]["PlanReason"][];
-        };
         /** RunPlanResponse */
         RunPlanResponse: {
             /** Alias */
@@ -8219,7 +8401,7 @@ export interface components {
             /** Mapping Id */
             mapping_id: string;
             /** Nodes */
-            nodes: components["schemas"]["RunNodePlanResponse"][];
+            nodes: components["schemas"]["StoredRunNodePlan"][];
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Revision Id */
@@ -9428,23 +9610,12 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
-        /** SourcePolicyFindingResponse */
-        SourcePolicyFindingResponse: {
-            /** Code */
-            code: string;
-            /** Detail */
-            detail: string;
-            /** Line */
-            line: number | null;
-            /** Path */
-            path: string;
-        };
         /** SourcePolicyResponse */
         SourcePolicyResponse: {
             /** Dockerfile */
             dockerfile: string;
             /** Findings */
-            findings: components["schemas"]["SourcePolicyFindingResponse"][];
+            findings: components["schemas"]["StoredPolicyFinding"][];
             /** Passed */
             passed: boolean;
             /** Source Bundle Sha256 */
@@ -9550,7 +9721,7 @@ export interface components {
             /** Authority Digest */
             authority_digest: string;
             /** Blockers */
-            blockers: components["schemas"]["PlanReason"][];
+            blockers: components["schemas"]["StoredAdmissionReason"][];
             /** Installation Id */
             installation_id: string;
             /** Nodes */
@@ -9574,7 +9745,7 @@ export interface components {
             /** Total Active Memory Reservation Bytes */
             total_active_memory_reservation_bytes: number;
             /** Warnings */
-            warnings: components["schemas"]["PlanReason"][];
+            warnings: components["schemas"]["StoredAdmissionReason"][];
         };
         /** StopPreviewRequest */
         StopPreviewRequest: {
@@ -9587,6 +9758,97 @@ export interface components {
             plan_digest: string;
             /** Request Key */
             request_key: string;
+        };
+        /** StoredAdmissionReason */
+        StoredAdmissionReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
+        /** StoredInstallNodePlan */
+        StoredInstallNodePlan: {
+            /** Active Reserved Bytes */
+            active_reserved_bytes: number;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["StoredAdmissionReason"][];
+            /** Disk Floor Bytes */
+            disk_floor_bytes: number;
+            /** Free After Bytes */
+            free_after_bytes: number | null;
+            /** Free Bytes */
+            free_bytes: number | null;
+            /** Inventory Observed At */
+            inventory_observed_at: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Required Bytes */
+            required_bytes: number;
+            /** Required Download Bytes */
+            required_download_bytes: number;
+            /** Reused Bytes */
+            reused_bytes: number;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings: components["schemas"]["StoredAdmissionReason"][];
+        };
+        /** StoredPolicyFinding */
+        StoredPolicyFinding: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Line */
+            line: number | null;
+            /** Path */
+            path: string;
+        };
+        /** StoredRunNodePlan */
+        StoredRunNodePlan: {
+            /** Active Reserved Bytes */
+            active_reserved_bytes: number;
+            /** Allowed */
+            allowed: boolean;
+            /** Available Memory Bytes */
+            available_memory_bytes: number | null;
+            /** Blockers */
+            blockers: components["schemas"]["StoredAdmissionReason"][];
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Fabric Address */
+            fabric_address: string | null;
+            /** Fabric Bandwidth Mbps */
+            fabric_bandwidth_mbps: number | null;
+            /** Free After Bytes */
+            free_after_bytes: number | null;
+            /** Inventory Observed At */
+            inventory_observed_at: string | null;
+            /** Memory Floor Bytes */
+            memory_floor_bytes: number;
+            /**
+             * Memory Kind
+             * @enum {string}
+             */
+            memory_kind: "unified" | "host" | "accelerator";
+            /** Node Id */
+            node_id: string;
+            /** Port */
+            port: number;
+            /** Rank */
+            rank: number;
+            /** Rendezvous Port */
+            rendezvous_port: number | null;
+            /** Required Memory Bytes */
+            required_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings: components["schemas"]["StoredAdmissionReason"][];
         };
         /** StringParameter */
         StringParameter: {
@@ -10281,7 +10543,7 @@ export interface components {
             /** Allowed */
             allowed: boolean;
             /** Blockers */
-            blockers: components["schemas"]["PlanReason"][];
+            blockers: components["schemas"]["StoredAdmissionReason"][];
             /** Bytes Removed */
             bytes_removed?: number | null;
             consequences: components["schemas"]["UninstallConsequencesResponse"];
@@ -10306,7 +10568,7 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /** Warnings */
-            warnings: components["schemas"]["PlanReason"][];
+            warnings: components["schemas"]["StoredAdmissionReason"][];
         };
         /** UninstallPreviewRequest */
         UninstallPreviewRequest: {
@@ -10371,68 +10633,6 @@ export interface components {
             run_state?: string | null;
             /** Source Bundle Sha256 */
             source_bundle_sha256?: string | null;
-        };
-        /**
-         * CompiledExecutionPlan
-         * @description Internal verified execution plan consumed by distribution/install.
-         */
-        vonk_control__compiled_execution_plan__CompiledExecutionPlan: {
-            /** Artifacts */
-            artifacts: components["schemas"]["CompiledModelArtifact"][];
-            /** Execution Sha256 */
-            execution_sha256: string;
-            /** Harness Sha256 */
-            harness_sha256: string;
-            /** Model Artifact Set Bytes */
-            model_artifact_set_bytes: number;
-            /** Model Artifact Set Sha256 */
-            model_artifact_set_sha256: string;
-            /** Recipe Revision Sha256 */
-            recipe_revision_sha256: string;
-            runtime_image: components["schemas"]["vonk_control__compiled_execution_plan__CompiledRuntimeImage"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-        };
-        /**
-         * CompiledRuntimeImage
-         * @description The exact OCI archive that the Controller gives to each Spark.
-         */
-        vonk_control__compiled_execution_plan__CompiledRuntimeImage: {
-            /**
-             * Architecture
-             * @constant
-             */
-            architecture: "linux-arm64";
-            /** Build Id */
-            build_id?: string | null;
-            distribution_object: components["schemas"]["DistributionObjectReceipt"];
-            /** Image Bytes */
-            image_bytes: number;
-            /** Image Digest */
-            image_digest: string;
-            /** Local Image Config Id */
-            local_image_config_id: string;
-            /** Local Image Reference */
-            local_image_reference?: string | null;
-            /** Oci Layout Sha256 */
-            oci_layout_sha256: string;
-            /** Platform Manifest Digest */
-            platform_manifest_digest: string;
-            /** Registry Manifest Digest */
-            registry_manifest_digest?: string | null;
-            /** Runtime Interface */
-            runtime_interface: string;
-            /** Runtime Interface Label */
-            runtime_interface_label: string;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "published" | "controller-build";
         };
         /** ProjectionReason */
         vonk_control__fleet_projection__ProjectionReason: {
@@ -11673,7 +11873,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -24,7 +24,6 @@ from vonk_agent_protocol import (
     RecipeJobRunRequest,
     RecipeJobRunResult,
     canonical_message,
-    recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
@@ -52,6 +51,11 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     RunNode,
+)
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .strict_json import StrictJSONModel
@@ -124,6 +128,31 @@ class ArtifactJobResultEvidence(ArtifactJobContractModel):
 
     elapsed_milliseconds: int | None = Field(default=None, ge=0)
     peak_memory_bytes: int | None = Field(default=None, ge=0)
+
+
+def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
+    try:
+        manifest = RecipeJobInputManifest.model_validate_json(
+            canonical_message(job.input_manifest)
+        )
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("stored artifact input manifest is invalid") from error
+    if (
+        manifest.total_bytes != job.input_total_bytes
+        or recipe_job_manifest_sha256(manifest.files) != job.input_manifest_sha256
+    ):
+        raise ArtifactJobError("stored artifact input manifest identity is invalid")
+    return manifest
+
+
+def _result_evidence(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    try:
+        evidence = ArtifactJobResultEvidence.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError("stored artifact result evidence is invalid") from error
+    return json.loads(canonical_message(evidence))
 
 
 class ArtifactJobResponse(ArtifactJobContractModel):
@@ -542,6 +571,36 @@ def _effective_parameters(
     return effective
 
 
+def _canonical_declared_parameters(
+    contract: CompiledArtifactContract, value: object
+) -> dict[str, object]:
+    """Load persisted parameters as canonical JSON and enforce the contract.
+
+    Parameter names and their scalar shapes come from the compiled recipe
+    contract.  The persisted JSON object is therefore validated by the same
+    declared-parameter path as a create request; this intentionally does not
+    maintain a separate engine-key allowlist.
+    """
+    try:
+        decoded = json.loads(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError(
+            "artifact job parameters must be a JSON object"
+        ) from error
+    if not isinstance(decoded, dict):
+        raise ArtifactJobError("artifact job parameters must be a JSON object")
+    effective = _effective_parameters(contract, decoded)
+    try:
+        canonical = json.loads(canonical_message(effective))
+    except (TypeError, ValueError) as error:
+        raise ArtifactJobError(
+            "artifact job parameters are not canonical JSON"
+        ) from error
+    if not isinstance(canonical, dict):
+        raise ArtifactJobError("artifact job parameters must be a JSON object")
+    return canonical
+
+
 class ArtifactJobService:
     def __init__(
         self,
@@ -943,7 +1002,7 @@ class ArtifactJobService:
                 return self._view_in_session(session, job)
             if job.state != "draft":
                 raise ArtifactJobError("artifact job cannot be finalized")
-            expected = job.input_manifest.get("files")
+            expected = _input_manifest(job).model_dump(mode="json")["files"]
             uploaded = self._files_in_session(session, job_id, "input")
             observed = [self._file_mapping(item) for item in uploaded]
             if expected != observed:
@@ -991,19 +1050,35 @@ class ArtifactJobService:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
             revision, recipe = resolved
             node = self._job_node_in_session(session, run)
-            plans = installation.plan.get("compiled_execution_plans")
-            if not isinstance(plans, Mapping) or node.node_id not in plans:
+            try:
+                installation_plan = parse_stored_installation_plan(installation.plan)
+            except RecipeExecutionContractError as error:
+                raise ArtifactJobError(
+                    "installed job execution plan is invalid"
+                ) from error
+            if node.node_id not in installation_plan.compiled_execution_plans:
                 raise ArtifactJobError("installed job execution plan is unavailable")
+            contract = _canonical_contract(artifact_job.compiled_contract)
+            try:
+                parameters = _canonical_declared_parameters(
+                    contract, artifact_job.parameters
+                )
+            except (ArtifactJobError, TypeError, ValueError) as error:
+                raise ArtifactJobError(
+                    "stored artifact job parameters are invalid"
+                ) from error
             invocation = compile_job_invocation(
                 session,
                 recipe=recipe,
-                installed=plans[node.node_id],
+                installed=installation_plan.compiled_execution_plans[
+                    node.node_id
+                ].model_dump(mode="json"),
                 build=(session.get(RecipeBuild, installation.recipe_build_id)
                        if installation.recipe_build_id is not None else None),
-                parameters=artifact_job.parameters,
+                parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
             )
-            raw_files = artifact_job.input_manifest["files"]
+            raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
                 "schema_version": 1,
                 "job_id": artifact_job.id,
@@ -1080,14 +1155,13 @@ class ArtifactJobService:
                 raise KeyError(job_id)
             operation_id = job.operation_id
             state = job.state
-            evidence = (
-                job.result_evidence if isinstance(job.result_evidence, Mapping) else {}
-            )
+            evidence = _result_evidence(job.result_evidence)
         if state in {"succeeded", "failed"}:
             raise ArtifactJobError("artifact job is not cancellable")
         if state == "cancelled" and operation_id is None:
             if (
-                evidence.get("cancel_request_id") == request_id
+                evidence is not None
+                and evidence.get("cancel_request_id") == request_id
                 and evidence.get("cancel_actor") == actor
                 and evidence.get("cancel_reason") == cancellation_reason
             ):
@@ -1118,16 +1192,16 @@ class ArtifactJobService:
             if job.state not in {"succeeded", "failed", "cancelled"}:
                 job.state = "cancelling" if cancel_pending else "cancelled"
                 job.status_reason = cancellation_reason
-                job.result_evidence = {
+                job.result_evidence = _result_evidence({
                     **(
-                        dict(job.result_evidence)
-                        if isinstance(job.result_evidence, Mapping)
+                        _result_evidence(job.result_evidence)
+                        if job.result_evidence is not None
                         else {}
                     ),
                     "cancel_request_id": request_id,
                     "cancel_actor": actor,
                     "cancel_reason": cancellation_reason,
-                }
+                })
                 job.completed_at = None if cancel_pending else now
                 job.updated_at = now
             return self._view_in_session(session, job)
@@ -1379,13 +1453,13 @@ class ArtifactJobService:
                 if waiting_result.reason
                 else "artifact cancellation could not safely stop the active scope"
             )[:512]
-            artifact_job.result_evidence = {
+            artifact_job.result_evidence = _result_evidence({
                 "failure_kind": "cancellation-stop-uncertain",
                 "recoverable": True,
                 "active_scope_may_remain": True,
                 "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
                 "peak_memory_bytes": waiting_result.peak_memory_bytes,
-            }
+            })
             artifact_job.updated_at = now
             return
         try:
@@ -1444,14 +1518,10 @@ class ArtifactJobService:
             artifact_job.updated_at = now
             return
         artifact_job.output_manifest_sha256 = result.output_manifest_sha256
-        artifact_job.output_manifest = {
-            **recipe_job_manifest_document(result.outputs),
-            "manifest_sha256": result.output_manifest_sha256,
-        }
-        artifact_job.result_evidence = {
+        artifact_job.result_evidence = _result_evidence({
             "elapsed_milliseconds": result.elapsed_milliseconds,
             "peak_memory_bytes": result.peak_memory_bytes,
-        }
+        })
         artifact_job.state = (
             "succeeded" if succeeded else "cancelled" if cancelled else "failed"
         )
@@ -1487,7 +1557,13 @@ class ArtifactJobService:
                 select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
             )
         )
-        plan_nodes = run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
+        try:
+            plan_nodes = [
+                node.model_dump(mode="json")
+                for node in parse_stored_run_plan(run.plan).nodes
+            ]
+        except RecipeExecutionContractError as error:
+            raise ArtifactJobError("recipe run plan is invalid") from error
         endpoint_ids = (
             {
                 item.get("node_id")
@@ -1539,15 +1615,8 @@ class ArtifactJobService:
 
     @staticmethod
     def _input_declaration(job: ArtifactJob, name: str) -> Mapping[str, object] | None:
-        declarations = job.input_manifest.get("files")
-        if not isinstance(declarations, list):
-            return None
         return next(
-            (
-                item
-                for item in declarations
-                if isinstance(item, Mapping) and item.get("name") == name
-            ),
+            (item.model_dump(mode="json") for item in _input_manifest(job).files if item.name == name),
             None,
         )
 
@@ -1599,6 +1668,7 @@ class ArtifactJobService:
             for item in self._files_in_session(session, job.id, "output")
         )
         contract = _canonical_contract(job.compiled_contract)
+        manifest = _input_manifest(job)
         view = ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
@@ -1610,15 +1680,13 @@ class ArtifactJobService:
             input_manifest_sha256=job.input_manifest_sha256,
             input_total_bytes=job.input_total_bytes,
             input_declarations=tuple(
-                dict(item)
-                for item in job.input_manifest.get("files", [])
-                if isinstance(item, Mapping)
+                item.model_dump(mode="json") for item in manifest.files
             ),
             input_files=inputs,
             output_limits=dict(job.output_limits),
             output_manifest_sha256=job.output_manifest_sha256,
             output_files=outputs,
-            result_evidence=dict(job.result_evidence) if job.result_evidence else None,
+            result_evidence=_result_evidence(job.result_evidence),
             status_reason=job.status_reason,
             timeout_seconds=job.timeout_seconds,
             created_at=job.created_at,

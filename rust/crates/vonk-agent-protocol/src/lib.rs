@@ -85,6 +85,9 @@ impl HostHelperOperation {
                 operation.job_id.get_version() == Some(uuid::Version::Random)
                     && operation.operation_id.get_version() == Some(uuid::Version::Random)
                     && operation.fence.get_version() == Some(uuid::Version::Random)
+                    && (operation.installation_id.is_some()
+                        == (operation.action
+                            == HostHelperContainerRuntimeAction::InstallationCleanup))
                     && operation
                         .observation_identity_sha256
                         .as_ref()
@@ -144,7 +147,13 @@ impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
             || self.attempt == 0
-            || (self.arguments.is_empty() != (self.action == HostRuntimeAction::RuntimePreflight))
+            || (self.arguments.is_empty()
+                != matches!(
+                    self.action,
+                    HostRuntimeAction::RuntimePreflight | HostRuntimeAction::InstallationCleanup
+                ))
+            || (self.installation_id.is_some()
+                != (self.action == HostRuntimeAction::InstallationCleanup))
             || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
             || self.arguments.iter().any(|value| {
                 value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
@@ -170,6 +179,71 @@ impl HostRuntimeRequest {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod installation_cleanup_contract_tests {
+    use super::*;
+
+    fn request(action: HostRuntimeAction, installation_id: Option<Uuid>) -> HostRuntimeRequest {
+        HostRuntimeRequest {
+            schema_version: 1,
+            action,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments: Vec::new(),
+            observation: None,
+            installation_id,
+        }
+    }
+
+    #[test]
+    fn cleanup_requires_one_installation_identity_and_other_actions_reject_it() {
+        let installation_id = Uuid::new_v4();
+        assert!(
+            request(
+                HostRuntimeAction::InstallationCleanup,
+                Some(installation_id)
+            )
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            request(HostRuntimeAction::InstallationCleanup, None)
+                .validate()
+                .is_err()
+        );
+        let mut ordinary = request(HostRuntimeAction::Start, Some(installation_id));
+        ordinary.arguments.push("run".to_owned());
+        assert!(ordinary.validate().is_err());
+
+        for raw in [
+            serde_json::json!({
+                "schema_version": 1,
+                "action": "installation-cleanup",
+                "job_id": Uuid::new_v4(),
+                "operation_id": Uuid::new_v4(),
+                "attempt": 1,
+                "fence": Uuid::new_v4(),
+                "arguments": [],
+            }),
+            serde_json::json!({
+                "schema_version": 1,
+                "action": "installation-cleanup",
+                "job_id": Uuid::new_v4(),
+                "operation_id": Uuid::new_v4(),
+                "attempt": 1,
+                "fence": Uuid::new_v4(),
+                "arguments": [],
+                "installation_id": null,
+            }),
+        ] {
+            let parsed: HostRuntimeRequest = serde_json::from_value(raw).unwrap();
+            assert!(parsed.validate().is_err());
+        }
     }
 }
 
@@ -562,6 +636,211 @@ impl AgentResult {
             return Err(ProtocolError::Identity("result identity"));
         }
         Ok(())
+    }
+
+    /// Validate the terminal result against the operation carried by its
+    /// authoritative claim. The wire envelope intentionally has no duplicate
+    /// operation discriminator, so callers must supply the stored operation.
+    pub fn validate_for_operation(
+        &self,
+        operation: &generated::AgentOperation,
+    ) -> Result<(), ProtocolError> {
+        use generated::{AgentOperation, AgentResultResult, AgentResultState};
+
+        self.validate()?;
+        let matches = match self.state {
+            AgentResultState::Succeeded => match operation {
+                AgentOperation::RuntimePreflightV1 => {
+                    let AgentResultResult::RuntimePreflightResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    true
+                }
+                AgentOperation::AgentUpgradeV1 => {
+                    matches!(&self.result, AgentResultResult::AgentUpgradeResult(_))
+                }
+                AgentOperation::ArtifactDistributionV1 => matches!(
+                    &self.result,
+                    AgentResultResult::ArtifactDistributionResult(_)
+                ),
+                AgentOperation::RecipeBuildV1 => {
+                    matches!(&self.result, AgentResultResult::RecipeBuildEvidence(_))
+                }
+                AgentOperation::RecipeImageImportV1 => matches!(
+                    &self.result,
+                    AgentResultResult::RecipeImageImportEvidence(_)
+                ),
+                AgentOperation::RecipeInstall => {
+                    matches!(&self.result, AgentResultResult::AgentInstallResult(_))
+                }
+                AgentOperation::RecipeStart => {
+                    matches!(&self.result, AgentResultResult::RecipeStartResult(_))
+                }
+                AgentOperation::RecipeJobRunV1 => {
+                    let AgentResultResult::RecipeJobRunResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    true
+                }
+                AgentOperation::RecipeStop => {
+                    let AgentResultResult::RecipeStopResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    true
+                }
+                AgentOperation::RecipeUninstall => {
+                    let AgentResultResult::RecipeUninstallResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    true
+                }
+                AgentOperation::RecipeModelUninstallV1 => {
+                    let AgentResultResult::RecipeModelCleanupResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    true
+                }
+            },
+            AgentResultState::Failed => match (&self.result, operation) {
+                (AgentResultResult::AgentFailureResult(result), _) => {
+                    result.reason.is_some() || result.error_code.is_some()
+                }
+                (AgentResultResult::RecipeJobRunResult(result), AgentOperation::RecipeJobRunV1) => {
+                    result.validate()?;
+                    result.exit_code != 0
+                }
+                _ => false,
+            },
+            AgentResultState::Cancelled | AgentResultState::WaitingForOperator => {
+                match (&self.result, operation) {
+                    (AgentResultResult::AgentFailureResult(result), _) => {
+                        result.reason.is_some() || result.error_code.is_some()
+                    }
+                    (
+                        AgentResultResult::RecipeJobRunResult(result),
+                        AgentOperation::RecipeJobRunV1,
+                    ) => {
+                        result.validate()?;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+        };
+        if matches {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("result operation"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod agent_result_binding_tests {
+    use super::*;
+    use crate::generated::{AgentOperation, AgentResultState};
+
+    fn result(state: AgentResultState, body: Value) -> AgentResult {
+        AgentResult {
+            attempt: 1,
+            deadline: DateTime::parse_from_rfc3339("2026-09-08T12:00:00+00:00").unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
+            operation_id: Uuid::new_v4(),
+            result: serde_json::from_value(body).unwrap(),
+            schema_version: 1,
+            state,
+        }
+    }
+
+    #[test]
+    fn succeeded_result_is_bound_to_its_current_operation() {
+        let stop = result(
+            AgentResultState::Succeeded,
+            serde_json::json!({"stopped": true}),
+        );
+        stop.validate_for_operation(&AgentOperation::RecipeStop)
+            .unwrap();
+        assert!(
+            stop.validate_for_operation(&AgentOperation::RecipeInstall)
+                .is_err()
+        );
+
+        let install = result(
+            AgentResultState::Succeeded,
+            serde_json::json!({"installed_bytes": 0}),
+        );
+        install
+            .validate_for_operation(&AgentOperation::RecipeInstall)
+            .unwrap();
+        assert!(
+            install
+                .validate_for_operation(&AgentOperation::RecipeStop)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn failure_result_retains_optional_fields_but_requires_failure_identity() {
+        let failure = result(
+            AgentResultState::WaitingForOperator,
+            serde_json::json!({"reason": "operator review required"}),
+        );
+        failure
+            .validate_for_operation(&AgentOperation::RecipeStop)
+            .unwrap();
+
+        let empty = result(AgentResultState::Failed, serde_json::json!({}));
+        assert!(
+            empty
+                .validate_for_operation(&AgentOperation::RecipeStop)
+                .is_err()
+        );
+        assert!(
+            failure
+                .validate_for_operation(&AgentOperation::RecipeJobRunV1)
+                .is_ok()
+        );
+        assert!(
+            failure
+                .validate_for_operation(&AgentOperation::RecipeStop)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn process_result_is_valid_only_for_the_recipe_job_operation() {
+        let mut job: AgentResult = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+        ))
+        .unwrap();
+        job.state = AgentResultState::Failed;
+        let generated::AgentResultResult::RecipeJobRunResult(body) = &mut job.result else {
+            panic!("expected typed job result")
+        };
+        body.exit_code = 1;
+        body.reason = Some("runtime failed".to_owned());
+
+        job.validate_for_operation(&AgentOperation::RecipeJobRunV1)
+            .unwrap();
+        assert!(
+            job.validate_for_operation(&AgentOperation::RecipeStop)
+                .is_err()
+        );
+        let generated::AgentResultResult::RecipeJobRunResult(body) = &mut job.result else {
+            panic!("expected typed job result")
+        };
+        body.exit_code = 0;
+        assert!(
+            job.validate_for_operation(&AgentOperation::RecipeJobRunV1)
+                .is_err()
+        );
     }
 }
 
@@ -2041,6 +2320,7 @@ mod recipe_run_inspection_tests {
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
+            installation_id: None,
         };
         request.validate().unwrap();
 
@@ -2137,6 +2417,7 @@ mod recipe_run_inspection_tests {
                         fence: Uuid::new_v4(),
                         request_sha256: "b".repeat(64),
                         observation_identity_sha256: Some(identity_sha256.clone()),
+                        installation_id: None,
                     },
                 ),
             },

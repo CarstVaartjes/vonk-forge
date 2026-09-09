@@ -448,3 +448,28 @@ def test_published_pipeline_has_output_contract() -> None:
     assert argv[0] == "/opt/vonk/bin/pytorch-pipeline"
     assert argv[-2:] == ["--output-dir", "/outputs"]
     assert any(item["target"] == "/outputs" for item in spec["security"]["mounts"])
+
+
+@pytest.mark.parametrize("retired", ["model_projections", "package", "build_receipt"])
+def test_runtime_compiler_rejects_retired_resolver_keys_even_with_current_inputs(model, retired) -> None:
+    recipe = _recipe("recipe-image.json", engine="vllm", entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"])
+    with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
+        compile_runtime_spec(
+            recipe,
+            resolved_entities={"models": [model], retired: [model] if retired == "model_projections" else {}},
+            role="entrypoint", rank=0,
+        )
+
+
+@pytest.mark.parametrize("include_paths", [False, True])
+def test_runtime_compiler_rejects_retired_member_paths(model, include_paths) -> None:
+    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"])
+    package = {
+        "image_reference": "localhost/vonk/recipe-build@sha256:" + "a" * 64,
+        "image_digest": "a" * 64,
+        "member_paths": ["context.tar", "Dockerfile"],
+    }
+    if include_paths:
+        package["paths"] = ["context.tar", "Dockerfile"]
+    with pytest.raises(RecipeRuntimeSpecError, match="retired member_paths"):
+        compile_runtime_spec(recipe, models=[model], package_handle=package, role="entrypoint", rank=0)

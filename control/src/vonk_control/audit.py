@@ -5,9 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
+from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import AgentCertificate, AgentEnrollment, AgentNode, AuditEvent
+
+_TARGETS = TypeAdapter(list[str], config=ConfigDict(strict=True))
+
+
+def _stored_targets(value: object) -> tuple[str, ...]:
+    try:
+        return tuple(_TARGETS.validate_json(canonical_message(value)))
+    except (TypeError, ValueError) as error:
+        raise ValueError("audit targets are invalid") from error
 
 
 @dataclass(frozen=True)
@@ -121,7 +132,7 @@ class SqlAuditStore:
                     row.actor,
                     row.action,
                     row.authority_revision,
-                    tuple(row.targets),
+                    _stored_targets(row.targets),
                     row.occurred_at.replace(tzinfo=UTC)
                     if row.occurred_at.tzinfo is None
                     else row.occurred_at.astimezone(UTC),

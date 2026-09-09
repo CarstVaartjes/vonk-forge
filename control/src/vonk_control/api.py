@@ -68,7 +68,7 @@ from .catalog_service import CatalogError, CatalogService
 from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
 from .database_authority import (
-    AuthorityChange,
+    ProposalChangeRequest,
 )
 from .deployment_provenance import DeploymentProvenanceService
 from .deployment_provenance_api import install_deployment_provenance_routes
@@ -477,12 +477,6 @@ def refresh_fleet_metrics(
     metrics.update_fleet(fleet_snapshot)
 
 
-class ProposalChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    path: str = Field(min_length=1, max_length=512)
-    document: dict[str, object]
-
-
 class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     base_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -871,7 +865,12 @@ def create_app(
     def readyz() -> ReadyzResponse:
         return ReadyzResponse(status="ready")
 
-    @app.get("/metrics", include_in_schema=False)
+    @app.get(
+        "/metrics",
+        response_class=Response,
+        responses=download_responses("text/plain"),
+        openapi_extra={"x-vonk-streaming-transport": True},
+    )
     def platform_metrics(request: Request) -> Response:
         if metrics is None or metrics_token is None:
             raise HTTPException(status_code=404, detail="not found")
@@ -1221,7 +1220,7 @@ def create_app(
         preview = admin.proposals.preview(
             authenticated.subject,
             body.base_revision,
-            [AuthorityChange(change.path, change.document) for change in body.changes],
+            body.changes,
         )
         return ProposalPreviewResponse(
             base_revision=preview.base_revision,
@@ -1592,6 +1591,7 @@ def production_app() -> FastAPI:
         persist_runtime_image_receipt,
         prepare_runtime_image,
         resolve_persisted_runtime_image_receipt,
+        runtime_image_expectations,
     )
     from .settings import Settings
     from .telemetry import TelemetryRepository
@@ -1741,16 +1741,11 @@ def production_app() -> FastAPI:
             raise TypeError(
                 "runtime image preparation is required: runtime projection is unavailable"
             )
-        architecture = runtime.get("architecture")
-        interface = runtime.get("interface", runtime.get("runtime_interface"))
-        if not isinstance(architecture, str) or not isinstance(interface, str):
-            raise TypeError(
-                "runtime image preparation is required: platform identity is unavailable"
-            )
+        expectations = runtime_image_expectations(runtime)
         receipt = runtime_image_storage.find_verified(
             image_digest,
-            expected_architecture=architecture,
-            expected_runtime_interface=interface,
+            expected_architecture=expectations["architecture"],
+            expected_runtime_interface=expectations["interface"],
         )
         if receipt is None:
             raise ValueError(
@@ -1811,7 +1806,6 @@ def production_app() -> FastAPI:
             forbidden_cidrs=settings.direct_fabric_cidrs,
         ),
         clock=clock,
-        maximum_age_seconds=30,
     )
     recipe_builds = RecipeBuildService(
         sessions,
