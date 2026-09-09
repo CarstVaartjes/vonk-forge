@@ -115,10 +115,11 @@ bounded recipe scalars; this capability does not grant secret access or shell
 execution.
 
 In the production Compose topology the control API retains no general outbound
-network. Its GitHub client uses an internal Caddy listener that accepts only
-`GET` requests beneath the `CarstVaartjes/vonk-forge-recipes` API path, removes
-credentials, and relays them over HTTPS to `api.github.com`. The NAS therefore
-needs ordinary outbound HTTPS and DNS access, but it never needs a GitHub token.
+network. Its GitHub client uses internal Caddy listeners that accept only
+repository-scoped `GET` requests, remove credentials, and relay the commit
+lookup to `api.github.com` and immutable catalog/package paths to
+`raw.githubusercontent.com`. The NAS therefore needs ordinary outbound HTTPS
+and DNS access, but it never needs a GitHub token.
 
 ## Custom libraries
 

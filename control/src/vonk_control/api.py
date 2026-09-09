@@ -1918,6 +1918,7 @@ def production_app() -> FastAPI:
         settings.recipe_library_package_url,
         cache_root=settings.state_path / "recipe-library-packages",
         api_url=settings.recipe_library_api_url,
+        raw_url=settings.recipe_library_raw_url,
     )
     catalog_service = CatalogService(
         sessions,

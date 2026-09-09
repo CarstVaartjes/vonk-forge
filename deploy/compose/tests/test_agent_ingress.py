@@ -518,6 +518,20 @@ def test_recipe_library_relay_is_read_only_and_repository_scoped() -> None:
     assert "control-api:8000" not in serialized
 
 
+def test_recipe_library_raw_relay_is_read_only_and_immutable_path_scoped() -> None:
+    adapted = _adapted_caddy(_environment())
+    relay = _server_on_port(adapted, 8085)
+    serialized = json.dumps(relay, sort_keys=True)
+
+    assert relay["listen"] == [":8085"]
+    assert '"method": ["GET"]' in serialized
+    assert "path_regexp" in serialized
+    assert "CarstVaartjes/vonk-forge-recipes" in serialized
+    assert "raw.githubusercontent.com:443" in serialized
+    assert '"status_code": 404' in serialized
+    assert "control-api:8000" not in serialized
+
+
 def test_agent_release_relay_is_read_only_and_path_scoped() -> None:
     adapted = _adapted_caddy(_environment())
     relay = _server_on_port(adapted, 8084)
