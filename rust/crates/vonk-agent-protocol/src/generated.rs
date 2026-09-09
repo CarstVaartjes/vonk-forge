@@ -5478,7 +5478,6 @@ pub struct TelemetrySample {
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub power_watts: ::std::option::Option<f64>,
-    pub sequence: u64,
     pub temperature_c: ::std::option::Option<f64>,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -12170,7 +12169,6 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub power_watts: ::std::option::Option<f64>,
-            pub sequence: u64,
             pub temperature_c: ::std::option::Option<f64>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -12192,7 +12190,6 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             network_transmit_bytes_per_second: raw.network_transmit_bytes_per_second,
             observed_at: raw.observed_at,
             power_watts: raw.power_watts,
-            sequence: raw.sequence,
             temperature_c: raw.temperature_c,
         })
     }

@@ -9845,12 +9845,6 @@
           ],
           "title": "Power Watts"
         },
-        "sequence": {
-          "maximum": 9223372036854775807,
-          "minimum": 0,
-          "title": "Sequence",
-          "type": "integer"
-        },
         "temperature_c": {
           "anyOf": [
             {
@@ -9867,7 +9861,6 @@
       },
       "required": [
         "boot_id",
-        "sequence",
         "observed_at",
         "cpu_utilization_percent",
         "load_average_1m",

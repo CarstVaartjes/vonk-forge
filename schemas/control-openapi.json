@@ -26492,12 +26492,6 @@
             "title": "Received At",
             "type": "string"
           },
-          "sequence": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Sequence",
-            "type": "integer"
-          },
           "temperature_c": {
             "anyOf": [
               {
@@ -26516,7 +26510,6 @@
           "id",
           "node_id",
           "boot_id",
-          "sequence",
           "observed_at",
           "received_at",
           "gap_samples",

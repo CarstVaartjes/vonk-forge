@@ -39,6 +39,7 @@ const HELPER_AUTHORITY_PATH: &str = "/etc/vonk-forge-agent/host-helper-authority
 const HOSTS_PATH: &str = "/etc/hosts";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
+const MONITOR_SERVICE: &str = "vonk-forge-monitor.service";
 const HELPER_SOCKET: &str = "vonk-forge-package-helper.socket";
 const FIREWALL_SERVICE: &str = "vonk-forge-docker-firewall.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
@@ -1673,6 +1674,7 @@ fn enable_runtime_units(
                 FIREWALL_SERVICE,
                 HELPER_SOCKET,
                 &paths.service,
+                MONITOR_SERVICE,
             ],
         ),
     )
@@ -1716,6 +1718,10 @@ fn upgrade_existing(
     run_checked(
         runner,
         Command::new("/usr/bin/systemctl", ["restart", &paths.service]),
+    )?;
+    run_checked(
+        runner,
+        Command::new("/usr/bin/systemctl", ["restart", MONITOR_SERVICE]),
     )?;
     verify_sustained_readiness(paths, runner)
 }

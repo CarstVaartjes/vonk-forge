@@ -24,7 +24,6 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
         "id": "00000000-0000-4000-8000-000000000001",
         "node_id": "spk_" + "1" * 32,
         "boot_id": "00000000-0000-4000-8000-000000000002",
-        "sequence": 4,
         "observed_at": "2026-09-05T00:00:00Z",
         "received_at": "2026-09-05T00:00:01Z",
         "gap_samples": 0,

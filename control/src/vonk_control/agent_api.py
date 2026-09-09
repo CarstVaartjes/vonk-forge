@@ -1710,7 +1710,6 @@ def install_agent_routes(
                 tuple(
                     TelemetrySampleInput(
                         boot_id=uuid.UUID(sample.boot_id),
-                        sequence=sample.sequence,
                         observed_at=sample.observed_at,
                         cpu_utilization_percent=sample.cpu_utilization_percent,
                         load_average_1m=sample.load_average_1m,

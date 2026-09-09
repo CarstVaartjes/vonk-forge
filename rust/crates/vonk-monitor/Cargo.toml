@@ -1,0 +1,15 @@
+[package]
+name = "vonk-monitor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap.workspace = true
+tokio.workspace = true
+vonk-agent = { path = "../vonk-agent" }
+
+[[bin]]
+name = "vonk-monitor"
+path = "src/main.rs"

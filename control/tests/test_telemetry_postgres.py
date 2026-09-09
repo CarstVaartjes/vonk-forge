@@ -46,7 +46,6 @@ def _sample(
 ) -> TelemetrySampleInput:
     return TelemetrySampleInput(
         boot_id=boot_id,
-        sequence=sequence,
         observed_at=observed_at,
         cpu_utilization_percent=None,
         load_average_1m=None,
@@ -156,7 +155,6 @@ def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
                 id="00000000-0000-4000-8000-000000000099",
                 node_id=NODE_A,
                 boot_id=str(BOOT_B),
-                sequence=99,
                 observed_at=NOW - timedelta(hours=24, seconds=1),
                 received_at=NOW - timedelta(hours=24, seconds=1),
                 cpu_utilization_percent=None,

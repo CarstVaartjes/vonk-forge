@@ -1708,14 +1708,18 @@ class NodeTelemetrySample(Base):
     __tablename__ = "node_telemetry_samples"
     __table_args__ = (
         UniqueConstraint(
-            "node_id", "boot_id", "sequence", name="uq_telemetry_node_boot_sequence"
+            "node_id", "id", name="uq_telemetry_node_sample"
         ),
-        UniqueConstraint("node_id", "id", name="uq_telemetry_node_sample"),
+        UniqueConstraint(
+            "node_id",
+            "boot_id",
+            "observed_at",
+            name="uq_telemetry_node_boot_observed",
+        ),
         CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
         CheckConstraint(
-            "sequence BETWEEN 0 AND 9223372036854775807 AND "
             "gap_samples BETWEEN 0 AND 9223372036854775807",
-            name="ck_telemetry_sequences",
+            name="ck_telemetry_gap_samples",
         ),
         CheckConstraint(
             "(cpu_utilization_percent IS NULL OR "
@@ -1777,7 +1781,6 @@ class NodeTelemetrySample(Base):
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False
     )
     boot_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

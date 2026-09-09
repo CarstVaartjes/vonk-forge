@@ -10,6 +10,7 @@ from pathlib import Path
 
 UNITS = (
     "vonk-forge-agent.service",
+    "vonk-forge-monitor.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-docker-firewall.service",
 )

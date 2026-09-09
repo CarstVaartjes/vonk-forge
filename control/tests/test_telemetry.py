@@ -65,13 +65,12 @@ def telemetry(tmp_path):
 
 def sample(
     *,
-    sequence: int,
+    sequence: int = 1,
     observed_at: datetime | None = None,
     boot_id: uuid.UUID = BOOT_A,
 ) -> TelemetrySampleInput:
     return TelemetrySampleInput(
         boot_id=boot_id,
-        sequence=sequence,
         observed_at=observed_at or START + timedelta(seconds=sequence),
         cpu_utilization_percent=12.5,
         load_average_1m=1.25,
@@ -101,11 +100,11 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
 
     repository.record_batch(NODE_A, (sample(sequence=4),))
 
-    assert repository.latest((NODE_A,))[NODE_A].sequence == 5
+    assert repository.latest((NODE_A,))[NODE_A].observed_at == START + timedelta(seconds=5)
     assert [
-        item.sequence
+        item.observed_at
         for item in repository.history(NODE_A, START, NOW, 1_500, resolution="raw")
-    ] == [4, 5]
+    ] == [START + timedelta(seconds=4), START + timedelta(seconds=5)]
 
 
 def test_new_samples_mark_exact_utc_minute_buckets_dirty(telemetry) -> None:
@@ -178,7 +177,7 @@ def test_rollup_bucket_flooring_is_utc_aware_and_exact() -> None:
         telemetry_maintenance.bucket_start(value, 300)
 
 
-def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
+def test_new_boot_only_newer_observation_advances_latest(
     telemetry,
 ) -> None:
     repository, _, _, _ = telemetry
@@ -206,7 +205,7 @@ def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
 
     latest = repository.latest((NODE_A, NODE_B))
     assert latest[NODE_A].boot_id == BOOT_B
-    assert latest[NODE_A].sequence == 0
+    assert latest[NODE_A].observed_at == START + timedelta(seconds=10)
     assert NODE_B not in latest
     assert [
         item.observed_at
@@ -221,8 +220,6 @@ def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"sequence": -1}, "sequence"),
-        ({"sequence": 2**63}, "sequence"),
         ({"cpu_utilization_percent": math.nan}, "CPU utilization"),
         ({"cpu_utilization_percent": 100.01}, "CPU utilization"),
         ({"load_average_1m": -0.01}, "load average"),
@@ -310,7 +307,6 @@ def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
             NodeTelemetrySample(
                 node_id=NODE_A,
                 boot_id=str(BOOT_A),
-                sequence=1,
                 observed_at=NOW,
                 received_at=NOW,
                 memory_total_bytes=1,
@@ -350,7 +346,6 @@ def test_database_rejects_metrics_above_wire_maximums(
             NodeTelemetrySample(
                 node_id=NODE_A,
                 boot_id=str(BOOT_A),
-                sequence=1,
                 observed_at=NOW,
                 received_at=NOW,
                 gap_samples=0,
@@ -380,7 +375,6 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
         row = NodeTelemetrySample(
             node_id=NODE_A,
             boot_id=str(BOOT_A),
-            sequence=1,
             observed_at=NOW,
             received_at=NOW,
             gap_samples=0,
@@ -437,7 +431,6 @@ def test_record_batch_rejects_time_window_before_opening_transaction(
                 NODE_A,
                 (
                     sample(
-                        sequence=1,
                         observed_at=NOW - timedelta(minutes=5, microseconds=1),
                     ),
                 ),
@@ -447,7 +440,6 @@ def test_record_batch_rejects_time_window_before_opening_transaction(
                 NODE_A,
                 (
                     sample(
-                        sequence=1,
                         observed_at=NOW + timedelta(seconds=30, microseconds=1),
                     ),
                 ),
@@ -467,7 +459,7 @@ def test_record_batch_rejects_more_than_sixteen_or_duplicate_samples(
         repository.record_batch(NODE_A, (sample(sequence=1), sample(sequence=1)))
 
 
-def test_record_batch_rejects_regressing_sequence_or_observation_time(
+def test_record_batch_rejects_regressing_observation_time(
     telemetry,
 ) -> None:
     repository, _, _, _ = telemetry
@@ -479,18 +471,11 @@ def test_record_batch_rejects_regressing_sequence_or_observation_time(
                 sample(sequence=2, observed_at=START + timedelta(seconds=1)),
             ),
         )
-    with pytest.raises(ValueError, match="sequences must increase"):
-        repository.record_batch(
-            NODE_A,
-            (
-                sample(sequence=2, observed_at=START + timedelta(seconds=1)),
-                sample(sequence=1, observed_at=START + timedelta(seconds=2)),
-            ),
-        )
-
     repository.record_batch(NODE_A, (sample(sequence=5),))
-    with pytest.raises(ValueError, match="regresses stored sequence"):
-        repository.record_batch(NODE_A, (sample(sequence=3),))
+    with pytest.raises(ValueError, match="regresses stored observation time"):
+        repository.record_batch(
+            NODE_A, (sample(sequence=3, observed_at=START + timedelta(seconds=3)),)
+        )
 
 
 def test_conflicting_replay_is_rejected(telemetry) -> None:

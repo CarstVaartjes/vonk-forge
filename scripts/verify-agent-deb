@@ -23,6 +23,7 @@ MAX_DEB_BYTES = 512 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 REQUIRED_ELF = {
     "usr/lib/vonk-forge/vonk-agent",
+    "usr/lib/vonk-forge/vonk-monitor",
     "usr/lib/vonk-forge/vonk-agent-helper",
     "usr/lib/vonk-forge/vonk-build-egress",
     "usr/lib/vonk-forge/vonk-runtime-probe",
@@ -43,6 +44,7 @@ REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
     "etc/vonk-forge-agent/containers-storage.conf",
     "lib/systemd/system/vonk-forge-agent.service",
+    "lib/systemd/system/vonk-forge-monitor.service",
     "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
     "lib/systemd/system/vonk-forge-docker-firewall.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
@@ -110,6 +112,9 @@ REPAIR_AUTHORITY_FIELDS = (
 NORMAL_SYSTEMD_PAYLOAD = {
     "lib/systemd/system/vonk-forge-agent.service": (
         "packaging/systemd/vonk-forge-agent.service"
+    ),
+    "lib/systemd/system/vonk-forge-monitor.service": (
+        "packaging/systemd/vonk-forge-monitor.service"
     ),
     "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf": (
         "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf"
@@ -559,7 +564,7 @@ def _verify_control(
             "installed_helper_digest",
             "confirmed_helper_digest",
             "/usr/bin/sync -f /var/lib/vonk-forge",
-            "vonk-forge-agent.service >/dev/null",
+            "vonk-forge-agent.service vonk-forge-monitor.service >/dev/null",
             "vonk-forge-package-helper-upgrade-finish.service",
             "RuntimeMaxSec=240s",
             "/proc/$wait_pid/stat",
@@ -696,6 +701,7 @@ def _verify_payload(
         name: (payload / f"lib/systemd/system/{name}").read_text(encoding="utf-8")
         for name in (
             "vonk-forge-agent.service",
+            "vonk-forge-monitor.service",
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
@@ -704,6 +710,18 @@ def _verify_payload(
     }
     if "User=vonk-agent" not in units["vonk-forge-agent.service"]:
         raise VerificationError("agent unit is not unprivileged")
+    monitor_unit = units["vonk-forge-monitor.service"]
+    if (
+        "ExecStart=/usr/lib/vonk-forge/vonk-monitor --config /etc/vonk-forge-agent/agent.toml"
+        not in monitor_unit.splitlines()
+        or "User=vonk-agent" not in monitor_unit
+        or "NoNewPrivileges=yes" not in monitor_unit
+        or "ReadWritePaths=" in monitor_unit
+        or "-/var/lib/vonk-forge-agent/state.sqlite" not in monitor_unit
+        or "-/var/lib/vonk-forge/incoming" not in monitor_unit
+        or "telemetry-state.sqlite" in monitor_unit
+    ):
+        raise VerificationError("monitor unit is invalid")
     agent_unit = units["vonk-forge-agent.service"]
     if (
         "ExecStart=/usr/lib/vonk-forge/vonk-agent --config "

@@ -214,11 +214,13 @@ runs:
           prebuilt/arm64/baseline/vonk-agent \
           prebuilt/arm64/baseline/vonk-agent-helper \
           prebuilt/arm64/baseline/vonk-build-egress \
+          prebuilt/arm64/baseline/vonk-monitor \
           prebuilt/arm64/baseline/vonk-runtime-probe \
           prebuilt/arm64/candidate.json \
           prebuilt/arm64/candidate/vonk-agent \
           prebuilt/arm64/candidate/vonk-agent-helper \
           prebuilt/arm64/candidate/vonk-build-egress \
+          prebuilt/arm64/candidate/vonk-monitor \
           prebuilt/arm64/candidate/vonk-runtime-probe)
         actual=$(find prebuilt -type f -print | LC_ALL=C sort)
         test "$actual" = "$expected"

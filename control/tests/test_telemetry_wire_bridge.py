@@ -56,7 +56,6 @@ def telemetry_wire_probe() -> Path:
 def _sample(observed_at: str, *, metric_value: object = 25.0) -> dict[str, object]:
     return {
         "boot_id": "00000000-0000-4000-8000-000000000001",
-        "sequence": 1,
         "observed_at": observed_at,
         "cpu_utilization_percent": 12.5,
         "load_average_1m": 1.25,

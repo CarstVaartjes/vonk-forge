@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError},
+    client::AgentHttpClient,
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
@@ -26,10 +26,6 @@ use vonk_agent::{
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
-    telemetry::{
-        SystemFileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
-        TelemetrySchedule, read_boot_id,
-    },
 };
 
 use vonk_agent::CLAIM_CAPABILITIES;
@@ -150,16 +146,15 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     rotate_if_due(config, &client).await?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
-    let (_client_updates, telemetry_client) = tokio::sync::watch::channel(client.clone());
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
-    let telemetry = run_telemetry_lane(
-        config.data_dir.clone(),
-        telemetry_client,
-        config.poll_min_seconds,
-        config.poll_max_seconds,
-    );
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
-    match supervise_lanes_with_rotation(control, telemetry, rotation, tokio::signal::ctrl_c()).await
+    match supervise_lanes_with_rotation(
+        control,
+        std::future::pending::<()>(),
+        rotation,
+        tokio::signal::ctrl_c(),
+    )
+    .await
     {
         LaneExitWithRotation::Control(result) => result,
         LaneExitWithRotation::Rotation(Ok(Ok(()))) => Ok(()),
@@ -181,10 +176,10 @@ async fn run_control_lane(
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
     let mut observation_failures = 0_u32;
-    let mut next_inventory = tokio::time::Instant::now();
+    let mut inventory_needed = true;
     let mut readiness_published = false;
     loop {
-        if tokio::time::Instant::now() >= next_inventory {
+        if inventory_needed {
             let inventory = InventoryCollector {
                 runner: &runner,
                 meminfo_path: Path::new("/proc/meminfo"),
@@ -197,8 +192,7 @@ async fn run_control_lane(
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
                     failures = 0;
-                    next_inventory =
-                        tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+                    inventory_needed = false;
                 }
                 Err(error) if error.retryable() => {
                     failures = failures.saturating_add(1);
@@ -304,6 +298,7 @@ async fn run_control_lane(
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
                 failures = failures.saturating_add(1);
+                inventory_needed = true;
                 let entropy = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
                 tokio::time::sleep(backoff_delay(
                     failures,
@@ -333,124 +328,6 @@ async fn run_rotation_lane(
             Err(error) => return Err(error),
         }
         tokio::time::sleep(interval).await;
-    }
-}
-
-async fn run_telemetry_lane(
-    data_dir: PathBuf,
-    clients: tokio::sync::watch::Receiver<AgentHttpClient>,
-    poll_min_seconds: u64,
-    poll_max_seconds: u64,
-) {
-    let boot_id_path = PathBuf::from("/proc/sys/kernel/random/boot_id");
-    let boot_id = loop {
-        match read_boot_id(&boot_id_path) {
-            Ok(boot_id) => break boot_id,
-            Err(error) => {
-                eprintln!("telemetry boot identity unavailable: {error}");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-        }
-    };
-    let collector = TelemetryCollector::new(
-        SystemProcessRunner,
-        SystemFileSystemProvider,
-        TelemetryPaths {
-            stat: PathBuf::from("/proc/stat"),
-            loadavg: PathBuf::from("/proc/loadavg"),
-            uptime: PathBuf::from("/proc/uptime"),
-            meminfo: PathBuf::from("/proc/meminfo"),
-            net_dev: PathBuf::from("/proc/net/dev"),
-            store: data_dir,
-            sys_block: PathBuf::from("/sys/block"),
-            sys_class_net: PathBuf::from("/sys/class/net"),
-            thermal: PathBuf::from("/sys/class/thermal"),
-            powercap: PathBuf::from("/sys/class/powercap"),
-        },
-        boot_id,
-    );
-    let mut collector = match collector {
-        Ok(collector) => collector,
-        Err(error) => {
-            eprintln!("telemetry durable state unavailable: {error}");
-            return;
-        }
-    };
-    let mut previous = None;
-    let mut queue = TelemetryQueue::new();
-    let mut schedule = TelemetrySchedule::new(tokio::time::Instant::now());
-    let mut send_failures = 0_u32;
-
-    loop {
-        tokio::time::sleep_until(schedule.next_collection()).await;
-        let collection_started = tokio::time::Instant::now();
-        let prior = previous.take();
-        let collection = tokio::task::spawn_blocking(move || {
-            let result = collector.sample(prior.as_ref());
-            (collector, prior, result)
-        })
-        .await;
-        let Ok((returned_collector, prior, result)) = collection else {
-            eprintln!("telemetry collector task stopped unexpectedly");
-            return;
-        };
-        collector = returned_collector;
-        match result {
-            Ok(sample) => {
-                previous = Some(sample.clone());
-                queue.push(sample);
-            }
-            Err(error) => {
-                previous = prior;
-                eprintln!("telemetry sample unavailable: {error}");
-            }
-        }
-        let now = tokio::time::Instant::now();
-        schedule.collected(collection_started, now);
-
-        if !schedule.send_due(now, !queue.is_empty()) {
-            continue;
-        }
-        let batch = queue.batch();
-        let client = clients.borrow().clone();
-        match client.report_telemetry(&batch).await {
-            Ok(()) => {
-                queue
-                    .acknowledge_prefix(batch.len())
-                    .expect("reported telemetry prefix exists");
-                send_failures = 0;
-                schedule.send_succeeded(tokio::time::Instant::now());
-            }
-            Err(error) => {
-                send_failures = send_failures.saturating_add(1);
-                let entropy = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |duration| duration.subsec_nanos() as u64);
-                let retry_after = telemetry_retry_after(
-                    &error,
-                    send_failures,
-                    entropy,
-                    poll_min_seconds,
-                    poll_max_seconds,
-                );
-                schedule.send_failed(tokio::time::Instant::now(), retry_after);
-                eprintln!("telemetry report deferred: {error}");
-            }
-        }
-    }
-}
-
-fn telemetry_retry_after(
-    error: &ClientError,
-    failures: u32,
-    entropy: u64,
-    poll_min_seconds: u64,
-    poll_max_seconds: u64,
-) -> std::time::Duration {
-    if error.retryable() {
-        backoff_delay(failures, entropy, poll_min_seconds, poll_max_seconds)
-    } else {
-        std::time::Duration::from_secs(60)
     }
 }
 
@@ -526,7 +403,7 @@ fn claim_wait_seconds(
 mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, exact_observation_disposition,
-        supervise_lanes_with_rotation, telemetry_retry_after,
+        supervise_lanes_with_rotation,
     };
     use std::{
         future,
@@ -578,33 +455,6 @@ mod tests {
     fn first_claim_returns_immediately_to_publish_controller_readiness() {
         assert_eq!(claim_wait_seconds(60, 0, false), 0);
         assert_eq!(claim_wait_seconds(60, 1, false), 0);
-    }
-
-    #[tokio::test]
-    async fn retryable_telemetry_failure_schedules_retry_without_delaying_claim_lane() {
-        let retry_after = telemetry_retry_after(&ClientError::Retryable, 1, 0, 5, 60);
-        assert!(retry_after >= std::time::Duration::from_secs(5));
-        let telemetry_lane = async move {
-            tokio::time::sleep(retry_after).await;
-        };
-        let claim_lane = future::ready("claim attempted");
-
-        let outcome = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            supervise_lanes_with_rotation(
-                claim_lane,
-                telemetry_lane,
-                tokio::spawn(future::pending::<Result<(), &'static str>>()),
-                future::pending::<()>(),
-            ),
-        )
-        .await
-        .expect("claim lane was gated by telemetry retry state");
-
-        assert!(matches!(
-            outcome,
-            LaneExitWithRotation::Control("claim attempted")
-        ));
     }
 
     #[tokio::test]
