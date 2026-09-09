@@ -7,7 +7,7 @@ from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_control import availability_production, route_runtime
+from vonk_control import api, availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
@@ -102,6 +102,7 @@ def test_production_app_recipe_download_auth_and_status(
     signing_key = tmp_path / "token-signing-key"
     signing_key.write_bytes(b"production-api-test-signing-key-32-bytes")
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
+    monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "1800")
     monkeypatch.setenv("VONK_AGENT_RUNTIME", "disabled")
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "127.0.0.1/32")
     monkeypatch.setenv("VONK_DATABASE_URL", database_url)
@@ -135,7 +136,17 @@ def test_production_app_recipe_download_auth_and_status(
         return original_builder(*args, **kwargs)
     monkeypatch.setattr(availability_production, "build_recipe_image_availability", image_only_builder)
 
+    lifecycles = []
+    original_lifecycle = api.RecipeOperationService
+
+    class CapturedLifecycle(original_lifecycle):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            lifecycles.append(self)
+
+    monkeypatch.setattr(api, "RecipeOperationService", CapturedLifecycle)
     app = production_app()
+    assert [item._distributed_start_timeout_seconds for item in lifecycles] == [1800]
     codec = TokenCodec(signing_key.read_bytes())
     operator = codec.issue(Actor("operator", "operator"), ttl_seconds=3600, now=int(time.time()))
     viewer = codec.issue(Actor("viewer", "viewer"), ttl_seconds=3600, now=int(time.time()))

@@ -249,6 +249,7 @@ def assemble_production_worker(
     artifact_job_retention_seconds: int,
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
+    distributed_start_timeout_seconds: int = 60,
     model_cache=None,
     background_services: Sequence[Callable[[], object]] = (),
     background_closers: Sequence[Callable[[], object]] = (),
@@ -333,6 +334,7 @@ def assemble_production_worker(
         route_publications=recipe_routes,
         builds=recipe_builds,
         mappings=ClusterMappingService(sessions),
+        distributed_start_timeout_seconds=distributed_start_timeout_seconds,
     )
     run_switch_operations = RunSwitchOperationService(
         sessions,
@@ -590,6 +592,7 @@ if __name__ == "__main__":
         sessions, channel=os.environ.get("VONK_INSTALL_CHANNEL", "stable"), clock=clock,
     )
     worker = assemble_production_worker(
+        distributed_start_timeout_seconds=settings.distributed_start_timeout_seconds,
         jobs=jobs,
         sessions=sessions,
         agent_jobs=agent_jobs,

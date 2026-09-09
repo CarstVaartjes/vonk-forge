@@ -25,6 +25,7 @@ x-api-environment: &api-environment
   # no direct network path to raw.githubusercontent.com.
   VONK_RECIPE_LIBRARY_RAW_URL: http://caddy:8085
   VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-900}
+  VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: ${VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-60}
   VONK_AGENT_RELEASE_API_URL: http://caddy:8084
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
@@ -44,6 +45,7 @@ x-api-environment: &api-environment
   VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
 
 x-worker-environment: &worker-environment
+  VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: ${VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-60}
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
   VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
