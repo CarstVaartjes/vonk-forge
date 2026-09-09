@@ -445,12 +445,16 @@ class AgentJobService:
             if (
                 capabilities is not None
                 and AgentOperation.AGENT_UPGRADE.value in capabilities
+                and runtime_identity.package_activation is not None
             ):
+                receipt = runtime_identity.package_activation
                 upgrade_id = session.scalar(
                     select(StoredOperation.id)
                     .where(
                         StoredOperation.node_id == node_id,
                         StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                        StoredOperation.payload["rollback"]["attempt_nonce"].as_string()
+                        == receipt.attempt_nonce,
                         StoredOperation.state.in_(
                             {"queued", "running", "waiting-for-operator"}
                         ),

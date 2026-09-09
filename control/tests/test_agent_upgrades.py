@@ -1841,3 +1841,31 @@ def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path
         assert attempt.result["package_activation"] == receipt
         assert attempt.state == "failed"
     assert _operation_nodes(sessions, job.id) == [NODE_A]
+
+
+def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(tmp_path):
+    sessions, operations, upgrades, old_job = _rollout(tmp_path, "older-paused")
+    old_claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    with sessions.begin() as session:
+        old = session.get(AgentOperation, old_claim.operation_id)
+        old.state = "waiting-for-operator"
+        old.created_at -= timedelta(minutes=1)
+        payload = json.loads(json.dumps(old.payload))
+        payload["rollback"]["attempt_nonce"] = "0" * 64
+        old.payload = payload
+        session.get(Job, old_job.id).state = "waiting-for-operator"
+    plan = upgrades.preview(None, PACKAGE, strategy="one-at-a-time")
+    current = upgrades.apply(
+        None, PACKAGE, plan_digest=plan.plan_digest, actor="admin",
+        request_id=str(uuid.uuid4()), strategy="one-at-a-time",
+    )
+    claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert operations.claim(
+        NODE_A, "serial-a", 30,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity=NEW_IDENTITY,
+    ) is None
+    with sessions() as session:
+        assert session.get(AgentOperation, claim.operation_id).state == "succeeded"
+        assert session.get(AgentOperation, old_claim.operation_id).state == "waiting-for-operator"
+    assert set(_operation_nodes(sessions, current.id)) == {NODE_A, NODE_B}
