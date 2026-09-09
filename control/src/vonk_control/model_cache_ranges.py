@@ -20,8 +20,17 @@ class RangeResponseError(ValueError):
     """A range response does not describe the requested object bytes."""
 
 
+class RangeTruncatedError(httpx.RemoteProtocolError):
+    """A valid range ended early; retry may resume its retained prefix."""
+
+
 class _RangeIgnored(Exception):
     pass
+
+
+def _reject_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise RangeResponseError("range cache path must not be a symlink")
 
 
 def _segments(target: Path, expected_bytes: int, workers: int):
@@ -35,7 +44,10 @@ def _segments(target: Path, expected_bytes: int, workers: int):
 
 def range_partial_bytes(target: Path, expected_bytes: int, *, workers: int = 4) -> int:
     """Count reusable bytes, without counting the contiguous prefix twice."""
+    _reject_symlink(target)
     prefix = min(target.stat().st_size, expected_bytes) if target.exists() else 0
+    for _, _, path in _segments(target, expected_bytes, workers):
+        _reject_symlink(path)
     return sum(
         max(
             min(path.stat().st_size, end - start + 1) if path.exists() else 0,
@@ -65,9 +77,14 @@ def download_ranges(
     Responses must be streaming and are always closed here. Progress is an
     absolute byte count and the callback is serialized across range threads.
     Interrupted/truncated transfers retain valid segment prefixes for retry.
+    Assembly temporarily needs space for another full object alongside segments.
     The caller must serialize attempts for this target and use stable workers.
     """
+    _reject_symlink(target)
     segments = list(_segments(target, expected_bytes, workers))
+    for _, _, path in segments:
+        _reject_symlink(path)
+    _reject_symlink(target.with_name(f"{target.name}.range-assembly"))
     target.parent.mkdir(parents=True, exist_ok=True)
     counts: dict[int, int] = {}
     # Reuse any existing sequential prefix without changing its fallback file.
@@ -131,7 +148,7 @@ def download_ranges(
             remaining = end - offset + 1
             with path.open("ab") as output:
                 try:
-                    for chunk in response.iter_bytes(chunk_size=1024 * 1024):
+                    for chunk in response.iter_bytes():
                         if interrupted():
                             raise InterruptedError("range transfer interrupted")
                         if len(chunk) > remaining:
@@ -145,7 +162,7 @@ def download_ranges(
                             counts[start] += len(chunk)
                             on_progress(sum(counts.values()))
                     if remaining:
-                        raise RangeResponseError(
+                        raise RangeTruncatedError(
                             "range response ended before requested bytes arrived"
                         )
                 finally:

@@ -4,6 +4,7 @@ import httpx
 import pytest
 from vonk_control.model_cache_ranges import (
     RangeResponseError,
+    RangeTruncatedError,
     download_ranges,
     range_partial_bytes,
 )
@@ -65,7 +66,7 @@ def test_ignored_ranges_preserve_sequential_partial(tmp_path):
 )
 def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
     target = tmp_path / "model.part"
-    with pytest.raises(RangeResponseError):
+    with pytest.raises((RangeResponseError, RangeTruncatedError)):
         download_ranges(
             target,
             10,
@@ -79,7 +80,7 @@ def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
 
 def test_truncated_response_resumes_its_valid_prefix(tmp_path):
     target = tmp_path / "model.part"
-    with pytest.raises(RangeResponseError):
+    with pytest.raises((RangeResponseError, RangeTruncatedError)):
         download_ranges(
             target,
             10,
@@ -105,6 +106,19 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
     data = b"a" * (3 * 1024 * 1024)
     stop = Event()
 
+    class Chunks(httpx.SyncByteStream):
+        def __iter__(self):
+            for offset in range(0, len(data), 1024 * 1024):
+                yield data[offset : offset + 1024 * 1024]
+
+    def streaming(start, end):
+        return httpx.Response(
+            206,
+            stream=Chunks(),
+            headers={"content-range": f"bytes {start}-{end}/{len(data)}"},
+            request=httpx.Request("GET", "https://example.com/model"),
+        )
+
     def progress(count):
         if count:
             stop.set()
@@ -113,7 +127,7 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
         download_ranges(
             target,
             len(data),
-            lambda s, e: response(s, e, len(data), data[s : e + 1]),
+            streaming,
             stop,
             progress,
             workers=1,
@@ -136,7 +150,7 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
 def test_oversize_after_complete_prefix_cannot_be_reused(tmp_path):
     target = tmp_path / "model.part"
     size = 1024 * 1024
-    with pytest.raises(RangeResponseError):
+    with pytest.raises((RangeResponseError, RangeTruncatedError)):
         download_ranges(
             target,
             size,
@@ -160,3 +174,21 @@ def test_precancelled_download_never_opens_http(tmp_path):
         download_ranges(
             tmp_path / "model.part", 100, unexpected, stop, lambda value: None
         )
+
+
+@pytest.mark.parametrize(
+    "name", ["model.part", "model.part.range-0-24", "model.part.range-assembly"]
+)
+def test_symlink_cache_paths_cannot_touch_external_file(tmp_path, name):
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"keep")
+    (tmp_path / name).symlink_to(outside)
+    with pytest.raises(RangeResponseError, match="symlink"):
+        download_ranges(
+            tmp_path / "model.part",
+            100,
+            lambda s, e: response(s, e, 100, b"a" * (e - s + 1)),
+            Event(),
+            lambda value: None,
+        )
+    assert outside.read_bytes() == b"keep"
