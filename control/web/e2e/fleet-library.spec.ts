@@ -1126,6 +1126,40 @@ test("Recipe Make available uses durable aggregate progress, access resume, and 
   await expect(availability.locator('[data-member-kind="runtime-image"]')).toContainText("Runtime image");
 });
 
+test("Recipe progress keeps updating after image failure and recovers from a polling error", async ({page}) => {
+  const progress = (bytes: number): components["schemas"]["OperationProgress"] => ({phase: "download", completed_bytes: bytes, total_bytes: 100, total_bytes_known: true});
+  const operation = (bytes: number): components["schemas"]["RecipeImageAvailabilityResponse"] => ({
+    schema_version: 2, id: "continuing-download", request_id: "prepare-request", kind: "recipe.image.availability.v2", state: "failed", attempt: 1,
+    recipe_revision_id: fullLibraryDetail.recipe.recipe_revision_id, recipe_content_sha256: "a".repeat(64),
+    progress: progress(bytes), created_at: "2026-09-09T08:00:00Z", updated_at: "2026-09-09T08:00:01Z",
+    children: [
+      {kind: "model-cache", id: "download-child", model_content_digests: [], state: bytes === 100 ? "succeeded" : "running", progress: progress(bytes)},
+      {kind: "runtime-image", id: "failed-image", model_content_digests: [], state: "failed", progress: {...progress(0), phase: "build"}},
+    ],
+  });
+  let polls = 0;
+  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 1, operations: [operation(40)]}}));
+  await page.route("**/api/v1/library/recipe-image-availability/continuing-download", route => {
+    polls++;
+    return polls === 1 ? route.fulfill({status: 503, json: {detail: "Temporarily unavailable"}}) : route.fulfill({json: operation(polls === 2 ? 75 : 100)});
+  });
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
+  const availability = page.getByRole("region", {name: "Make Recipe available"});
+  const model = availability.locator('[data-member-kind="model-cache"]');
+  await expect(model).toContainText("40 B / 100 B");
+  await expect(availability.getByRole("status")).toContainText("progress updates automatically");
+  await expect(availability.getByText("Availability status could not be loaded.")).toBeVisible();
+  await expect(model).toContainText("75 B / 100 B");
+  await expect(availability.getByText("Availability status could not be loaded.")).not.toBeVisible();
+  await expect(model).toContainText("100 B / 100 B");
+  await expect(model).toContainText("Succeeded");
+  await expect(availability.getByRole("status")).not.toBeVisible();
+  await page.waitForTimeout(1_500);
+  expect(polls).toBe(3);
+  expect(browserProblems.get(page)).toEqual(["error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"]);
+  browserProblems.set(page, []);
+});
+
 test("Library pairs exact model selection with matching recipes and downloads an unlinked Model", async ({page}, testInfo) => {
   const linked = librarySnapshot.models.find(model => model.recipes.length > 0)!;
   const unlinked = librarySnapshot.models.find(model => model.recipes.length === 0)!;

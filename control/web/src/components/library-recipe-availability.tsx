@@ -11,6 +11,8 @@ export function LibraryRecipeAvailability({api, detail, onBusyChange}: {api: Con
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
   const modelAccessUrl = detail.model_documents[0]?.model_document.provenance.source_url;
+  const activeChildren = operation?.children?.some(child => !terminal.has(child.state)) ?? false;
+  const shouldPoll = Boolean(operation && (!terminal.has(operation.state) || activeChildren));
   const presentation = useMemo(() => operation ? recipeAvailabilityPresentation(operation) : undefined, [operation]);
 
   async function load(signal?: AbortSignal) {
@@ -35,15 +37,34 @@ export function LibraryRecipeAvailability({api, detail, onBusyChange}: {api: Con
   }, [api, revisionId]);
 
   useEffect(() => {
-    onBusyChange?.(Boolean(operation && !terminal.has(operation.state)));
+    onBusyChange?.(shouldPoll);
     return () => onBusyChange?.(false);
-  }, [onBusyChange, operation]);
+  }, [onBusyChange, shouldPoll]);
 
   useEffect(() => {
-    if (!operation || terminal.has(operation.state) || !api.recipeAvailabilityOperation) return;
-    const timer = window.setTimeout(() => void api.recipeAvailabilityOperation!(operation.id).then(setOperation).catch(setError), 1_200);
-    return () => window.clearTimeout(timer);
-  }, [api, operation]);
+    if (!operation || !shouldPoll || !api.recipeAvailabilityOperation) return;
+    const controller = new AbortController();
+    let timer: number;
+    async function poll() {
+      try {
+        const updated = await api.recipeAvailabilityOperation(operation!.id, controller.signal);
+        if (!controller.signal.aborted) {
+          setOperation(updated);
+          setError(undefined);
+        }
+      } catch (value) {
+        if (!controller.signal.aborted) {
+          setError(value);
+          timer = window.setTimeout(() => void poll(), 1_200);
+        }
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 1_200);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [api, operation, shouldPoll]);
 
   if (!api.recipeAvailabilityStart || !api.recipeAvailabilityList) return null;
 
@@ -90,6 +111,7 @@ export function LibraryRecipeAvailability({api, detail, onBusyChange}: {api: Con
     {loading && !presentation && <p role="status">Checking durable availability…</p>}
     {Boolean(error) && <LibraryRequestError error={error} title="Availability status could not be loaded." onRetry={() => void load()} retryLabel="Refresh availability status"/>}
     {!presentation && !loading && !error && <button type="button" className="button" onClick={() => void start(false)}>Make available</button>}
+    {operation && terminal.has(operation.state) && activeChildren && <p role="status">Preparation needs attention. Remaining downloads and image preparation continue below; progress updates automatically.</p>}
     {presentation && <LibraryAvailabilityOperation operation={presentation} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={member => void checkAccess(member)} onForce={() => void start(true)} onMakeAvailable={() => void start(false)} onRetry={() => void retry()}/>} 
   </section>;
 }

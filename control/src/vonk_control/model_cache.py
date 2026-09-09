@@ -993,6 +993,7 @@ class ModelCacheService:
         self._background_operations: dict[str, dict[str, object]] = {}
         self._digest_events: dict[str, threading.Event] = {}
         self._hf_cooldown_until: datetime | None = None
+        self._progress_checkpoint_at: dict[str, datetime] = {}
 
     def close(self) -> None:
         """Stop the Controller-wide transfer pool during service shutdown."""
@@ -1005,6 +1006,7 @@ class ModelCacheService:
         self._upstream_executor.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._advance_background_operations()
+            self._progress_checkpoint_at.clear()
 
     @property
     def root(self) -> Path:
@@ -1934,6 +1936,12 @@ class ModelCacheService:
         if offset > spec.expected_bytes:
             part.unlink(missing_ok=True)
             offset = 0
+        if offset:
+            # A previous disk error or abrupt exit can leave readable bytes
+            # beyond the last successful sync. Make them durable before using
+            # their length for resume or publishing an already-complete file.
+            with part.open("r+b") as retained:
+                os.fsync(retained.fileno())
         received = offset
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             self._publish_object(spec, part)
@@ -1946,63 +1954,65 @@ class ModelCacheService:
         stream, effective_offset, close = self._open_source(spec, offset)
         if effective_offset != offset:
             received = effective_offset
+        durable_received = received
         try:
             mode = "ab" if effective_offset else "wb"
             with part.open(mode) as output:
-                while True:
-                    if self._closed.is_set():
-                        self._checkpoint_artifact(
-                            spec,
-                            operation_id=operation_id,
-                            set_digest=set_digest,
-                            actual_bytes=received,
-                            state="partial",
-                            completed_artifacts=completed_artifacts,
-                        )
-                        raise InterruptedError("model cache service is shutting down")
-                    if hasattr(stream, "read"):
-                        chunk = stream.read(_CHUNK_BYTES)
-                    else:
-                        chunk = next(stream, b"")
-                    if not chunk:
-                        break
-                    if not isinstance(chunk, bytes):
-                        chunk = bytes(chunk)
-                    received += len(chunk)
-                    if received > spec.expected_bytes:
-                        raise ModelCacheStorageError(
-                            "model_cache.source_size_mismatch",
-                            "source returned more bytes than the immutable artifact pin",
-                            recovery="download_again",
-                        )
-                    output.write(chunk)
+                synced_at = time.monotonic()
+
+                def sync_received() -> None:
+                    nonlocal durable_received, synced_at
                     output.flush()
                     os.fsync(output.fileno())
-                    if interrupt_after_bytes is not None and received >= interrupt_after_bytes:
-                        self._checkpoint_artifact(
-                            spec,
-                            operation_id=operation_id,
-                            set_digest=set_digest,
-                            actual_bytes=received,
-                            state="partial",
-                            completed_artifacts=completed_artifacts,
-                        )
-                        raise InterruptedError("download interrupted at a durable checkpoint")
-                    self._checkpoint_artifact(
-                        spec,
-                        operation_id=operation_id,
-                        set_digest=set_digest,
-                        actual_bytes=received,
-                        state="partial",
-                        completed_artifacts=completed_artifacts,
-                        force_progress=False,
-                    )
+                    durable_received = received
+                    synced_at = time.monotonic()
+
+                try:
+                    while True:
+                        if self._closed.is_set():
+                            raise InterruptedError("model cache service is shutting down")
+                        if hasattr(stream, "read"):
+                            chunk = stream.read(_CHUNK_BYTES)
+                        else:
+                            chunk = next(stream, b"")
+                        if not chunk:
+                            break
+                        if not isinstance(chunk, bytes):
+                            chunk = bytes(chunk)
+                        next_received = received + len(chunk)
+                        if next_received > spec.expected_bytes:
+                            raise ModelCacheStorageError(
+                                "model_cache.source_size_mismatch",
+                                "source returned more bytes than the immutable artifact pin",
+                                recovery="download_again",
+                            )
+                        output.write(chunk)
+                        received = next_received
+                        if interrupt_after_bytes is not None and received >= interrupt_after_bytes:
+                            raise InterruptedError("download interrupted at a durable checkpoint")
+                        # Keep reading individual network fragments so shutdown is
+                        # observed promptly; batch only durable disk/DB work. The
+                        # file object's bounded buffer avoids another model buffer.
+                        if (received - durable_received >= _CHUNK_BYTES
+                            or time.monotonic() - synced_at >= 1):
+                            sync_received()
+                            self._checkpoint_artifact(
+                                spec, operation_id=operation_id, set_digest=set_digest,
+                                actual_bytes=durable_received, state="partial",
+                                completed_artifacts=completed_artifacts, force_progress=False,
+                            )
+                except (OSError, httpx.HTTPError, ModelCacheError):
+                    # Preserve even a sub-MiB tail when a source fails. Never
+                    # publish its byte count until the sync has succeeded.
+                    if received > durable_received:
+                        sync_received()
+                    raise
+                if received > durable_received:
+                    sync_received()
         except (OSError, httpx.HTTPError, ModelCacheError):
-            # Flush the last received counter when a stream fails between the
-            # regular one-second samples; resumable bytes are already on disk.
             self._checkpoint_artifact(
                 spec, operation_id=operation_id, set_digest=set_digest,
-                actual_bytes=part.stat().st_size, state="partial",
+                actual_bytes=durable_received, state="partial",
                 completed_artifacts=completed_artifacts,
             )
             raise
@@ -2306,81 +2316,93 @@ class ModelCacheService:
         force_progress: bool = True,
     ) -> None:
         now = self._clock()
-        with self._lock, self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
-            if operation is not None and not force_progress:
-                prior = _validated_operation_progress(operation).measurement
-                if (prior.phase == "download" and prior.observed_at is not None
-                    and 0 <= (now - datetime.fromisoformat(prior.observed_at)).total_seconds() < 1):
+        with self._lock:
+            if not force_progress:
+                last = self._progress_checkpoint_at.get(operation_id)
+                if last is not None and 0 <= (now - last).total_seconds() < 1:
                     return
-            artifact = session.get(ModelCacheArtifact, spec.sha256)
-            if artifact is not None:
-                artifact.actual_bytes = actual_bytes
-                artifact.state = "partial" if state == "verifying" else state
-                artifact.updated_at = now
-            if operation is not None:
-                payload = _validated_operation_payload(operation)
-                manifest = ArtifactSetManifest.from_document(payload["manifest"])
-                raw_transfer = payload.get("transfer")
-                transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
-                raw_artifacts = transfer.get("artifacts")
-                artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
-                raw_entry = artifacts.get(spec.sha256)
-                entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
-                baseline = entry.get("baseline_bytes")
-                baseline = baseline if type(baseline) is int and baseline >= 0 else 0
-                previous_received = entry.get("received_bytes")
-                previous_received = (
-                    previous_received
-                    if type(previous_received) is int and previous_received >= 0
-                    else 0
-                )
-                entry["baseline_bytes"] = baseline
-                entry["received_bytes"] = max(
-                    previous_received, max(0, actual_bytes - baseline)
-                )
-                artifacts[spec.sha256] = entry
-                transfer["schema_version"] = SCHEMA_VERSION
-                transfer["artifacts"] = artifacts
-                total = transfer.get("total_bytes")
-                total = total if type(total) is int and total >= 0 else None
-                received = sum(
-                    value.get("received_bytes", 0)
-                    for value in artifacts.values()
-                    if isinstance(value, Mapping)
-                    and type(value.get("received_bytes")) is int
-                    and value.get("received_bytes", 0) >= 0
-                )
-                payload["transfer"] = transfer
-                claim = payload.get("claim")
-                if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
-                    payload["claim"] = dict(claim) | {
-                        "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
-                    }
-                operation.payload = _write_operation_payload(operation.kind, payload)
-                old_progress = _validated_operation_progress(operation)
-                old_downloaded = old_progress.downloaded_bytes
-                old_completed = old_progress.completed_artifacts
-                # A partial file is an active download checkpoint. Only an
-                # interrupted operation should enter the resumable partial state.
-                operation.state = "running"
-                operation.progress = self._progress(
-                    manifest,
-                    previous=old_progress.model_dump(mode="json"),
-                    phase="downloading" if state == "partial" else "verifying",
-                    completed_artifacts=max(old_completed, completed_artifacts),
-                    downloaded_bytes=max(old_downloaded, received),
-                    expected_bytes=total,
-                    current_artifact_key=spec.key,
-                    transfer=transfer,
-                )
-                operation.current_artifact_key = spec.key
-                operation.updated_at = now
-            row = session.get(ModelCacheSet, set_digest)
-            if row is not None:
-                row.state = "downloading" if state == "partial" else "verifying"
-                row.verified_bytes = self._verified_bytes(session, set_digest)
-                row.updated_at = now
+            # Bound this process-local fast path to the current sampling window.
+            self._progress_checkpoint_at = {
+                key: value for key, value in self._progress_checkpoint_at.items()
+                if 0 <= (now - value).total_seconds() < 1
+            }
+            with self._session(write=True) as session:
+                operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                if operation is not None and not force_progress:
+                    prior = _validated_operation_progress(operation).measurement
+                    if (prior.phase == "download" and prior.observed_at is not None
+                        and 0 <= (now - datetime.fromisoformat(prior.observed_at)).total_seconds() < 1):
+                        self._progress_checkpoint_at[operation_id] = now
+                        return
+                artifact = session.get(ModelCacheArtifact, spec.sha256)
+                if artifact is not None:
+                    artifact.actual_bytes = actual_bytes
+                    artifact.state = "partial" if state == "verifying" else state
+                    artifact.updated_at = now
+                if operation is not None:
+                    payload = _validated_operation_payload(operation)
+                    manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                    raw_transfer = payload.get("transfer")
+                    transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
+                    raw_artifacts = transfer.get("artifacts")
+                    artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
+                    raw_entry = artifacts.get(spec.sha256)
+                    entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
+                    baseline = entry.get("baseline_bytes")
+                    baseline = baseline if type(baseline) is int and baseline >= 0 else 0
+                    previous_received = entry.get("received_bytes")
+                    previous_received = (
+                        previous_received
+                        if type(previous_received) is int and previous_received >= 0
+                        else 0
+                    )
+                    entry["baseline_bytes"] = baseline
+                    entry["received_bytes"] = max(
+                        previous_received, max(0, actual_bytes - baseline)
+                    )
+                    artifacts[spec.sha256] = entry
+                    transfer["schema_version"] = SCHEMA_VERSION
+                    transfer["artifacts"] = artifacts
+                    total = transfer.get("total_bytes")
+                    total = total if type(total) is int and total >= 0 else None
+                    received = sum(
+                        value.get("received_bytes", 0)
+                        for value in artifacts.values()
+                        if isinstance(value, Mapping)
+                        and type(value.get("received_bytes")) is int
+                        and value.get("received_bytes", 0) >= 0
+                    )
+                    payload["transfer"] = transfer
+                    claim = payload.get("claim")
+                    if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
+                        payload["claim"] = dict(claim) | {
+                            "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
+                        }
+                    operation.payload = _write_operation_payload(operation.kind, payload)
+                    old_progress = _validated_operation_progress(operation)
+                    old_downloaded = old_progress.downloaded_bytes
+                    old_completed = old_progress.completed_artifacts
+                    # A partial file is an active download checkpoint. Only an
+                    # interrupted operation should enter the resumable partial state.
+                    operation.state = "running"
+                    operation.progress = self._progress(
+                        manifest,
+                        previous=old_progress.model_dump(mode="json"),
+                        phase="downloading" if state == "partial" else "verifying",
+                        completed_artifacts=max(old_completed, completed_artifacts),
+                        downloaded_bytes=max(old_downloaded, received),
+                        expected_bytes=total,
+                        current_artifact_key=spec.key,
+                        transfer=transfer,
+                    )
+                    operation.current_artifact_key = spec.key
+                    operation.updated_at = now
+                row = session.get(ModelCacheSet, set_digest)
+                if row is not None:
+                    row.state = "downloading" if state == "partial" else "verifying"
+                    row.verified_bytes = self._verified_bytes(session, set_digest)
+                    row.updated_at = now
+            self._progress_checkpoint_at[operation_id] = now
 
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
         now = self._clock()

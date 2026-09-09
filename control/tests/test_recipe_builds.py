@@ -20,12 +20,14 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
     AgentOperation,
     Base,
@@ -123,7 +125,6 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 self_test_passed=True,
                 capabilities=[
                     "recipe.build.v1",
-                    "recipe.build.egress-proxy.v1",
                     "recipe.image.import.v1",
                 ],
                 last_seen_at=now,
@@ -861,14 +862,44 @@ def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
         "hosts": ["pypi.org"],
     }
 
+    # Job claims report executable operations; probed host capabilities are
+    # recorded separately by inventory. Exercise the contact write that happens
+    # every poll before planning another public-network build.
     with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.capabilities = ["recipe.build.v1", "recipe.image.import.v1"]
-    with pytest.raises(RecipeBuildError, match="hostname-aware build egress"):
-        RecipeBuildService(sessions, bundles=bundles).plan(
-            revision.id, node_id, now=now
+        session.add(
+            AgentCertificate(
+                serial="builder-serial",
+                node_id=node_id,
+                not_before=now - timedelta(seconds=1),
+                not_after=now + timedelta(hours=1),
+                fingerprint="builder-fingerprint",
+            )
         )
+    assert (
+        AgentJobService(sessions, clock=lambda: now).claim(
+            node_id,
+            "builder-serial",
+            30,
+            capabilities=[
+                "agent.runtime.rust.v1",
+                "recipe.build.v1",
+                "recipe.image.import.v1",
+            ],
+            runtime_identity={
+                "architecture": "linux-arm64",
+                "semantic_version": "1.2.3",
+                "build_digest": "sha256:" + "a" * 64,
+                "binary_digest": "1" * 64,
+                "self_test_passed": True,
+                "observation_receipt_public_key": "d" * 64,
+            },
+        )
+        is None
+    )
+    after_claim = RecipeBuildService(sessions, bundles=bundles).plan(
+        revision.id, node_id, now=now
+    )
+    assert after_claim.build_input_sha256 == plan.build_input_sha256
 
 
 def test_public_build_rejects_stale_inventory_without_egress_capability(
