@@ -122,6 +122,24 @@ http://:8083 {
 	respond 404
 }
 
+# Relay only immutable raw files from the reviewed public recipe repository.
+# The commit segment is a full SHA-1 and the file segment is limited to the
+# generated catalog index or a generated recipe package.
+http://:8085 {
+	@recipe_library_raw {
+		method GET
+		path_regexp recipe_library_raw ^/CarstVaartjes/vonk-forge-recipes/[0-9a-f]{40}/(catalog-index\.json|packages/[a-z0-9][a-z0-9-]{1,62}\.tar\.gz)$
+	}
+	handle @recipe_library_raw {
+		reverse_proxy https://raw.githubusercontent.com {
+			header_up Host raw.githubusercontent.com
+			header_up -Authorization
+			header_up -Cookie
+		}
+	}
+	respond 404
+}
+
 # Relay only the immutable documents needed to select the current signed agent
 # package. The package URL returned to Sparks remains the public HTTPS origin.
 http://:8084 {
@@ -129,7 +147,18 @@ http://:8084 {
 		method GET
 		path /artifacts/dev/current.manifest /artifacts/stable/current.manifest /artifacts/dev/releases/*/release.json /artifacts/stable/releases/*/release.json /artifacts/dev/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig /artifacts/stable/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig
 	}
+	@agent_package_api {
+		method GET
+		path_regexp agent_package ^/artifacts/(dev|stable)/agent-builds/[0-9a-f]{64}/[0-9a-f]{64}/package[.]json$
+	}
 	handle @agent_release_api {
+		reverse_proxy https://install.vonkforge.ai {
+			header_up Host install.vonkforge.ai
+			header_up -Authorization
+			header_up -Cookie
+		}
+	}
+	handle @agent_package_api {
 		reverse_proxy https://install.vonkforge.ai {
 			header_up Host install.vonkforge.ai
 			header_up -Authorization

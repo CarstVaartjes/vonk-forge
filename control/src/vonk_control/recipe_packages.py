@@ -166,9 +166,14 @@ class RecipePackageClient:
         timeout_seconds: float = 8.0,
         publication_commit: str | None = None,
         api_url: str = PACKAGE_API_ORIGIN,
+        raw_url: str | None = None,
     ) -> None:
         production = base_url is None
-        origin = PACKAGE_RAW_ORIGIN if production else base_url.rstrip("/")
+        origin = (
+            (raw_url or PACKAGE_RAW_ORIGIN).rstrip("/")
+            if production
+            else base_url.rstrip("/")
+        )
         parsed = urlsplit(origin)
         if not parsed.hostname or (parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}):
             raise RecipePackageError("recipe_package.url_insecure", "recipe package URL must use HTTPS")
