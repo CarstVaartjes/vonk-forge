@@ -10202,8 +10202,6 @@ export interface components {
              * Format: date-time
              */
             received_at: string;
-            /** Sequence */
-            sequence: number;
             /** Temperature C */
             temperature_c?: number | null;
         };

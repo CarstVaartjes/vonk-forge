@@ -1377,7 +1377,7 @@ impl AgentHttpClient {
         let response = self
             .current_client()
             .post(self.endpoint("/agent/v1/telemetry")?)
-            .timeout(Duration::from_secs(1))
+            .timeout(Duration::from_secs(2))
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1924,7 +1924,7 @@ mod tests {
             .expect("agent client lock is not poisoned") = replacement;
 
         operation_client
-            .report_telemetry(&[telemetry_sample(1)])
+            .report_telemetry(&[telemetry_sample()])
             .await
             .unwrap();
         let request = server.join().unwrap();
@@ -2844,11 +2844,10 @@ mod tests {
         )
     }
 
-    fn telemetry_sample(sequence: i64) -> TelemetrySample {
+    fn telemetry_sample() -> TelemetrySample {
         serde_json::from_value(serde_json::json!({
             "boot_id": "00000000-0000-4000-8000-000000000001",
-            "sequence": sequence,
-            "observed_at": format!("2026-08-15T12:00:{sequence:02}Z"),
+            "observed_at": "2026-08-15T12:00:01Z",
             "cpu_utilization_percent": 12.5,
             "load_average_1m": 1.25,
             "memory_total_bytes": 128000000000_u64,
@@ -3356,7 +3355,7 @@ mod tests {
 
     #[tokio::test]
     async fn telemetry_posts_large_valid_metrics_without_content_loss() {
-        let mut sample = telemetry_sample(1);
+        let mut sample = telemetry_sample();
         sample.metrics.series = (0..143)
             .map(|index| {
                 serde_json::from_value(json!({
@@ -3391,7 +3390,7 @@ mod tests {
 
     #[tokio::test]
     async fn telemetry_posts_current_contract_without_node_identity() {
-        let sample = telemetry_sample(1);
+        let sample = telemetry_sample();
         let (client, server) = observation_client(204);
 
         client
@@ -3443,7 +3442,6 @@ mod tests {
                 "network_transmit_bytes_per_second",
                 "observed_at",
                 "power_watts",
-                "sequence",
                 "temperature_c",
             ]
         );
@@ -3470,7 +3468,7 @@ mod tests {
             client.report_telemetry(&[]).await,
             Err(ClientError::Protocol)
         ));
-        let samples = (0..17).map(telemetry_sample).collect::<Vec<_>>();
+        let samples = (0..17).map(|_| telemetry_sample()).collect::<Vec<_>>();
         assert!(matches!(
             client.report_telemetry(&samples).await,
             Err(ClientError::Protocol)
@@ -3479,7 +3477,7 @@ mod tests {
 
     #[tokio::test]
     async fn telemetry_accepts_only_204_and_preserves_status_classification() {
-        let samples = [telemetry_sample(1)];
+        let samples = [telemetry_sample()];
         for (status, expected) in [
             (200, "protocol"),
             (401, "authentication"),

@@ -187,7 +187,6 @@ function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): 
     id: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
     node_id: telemetryNodeId,
     boot_id: "00000000-0000-4000-8000-000000000001",
-    sequence,
     observed_at: observedAt,
     received_at: observedAt,
     cpu_utilization_percent: 24.5,

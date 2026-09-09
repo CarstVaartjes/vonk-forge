@@ -36,7 +36,6 @@ def _fleet_snapshot(
         id="00000000-0000-4000-8000-000000000001",
         node_id=NODE,
         boot_id="00000000-0000-4000-8000-000000000002",
-        sequence=1,
         observed_at=NOW,
         received_at=NOW,
         gpu_utilization_percent=gpu_utilization,

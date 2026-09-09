@@ -117,7 +117,6 @@ class TelemetryDetailsInput:
 @dataclass(frozen=True, slots=True)
 class TelemetrySampleInput:
     boot_id: uuid.UUID
-    sequence: int
     observed_at: datetime
     cpu_utilization_percent: float | None
     load_average_1m: float | None
@@ -139,11 +138,6 @@ class TelemetrySampleInput:
     def __post_init__(self) -> None:
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
             raise ValueError("telemetry boot ID is invalid")
-        if (
-            type(self.sequence) is not int
-            or not 0 <= self.sequence <= _MAX_SIGNED_BIGINT
-        ):
-            raise ValueError("telemetry sequence is invalid")
         if not isinstance(self.observed_at, datetime):
             raise ValueError("telemetry observation time is invalid")  # noqa: TRY004
         _finite_number(
@@ -222,7 +216,6 @@ class TelemetrySampleView:
     id: str
     node_id: str
     boot_id: uuid.UUID
-    sequence: int
     observed_at: datetime
     received_at: datetime
     cpu_utilization_percent: float | None
@@ -330,7 +323,6 @@ def _canonical_sample(
 def _row_values(value: TelemetrySampleInput) -> dict[str, object]:
     return {
         "boot_id": str(value.boot_id),
-        "sequence": value.sequence,
         "observed_at": value.observed_at,
         "cpu_utilization_percent": value.cpu_utilization_percent,
         "load_average_1m": value.load_average_1m,
@@ -378,7 +370,6 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
         id=row.id,
         node_id=row.node_id,
         boot_id=uuid.UUID(row.boot_id),
-        sequence=row.sequence,
         observed_at=_stored_utc(row.observed_at),
         received_at=_stored_utc(row.received_at),
         cpu_utilization_percent=row.cpu_utilization_percent,
@@ -423,18 +414,13 @@ class TelemetryRepository:
             raise ValueError("telemetry batch must contain between 1 and 16 samples")
         now = _aware_utc(self._clock(), label="telemetry receive time")
         canonical = tuple(_canonical_sample(value, now) for value in values)
-        keys = [(value.boot_id, value.sequence) for value in canonical]
+        keys = [(value.boot_id, value.observed_at) for value in canonical]
         if len(keys) != len(set(keys)):
             raise ValueError("telemetry sample is duplicated")
         last_observed: datetime | None = None
-        per_boot: dict[uuid.UUID, int] = {}
         for value in canonical:
             if last_observed is not None and value.observed_at <= last_observed:
                 raise ValueError("telemetry observation times must increase")
-            prior_sequence = per_boot.get(value.boot_id)
-            if prior_sequence is not None and value.sequence <= prior_sequence:
-                raise ValueError("telemetry sequences must increase")
-            per_boot[value.boot_id] = value.sequence
             last_observed = value.observed_at
 
         stored: list[NodeTelemetrySample] = []
@@ -459,7 +445,7 @@ class TelemetryRepository:
                     select(NodeTelemetrySample).where(
                         NodeTelemetrySample.node_id == node_id,
                         NodeTelemetrySample.boot_id == boot_id,
-                        NodeTelemetrySample.sequence == value.sequence,
+                        NodeTelemetrySample.observed_at == value.observed_at,
                     )
                 )
                 if existing is not None:
@@ -474,15 +460,10 @@ class TelemetryRepository:
                             NodeTelemetrySample.node_id == node_id,
                             NodeTelemetrySample.boot_id == boot_id,
                         )
-                        .order_by(
-                            NodeTelemetrySample.sequence.desc(),
-                            NodeTelemetrySample.observed_at.desc(),
-                        )
+                        .order_by(NodeTelemetrySample.observed_at.desc())
                         .limit(1)
                     )
                 boot_head = boot_heads[value.boot_id]
-                if boot_head is not None and value.sequence <= boot_head.sequence:
-                    raise ValueError("telemetry sample regresses stored sequence")
                 if boot_head is not None and value.observed_at <= _aware_utc(
                     boot_head.observed_at.replace(tzinfo=UTC)
                     if boot_head.observed_at.tzinfo is None
@@ -510,10 +491,7 @@ class TelemetryRepository:
                 if latest is None:
                     advances = True
                 elif latest.boot_id == boot_id:
-                    advances = (
-                        value.sequence > latest.sequence
-                        and value.observed_at > _stored_utc(latest.observed_at)
-                    )
+                    advances = value.observed_at > _stored_utc(latest.observed_at)
                 else:
                     advances = value.observed_at > _stored_utc(latest.observed_at)
                 if advances:
@@ -614,7 +592,6 @@ class TelemetryRepository:
                     )
                     .order_by(
                         NodeTelemetrySample.observed_at.desc(),
-                        NodeTelemetrySample.sequence.desc(),
                         NodeTelemetrySample.id.desc(),
                     )
                     .limit(maximum_points)

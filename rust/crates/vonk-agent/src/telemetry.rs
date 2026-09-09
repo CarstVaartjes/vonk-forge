@@ -1,14 +1,12 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
-    fs::{self, File, OpenOptions},
+    collections::BTreeMap,
+    fs::{self, File},
     io::Read,
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -20,13 +18,7 @@ use crate::{
 
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
-const MAX_QUEUE_SAMPLES: usize = 15;
-const SEQUENCE_RESERVATION_SIZE: u64 = 64;
-const SEQUENCE_STATE_KEY: &str = "telemetry_sequence_v1";
-const SEQUENCE_LIMIT_EXCLUSIVE: u64 = i64::MAX as u64 + 1;
-pub const TELEMETRY_STATE_FILENAME: &str = "telemetry-state.sqlite";
 pub const MAX_REPORT_SAMPLES: usize = 16;
-const REPORT_BATCH_TARGET_BYTES: usize = 1024 * 1024;
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_ACCELERATORS: usize = 16;
 const MAX_STORAGE_DEVICES: usize = 32;
@@ -45,13 +37,7 @@ pub use vonk_agent_protocol::generated::{
 pub enum TelemetryError {
     #[error("telemetry boot identity is invalid")]
     InvalidBootId,
-    #[error("telemetry sequence is exhausted")]
-    SequenceExhausted,
-    #[error("telemetry sequence state is invalid")]
-    InvalidSequenceState,
-    #[error("telemetry sequence state database failed")]
-    Database(#[from] rusqlite::Error),
-    #[error("telemetry sequence state file is unsafe")]
+    #[error("telemetry filesystem access failed")]
     Io(#[from] std::io::Error),
 }
 
@@ -170,160 +156,11 @@ pub struct TelemetryCollector<R, F> {
     filesystem: F,
     paths: TelemetryPaths,
     boot_id: Uuid,
-    sequences: SequenceAllocator,
     disk_counters: BTreeMap<String, DiskCounters>,
     interface_counters: BTreeMap<String, NetworkInterfaceCounters>,
     cpu_power_counter: Option<EnergyCounter>,
     runtime_counters: BTreeMap<String, f64>,
     last_observed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredSequenceReservation {
-    boot_id: String,
-    next_unreserved_sequence: u64,
-}
-
-struct DurableSequenceAllocator {
-    connection: Connection,
-    boot_id: Uuid,
-    next_sequence: u64,
-    reserved_until: u64,
-}
-
-enum SequenceAllocator {
-    Durable(DurableSequenceAllocator),
-    /// Monitor samples never use filesystem or database sequence state.
-    Ephemeral(u64),
-}
-
-impl SequenceAllocator {
-    fn next(&mut self) -> Result<i64, TelemetryError> {
-        match self {
-            Self::Durable(value) => value.next(),
-            Self::Ephemeral(value) => {
-                let current =
-                    i64::try_from(*value).map_err(|_| TelemetryError::SequenceExhausted)?;
-                *value = value
-                    .checked_add(1)
-                    .ok_or(TelemetryError::SequenceExhausted)?;
-                Ok(current)
-            }
-        }
-    }
-}
-
-impl DurableSequenceAllocator {
-    fn open(path: &Path, boot_id: Uuid) -> Result<Self, TelemetryError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-        {
-            Ok(file) => drop(file),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
-        }
-        let metadata = fs::symlink_metadata(path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.file_type().is_file()
-            || metadata.nlink() != 1
-        {
-            return Err(TelemetryError::InvalidSequenceState);
-        }
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-        let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-        connection.busy_timeout(Duration::from_secs(1))?;
-        connection.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA foreign_keys=ON;
-             PRAGMA trusted_schema=OFF;
-             CREATE TABLE IF NOT EXISTS metadata (
-               key TEXT PRIMARY KEY NOT NULL,
-               value TEXT NOT NULL
-             ) STRICT;",
-        )?;
-        let (next_sequence, reserved_until) = reserve_sequence_block(&mut connection, boot_id)?;
-        Ok(Self {
-            connection,
-            boot_id,
-            next_sequence,
-            reserved_until,
-        })
-    }
-
-    fn next(&mut self) -> Result<i64, TelemetryError> {
-        if self.next_sequence >= self.reserved_until {
-            (self.next_sequence, self.reserved_until) =
-                reserve_sequence_block(&mut self.connection, self.boot_id)?;
-        }
-        let sequence =
-            i64::try_from(self.next_sequence).map_err(|_| TelemetryError::SequenceExhausted)?;
-        self.next_sequence = self
-            .next_sequence
-            .checked_add(1)
-            .ok_or(TelemetryError::SequenceExhausted)?;
-        Ok(sequence)
-    }
-}
-
-fn reserve_sequence_block(
-    connection: &mut Connection,
-    boot_id: Uuid,
-) -> Result<(u64, u64), TelemetryError> {
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let stored: Option<String> = transaction
-        .query_row(
-            "SELECT value FROM metadata WHERE key = ?1",
-            [SEQUENCE_STATE_KEY],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let next_sequence = match stored {
-        None => 0,
-        Some(value) => {
-            let state: StoredSequenceReservation =
-                serde_json::from_str(&value).map_err(|_| TelemetryError::InvalidSequenceState)?;
-            let stored_boot_id = Uuid::parse_str(&state.boot_id)
-                .map_err(|_| TelemetryError::InvalidSequenceState)?;
-            if stored_boot_id.is_nil()
-                || stored_boot_id.to_string() != state.boot_id
-                || state.next_unreserved_sequence > SEQUENCE_LIMIT_EXCLUSIVE
-            {
-                return Err(TelemetryError::InvalidSequenceState);
-            }
-            if stored_boot_id == boot_id {
-                state.next_unreserved_sequence
-            } else {
-                0
-            }
-        }
-    };
-    if next_sequence >= SEQUENCE_LIMIT_EXCLUSIVE {
-        return Err(TelemetryError::SequenceExhausted);
-    }
-    let reserved_until = next_sequence
-        .saturating_add(SEQUENCE_RESERVATION_SIZE)
-        .min(SEQUENCE_LIMIT_EXCLUSIVE);
-    let stored = serde_json::to_string(&StoredSequenceReservation {
-        boot_id: boot_id.to_string(),
-        next_unreserved_sequence: reserved_until,
-    })
-    .map_err(|_| TelemetryError::InvalidSequenceState)?;
-    transaction.execute(
-        "INSERT INTO metadata(key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![SEQUENCE_STATE_KEY, stored],
-    )?;
-    transaction.commit()?;
-    Ok((next_sequence, reserved_until))
 }
 
 impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
@@ -336,39 +173,11 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         if boot_id.is_nil() || boot_id.to_string() != boot_id.hyphenated().to_string() {
             return Err(TelemetryError::InvalidBootId);
         }
-        let sequences =
-            DurableSequenceAllocator::open(&paths.store.join(TELEMETRY_STATE_FILENAME), boot_id)?;
         Ok(Self {
             runner,
             filesystem,
             paths,
             boot_id,
-            sequences: SequenceAllocator::Durable(sequences),
-            disk_counters: BTreeMap::new(),
-            interface_counters: BTreeMap::new(),
-            cpu_power_counter: None,
-            runtime_counters: BTreeMap::new(),
-            last_observed_at: None,
-        })
-    }
-
-    /// Construct a collector for the standalone monitor without opening a
-    /// telemetry state file. Rate counters remain process-local.
-    pub fn new_ephemeral(
-        runner: R,
-        filesystem: F,
-        paths: TelemetryPaths,
-        boot_id: Uuid,
-    ) -> Result<Self, TelemetryError> {
-        if boot_id.is_nil() || boot_id.to_string() != boot_id.hyphenated().to_string() {
-            return Err(TelemetryError::InvalidBootId);
-        }
-        Ok(Self {
-            runner,
-            filesystem,
-            paths,
-            boot_id,
-            sequences: SequenceAllocator::Ephemeral(0),
             disk_counters: BTreeMap::new(),
             interface_counters: BTreeMap::new(),
             cpu_power_counter: None,
@@ -389,8 +198,6 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         previous: Option<&TelemetrySample>,
         observed_at: DateTime<Utc>,
     ) -> Result<TelemetrySample, TelemetryError> {
-        let sequence = self.sequences.next()?;
-
         let cpu_counters = read_bounded_text(&self.paths.stat)
             .as_deref()
             .and_then(parse_cpu_counters);
@@ -504,7 +311,6 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         Ok(TelemetrySample {
             wire: WireTelemetrySample {
                 boot_id: self.boot_id,
-                sequence: u64::try_from(sequence).map_err(|_| TelemetryError::SequenceExhausted)?,
                 observed_at: observed_at.fixed_offset(),
                 cpu_utilization_percent,
                 load_average_1m,
@@ -529,7 +335,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                         .saturating_add(runtime_counter_gaps)
                         .saturating_add(i64::from(cpu_counter_gap)),
                 )
-                .map_err(|_| TelemetryError::SequenceExhausted)?,
+                .unwrap_or(u64::MAX),
                 details: accelerator
                     .map(|value| TelemetryDetails {
                         accelerator_name: value.name.clone(),
@@ -1608,113 +1414,6 @@ fn parse_comfy_runtime(
     (series, capabilities, recognized, 0)
 }
 
-#[derive(Debug, Default)]
-pub struct TelemetryQueue {
-    samples: VecDeque<TelemetrySample>,
-}
-
-impl TelemetryQueue {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn len(&self) -> usize {
-        self.samples.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.samples.is_empty()
-    }
-
-    pub fn push(&mut self, sample: TelemetrySample) {
-        if self.samples.len() == MAX_QUEUE_SAMPLES
-            && let Some(dropped) = self.samples.pop_front()
-        {
-            let lost = dropped.gap_samples.saturating_add(1);
-            if let Some(oldest_retained) = self.samples.front_mut() {
-                oldest_retained.gap_samples = oldest_retained.gap_samples.saturating_add(lost);
-            }
-        }
-        self.samples.push_back(sample);
-    }
-
-    pub fn batch(&self) -> Vec<TelemetrySample> {
-        let mut batch = Vec::new();
-        for sample in self.samples.iter().take(MAX_REPORT_SAMPLES) {
-            batch.push(sample.clone());
-            let request = TelemetryRequest {
-                schema_version: 1,
-                samples: batch.iter().map(|sample| sample.wire().clone()).collect(),
-            };
-            if batch.len() > 1
-                && serde_json::to_vec(&request)
-                    .is_ok_and(|body| body.len() > REPORT_BATCH_TARGET_BYTES)
-            {
-                batch.pop();
-                break;
-            }
-        }
-        // A larger valid sample travels alone. Splitting a batch never
-        // changes its samples, sequence numbers, or acknowledgement state.
-        batch
-    }
-
-    pub fn acknowledge_prefix(&mut self, count: usize) -> Result<(), TelemetryError> {
-        if count > self.samples.len() {
-            return Err(TelemetryError::SequenceExhausted);
-        }
-        self.samples.drain(..count);
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TelemetrySchedule {
-    next_collection: tokio::time::Instant,
-    next_send: tokio::time::Instant,
-}
-
-impl TelemetrySchedule {
-    pub fn new(now: tokio::time::Instant) -> Self {
-        Self {
-            next_collection: now,
-            next_send: now,
-        }
-    }
-
-    pub fn collection_due(&self, now: tokio::time::Instant) -> bool {
-        now >= self.next_collection
-    }
-
-    pub fn collected(
-        &mut self,
-        collection_started: tokio::time::Instant,
-        collection_finished: tokio::time::Instant,
-    ) {
-        let mut next_collection = collection_started + COLLECTION_INTERVAL;
-        while next_collection <= collection_finished {
-            next_collection += COLLECTION_INTERVAL;
-        }
-        self.next_collection = next_collection;
-    }
-
-    pub fn send_due(&self, now: tokio::time::Instant, has_samples: bool) -> bool {
-        has_samples && now >= self.next_send
-    }
-
-    pub fn send_failed(&mut self, now: tokio::time::Instant, retry_after: Duration) {
-        self.next_send = now + retry_after;
-    }
-
-    pub fn send_succeeded(&mut self, now: tokio::time::Instant) {
-        self.next_send = now;
-    }
-
-    pub fn next_collection(&self) -> tokio::time::Instant {
-        self.next_collection
-    }
-}
-
 pub fn read_boot_id(path: &Path) -> Result<Uuid, TelemetryError> {
     let value = read_bounded_text(path).ok_or(TelemetryError::InvalidBootId)?;
     let value = value.trim();
@@ -1730,11 +1429,9 @@ pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
         return false;
     }
     let mut previous_observed_at = None;
-    let mut boot_heads = std::collections::BTreeMap::new();
     for sample in samples {
         let observed_at = sample.observed_at;
         if sample.boot_id.is_nil()
-            || sample.sequence > i64::MAX as u64
             || sample.gap_samples > i64::MAX as u64
             || previous_observed_at.is_some_and(|previous| observed_at <= previous)
             || !valid_optional_number(sample.cpu_utilization_percent, 0.0, 100.0)
@@ -1764,12 +1461,6 @@ pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
             || !valid_optional_text(sample.details.accelerator_name.as_deref(), 256)
             || !valid_optional_text(sample.details.accelerator_performance_state.as_deref(), 32)
             || !valid_metrics(&sample.metrics)
-        {
-            return false;
-        }
-        if boot_heads
-            .insert(sample.boot_id, sample.sequence)
-            .is_some_and(|previous| sample.sequence <= previous)
         {
             return false;
         }

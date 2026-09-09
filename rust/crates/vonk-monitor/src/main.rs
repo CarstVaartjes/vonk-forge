@@ -43,20 +43,20 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             Ok(config) => break config,
             Err(error) => {
                 eprintln!(
-                    "vonk-monitor: operation=configuration.load endpoint={} "
-                        "error={error}; decision=defer-until-next-interval",
+                    "vonk-monitor: operation=configuration.load endpoint={} error={error}; decision=defer-until-next-interval",
                     config_path.display()
                 );
                 tokio::time::sleep(INTERVAL).await;
             }
         }
     };
-    let mut collector = TelemetryCollector::new_ephemeral(
+    let collector_paths = telemetry_paths(&initial_config);
+    let mut collector = Some(TelemetryCollector::new(
         SystemProcessRunner,
         SystemFileSystemProvider,
-        telemetry_paths(&initial_config),
+        collector_paths.clone(),
         boot_id,
-    )?;
+    )?);
     let mut previous = None;
     let mut next_tick = tokio::time::Instant::now();
 
@@ -64,17 +64,25 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         tokio::time::sleep_until(next_tick).await;
         let tick_started = tokio::time::Instant::now();
         let prior = previous.take();
+        let current_collector = collector.take().expect("collector is returned each tick");
         let collection = tokio::task::spawn_blocking(move || {
+            let mut collector = current_collector;
             let result = collector.sample(prior.as_ref());
             (collector, prior, result)
         })
         .await;
         let Ok((returned_collector, prior, result)) = collection else {
             eprintln!("vonk-monitor: collector task stopped; retrying next interval");
+            collector = Some(TelemetryCollector::new(
+                SystemProcessRunner,
+                SystemFileSystemProvider,
+                collector_paths.clone(),
+                boot_id,
+            )?);
             next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
             continue;
         };
-        collector = returned_collector;
+        collector = Some(returned_collector);
         match result {
             Ok(sample) => {
                 previous = Some(sample.clone());
@@ -88,14 +96,12 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
                         // no retry queue or replay exists.
                         if let Err(error) = client.report_telemetry(&[sample]).await {
                             eprintln!(
-                                "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry "
-                                    "error={error}; decision=discard-and-collect-next-interval"
+                                "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry error={error}; decision=discard-and-collect-next-interval"
                             );
                         }
                     }
                     None => eprintln!(
-                        "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry "
-                            "error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
+                        "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
                     ),
                 }
             }

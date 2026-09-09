@@ -217,7 +217,6 @@ class TelemetryPoint(_StrictModel):
     id: UuidId
     node_id: NodeId
     boot_id: BootId
-    sequence: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     observed_at: datetime
     received_at: datetime
     cpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
@@ -446,7 +445,6 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         id=value.id,
         node_id=value.node_id,
         boot_id=str(value.boot_id),
-        sequence=value.sequence,
         observed_at=value.observed_at,
         received_at=value.received_at,
         cpu_utilization_percent=value.cpu_utilization_percent,
