@@ -189,13 +189,20 @@ def assert_bundle_contract(bundle: Path) -> None:
         ".env",
         "docker-compose.yaml",
         "secrets",
+        "backups",
     }:
         raise AcceptanceError(
-            "NAS bundle must contain exactly docker-compose.yaml, .env, and secrets"
+            "NAS bundle must contain exactly docker-compose.yaml, .env, secrets, and backups"
         )
     compose = bundle / "docker-compose.yaml"
     environment = bundle / ".env"
     secrets = bundle / "secrets"
+    backups = bundle / "backups"
+    if backups.is_symlink() or not backups.is_dir():
+        raise AcceptanceError("backups is unsafe")
+    _require_mode(backups, 0o700)
+    if backups.stat().st_uid != bundle.stat().st_uid:
+        raise AcceptanceError("backups must belong to the bundle owner")
     for path in (compose, environment):
         metadata = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
