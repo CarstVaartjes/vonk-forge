@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -545,6 +546,39 @@ def test_agent_release_relay_is_read_only_and_path_scoped() -> None:
     assert "install.vonkforge.ai:443" in serialized
     assert '"status_code": 404' in serialized
     assert "control-api:8000" not in serialized
+
+
+def test_agent_package_relay_matches_only_digest_bound_package_documents() -> None:
+    adapted = _adapted_caddy(_environment())
+    relay = _server_on_port(adapted, 8084)
+    package_route = next(
+        route
+        for route in _routes_with_handlers(relay["routes"])
+        if any("path_regexp" in matcher for matcher in route.get("match", []))
+    )
+    matcher = next(
+        matcher["path_regexp"]["pattern"]
+        for matcher in package_route.get("match", [])
+        if "path_regexp" in matcher
+    )
+    assert re.fullmatch(
+        matcher,
+        "/artifacts/dev/agent-builds/"
+        + "a" * 64
+        + "/"
+        + "b" * 64
+        + "/package.json",
+    )
+    for denied in (
+        "/artifacts/dev/agent-builds/" + "a" * 63 + "/" + "b" * 64 + "/package.json",
+        "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 63 + "/package.json",
+        "/artifacts/test/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/package.json",
+        "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/other.json",
+        "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/package.json/extra",
+    ):
+        assert re.fullmatch(matcher, denied) is None
+    assert package_route["match"][0]["method"] == ["GET"]
+    assert "install.vonkforge.ai:443" in json.dumps(package_route)
 
 
 def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> (

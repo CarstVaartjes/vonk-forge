@@ -147,7 +147,18 @@ http://:8084 {
 		method GET
 		path /artifacts/dev/current.manifest /artifacts/stable/current.manifest /artifacts/dev/releases/*/release.json /artifacts/stable/releases/*/release.json /artifacts/dev/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig /artifacts/stable/releases/*/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig
 	}
+	@agent_package_api {
+		method GET
+		path_regexp agent_package ^/artifacts/(dev|stable)/agent-builds/[0-9a-f]{64}/[0-9a-f]{64}/package[.]json$
+	}
 	handle @agent_release_api {
+		reverse_proxy https://install.vonkforge.ai {
+			header_up Host install.vonkforge.ai
+			header_up -Authorization
+			header_up -Cookie
+		}
+	}
+	handle @agent_package_api {
 		reverse_proxy https://install.vonkforge.ai {
 			header_up Host install.vonkforge.ai
 			header_up -Authorization
