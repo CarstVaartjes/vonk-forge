@@ -107,6 +107,7 @@ class TinyTransport:
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        progress=None,
     ) -> PulledImageEvidence:
         self.calls.append((reference, destination))
         destination.write_bytes(self.payload)
@@ -364,6 +365,8 @@ def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
                 "architecture": "arm64",
                 "config": {"Labels": {"ai.vonkforge.runtime-interface": "v1"}},
             }))
+        if command[1] == "inspect":
+            return SimpleNamespace(stdout=json.dumps({"LayersData": []}))
         destination.write_bytes(ARCHIVE)
         return SimpleNamespace(stdout="")
 
@@ -375,6 +378,14 @@ def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
         expected_runtime_interface="vonk.runtime.v1",
     )
 
+    registry_copy = next(command for command in calls
+                         if "--dest-shared-blob-dir" in command)
+    archive_copy = next(command for command in calls
+                        if "--src-shared-blob-dir" in command)
+    assert registry_copy[-1].startswith(f"oci:{tmp_path}/registry-layers/")
+    assert registry_copy[registry_copy.index("--retry-times") + 1] == "3"
+    assert registry_copy[registry_copy.index("--image-parallel-copies") + 1] == "6"
+    assert archive_copy[-2] == registry_copy[-1]
     assert evidence.manifest_digest == PLATFORM_IMAGE_DIGEST
     assert evidence.requested_manifest_digest == IMAGE_DIGEST
     assert evidence.config_id == "sha256:" + "c" * 64
@@ -524,6 +535,7 @@ def test_transport_digest_mismatch_does_not_publish_archive_or_receipt(
             *,
             expected_architecture: str,
             expected_runtime_interface: str,
+            progress=None,
         ) -> PulledImageEvidence:
             destination.write_bytes(ARCHIVE)
             return PulledImageEvidence(
@@ -978,3 +990,35 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(tm
             storage=FilesystemRuntimeImageStorage(tmp_path / "objects"), transport=transport,
         )
     assert transport.calls == []
+
+
+def test_native_transfer_continues_while_progress_observer_is_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from vonk_control.runtime_image_preparation import _run_with_progress
+
+    observer_entered = threading.Event()
+    transfer_finished = threading.Event()
+    destination = tmp_path / "transfer"
+
+    def transfer(command: list[str]) -> str:
+        assert observer_entered.wait(5)
+        destination.write_bytes(b"completed while observer was busy")
+        transfer_finished.set()
+        return ""
+
+    reports = []
+
+    def progress(phase: str, received: int, total: int | None) -> None:
+        observer_entered.set()
+        assert transfer_finished.wait(5)
+        reports.append((phase, received, total))
+
+    monkeypatch.setattr("vonk_control.runtime_image_preparation._run_text", transfer)
+    _run_with_progress(
+        ["skopeo", "copy"], lambda: destination.stat().st_size if destination.exists() else 0,
+        progress, "download", None,
+    )
+    assert reports[-1] == ("download", len(destination.read_bytes()), None)

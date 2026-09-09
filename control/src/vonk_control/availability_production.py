@@ -9,6 +9,7 @@ an executor which can be closed independently of the API event loop.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 import uuid
@@ -20,9 +21,16 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
-from .models import AgentNode, CatalogDocumentRevision, Job
+from .models import (
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
+    CatalogDocumentRevision,
+    Job,
+)
 from .recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -428,7 +436,10 @@ def build_recipe_image_availability(
             force=force,
         )
         while operation.state not in {"succeeded", "failed", "expired"}:
-            progress({"step": "build", "completed_bytes": 0})
+            with sessions() as session:
+                current_progress = _build_progress(session, operation.id, builder_node_id)
+            if current_progress is not None:
+                progress(current_progress.model_dump(mode="json", exclude_none=True))
             time.sleep(0.5)
             with sessions() as session:
                 row = session.get(Job, operation.id)
@@ -571,3 +582,19 @@ def _compile_consistent_runtime(
             "canonical recipe roles do not share one runtime image identity",
         )
     return first
+
+
+def _build_progress(session: Session, job_id: str, node_id: str) -> OperationProgress | None:
+    """Read the current attempt's typed heartbeat, including image uploads."""
+    document = session.scalar(
+        select(AgentOperationAttempt.progress).join(
+            AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id,
+        ).where(
+            AgentOperation.parent_job_id == job_id,
+            AgentOperation.node_id == node_id,
+            AgentOperationAttempt.attempt == AgentOperation.current_attempt,
+        )
+    )
+    if document is None:
+        return None
+    return OperationProgress.model_validate_json(json.dumps(document))

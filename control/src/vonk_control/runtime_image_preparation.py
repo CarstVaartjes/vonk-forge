@@ -13,19 +13,21 @@ and receipts are replaced atomically after the archive has been verified.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.wire_model import Digest, WireModel
@@ -67,6 +69,7 @@ class OCIImageTransport(Protocol):
     def pull_and_export(
         self, reference: str, destination: Path, *, expected_architecture: str,
         expected_runtime_interface: str,
+        progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
         """Pull the exact pinned image and export it to ``destination``.
 
@@ -87,6 +90,16 @@ class OCIImageTransport(Protocol):
         """Inspect an already stored final image without pulling a registry image."""
 
 
+class SkopeoLayerMetadata(BaseModel):
+    digest: str = Field(alias="Digest")
+    size: int = Field(alias="Size")
+
+
+class SkopeoImageMetadata(BaseModel):
+    # Provider metadata is extensible; only declared fields drive progress.
+    layers: list[SkopeoLayerMetadata] = Field(default_factory=list, alias="LayersData")
+
+
 class SkopeoOCIImageTransport:
     """Concrete unprivileged OCI transport backed by packaged ``skopeo``."""
 
@@ -100,6 +113,7 @@ class SkopeoOCIImageTransport:
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
         # Recipe/runtime projections carry the Controller wire contract
         # (``vonk.runtime.v1``), while the OCI label stores its short value
@@ -134,9 +148,47 @@ class SkopeoOCIImageTransport:
             raise RuntimeImagePreparationError(
                 "runtime_image.interface_mismatch", "OCI image runtime interface label does not match the recipe"
             )
-        _run_text(
-            [self.executable, "copy", *_platform_args(expected_architecture), source, f"docker-archive:{destination}"]
-        )
+        # Keep native OCI blobs between attempts and share completed layers
+        # across images. Streaming straight into a tar discards this reuse on
+        # interruption. Skopeo owns concurrent layers and transient retries;
+        # only the final local conversion creates the runnable archive.
+        cache = destination.parent / "registry-layers"
+        cache.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(f"{reference}\n{expected_architecture}".encode()).hexdigest()
+        layout = cache / key
+        blobs = cache / "blobs"
+        blobs.mkdir(exist_ok=True)
+        staged_source = f"oci:{layout}:image"
+        # Different images can transfer concurrently. Only writers of the
+        # same OCI index are serialized, including across worker processes.
+        with (cache / f"{key}.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # Skopeo cleans failed writes itself. Remove leftovers after a
+            # killed worker once this image's exclusive lock proves no writer
+            # can still be using them; completed shared blobs remain reusable.
+            for abandoned in layout.glob("oci-put-blob*"):
+                abandoned.unlink(missing_ok=True)
+            metadata = SkopeoImageMetadata.model_validate_json(_run_text([
+                self.executable, "inspect", *_platform_args(expected_architecture), source,
+            ]))
+            layer_paths = [blobs / value.digest.replace(":", "/", 1)
+                           for value in metadata.layers
+                           if _IMAGE_DIGEST.fullmatch(value.digest)]
+            total = (sum(value.size for value in metadata.layers)
+                     if metadata.layers and all(value.size >= 0 for value in metadata.layers)
+                     else None)
+            _run_with_progress([
+                self.executable, "copy", *_platform_args(expected_architecture),
+                "--retry-times", "3", "--image-parallel-copies", "6",
+                "--dest-oci-accept-uncompressed-layers",
+                "--dest-shared-blob-dir", str(blobs), source, staged_source,
+            ], lambda: _existing_bytes(layer_paths) + _existing_bytes(layout.glob("oci-put-blob*")),
+                progress, "download", total)
+            _run_with_progress([
+                self.executable, "copy", *_platform_args(expected_architecture),
+                "--src-shared-blob-dir", str(blobs), staged_source,
+                f"docker-archive:{destination}",
+            ], lambda: _existing_bytes([destination]), progress, "prepare", None)
         archive_bytes, archive_sha = _file_digest(destination, 16 * 1024**4)
         # Registry pins may identify a multi-platform index. Docker's native
         # archive conversion also changes manifest representation. Inspect the
@@ -943,6 +995,7 @@ def prepare_runtime_image(
     now: datetime | None = None,
     receipt_writer: Callable[[RuntimeImageReceipt], object] | None = None,
     force: bool = False,
+    progress: Callable[[str, int, int | None], None] | None = None,
 ) -> RuntimeImageReceipt:
     """Prepare the image selected by a canonical ``RecipeDefinition``.
 
@@ -986,6 +1039,7 @@ def prepare_runtime_image(
             expected_interface=projection["interface"],
             now=now,
             force=force,
+            progress=progress,
         )
     if not source_build and receipt.registry_manifest_digest != expected_manifest:
         raise RuntimeImagePreparationError(
@@ -1017,6 +1071,7 @@ def _prepare_from_registry(
     expected_interface: str,
     now: datetime | None,
     force: bool = False,
+    progress: Callable[[str, int, int | None], None] | None = None,
 ) -> RuntimeImageReceipt:
     if not force:
         cached = storage.find_published(
@@ -1034,6 +1089,7 @@ def _prepare_from_registry(
             staged,
             expected_architecture=expected_architecture,
             expected_runtime_interface=expected_interface_label,
+            progress=progress,
         )
         _validate_evidence(
             evidence,
@@ -1282,6 +1338,42 @@ def _validate_evidence(
         raise RuntimeImagePreparationError(
             "runtime_image.interface_mismatch", "verified image runtime interface does not match the recipe"
         )
+
+
+def _existing_bytes(paths: Iterable[Path]) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += path.stat().st_size
+        except FileNotFoundError:
+            # A native layer may be atomically renamed during sampling.
+            pass
+    return total
+
+
+def _run_with_progress(
+    command: list[str], sample: Callable[[], int],
+    progress: Callable[[str, int, int | None], None] | None,
+    phase: str, total: int | None,
+) -> None:
+    if progress is None:
+        _run_text(command)
+        return
+    # The native helper continues transferring while the observer publishes
+    # its sampled state. Database latency never blocks its receive loop.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="oci-transfer") as pool:
+        transfer = pool.submit(_run_text, command)
+        observed = 0
+        while True:
+            observed = max(observed, sample())
+            progress(phase, min(observed, total) if total is not None else observed, total)
+            try:
+                transfer.result(timeout=1.0)
+                break
+            except TimeoutError:
+                continue
+        observed = max(observed, sample())
+        progress(phase, min(observed, total) if total is not None else observed, total)
 
 
 def _run_text(command: list[str]) -> str:

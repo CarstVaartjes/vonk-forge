@@ -1339,7 +1339,8 @@ class RecipeImageAvailabilityService:
             build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
             if build_receipt is None:
                 def report(value: Mapping[str, object]) -> None:
-                    self._update_progress(operation_id, "build", detail=value)
+                    phase = value.get("phase", "build")
+                    self._update_progress(operation_id, str(phase), detail=value)
 
                 build_receipt = self._builder(
                     recipe,
@@ -1392,6 +1393,9 @@ class RecipeImageAvailabilityService:
             transport=self._transport,
             now=self._clock(),
             force=force_download,
+            progress=lambda phase, completed, total: self._update_progress(
+                operation_id, phase, completed_bytes=completed, total_bytes=total,
+            ),
         )
         self._update_progress(
             operation_id,
