@@ -3729,7 +3729,7 @@ mod tests {
 
     #[tokio::test]
     async fn telemetry_allows_the_two_second_controller_budget() {
-        let sample = telemetry_sample(1);
+        let sample = telemetry_sample();
         let (client, server) = request_capture_client(
             204,
             Vec::new(),
@@ -3791,7 +3791,7 @@ mod tests {
 
     #[tokio::test]
     async fn controller_rejection_preserves_safe_status_code_and_request_id() {
-        let sample = telemetry_sample(1);
+        let sample = telemetry_sample();
         let (client, server) = request_capture_client(
             403,
             vec![
