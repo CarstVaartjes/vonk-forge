@@ -62,7 +62,8 @@ struct GenerationPointer {
     generation: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IdentityMetadata<'a> {
     fingerprint: &'a str,
     generation: u64,
@@ -220,7 +221,11 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
     if material.generation == 0 {
         return Err(IdentityError::Node);
     }
-    if let Some(active_generation) = load_pointer(root, "active.json")? {
+    let active_generation = match load_pointer(root, "active.json")? {
+        Some(generation) => Some(generation),
+        None => flat_generation(root)?,
+    };
+    if let Some(active_generation) = active_generation {
         if material.generation == active_generation {
             return Err(IdentityError::ActiveGeneration);
         }
@@ -288,6 +293,17 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
     )?;
     File::open(root)?.sync_all()?;
     Ok(())
+}
+
+fn flat_generation(root: &Path) -> Result<Option<u64>, IdentityError> {
+    let path = root.join("identity.json");
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    let raw = read_private(&path)?;
+    let metadata: IdentityMetadata<'_> = serde_json::from_slice(&raw)
+        .map_err(|_| std::io::Error::other("flat identity metadata is invalid"))?;
+    Ok(Some(metadata.generation))
 }
 
 fn replacement_archive_path(root: &Path, generation: u64) -> Result<PathBuf, IdentityError> {
@@ -693,6 +709,20 @@ mod tests {
         let root = temporary.path().join("credentials");
         stage_identity(&root, &material(3, b'o')).unwrap();
         publish_staged(&root, 3).unwrap();
+
+        let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
+        assert!(error.to_string().contains("move backwards"));
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+        );
+    }
+
+    #[test]
+    fn flat_identity_generation_also_blocks_downgrade() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_paired_identity(&root, &material(3, b'o')).unwrap();
 
         let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
         assert!(error.to_string().contains("move backwards"));
