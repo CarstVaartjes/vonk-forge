@@ -136,6 +136,12 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(volumes, list):
             raise BundleError(f"Compose service {name} volumes are invalid")
         for volume in volumes:
+            if name == "postgres" and volume == {
+                "type": "bind",
+                "source": "./backups",
+                "target": "/backups",
+            }:
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source
