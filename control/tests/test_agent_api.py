@@ -4609,3 +4609,33 @@ def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -
     assert components["EnrollmentSubmitRequest"] == expected
     for name, document in nested.items():
         assert components[name] == document
+
+
+def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
+    agent_system,
+) -> None:
+    from vonk_agent_protocol.enrollment import IssuedCertificateResponse, RenewRequest
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/agent/v1/renew/recover"]["post"]
+    assert operation["requestBody"] == {
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/RenewRequest"}
+            }
+        },
+        "required": True,
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/IssuedCertificateResponse"
+    }
+    components = schema["components"]["schemas"]
+    assert components["RenewRequest"] == RenewRequest.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    assert components["IssuedCertificateResponse"] == (
+        IssuedCertificateResponse.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+    )
