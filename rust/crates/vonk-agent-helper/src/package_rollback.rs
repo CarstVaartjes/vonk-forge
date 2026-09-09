@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,6 +22,9 @@ const STATE: &str = "/var/lib/vonk-forge/package-rollback";
 const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";
 const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
 const PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
+const CAPSULE_UNIT: &str = "vonk-forge-package-upgrade-recover-capsule.service";
+const PROCESS_PROOF_TIMEOUT: Duration = Duration::from_secs(15);
+const PROCESS_PROOF_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -541,6 +544,16 @@ impl Store {
         let _lock = self.lock()?;
         let mut tx = self.read()?;
         if tx.phase == Phase::Armed {
+            // dpkg can report the initial maintainer-script failure while the
+            // package's signed recovery capsule is still completing the exact
+            // same candidate.  Let that root-owned owner finish; otherwise the
+            // rollback watchdog can stop it and downgrade a candidate that was
+            // already repaired successfully.
+            if now()? < tx.rollback.activation_deadline
+                && self.candidate_recovery_can_finish(&tx)?
+            {
+                return Ok(());
+            }
             tx.phase = Phase::ActivationFailed;
             tx.outcome = "candidate_install_failed".into();
             tx.updated_at = now()?;
@@ -587,6 +600,16 @@ impl Store {
             if matches!(tx.phase, Phase::Acknowledged | Phase::RolledBack) {
                 return Ok(());
             }
+            if matches!(
+                tx.phase,
+                Phase::ActivationFailed | Phase::RollingBack | Phase::RollbackFailed
+            ) && now()? < tx.rollback.activation_deadline
+                && self.candidate_recovery_can_finish(&tx)?
+            {
+                drop(lock);
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
             if tx.phase == Phase::Armed && now()? < tx.rollback.activation_deadline {
                 drop(lock);
                 std::thread::sleep(Duration::from_secs(1));
@@ -610,6 +633,12 @@ impl Store {
         }
     }
     fn restore(&self, tx: &Transaction) -> Result<(), String> {
+        // Recheck immediately before stopping any unit.  The capsule may have
+        // become active after watch() inspected the transaction, and stopping
+        // it here would race its root-owned package repair.
+        if now()? < tx.rollback.activation_deadline && self.candidate_recovery_can_finish(tx)? {
+            return Err("candidate recovery still owns activation".into());
+        }
         let source = self.root.join("source.deb");
         safe(&source, false, self.owner, 0o600)?;
         if digest(&source)? != tx.rollback.source.package_sha256 {
@@ -685,16 +714,6 @@ impl Store {
         ] {
             command("/usr/bin/systemctl", &["--system", "restart", unit], false)?;
         }
-        command(
-            "/usr/bin/systemctl",
-            &[
-                "--system",
-                "is-active",
-                "--quiet",
-                "vonk-forge-agent.service",
-            ],
-            false,
-        )?;
         let installed = command(
             "/usr/bin/dpkg-query",
             &[
@@ -707,22 +726,186 @@ impl Store {
         if installed != format!("ii |{}", tx.rollback.source.package_version) {
             return Err("source package is not configured after rollback".into());
         }
-        let pid = command(
-            "/usr/bin/systemctl",
-            &[
-                "--system",
-                "show",
-                "--property=MainPID",
-                "--value",
-                "vonk-forge-agent.service",
-            ],
-            false,
-        )?;
-        let pid: u32 = pid.parse().map_err(|_| "source process unavailable")?;
-        if pid == 0 || digest_process(pid)? != tx.rollback.source.binary_sha256 {
-            return Err("source process identity differs after rollback".into());
-        }
+        prove_running_process(
+            "vonk-forge-agent.service",
+            &tx.rollback.source.binary_sha256,
+        )
+        .map_err(|_| "source process identity differs after rollback".to_owned())?;
         Ok(())
+    }
+
+    fn candidate_recovery_can_finish(&self, tx: &Transaction) -> Result<bool, String> {
+        if candidate_recovery_intent_matches(tx)? && recovery_capsule_is_active()? {
+            return Ok(true);
+        }
+        candidate_process_matches(tx)
+    }
+}
+
+fn candidate_recovery_intent_matches(tx: &Transaction) -> Result<bool, String> {
+    let root = Path::new("/var/lib/vonk-forge/package-upgrade");
+    let intent = root.join("intent");
+    if !intent.exists() {
+        return Ok(false);
+    }
+    safe(root, true, 0, 0o700)?;
+    safe(&intent, false, 0, 0o600)?;
+    let text = fs::read_to_string(intent).map_err(|e| e.to_string())?;
+    Ok(candidate_recovery_intent_matches_text(&text, tx))
+}
+
+fn candidate_recovery_intent_matches_text(text: &str, tx: &Transaction) -> bool {
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.len() != 17
+        || lines[0] != "schema_version=2"
+        || lines[1] != "package=vonk-forge-agent"
+        || lines[2] != format!("target_version={}", tx.candidate_version)
+        || lines[3] != "architecture=arm64"
+        || lines[4] != format!("package_sha256={}", tx.candidate_sha256)
+        || !decimal_field(lines[5], "package_bytes")
+        || lines[6] != format!("agent_sha256={}", tx.candidate_binary_sha256)
+        || lines[7] != format!("helper_sha256={}", tx.candidate_helper_sha256)
+        || !hex_field(lines[8], "runner_sha256")
+        || !hex_field(lines[9], "unit_sha256")
+        || !boot_id_field(lines[10], "request_boot_id")
+        || !decimal_field(lines[11], "dpkg_pid")
+        || !decimal_field(lines[12], "dpkg_start_time")
+        || !hex_field(lines[13], "recovery_nonce")
+        || !hex_field(lines[14], "capsule_unit_sha256")
+        || !hex_field(lines[15], "capsule_gate_sha256")
+        || !hex_field(lines[16], "capsule_suppression_sha256")
+    {
+        return false;
+    }
+    true
+}
+
+fn field_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.strip_prefix(key)
+        .and_then(|value| value.strip_prefix('='))
+}
+
+fn decimal_field(line: &str, key: &str) -> bool {
+    field_value(line, key)
+        .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn hex_field(line: &str, key: &str) -> bool {
+    field_value(line, key).is_some_and(|value| {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+fn boot_id_field(line: &str, key: &str) -> bool {
+    field_value(line, key).is_some_and(|value| {
+        value.len() == 36
+            && value.bytes().enumerate().all(|(index, byte)| {
+                if [8, 13, 18, 23].contains(&index) {
+                    byte == b'-'
+                } else {
+                    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                }
+            })
+    })
+}
+
+fn recovery_capsule_is_active() -> Result<bool, String> {
+    let state = command(
+        "/usr/bin/systemctl",
+        &[
+            "--system",
+            "show",
+            "--property=ActiveState",
+            "--value",
+            CAPSULE_UNIT,
+        ],
+        false,
+    )?;
+    Ok(matches!(state.as_str(), "active" | "activating"))
+}
+
+fn candidate_process_matches(tx: &Transaction) -> Result<bool, String> {
+    let installed = match command(
+        "/usr/bin/dpkg-query",
+        &[
+            "-W",
+            "-f=${db:Status-Abbrev}|${Version}",
+            "vonk-forge-agent",
+        ],
+        false,
+    ) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    if installed != format!("ii |{}", tx.candidate_version)
+        || digest(Path::new(AGENT)).ok().as_deref() != Some(tx.candidate_binary_sha256.as_str())
+        || digest(Path::new(HELPER)).ok().as_deref() != Some(tx.candidate_helper_sha256.as_str())
+    {
+        return Ok(false);
+    }
+    let active = command(
+        "/usr/bin/systemctl",
+        &[
+            "--system",
+            "is-active",
+            "--quiet",
+            "vonk-forge-agent.service",
+        ],
+        false,
+    )
+    .is_ok();
+    if !active {
+        return Ok(false);
+    }
+    let pid = command(
+        "/usr/bin/systemctl",
+        &[
+            "--system",
+            "show",
+            "--property=MainPID",
+            "--value",
+            "vonk-forge-agent.service",
+        ],
+        false,
+    )?;
+    let Ok(pid) = pid.parse::<u32>() else {
+        return Ok(false);
+    };
+    Ok(pid > 1 && digest_process(pid).is_ok_and(|value| value == tx.candidate_binary_sha256))
+}
+
+fn prove_running_process(service: &str, expected_digest: &str) -> Result<(), String> {
+    let deadline = Instant::now() + PROCESS_PROOF_TIMEOUT;
+    loop {
+        let active = command(
+            "/usr/bin/systemctl",
+            &["--system", "is-active", "--quiet", service],
+            false,
+        )
+        .is_ok();
+        if active {
+            if let Ok(pid) = command(
+                "/usr/bin/systemctl",
+                &["--system", "show", "--property=MainPID", "--value", service],
+                false,
+            )
+            .and_then(|value| {
+                value
+                    .parse::<u32>()
+                    .map_err(|_| "invalid process id".into())
+            }) {
+                if pid > 1 && digest_process(pid).is_ok_and(|value| value == expected_digest) {
+                    return Ok(());
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err("process identity proof timed out".into());
+        }
+        std::thread::sleep(PROCESS_PROOF_INTERVAL);
     }
 }
 
@@ -902,5 +1085,49 @@ mod tests {
         let mut value = serde_json::to_value(transaction()).unwrap();
         value["schema_version"] = serde_json::json!(2.0);
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn recovery_capsule_coordination_requires_the_exact_candidate_intent() {
+        let tx = transaction();
+        let intent = format!(
+            "schema_version=2
+package=vonk-forge-agent
+target_version={}
+architecture=arm64
+package_sha256={}
+package_bytes=123
+agent_sha256={}
+helper_sha256={}
+runner_sha256={}
+unit_sha256={}
+request_boot_id=01234567-89ab-cdef-0123-456789abcdef
+dpkg_pid=123
+dpkg_start_time=456
+recovery_nonce={}
+capsule_unit_sha256={}
+capsule_gate_sha256={}
+capsule_suppression_sha256={}
+",
+            tx.candidate_version,
+            tx.candidate_sha256,
+            tx.candidate_binary_sha256,
+            tx.candidate_helper_sha256,
+            "a".repeat(64),
+            "b".repeat(64),
+            tx.rollback.attempt_nonce,
+            "c".repeat(64),
+            "d".repeat(64),
+            "e".repeat(64),
+        );
+        assert!(candidate_recovery_intent_matches_text(&intent, &tx));
+
+        let mut changed = intent.replace(
+            &format!("package_sha256={}", tx.candidate_sha256),
+            &format!("package_sha256={}", "f".repeat(64)),
+        );
+        assert!(!candidate_recovery_intent_matches_text(&changed, &tx));
+        changed.push_str("unexpected=field\n");
+        assert!(!candidate_recovery_intent_matches_text(&changed, &tx));
     }
 }

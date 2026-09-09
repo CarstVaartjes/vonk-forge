@@ -74,7 +74,17 @@ watchdog cgroup, while the transaction is `rolling_back` and its attempt nonce
 matches. A copied nonce used from another process, another package, or another
 attempt does not authorize a downgrade. Source installation runs with the
 current maintainer scripts' offline activation setting; the watchdog itself
-restarts and proves the source process afterwards.
+restarts and proves the source process afterwards. If the initial `dpkg` result
+arrives while the exact candidate recovery capsule is still active, or after it
+has already proved the candidate process, the rollback watchdog leaves the
+transaction armed until the existing activation deadline. This gives the
+root-owned capsule one owner for the repair and prevents the watchdog from
+stopping it mid-configure. If recovery does not produce the exact candidate
+package and process before that bounded deadline, the watchdog resumes source
+restoration. After restoration, the source process identity proof polls the
+service's `MainPID` for a bounded interval so a normal systemd restart race is
+not reported as a failed rollback; it still requires the `/proc/<pid>/exe`
+digest to equal the captured source agent.
 
 The Controller issues the signed fixed `confirm-package-activation` operation
 only for the candidate that has met the contact/readiness gate. It binds the
