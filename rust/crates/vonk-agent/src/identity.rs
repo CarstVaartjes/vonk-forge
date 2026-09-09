@@ -306,7 +306,27 @@ pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError>
         Err(error) => return Err(error.into()),
     }
     clear_pending(root)?;
+    cleanup_abandoned_generations(root, generation)?;
     File::open(root)?.sync_all()?;
+    Ok(())
+}
+
+fn cleanup_abandoned_generations(root: &Path, active_generation: u64) -> Result<(), IdentityError> {
+    let active_name = generation_name(active_generation);
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with("generation-") || name.starts_with("replaced-generation-"))
+            && name != active_name
+        {
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(std::io::Error::other("identity generation is unsafe").into());
+            }
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
     Ok(())
 }
 
@@ -605,6 +625,25 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("replaced-generation-00000000000000000002-")
+        }));
+    }
+
+    #[test]
+    fn successful_publish_cleans_replaced_and_old_generation_directories() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'o')).unwrap();
+        stage_identity(&root, &material(2, b'n')).unwrap();
+        stage_identity(&root, &material(3, b't')).unwrap();
+        publish_staged(&root, 3).unwrap();
+
+        assert!(root.join(generation_name(3)).is_dir());
+        assert!(!root.join(generation_name(2)).exists());
+        assert!(!fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("replaced-generation-")
         }));
     }
 
