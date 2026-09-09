@@ -26,10 +26,9 @@ NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 BOOT_ID = "00000000-0000-4000-8000-000000000001"
 
 
-def sample(*, sequence: int, observed_at: datetime) -> dict[str, object]:
+def sample(*, observed_at: datetime) -> dict[str, object]:
     return {
         "boot_id": BOOT_ID,
-        "sequence": sequence,
         "observed_at": observed_at.isoformat(),
         "cpu_utilization_percent": 42.0,
         "load_average_1m": 1.25,
@@ -98,7 +97,6 @@ def report(*, sample_count: int = 1) -> dict[str, object]:
         "schema_version": 1,
         "samples": [
             sample(
-                sequence=index,
                 observed_at=start + timedelta(seconds=index),
             )
             for index in range(sample_count)
@@ -119,8 +117,8 @@ def test_rich_report_is_schema_validated_and_canonically_copied() -> None:
         TelemetryRequest.parse(parsed.document()).document()
     )
 
-    raw["samples"][0]["sequence"] = 99  # type: ignore[index]
-    assert parsed.samples[0].sequence == 0
+    raw["samples"][0]["cpu_utilization_percent"] = 99  # type: ignore[index]
+    assert parsed.samples[0].cpu_utilization_percent == 42.0
 
 
 def test_telemetry_schema_validator_uses_the_registered_pydantic_model() -> None:
@@ -142,7 +140,7 @@ def test_packaged_telemetry_schema_is_deterministically_generated() -> None:
 
 def test_report_rejects_duplicate_or_out_of_order_samples() -> None:
     duplicate = report(sample_count=2)
-    duplicate["samples"][1]["sequence"] = 0  # type: ignore[index]
+    duplicate["samples"][1]["observed_at"] = duplicate["samples"][0]["observed_at"]  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="duplicated|ordered"):
         TelemetryRequest.parse(duplicate)
 

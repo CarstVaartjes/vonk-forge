@@ -57,7 +57,6 @@ function telemetry(observedAt: string, memory = 80): NonNullable<VisualFleetNode
       id: "00000000-0000-4000-8000-000000000001",
       node_id: "spk_0123456789abcdef0123456789abcdef",
       boot_id: "00000000-0000-0000-0000-000000000001",
-      sequence: 1,
       observed_at: observedAt,
       received_at: observedAt,
       cpu_utilization_percent: 10,

@@ -349,7 +349,7 @@ schedule_permanent_helper_restart() {
             /usr/bin/rm -f -- "$helper_pending"
             /usr/bin/sync -f /var/lib/vonk-forge
             /usr/bin/systemctl --system restart \
-                vonk-forge-agent.service >/dev/null
+                vonk-forge-agent.service vonk-forge-monitor.service >/dev/null
         ' vonk-package-upgrade "$wait_pid" "$wait_start" \
             "$old_helper_pid" "$old_helper_start" "$expected_helper_digest" \
             "$expected_agent_digest" \
@@ -493,6 +493,7 @@ if ! deb-systemd-helper is-enabled vonk-forge-package-rollback.service >/dev/nul
     deb-systemd-helper enable vonk-forge-package-rollback.service >/dev/null
 fi
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
+deb-systemd-helper enable vonk-forge-monitor.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
 fi

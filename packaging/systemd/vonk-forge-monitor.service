@@ -1,0 +1,56 @@
+[Unit]
+Description=Vonk Forge Spark monitor
+Wants=network-online.target
+After=network-online.target vonk-forge-agent.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=vonk-agent
+Group=vonk-agent
+ExecStart=/usr/lib/vonk-forge/vonk-monitor --config /etc/vonk-forge-agent/agent.toml
+Environment=HOME=/var/lib/vonk-forge-agent
+Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config
+Environment=XDG_DATA_HOME=/var/lib/vonk-forge-agent
+Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+UMask=0077
+RuntimeDirectory=vonk-forge-agent
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/nvidiactl r
+DeviceAllow=/dev/nvidia-uvm r
+DeviceAllow=/dev/nvidia-uvm-tools r
+DeviceAllow=/dev/nvidia-modeset r
+DeviceAllow=/dev/nvidia0 r
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=all
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/vonk-forge-agent /usr/lib/vonk-forge /var/lib/vonk-forge-agent /run/vonk-forge-agent /proc /sys
+InaccessiblePaths=/home /root -/var/lib/vonk-forge/incoming -/var/lib/vonk-forge-agent/state.sqlite
+
+[Install]
+WantedBy=multi-user.target

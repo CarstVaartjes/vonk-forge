@@ -11,11 +11,26 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-agent-systemd"
 PACKAGED_UNITS = [
     "vonk-forge-agent.service",
+    "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
 ]
+
+
+def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
+    unit = (ROOT / "packaging/systemd/vonk-forge-monitor.service").read_text()
+    inaccessible = next(
+        line.removeprefix("InaccessiblePaths=")
+        for line in unit.splitlines()
+        if line.startswith("InaccessiblePaths=")
+    ).split()
+
+    assert "-/var/lib/vonk-forge-agent/state.sqlite" in inaccessible
+    assert "-/var/lib/vonk-forge/incoming" in inaccessible
+    assert "/var/lib/vonk-forge-agent/state.sqlite" not in inaccessible
+    assert "/var/lib/vonk-forge/incoming" not in inaccessible
 
 
 @pytest.mark.skipif(

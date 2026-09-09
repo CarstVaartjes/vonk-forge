@@ -39,7 +39,11 @@ impl HostRuntimeError {
         match self {
             Self::Io(_) => "helper_io_failed".to_owned(),
             Self::Controller(ClientError::Protocol) => "helper_grant_invalid".to_owned(),
-            Self::Controller(ClientError::Authentication) => "helper_grant_unauthorized".to_owned(),
+            Self::Controller(ClientError::Controller(error))
+                if matches!(error.status, 401 | 403) =>
+            {
+                "helper_grant_unauthorized".to_owned()
+            }
             Self::Controller(_) => "helper_grant_unavailable".to_owned(),
             Self::Protocol => "helper_protocol_invalid".to_owned(),
             Self::HelperRejected { code } if stable_runtime_error_code(code) => {
@@ -492,7 +496,9 @@ mod tests {
                 "helper_grant_invalid",
             ),
             (
-                HostRuntimeError::Controller(ClientError::Authentication),
+                HostRuntimeError::Controller(ClientError::Controller(
+                    crate::client::ControllerError::from_status(403),
+                )),
                 "helper_grant_unauthorized",
             ),
             (

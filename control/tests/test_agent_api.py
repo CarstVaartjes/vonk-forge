@@ -389,7 +389,6 @@ def agent_headers(node: str, serial: str) -> dict[str, str]:
 def telemetry_payload(
     clock: Clock,
     *,
-    sequence: int = 1,
     observed_at: datetime | None = None,
     boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> dict[str, object]:
@@ -398,7 +397,6 @@ def telemetry_payload(
         "samples": [
             {
                 "boot_id": boot_id,
-                "sequence": sequence,
                 "observed_at": (observed_at or clock.now).isoformat(),
                 "cpu_utilization_percent": 12.5,
                 "load_average_1m": 1.25,
@@ -571,7 +569,6 @@ def test_agent_posts_authenticated_telemetry_for_certificate_node(
     payload["samples"].append(  # type: ignore[union-attr]
         telemetry_payload(
             clock,
-            sequence=2,
             observed_at=clock.now,
         )["samples"][0]  # type: ignore[index]
     )
@@ -585,12 +582,9 @@ def test_agent_posts_authenticated_telemetry_for_certificate_node(
     assert response.status_code == 204
     with services.sessions() as session:
         rows = session.scalars(
-            select(NodeTelemetrySample).order_by(NodeTelemetrySample.sequence)
+            select(NodeTelemetrySample).order_by(NodeTelemetrySample.observed_at)
         ).all()
-        assert [(row.node_id, row.sequence) for row in rows] == [
-            (NODE_A, 1),
-            (NODE_A, 2),
-        ]
+        assert [row.node_id for row in rows] == [NODE_A, NODE_A]
         assert rows[0].observed_at != rows[0].received_at
         assert rows[0].received_at == clock.now.replace(tzinfo=None)
 
@@ -643,7 +637,6 @@ def test_telemetry_rejects_more_than_sixteen_samples(agent_system) -> None:
     samples = [
         telemetry_payload(
             clock,
-            sequence=index,
             observed_at=clock.now - timedelta(seconds=16 - index),
         )["samples"][0]  # type: ignore[index]
         for index in range(17)
@@ -702,8 +695,9 @@ def test_telemetry_requires_every_fixed_core_metric(agent_system) -> None:
         (
             '{"schema_version":1,"samples":[{'
             '"boot_id":"00000000-0000-4000-8000-000000000001",'
-            '"sequence":1,"sequence":2,'
-            '"observed_at":"2026-08-03T12:00:00+00:00"}]}'
+            '"observed_at":"2026-08-03T12:00:00+00:00",'
+            '"observed_at":"2026-08-03T12:00:01+00:00",'
+            '"gap_samples":0}]}'
         ),
     ],
 )
@@ -4609,3 +4603,33 @@ def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -
     assert components["EnrollmentSubmitRequest"] == expected
     for name, document in nested.items():
         assert components[name] == document
+
+
+def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
+    agent_system,
+) -> None:
+    from vonk_agent_protocol.enrollment import IssuedCertificateResponse, RenewRequest
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/agent/v1/renew/recover"]["post"]
+    assert operation["requestBody"] == {
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/RenewRequest"}
+            }
+        },
+        "required": True,
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/IssuedCertificateResponse"
+    }
+    components = schema["components"]["schemas"]
+    assert components["RenewRequest"] == RenewRequest.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    assert components["IssuedCertificateResponse"] == (
+        IssuedCertificateResponse.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+    )

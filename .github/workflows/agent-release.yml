@@ -12,6 +12,7 @@ on:
       - Cargo.toml
       - packaging/**
       - rust/crates/vonk-agent/**
+      - rust/crates/vonk-monitor/**
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
       - rust/crates/vonk-build-egress/**

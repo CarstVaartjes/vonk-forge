@@ -37,7 +37,6 @@ class TelemetryPoint:
             node_id (str):
             observed_at (datetime.datetime):
             received_at (datetime.datetime):
-            sequence (int):
             cpu_utilization_percent (Union[None, Unset, float]):
             disk_free_bytes (Union[None, Unset, int]):
             disk_total_bytes (Union[None, Unset, int]):
@@ -61,7 +60,6 @@ class TelemetryPoint:
     node_id: str
     observed_at: datetime.datetime
     received_at: datetime.datetime
-    sequence: int
     cpu_utilization_percent: Union[None, Unset, float] = UNSET
     disk_free_bytes: Union[None, Unset, int] = UNSET
     disk_total_bytes: Union[None, Unset, int] = UNSET
@@ -98,8 +96,6 @@ class TelemetryPoint:
         observed_at = self.observed_at.isoformat()
 
         received_at = self.received_at.isoformat()
-
-        sequence = self.sequence
 
         cpu_utilization_percent: Union[None, Unset, float]
         if isinstance(self.cpu_utilization_percent, Unset):
@@ -191,7 +187,6 @@ class TelemetryPoint:
             "node_id": node_id,
             "observed_at": observed_at,
             "received_at": received_at,
-            "sequence": sequence,
         })
         if cpu_utilization_percent is not UNSET:
             field_dict["cpu_utilization_percent"] = cpu_utilization_percent
@@ -256,8 +251,6 @@ class TelemetryPoint:
 
 
 
-
-        sequence = d.pop("sequence")
 
         def _parse_cpu_utilization_percent(data: object) -> Union[None, Unset, float]:
             if data is None:
@@ -398,7 +391,6 @@ class TelemetryPoint:
             node_id=node_id,
             observed_at=observed_at,
             received_at=received_at,
-            sequence=sequence,
             cpu_utilization_percent=cpu_utilization_percent,
             disk_free_bytes=disk_free_bytes,
             disk_total_bytes=disk_total_bytes,

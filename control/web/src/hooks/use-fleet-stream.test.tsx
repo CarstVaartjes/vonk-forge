@@ -49,7 +49,6 @@ function point(cpu: number): TelemetryPoint {
     id: `sample-${cpu}`,
     node_id: "node-a",
     boot_id: "00000000-0000-0000-0000-000000000001",
-    sequence: cpu,
     observed_at: "2026-08-15T11:59:58Z",
     received_at: "2026-08-15T11:59:59Z",
     cpu_utilization_percent: cpu,

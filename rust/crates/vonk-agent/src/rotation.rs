@@ -14,17 +14,32 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum RotationError {
-    #[error("credential transport failed")]
+    #[error("credential operation failed: {0}")]
     Client(#[from] ClientError),
-    #[error("credential storage failed")]
+    #[error("credential storage failed: {0}")]
     Identity(#[from] IdentityError),
-    #[error("issued credential is invalid")]
+    #[error("issued credential is invalid: {0}")]
     Issued(#[from] PairingError),
 }
 
 impl RotationError {
     pub fn retryable(&self) -> bool {
         matches!(self, Self::Client(error) if error.retryable())
+    }
+
+    pub fn code(&self) -> String {
+        match self {
+            Self::Client(error) => error
+                .code()
+                .map(str::to_owned)
+                .unwrap_or_else(|| "controller.request_failed".to_owned()),
+            Self::Identity(_) => "local.identity_failed".to_owned(),
+            Self::Issued(_) => "local.issued_identity_invalid".to_owned(),
+        }
+    }
+
+    pub fn decision(&self) -> &'static str {
+        if self.retryable() { "retry" } else { "exit" }
     }
 }
 
@@ -63,9 +78,23 @@ pub async fn rotate_if_due(
             value
         }
     };
-    let issued = AgentHttpClient::from_config(config)?
-        .renew(&pending.csr_pem)
-        .await?;
+    let active_client = AgentHttpClient::from_config(config)?;
+    let issued = match active_client.renew(&pending.csr_pem).await {
+        Ok(issued) => issued,
+        // A controller-side staged CSR conflict is a typed denial.  The
+        // recovery endpoint is authenticated with the same still-active
+        // source identity and is bounded to this one durable CSR.  Actual
+        // Only the exact Controller context emitted for a staged CSR
+        // conflict can enter recovery. Other authentication or rejection
+        // responses retain their original status, code, and decision.
+        Err(error)
+            if error.status() == Some(403)
+                && error.code() == Some("agent.certificate.rotation.conflict") =>
+        {
+            active_client.recover_renewal(&pending.csr_pem).await?
+        }
+        Err(error) => return Err(error.into()),
+    };
     validate_issued(&issued, &pending, &config.node_id)?;
     let generation = issued.generation;
     stage_identity(
@@ -92,4 +121,20 @@ pub async fn rotate_if_due(
     }
     client.replace_identity(config, &paths)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClientError, RotationError};
+
+    #[test]
+    fn rotation_preserves_controller_status_code_and_decision() {
+        let error = RotationError::Client(ClientError::Controller(
+            crate::client::ControllerError::from_status(403),
+        ));
+        assert_eq!(error.code(), "controller.request_rejected");
+        assert_eq!(error.decision(), "exit");
+        assert!(!error.retryable());
+        assert!(error.to_string().contains("HTTP 403"));
+    }
 }

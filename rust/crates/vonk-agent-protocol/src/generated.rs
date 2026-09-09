@@ -667,6 +667,8 @@ pub struct ArtifactDistributionResult {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct BoundedErrorResponse {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1623,6 +1625,154 @@ pub struct EnrollmentSubmitRequest {
     pub csr: ::std::string::String,
     pub evidence: EnrollmentEvidence,
     pub grant_token: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct ErrorContextResponse {
+    pub code: ::std::string::String,
+    pub decision: ErrorContextResponseDecision,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub endpoint: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub http_status: ::std::option::Option<u32>,
+    pub operation: ::std::string::String,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub request_id: ::std::option::Option<::std::string::String>,
+    pub retryable: bool,
+    pub source: ErrorContextResponseSource,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum ErrorContextResponseDecision {
+    #[serde(rename = "retry")]
+    Retry,
+    #[serde(rename = "defer")]
+    Defer,
+    #[serde(rename = "exit")]
+    Exit,
+}
+impl ::std::fmt::Display for ErrorContextResponseDecision {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Retry => f.write_str("retry"),
+            Self::Defer => f.write_str("defer"),
+            Self::Exit => f.write_str("exit"),
+        }
+    }
+}
+impl ::std::str::FromStr for ErrorContextResponseDecision {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "retry" => Ok(Self::Retry),
+            "defer" => Ok(Self::Defer),
+            "exit" => Ok(Self::Exit),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ErrorContextResponseDecision {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for ErrorContextResponseDecision {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ErrorContextResponseDecision {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum ErrorContextResponseSource {
+    #[serde(rename = "remote_rejection")]
+    RemoteRejection,
+    #[serde(rename = "transport")]
+    Transport,
+    #[serde(rename = "local_io")]
+    LocalIo,
+    #[serde(rename = "protocol")]
+    Protocol,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for ErrorContextResponseSource {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RemoteRejection => f.write_str("remote_rejection"),
+            Self::Transport => f.write_str("transport"),
+            Self::LocalIo => f.write_str("local_io"),
+            Self::Protocol => f.write_str("protocol"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ErrorContextResponseSource {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "remote_rejection" => Ok(Self::RemoteRejection),
+            "transport" => Ok(Self::Transport),
+            "local_io" => Ok(Self::LocalIo),
+            "protocol" => Ok(Self::Protocol),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ErrorContextResponseSource {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for ErrorContextResponseSource {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ErrorContextResponseSource {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -4399,6 +4549,8 @@ pub struct RequestValidationIssue {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RequestValidationProblem {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
     pub issues: ::std::vec::Vec<RequestValidationIssue>,
 }
@@ -5478,7 +5630,6 @@ pub struct TelemetrySample {
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub power_watts: ::std::option::Option<f64>,
-    pub sequence: u64,
     pub temperature_c: ::std::option::Option<f64>,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -6622,10 +6773,15 @@ impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self { detail: raw.detail })
+        Ok(Self {
+            context: raw.context,
+            detail: raw.detail,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
@@ -7652,6 +7808,92 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentSubmitRequest {
             evidence: raw.evidence,
             grant_token: raw.grant_token,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ErrorContextResponse {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ErrorContextResponse", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub code: ::std::string::String,
+            pub decision: ErrorContextResponseDecision,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub endpoint: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub http_status: ::std::option::Option<u32>,
+            pub operation: ::std::string::String,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub request_id: ::std::option::Option<::std::string::String>,
+            pub retryable: bool,
+            pub source: ErrorContextResponseSource,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            code: raw.code,
+            decision: raw.decision,
+            endpoint: raw.endpoint,
+            http_status: raw.http_status,
+            operation: raw.operation,
+            request_id: raw.request_id,
+            retryable: raw.retryable,
+            source: raw.source,
+        })
+    }
+}
+impl ErrorContextResponseDecision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Retry => "retry",
+            Self::Defer => "defer",
+            Self::Exit => "exit",
+        }
+    }
+}
+impl ::std::ops::Deref for ErrorContextResponseDecision {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ErrorContextResponseDecision {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ErrorContextResponseDecision {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl ErrorContextResponseSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RemoteRejection => "remote_rejection",
+            Self::Transport => "transport",
+            Self::LocalIo => "local_io",
+            Self::Protocol => "protocol",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ErrorContextResponseSource {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ErrorContextResponseSource {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ErrorContextResponseSource {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation {
@@ -11171,11 +11413,14 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
             pub issues: ::std::vec::Vec<RequestValidationIssue>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            context: raw.context,
             detail: raw.detail,
             issues: raw.issues,
         })
@@ -12170,7 +12415,6 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub power_watts: ::std::option::Option<f64>,
-            pub sequence: u64,
             pub temperature_c: ::std::option::Option<f64>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -12192,7 +12436,6 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             network_transmit_bytes_per_second: raw.network_transmit_bytes_per_second,
             observed_at: raw.observed_at,
             power_watts: raw.power_watts,
-            sequence: raw.sequence,
             temperature_c: raw.temperature_c,
         })
     }
@@ -12706,6 +12949,7 @@ impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
 impl From<&RequestValidationProblem> for BoundedErrorResponse {
     fn from(value: &RequestValidationProblem) -> Self {
         Self {
+            context: value.context.clone(),
             detail: value.detail.clone(),
         }
     }

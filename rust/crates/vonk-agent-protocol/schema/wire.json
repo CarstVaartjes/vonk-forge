@@ -1089,6 +1089,17 @@
     "BoundedErrorResponse": {
       "additionalProperties": false,
       "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorContextResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "detail": {
           "maxLength": 256,
           "minLength": 1,
@@ -2747,6 +2758,97 @@
         "evidence"
       ],
       "title": "EnrollmentSubmitRequest",
+      "type": "object"
+    },
+    "ErrorContextResponse": {
+      "additionalProperties": false,
+      "description": "Safe context shared by public errors and generated clients.",
+      "properties": {
+        "code": {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "retry",
+            "defer",
+            "exit"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "pattern": "^/[^?#\\x00\\r\\n]{0,511}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Http Status"
+        },
+        "operation": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "remote_rejection",
+            "transport",
+            "local_io",
+            "protocol",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "code",
+        "source",
+        "decision"
+      ],
+      "title": "ErrorContextResponse",
       "type": "object"
     },
     "ExecuteContainerRuntimeRequestOperation": {
@@ -8395,6 +8497,17 @@
     "RequestValidationProblem": {
       "additionalProperties": false,
       "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorContextResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "detail": {
           "maxLength": 256,
           "minLength": 1,
@@ -9845,12 +9958,6 @@
           ],
           "title": "Power Watts"
         },
-        "sequence": {
-          "maximum": 9223372036854775807,
-          "minimum": 0,
-          "title": "Sequence",
-          "type": "integer"
-        },
         "temperature_c": {
           "anyOf": [
             {
@@ -9867,7 +9974,6 @@
       },
       "required": [
         "boot_id",
-        "sequence",
         "observed_at",
         "cpu_utilization_percent",
         "load_average_1m",

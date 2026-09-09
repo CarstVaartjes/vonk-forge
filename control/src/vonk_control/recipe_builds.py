@@ -322,6 +322,7 @@ class RecipeBuildPlan:
     source_bundle_sha256: str
     build_input_sha256: str
     agent_payload: dict[str, object]
+    policy_report: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -557,7 +558,7 @@ class RecipeBuildService:
             image_bytes=cached.image_bytes,
         )
 
-    def plan(
+    def prepare_plan(
         self,
         recipe_revision_id: str,
         builder_node_id: str,
@@ -751,74 +752,126 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.contract_invalid", "source build envelope is invalid"
             ) from error
-        with self._sessions.begin() as session:
-            existing = session.scalar(
-                select(RecipeBuild).where(
-                    RecipeBuild.recipe_revision_id == revision.id,
-                    RecipeBuild.builder_node_id == builder_node_id,
-                    RecipeBuild.build_input_sha256 == build_input_sha256,
-                )
-            )
-            if existing is None:
-                # Reusable image bytes are keyed by executable inputs, not by
-                # editorial recipe provenance.  Only a succeeded receipt may
-                # cross a revision boundary; planned/failed rows remain tied
-                # to their original authorization and recovery state.
-                existing = session.scalar(
-                    select(RecipeBuild)
-                    .where(
-                        RecipeBuild.builder_node_id == builder_node_id,
-                        RecipeBuild.build_input_sha256 == build_input_sha256,
-                        RecipeBuild.state == "succeeded",
-                    )
-                    .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                    .limit(1)
-                )
-            if existing is None:
-                existing = RecipeBuild(
-                    id=proposed_build_id,
-                    recipe_revision_id=revision.id,
-                    builder_node_id=builder_node_id,
-                    source_bundle_sha256=source_sha256,
-                    build_input_sha256=build_input_sha256,
-                    state="planned",
-                    policy_report=policy_document,
-                    plan=copy.deepcopy(payload),
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(existing)
-                session.flush()
-            elif existing.recipe_revision_id == revision.id:
-                try:
-                    payload = build_plan_document(existing.plan)
-                    parse_stored_build_policy(existing.policy_report)
-                except RecipeExecutionContractError as error:
-                    raise RecipeBuildError(
-                        "build.plan_invalid", "stored source build envelope is invalid"
-                    ) from error
-            else:
-                # Keep the immutable receipt and its original provenance. The
-                # plan returned to the caller carries the newly requested
-                # recipe digest while execution reuses the exact image result.
-                payload["build_id"] = existing.id
-                payload["recipe_revision_id"] = revision.id
-                payload["recipe_content_sha256"] = revision.content_digest
-            try:
-                payload = build_plan_document(payload)
-            except RecipeExecutionContractError as error:
-                raise RecipeBuildError(
-                    "build.plan_invalid", "stored source build plan is invalid"
-                ) from error
-            build_id = existing.id
         return RecipeBuildPlan(
-            build_id=build_id,
+            build_id=proposed_build_id,
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_digest,
             builder_node_id=builder_node_id,
             source_bundle_sha256=source_sha256,
             build_input_sha256=build_input_sha256,
             agent_payload=payload,
+            policy_report=policy_document,
+        )
+
+    def plan(
+        self,
+        recipe_revision_id: str,
+        builder_node_id: str,
+        *,
+        now: datetime,
+        resolution: RecipeBuildResolution | None = None,
+    ) -> RecipeBuildPlan:
+        """Prepare a build outside locks, then persist it in one short transaction."""
+        prepared = self.prepare_plan(
+            recipe_revision_id,
+            builder_node_id,
+            now=now,
+            resolution=resolution,
+        )
+        with self._sessions.begin() as session:
+            return self.persist_plan_in_session(session, prepared, now=now)
+
+    def persist_plan_in_session(
+        self, session: Session, plan: RecipeBuildPlan, *, now: datetime
+    ) -> RecipeBuildPlan:
+        """Persist a prepared plan using the caller's transaction.
+
+        This helper intentionally never opens another transaction.  It may be
+        called while the availability parent and builder rows are locked.
+        """
+        node = session.get(AgentNode, plan.builder_node_id, with_for_update=True)
+        if node is None:
+            raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
+        _validate_builder(node)
+        policy_document = plan.policy_report
+        if not isinstance(policy_document, dict):
+            raise RecipeBuildError(
+                "build.plan_invalid", "prepared source build policy is unavailable"
+            )
+        try:
+            policy = parse_stored_build_policy(policy_document)
+        except RecipeExecutionContractError as error:
+            raise RecipeBuildError(
+                "build.plan_invalid", "prepared source build policy is invalid"
+            ) from error
+        if policy.builder_binary_digest != node.binary_digest:
+            raise RecipeBuildError(
+                "build.runtime_changed", "builder runtime identity changed"
+            )
+        existing = session.scalar(
+            select(RecipeBuild).where(
+                RecipeBuild.recipe_revision_id == plan.recipe_revision_id,
+                RecipeBuild.builder_node_id == plan.builder_node_id,
+                RecipeBuild.build_input_sha256 == plan.build_input_sha256,
+            )
+        )
+        if existing is None:
+            # Reusable image bytes are keyed by executable inputs, not by
+            # editorial recipe provenance. Only a succeeded receipt may cross
+            # a revision boundary.
+            existing = session.scalar(
+                select(RecipeBuild)
+                .where(
+                    RecipeBuild.builder_node_id == plan.builder_node_id,
+                    RecipeBuild.build_input_sha256 == plan.build_input_sha256,
+                    RecipeBuild.state == "succeeded",
+                )
+                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+                .limit(1)
+            )
+        payload = build_plan_document(copy.deepcopy(plan.agent_payload))
+        if existing is None:
+            existing = RecipeBuild(
+                id=plan.build_id,
+                recipe_revision_id=plan.recipe_revision_id,
+                builder_node_id=plan.builder_node_id,
+                source_bundle_sha256=plan.source_bundle_sha256,
+                build_input_sha256=plan.build_input_sha256,
+                state="planned",
+                policy_report=copy.deepcopy(policy_document),
+                plan=copy.deepcopy(payload),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(existing)
+            session.flush()
+        elif existing.recipe_revision_id == plan.recipe_revision_id:
+            try:
+                payload = build_plan_document(existing.plan)
+                parse_stored_build_policy(existing.policy_report)
+            except RecipeExecutionContractError as error:
+                raise RecipeBuildError(
+                    "build.plan_invalid", "stored source build envelope is invalid"
+                ) from error
+        else:
+            payload["build_id"] = existing.id
+            payload["recipe_revision_id"] = plan.recipe_revision_id
+            payload["recipe_content_sha256"] = plan.recipe_content_sha256
+        try:
+            payload = build_plan_document(payload)
+        except RecipeExecutionContractError as error:
+            raise RecipeBuildError(
+                "build.plan_invalid", "stored source build plan is invalid"
+            ) from error
+        return RecipeBuildPlan(
+            build_id=existing.id,
+            recipe_revision_id=plan.recipe_revision_id,
+            recipe_content_sha256=plan.recipe_content_sha256,
+            builder_node_id=plan.builder_node_id,
+            source_bundle_sha256=plan.source_bundle_sha256,
+            build_input_sha256=plan.build_input_sha256,
+            agent_payload=payload,
+            policy_report=copy.deepcopy(policy_document),
         )
 
     def record_success(

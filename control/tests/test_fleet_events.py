@@ -184,7 +184,6 @@ def _telemetry_sample(
 ) -> TelemetrySampleInput:
     return TelemetrySampleInput(
         boot_id=uuid.UUID(boot_id),
-        sequence=sequence,
         observed_at=observed_at,
         cpu_utilization_percent=cpu,
         load_average_1m=None,

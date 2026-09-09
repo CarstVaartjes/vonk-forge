@@ -314,7 +314,6 @@ class TelemetryMetrics(TelemetryWireModel):
 
 class TelemetrySample(TelemetryWireModel):
     boot_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-    sequence: int = Field(ge=0, le=MAX_TELEMETRY_SCALAR_INTEGER)
     observed_at: datetime
     cpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
     load_average_1m: float | None = Field(ge=0, le=1_000_000, allow_inf_nan=False)
@@ -355,19 +354,11 @@ class TelemetryRequest(TelemetryWireModel):
 
     @model_validator(mode="after")
     def ordered_unique_samples(self) -> TelemetryRequest:
-        identities = [(sample.boot_id, sample.sequence) for sample in self.samples]
-        if len(identities) != len(set(identities)):
-            raise ValueError("telemetry sample is duplicated")
         previous_observed_at: datetime | None = None
-        previous_by_boot: dict[str, int] = {}
         for sample in self.samples:
             if previous_observed_at is not None and sample.observed_at <= previous_observed_at:
                 raise ValueError("telemetry observations are not ordered")
             previous_observed_at = sample.observed_at
-            prior = previous_by_boot.get(sample.boot_id)
-            if prior is not None and sample.sequence <= prior:
-                raise ValueError("telemetry sequences must increase within one boot")
-            previous_by_boot[sample.boot_id] = sample.sequence
         return self
 
     @classmethod

@@ -180,8 +180,28 @@ class EmptyBody(StrictModel):
     """A body type used only where an explicit empty JSON object is allowed."""
 
 
+class ErrorContextResponse(StrictModel):
+    """Safe context shared by public errors and generated clients."""
+
+    operation: str = Field(min_length=1, max_length=160)
+    endpoint: str | None = Field(
+        default=None,
+        pattern=r"^/[^?#\x00\r\n]{0,511}$",
+        max_length=512,
+    )
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
+    request_id: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    )
+    source: Literal["remote_rejection", "transport", "local_io", "protocol", "unknown"]
+    decision: Literal["retry", "defer", "exit"]
+    retryable: bool = False
+
+
 class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
+    context: ErrorContextResponse | None = None
 
 
 class RequestValidationIssue(StrictModel):

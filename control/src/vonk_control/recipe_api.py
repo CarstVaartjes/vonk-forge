@@ -597,7 +597,14 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         return _response(
             BuildPlanResponse,
-            {key: value for key, value in asdict(plan).items() if key != "agent_payload"},
+            {
+                "build_id": plan.build_id,
+                "recipe_revision_id": plan.recipe_revision_id,
+                "recipe_content_sha256": plan.recipe_content_sha256,
+                "builder_node_id": plan.builder_node_id,
+                "source_bundle_sha256": plan.source_bundle_sha256,
+                "build_input_sha256": plan.build_input_sha256,
+            },
         )
 
     @app.post(

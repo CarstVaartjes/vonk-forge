@@ -101,6 +101,7 @@ if [ "${1:-}" = remove ]; then
             "$recovery_unit" "$recovery_capsule_unit" >/dev/null 2>&1 || true
     fi
     deb-systemd-invoke stop vonk-forge-agent.service >/dev/null || true
+    deb-systemd-invoke stop vonk-forge-monitor.service >/dev/null || true
     deb-systemd-invoke stop vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-invoke stop vonk-forge-package-helper.service >/dev/null || true
     deb-systemd-invoke stop vonk-forge-docker-firewall.service >/dev/null || true
@@ -127,6 +128,7 @@ if [ "${1:-}" = remove ]; then
         /usr/bin/sync -f /var/lib/vonk-forge
     fi
     deb-systemd-helper disable vonk-forge-agent.service >/dev/null || true
+    deb-systemd-helper disable vonk-forge-monitor.service >/dev/null || true
     deb-systemd-helper disable vonk-forge-package-helper.socket >/dev/null || true
     deb-systemd-helper disable vonk-forge-docker-firewall.service >/dev/null || true
     /usr/bin/loginctl disable-linger vonk-agent >/dev/null || true

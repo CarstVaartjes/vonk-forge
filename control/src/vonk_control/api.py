@@ -102,6 +102,7 @@ from .operation_api import (
     BoundedErrorResponse,
     ChangeResponse,
     EndpointResponse,
+    ErrorContextResponse,
     HealthzResponse,
     IdentityHistoryResponse,
     JobDetailResponse,
@@ -164,17 +165,22 @@ _CATALOG_HTTP_ERROR_CODES = {
 }
 
 
-def _bounded_error_content(detail: object, *, validation: bool = False) -> bytes:
+def _bounded_error_content(
+    detail: object,
+    *,
+    validation: bool = False,
+    context: ErrorContextResponse | None = None,
+) -> bytes:
     """Serialize the documented non-agent HTTP error contract."""
 
     if not isinstance(detail, str):
         detail = "request failed"
     response = (
-        RequestValidationProblem(detail=detail[:256], issues=[])
+        RequestValidationProblem(detail=detail[:256], issues=[], context=context)
         if validation
-        else BoundedErrorResponse(detail=detail[:256])
+        else BoundedErrorResponse(detail=detail[:256], context=context)
     )
-    return canonical_message(response.model_dump(mode="json"))
+    return canonical_message(response.model_dump(mode="json", exclude_none=True))
 
 
 def _invalid_login_content() -> bytes:
@@ -195,6 +201,26 @@ def _catalog_error_content(request: Request, error: StarletteHTTPException) -> b
         request_id=request.state.request_id,
     )
     return canonical_message(response.model_dump(mode="json"))
+
+
+def _http_error_code(status_code: int) -> str:
+    """Return a stable, secret-free code for an HTTP boundary failure."""
+
+    if status_code == 401:
+        return "controller.authentication_required"
+    if status_code == 403:
+        # Middleware cannot reliably recover route detail from a wrapped
+        # response. Keep the classification generic unless a trusted producer
+        # supplies a canonical code directly.
+        return "controller.request_rejected"
+    return {
+        400: "controller.invalid_request",
+        404: "controller.not_found",
+        409: "controller.conflict",
+        413: "controller.request_too_large",
+        422: "controller.invalid_request",
+        503: "controller.unavailable",
+    }.get(status_code, f"controller.http_{status_code}")
 
 
 class _FleetEventStreamResponse(StreamingResponse):
@@ -683,37 +709,70 @@ def create_app(
             if artifact_output_upload
             else 1_048_576
         )
-        if telemetry_ingest:
-            response = await call_next(request)
-        elif (
-            length and int(length) > maximum and request.url.path != "/agent/v1/enroll"
-        ):
-            response = Response(status_code=413)
-        else:
-            body_too_large = False
-            invalid_login_document = False
-            if request.method == "POST" and request.url.path == _LOGIN_PATH:
-                try:
-                    json.loads(
-                        await _bounded_request_body(request, maximum),
-                        object_pairs_hook=_reject_duplicate_json_keys,
-                    )
-                except _RequestBodyTooLarge:
-                    body_too_large = True
-                except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
-                    invalid_login_document = True
-            if body_too_large:
-                response = Response(status_code=413)
-            elif invalid_login_document:
-                response = Response(
-                    content=_invalid_login_content(),
-                    status_code=422,
-                    media_type="application/json",
-                )
-            else:
+        try:
+            if telemetry_ingest:
                 response = await call_next(request)
+            elif (
+                length and int(length) > maximum and request.url.path != "/agent/v1/enroll"
+            ):
+                response = Response(status_code=413)
+            else:
+                body_too_large = False
+                invalid_login_document = False
+                if request.method == "POST" and request.url.path == _LOGIN_PATH:
+                    try:
+                        json.loads(
+                            await _bounded_request_body(request, maximum),
+                            object_pairs_hook=_reject_duplicate_json_keys,
+                        )
+                    except _RequestBodyTooLarge:
+                        body_too_large = True
+                    except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+                        invalid_login_document = True
+                if body_too_large:
+                    response = Response(status_code=413)
+                elif invalid_login_document:
+                    response = Response(
+                        content=_invalid_login_content(),
+                        status_code=422,
+                        media_type="application/json",
+                    )
+                else:
+                    response = await call_next(request)
+        except Exception:
+            # Preserve the correlation key without serializing the exception,
+            # request body, headers, or URL query into logs.
+            from .logging import log_event
+
+            log_event(
+                _LOGGER,
+                "api.request_failed",
+                service="controller",
+                operation=f"{request.method} {request.url.path}",
+                endpoint=request.url.path,
+                request_id=request_id,
+            )
+            response = Response(
+                content=_bounded_error_content(
+                    "internal server error",
+                    context=ErrorContextResponse(
+                        operation=f"{request.method} {request.url.path}",
+                        endpoint=request.url.path,
+                        http_status=500,
+                        code="controller.internal_error",
+                        request_id=request_id,
+                        source="unknown",
+                        decision="exit",
+                    ),
+                ),
+                status_code=500,
+                media_type="application/json",
+            )
+            response.headers["x-vonk-error-code"] = "controller.internal_error"
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
+        if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:
+            response.headers["x-vonk-error-code"] = _http_error_code(response.status_code)
         if request.url.path.startswith("/api/v1/auth/"):
             response.headers["cache-control"] = "no-store"
         if metrics is not None:

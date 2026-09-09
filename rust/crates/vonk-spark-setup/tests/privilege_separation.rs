@@ -940,6 +940,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
                     "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
+                    "vonk-forge-monitor.service",
                 ]
     }));
 }
@@ -1044,6 +1045,7 @@ fn start_converges_when_reset_failed_reports_unit_not_loaded() {
                     "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
+                    "vonk-forge-monitor.service",
                 ]
     }));
 }
@@ -1139,6 +1141,7 @@ fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
                     "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
+                    "vonk-forge-monitor.service",
                 ]
     }));
     assert_eq!(
@@ -1309,6 +1312,7 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
                     "vonk-forge-docker-firewall.service",
                     "vonk-forge-package-helper.socket",
                     "vonk-forge-agent.service",
+                    "vonk-forge-monitor.service",
                 ]
     }));
     assert!(

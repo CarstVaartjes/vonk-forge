@@ -135,6 +135,9 @@ from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .enum_parameter import EnumParameter
+from .error_context_response import ErrorContextResponse
+from .error_context_response_decision import ErrorContextResponseDecision
+from .error_context_response_source import ErrorContextResponseSource
 from .evidence_age import EvidenceAge
 from .evidence_age_freshness import EvidenceAgeFreshness
 from .evidence_context import EvidenceContext
@@ -851,6 +854,9 @@ __all__ = (
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "EnumParameter",
+    "ErrorContextResponse",
+    "ErrorContextResponseDecision",
+    "ErrorContextResponseSource",
     "EvidenceAge",
     "EvidenceAgeFreshness",
     "EvidenceContext",

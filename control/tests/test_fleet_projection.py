@@ -214,7 +214,6 @@ def _telemetry(
         id=sample_id,
         node_id=node_id,
         boot_id=boot_id,
-        sequence=sequence,
         observed_at=observed_at,
         received_at=observed_at + timedelta(milliseconds=250),
         cpu_utilization_percent=cpu,
@@ -511,7 +510,6 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "id": "00000000-0000-4000-8000-000000000012",
                         "node_id": NODE_A,
                         "boot_id": "00000000-0000-4000-8000-000000000001",
-                        "sequence": 2,
                         "observed_at": "2026-08-15T11:59:58Z",
                         "received_at": "2026-08-15T11:59:58.250000Z",
                         "cpu_utilization_percent": 12.5,
@@ -779,7 +777,6 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         "id": "00000000-0000-4000-8000-000000000004",
         "node_id": NODE_A,
         "boot_id": "00000000-0000-4000-8000-000000000005",
-        "sequence": 1,
         "observed_at": NOW,
         "received_at": NOW,
         "gap_samples": 0,
@@ -811,7 +808,6 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
             id="00000000-0000-4000-8000-000000000004",
             node_id=NODE_A,
             boot_id=boot_id,
-            sequence=1,
             observed_at=NOW,
             received_at=NOW,
             gap_samples=0,
@@ -1626,23 +1622,20 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
     assert [
         (
             point["id"],
-            point["sequence"],
             point["observed_at"],
             point["cpu_utilization_percent"],
         )
         for point in document["points"]
     ] == [
-        (
-            "00000000-0000-4000-8000-000000000202",
-            2,
-            "2026-08-15T11:40:00Z",
-            2.0,
+            (
+                "00000000-0000-4000-8000-000000000202",
+                "2026-08-15T11:40:00Z",
+                2.0,
         ),
-        (
-            "00000000-0000-4000-8000-000000000203",
-            3,
-            "2026-08-15T11:50:00Z",
-            3.0,
+            (
+                "00000000-0000-4000-8000-000000000203",
+                "2026-08-15T11:50:00Z",
+                3.0,
         ),
     ]
     with pytest.raises(KeyError, match=EXTRA_NODE):

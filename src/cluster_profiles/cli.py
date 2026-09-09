@@ -427,6 +427,9 @@ def _control_error(
         "shortfall_bytes": getattr(error, "shortfall_bytes", None),
         "log_excerpt": getattr(error, "log_excerpt", None),
     }
+    context = getattr(error, "context", None)
+    if context is not None:
+        result.update(context.as_dict())
     result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
     operation_id = getattr(args, "operation_id", None) if args is not None else None

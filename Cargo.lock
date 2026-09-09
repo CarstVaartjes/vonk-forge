@@ -2846,6 +2846,15 @@ name = "vonk-build-egress"
 version = "0.1.1"
 
 [[package]]
+name = "vonk-monitor"
+version = "0.1.1"
+dependencies = [
+ "clap",
+ "tokio",
+ "vonk-agent",
+]
+
+[[package]]
 name = "vonk-nas-setup"
 version = "0.1.1"
 dependencies = [

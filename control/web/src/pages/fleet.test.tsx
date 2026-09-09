@@ -29,7 +29,7 @@ class FakeEventSource extends EventTarget {
 
 function sample(nodeId: string, observedAt: string, gpu = 10): TelemetryPoint {
   return {
-    id: `${nodeId}-sample-${gpu}`, node_id: nodeId, boot_id: "00000000-0000-0000-0000-000000000001", sequence: gpu,
+    id: `${nodeId}-sample-${gpu}`, node_id: nodeId, boot_id: "00000000-0000-0000-0000-000000000001",
     observed_at: observedAt, received_at: observedAt,
     cpu_utilization_percent: 12, load_average_1m: 1,
     memory_total_bytes: 100 * GIB, memory_available_bytes: 80 * GIB,

@@ -33,6 +33,7 @@ def binary(machine: int, *, identity: bool, static: bool = False) -> bytes:
 def fixture(root: Path, machine: int = 183) -> Path:
     root.mkdir()
     (root / "vonk-agent").write_bytes(binary(machine, identity=True))
+    (root / "vonk-monitor").write_bytes(binary(machine, identity=False))
     (root / "vonk-agent-helper").write_bytes(binary(machine, identity=False))
     (root / "vonk-build-egress").write_bytes(
         binary(machine, identity=False, static=True)
@@ -76,6 +77,7 @@ def test_verifier_accepts_exact_identity_bound_binary_set(tmp_path: Path) -> Non
     assert evidence["semantic_version"] == SEMANTIC_VERSION
     assert set(evidence["files"]) == {
         "vonk-agent",
+        "vonk-monitor",
         "vonk-agent-helper",
         "vonk-build-egress",
         "vonk-runtime-probe",

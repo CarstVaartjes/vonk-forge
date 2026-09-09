@@ -64,7 +64,6 @@ def _raw(
         id=identifier,
         node_id=NODE_A,
         boot_id=BOOT_A,
-        sequence=sequence,
         observed_at=observed_at,
         received_at=observed_at,
         cpu_utilization_percent=cpu,
@@ -89,7 +88,6 @@ def _raw(
 def _input(*, sequence: int, observed_at: datetime, cpu: float) -> TelemetrySampleInput:
     return TelemetrySampleInput(
         boot_id=uuid.UUID(BOOT_A),
-        sequence=sequence,
         observed_at=observed_at,
         cpu_utilization_percent=cpu,
         load_average_1m=None,
