@@ -25,6 +25,12 @@ share one digest transfer. Partial files remain outside the published object
 namespace and resume from durable byte checkpoints. Once all declared files
 match their pinned sizes and SHA-256 identities, the cache entry is usable.
 
+Active downloads sync partial bytes after 1 MiB or when a received fragment
+crosses the one-second checkpoint interval. Progress samples are limited to
+once per second per operation. Shutdown, source failures, and verification
+force the final durable counter; a failed disk sync never advances that counter.
+An abrupt process or host failure can require downloading an unsynced tail again.
+
 Successful verification is reused while a file's filesystem identity remains
 unchanged, including during inventory reconciliation and LAN serving. A changed
 file triggers verification again. Routine inventory and installation do not
