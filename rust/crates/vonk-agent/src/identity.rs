@@ -27,6 +27,8 @@ pub enum IdentityError {
     Json(#[from] serde_json::Error),
     #[error("cannot replace the active identity generation")]
     ActiveGeneration,
+    #[error("identity generation would move backwards")]
+    GenerationRollback,
 }
 
 #[derive(Debug)]
@@ -217,6 +219,14 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
     ensure_private_directory(root)?;
     if material.generation == 0 {
         return Err(IdentityError::Node);
+    }
+    if let Some(active_generation) = load_pointer(root, "active.json")? {
+        if material.generation == active_generation {
+            return Err(IdentityError::ActiveGeneration);
+        }
+        if material.generation < active_generation {
+            return Err(IdentityError::GenerationRollback);
+        }
     }
     let destination = root.join(generation_name(material.generation));
     if destination.try_exists()? {
@@ -671,6 +681,21 @@ mod tests {
 
         let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
         assert!(error.to_string().contains("active identity generation"));
+        assert_eq!(
+            fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
+            vec![b'o', b'c'],
+        );
+    }
+
+    #[test]
+    fn lower_generation_cannot_downgrade_the_active_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(3, b'o')).unwrap();
+        publish_staged(&root, 3).unwrap();
+
+        let error = stage_identity(&root, &material(2, b'n')).unwrap_err();
+        assert!(error.to_string().contains("move backwards"));
         assert_eq!(
             fs::read(active_identity_paths(&root).unwrap().certificate).unwrap(),
             vec![b'o', b'c'],
