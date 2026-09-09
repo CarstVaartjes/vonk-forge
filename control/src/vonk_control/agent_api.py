@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import hmac
 import json
@@ -22,6 +23,7 @@ from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import (
+    BaseModel,
     ConfigDict,
     Field,
     ValidationError,
@@ -876,14 +878,44 @@ def _sha256_path(path: Path, expected_bytes: int) -> str:
     return digest.hexdigest()
 
 
+class RecipeImageUploadHeaders(BaseModel):
+    """Identity and cursor for one authenticated resumable archive transfer."""
+
+    model_config = ConfigDict(extra="forbid")
+    layout_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    image_bytes: int = Field(gt=0)
+    offset: int = Field(default=0, ge=0)
+
+
+class RecipeImageUploadStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    offset: int = Field(ge=0)
+    complete: bool
+
+    def response(self) -> Response:
+        return Response(
+            headers={
+                "x-vonk-upload-offset": str(self.offset),
+                "x-vonk-upload-complete": "true" if self.complete else "false",
+            }
+        )
+
+
 def _prepare_recipe_image_upload(
-    artifact_root: Path, layout_sha256: str
+    artifact_root: Path, identity: str
 ) -> tuple[int, Path]:
     artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{layout_sha256}.", suffix=".upload", dir=artifact_root
-    )
-    return descriptor, Path(temporary_name)
+    temporary = artifact_root / f".{identity}.upload"
+    descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(descriptor)
+        raise HTTPException(
+            status_code=409, detail="recipe image upload is active"
+        ) from None
+    return descriptor, temporary
 
 
 def _flush_and_sync(stream: Any) -> None:
@@ -1008,8 +1040,10 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
         directory_descriptor = os.open(os.fspath(root), root_flags)
         try:
             opened_root = os.fstat(directory_descriptor)
+
             def root_identity(item: os.stat_result) -> tuple[int, int, int, int]:
                 return (item.st_dev, item.st_ino, item.st_mode, item.st_uid)
+
             if root_identity(root_metadata) != root_identity(opened_root):
                 raise OSError("TUF root changed")
             for component in components[:-1]:
@@ -1067,6 +1101,7 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
             first_digest.update(chunk)
             remaining -= len(chunk)
         after = os.fstat(descriptor)
+
         def identity(item: os.stat_result) -> tuple[int, ...]:
             return (
                 item.st_dev,
@@ -1078,6 +1113,7 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
                 item.st_mtime_ns,
                 item.st_ctime_ns,
             )
+
         if identity(before) != identity(after) or os.read(descriptor, 1):
             raise HTTPException(status_code=404, detail="TUF file changed")
         os.lseek(descriptor, 0, os.SEEK_SET)
@@ -1517,8 +1553,12 @@ def install_agent_routes(
                 # consumed and reported as denied even when the request shape
                 # is malformed.  The canonical model handles valid requests;
                 # this branch preserves the bounded burn-on-invalid policy.
-                raise HTTPException(status_code=403, detail="enrollment denied") from None
-            raise HTTPException(status_code=422, detail="enrollment request is invalid") from None
+                raise HTTPException(
+                    status_code=403, detail="enrollment denied"
+                ) from None
+            raise HTTPException(
+                status_code=422, detail="enrollment request is invalid"
+            ) from None
         try:
             csr_bytes = submitted.csr.encode("ascii")
         except UnicodeEncodeError:
@@ -1578,7 +1618,8 @@ def install_agent_routes(
         return _json_response(_issued_response(outcome))
 
     @agent.post(
-        "/claim", response_model=AgentClaim,
+        "/claim",
+        response_model=AgentClaim,
         responses={204: {"description": "No work available"}},
     )
     def claim(request: Request, body: ClaimRequest) -> Response:
@@ -2062,9 +2103,7 @@ def install_agent_routes(
                 build.oci_layout_sha256 if build is not None else None
             )
             build_image_bytes = build.image_bytes if build is not None else None
-            build_input_sha256 = (
-                build.build_input_sha256 if build is not None else None
-            )
+            build_input_sha256 = build.build_input_sha256 if build is not None else None
             installation_recipe_build_id = installation.recipe_build_id
             revision_id = revision.id
             revision_content_digest = revision.content_digest
@@ -2174,9 +2213,7 @@ def install_agent_routes(
         return required
 
     @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
-    def host_runtime_grant(
-        body: HostRuntimeGrantRequest, request: Request
-    ) -> Response:
+    def host_runtime_grant(body: HostRuntimeGrantRequest, request: Request) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
@@ -2198,18 +2235,27 @@ def install_agent_routes(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
 
-    @agent.post("/agent-upgrade/activation-grant", response_model=HostHelperGrantResponse)
-    def package_activation_grant(body: PackageActivationGrantRequest, request: Request) -> Response:
+    @agent.post(
+        "/agent-upgrade/activation-grant", response_model=HostHelperGrantResponse
+    )
+    def package_activation_grant(
+        body: PackageActivationGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         if identity.node_id != body.node_id:
             raise HTTPException(status_code=403, detail="activation node mismatch")
         try:
             grant = host_runtime_service().issue_package_activation_grant(
-                node_id=body.node_id, receipt=body.receipt, runtime_identity=body.runtime_identity,
-                certificate_serial=identity.certificate_serial)
+                node_id=body.node_id,
+                receipt=body.receipt,
+                runtime_identity=body.runtime_identity,
+                certificate_serial=identity.certificate_serial,
+            )
             return _json_response(_host_grant_response(grant))
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(status_code=409, detail="package activation authority rejected request") from None
+            raise HTTPException(
+                status_code=409, detail="package activation authority rejected request"
+            ) from None
 
     @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
     def agent_upgrade_grant(
@@ -2254,9 +2300,7 @@ def install_agent_routes(
                 objects=[item.model_dump() for item in body.objects],
                 certificate_serial=identity.certificate_serial,
             )
-            return _json_response(
-                _package_receipts_response(receipts)
-            )
+            return _json_response(_package_receipts_response(receipts))
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
@@ -2283,9 +2327,7 @@ def install_agent_routes(
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response(
-                _package_grant_response(grant)
-            )
+            return _json_response(_package_grant_response(grant))
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
@@ -2319,7 +2361,9 @@ def install_agent_routes(
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
-            if message.state == "failed" and not isinstance(message.result, RecipeJobRunResult):
+            if message.state == "failed" and not isinstance(
+                message.result, RecipeJobRunResult
+            ):
                 error_code = message.result.get("error_code")
                 if (
                     message.result.get("status") != "failed"
@@ -2370,42 +2414,31 @@ def install_agent_routes(
             raise HTTPException(status_code=403, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.put(
-        "/recipe-builds/{build_id}/image",
-        status_code=status.HTTP_204_NO_CONTENT,
-        openapi_extra=upload_request_body("application/x-tar"),
-    )
-    async def upload_recipe_image(build_id: str, request: Request) -> Response:
+    def image_upload_context(build_id: str, request: Request):
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        media_type = request.headers.get("content-type", "").partition(";")[0].strip()
-        if media_type.lower() != "application/x-tar":
-            raise HTTPException(
-                status_code=415, detail="Docker image archive media type is required"
-            )
-        if (
-            re.fullmatch(
-                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                build_id,
-            )
-            is None
-        ):
-            raise HTTPException(status_code=404, detail="recipe build does not exist")
-        layout_sha256 = request.headers.get("x-vonk-oci-layout-sha256", "")
-        image_digest = request.headers.get("x-vonk-image-digest", "")
         try:
-            expected_bytes = int(request.headers.get("content-length", ""))
-        except ValueError:
+            uuid.UUID(build_id)
+            headers = RecipeImageUploadHeaders.model_validate(
+                {
+                    "layout_sha256": request.headers.get(
+                        "x-vonk-oci-layout-sha256", ""
+                    ),
+                    "image_digest": request.headers.get("x-vonk-image-digest", ""),
+                    "image_bytes": request.headers.get("x-vonk-image-bytes", ""),
+                    "offset": request.headers.get("x-vonk-upload-offset", "0"),
+                }
+            )
+        except (ValueError, ValidationError):
             raise HTTPException(
-                status_code=411, detail="image length is required"
+                status_code=422, detail="image upload identity is invalid"
             ) from None
         if (
-            _DIGEST.fullmatch(layout_sha256) is None
-            or re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest) is None
-            or not 1 <= expected_bytes <= required.max_recipe_image_bytes
+            headers.image_bytes > required.max_recipe_image_bytes
+            or headers.offset > headers.image_bytes
         ):
-            raise HTTPException(status_code=422, detail="image evidence is invalid")
+            raise HTTPException(status_code=422, detail="image upload size is invalid")
         with required.sessions() as session:
             build = session.get(RecipeBuild, build_id)
             if (
@@ -2416,38 +2449,139 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe build does not exist"
                 )
+        key = hashlib.sha256(
+            f"{identity.node_id}:{build_id}:{headers.image_digest}:{headers.layout_sha256}:{headers.image_bytes}".encode()
+        ).hexdigest()
+        return required, identity, headers, key
+
+    upload_header_names = {
+        "layout_sha256": "x-vonk-oci-layout-sha256",
+        "image_digest": "x-vonk-image-digest",
+        "image_bytes": "x-vonk-image-bytes",
+        "offset": "x-vonk-upload-offset",
+    }
+    upload_schema = RecipeImageUploadHeaders.model_json_schema()
+    upload_parameters = [
+        {
+            "in": "header",
+            "name": name,
+            "required": field in upload_schema["required"],
+            "schema": upload_schema["properties"][field],
+        }
+        for field, name in upload_header_names.items()
+    ]
+
+    @agent.head(
+        "/recipe-builds/{build_id}/image",
+        response_class=Response,
+        openapi_extra={"parameters": upload_parameters},
+        responses={
+            200: {
+                "description": "Accepted archive cursor",
+                "headers": {
+                    name: {
+                        "schema": RecipeImageUploadStatus.model_json_schema()[
+                            "properties"
+                        ][field]
+                    }
+                    for field, name in {
+                        "offset": "x-vonk-upload-offset",
+                        "complete": "x-vonk-upload-complete",
+                    }.items()
+                },
+            }
+        },
+    )
+    async def recipe_image_upload_status(build_id: str, request: Request) -> Response:
+        required, _, headers, key = image_upload_context(build_id, request)
+        with required.sessions() as session:
+            build = session.get(RecipeBuild, build_id)
+            complete = (
+                build.image_digest == headers.image_digest
+                and build.oci_layout_sha256 == headers.layout_sha256
+                and build.image_bytes == headers.image_bytes
+            )
+        destination = (
+            required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
+        )
+        if (
+            complete
+            and destination.is_file()
+            and destination.stat().st_size == headers.image_bytes
+        ):
+            return RecipeImageUploadStatus(
+                offset=headers.image_bytes, complete=True
+            ).response()
+        descriptor, _temporary = await asyncio.to_thread(
+            _prepare_recipe_image_upload,
+            required.artifact_root / IMAGE_CACHE_DIRECTORY,
+            key,
+        )
+        try:
+            offset = os.fstat(descriptor).st_size
+            return RecipeImageUploadStatus(offset=offset, complete=False).response()
+        finally:
+            os.close(descriptor)
+
+    @agent.put(
+        "/recipe-builds/{build_id}/image",
+        status_code=status.HTTP_204_NO_CONTENT,
+        openapi_extra=upload_request_body("application/x-tar")
+        | {"parameters": upload_parameters},
+    )
+    async def upload_recipe_image(build_id: str, request: Request) -> Response:
+        required, identity, headers, key = image_upload_context(build_id, request)
+        media_type = request.headers.get("content-type", "").partition(";")[0].strip()
+        if media_type.lower() != "application/x-tar":
+            raise HTTPException(
+                status_code=415, detail="Docker image archive media type is required"
+            )
+        try:
+            content_length = int(request.headers.get("content-length", ""))
+        except ValueError:
+            raise HTTPException(
+                status_code=411, detail="image length is required"
+            ) from None
+        if content_length != headers.image_bytes - headers.offset:
+            raise HTTPException(
+                status_code=422, detail="image upload length does not match cursor"
+            )
         descriptor, temporary = await asyncio.to_thread(
             _prepare_recipe_image_upload,
             required.artifact_root / IMAGE_CACHE_DIRECTORY,
-            layout_sha256,
+            key,
         )
-        digest = hashlib.sha256()
-        received = 0
+        stream = os.fdopen(descriptor, "r+b")
         try:
-            stream = os.fdopen(descriptor, "wb")
-            try:
-                async for chunk in request.stream():
-                    received += len(chunk)
-                    if received > expected_bytes:
-                        raise HTTPException(
-                            status_code=413, detail="recipe image is too large"
-                        )
-                    digest.update(chunk)
-                    await asyncio.to_thread(stream.write, chunk)
-                if received != expected_bytes or digest.hexdigest() != layout_sha256:
+            if os.fstat(descriptor).st_size != headers.offset:
+                raise HTTPException(
+                    status_code=409, detail="image upload cursor changed"
+                )
+            stream.seek(headers.offset)
+            received = headers.offset
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > headers.image_bytes:
                     raise HTTPException(
-                        status_code=422, detail="recipe image digest changed"
+                        status_code=413, detail="recipe image is too large"
                     )
-                await asyncio.to_thread(_flush_and_sync, stream)
-            finally:
-                await asyncio.to_thread(stream.close)
-            destination = required.artifact_root / IMAGE_CACHE_DIRECTORY / layout_sha256
-            await asyncio.to_thread(
-                _commit_recipe_image_upload,
-                temporary,
-                destination,
-                expected_bytes=expected_bytes,
-                layout_sha256=layout_sha256,
+                await asyncio.to_thread(stream.write, chunk)
+            # A truncated/interrupted transfer remains available to the next HEAD/PUT.
+            await asyncio.to_thread(_flush_and_sync, stream)
+            if received != headers.image_bytes:
+                raise HTTPException(
+                    status_code=422, detail="image upload is incomplete"
+                )
+            if (
+                await asyncio.to_thread(_sha256_path, temporary, headers.image_bytes)
+                != headers.layout_sha256
+            ):
+                await asyncio.to_thread(stream.truncate, 0)
+                raise HTTPException(
+                    status_code=422, detail="recipe image digest changed"
+                )
+            destination = (
+                required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
             )
             with required.sessions.begin() as session:
                 build = session.get(RecipeBuild, build_id, with_for_update=True)
@@ -2459,12 +2593,19 @@ def install_agent_routes(
                     raise HTTPException(
                         status_code=409, detail="recipe build authority changed"
                     )
-                build.image_digest = image_digest
-                build.oci_layout_sha256 = layout_sha256
-                build.image_bytes = expected_bytes
+                await asyncio.to_thread(
+                    _commit_recipe_image_upload,
+                    temporary,
+                    destination,
+                    expected_bytes=headers.image_bytes,
+                    layout_sha256=headers.layout_sha256,
+                )
+                build.image_digest = headers.image_digest
+                build.oci_layout_sha256 = headers.layout_sha256
+                build.image_bytes = headers.image_bytes
                 build.updated_at = _now(required.clock())
         finally:
-            await asyncio.to_thread(_unlink_if_present, temporary)
+            await asyncio.to_thread(stream.close)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.get(

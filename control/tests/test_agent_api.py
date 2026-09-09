@@ -1241,6 +1241,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
         "content-type": "application/x-tar",
         "x-vonk-image-digest": image_digest,
         "x-vonk-oci-layout-sha256": layout_digest,
+        "x-vonk-image-bytes": str(len(payload)),
     }
 
     rejected = client.put(
@@ -1250,11 +1251,28 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     )
     assert rejected.status_code == 415
 
-    response = client.put(
-        f"/agent/v1/recipe-builds/{build_id}/image",
-        headers=headers,
-        content=payload,
+    route = f"/agent/v1/recipe-builds/{build_id}/image"
+    interrupted = client.put(
+        route,
+        headers=headers | {"content-length": str(len(payload))},
+        content=payload[:7],
     )
+    assert interrupted.status_code == 422
+    cursor = client.head(route, headers=headers)
+    assert cursor.status_code == 200
+    assert cursor.headers["x-vonk-upload-offset"] == "7"
+    assert cursor.headers["x-vonk-upload-complete"] == "false"
+    wrong_identity = client.head(
+        route, headers=headers | {"x-vonk-image-digest": "sha256:" + "e" * 64}
+    )
+    assert wrong_identity.headers["x-vonk-upload-offset"] == "0"
+    assert client.put(route, headers=headers, content=payload).status_code == 409
+    response = client.put(
+        route, headers=headers | {"x-vonk-upload-offset": "7"}, content=payload[7:]
+    )
+    complete = client.head(route, headers=headers)
+    assert complete.headers["x-vonk-upload-offset"] == str(len(payload))
+    assert complete.headers["x-vonk-upload-complete"] == "true"
 
     assert response.status_code == 204
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
@@ -1275,11 +1293,35 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
                 "content-type": "application/x-tar",
                 "x-vonk-image-digest": image_digest,
                 "x-vonk-oci-layout-sha256": layout_digest,
+                "x-vonk-image-bytes": str(len(payload)),
             },
             content=payload,
         ).status_code
         == 404
     )
+
+
+def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
+    import os
+
+    from fastapi import HTTPException
+    from vonk_control.agent_api import _prepare_recipe_image_upload
+
+    descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
+    try:
+        os.write(descriptor, b"partial archive")
+        with pytest.raises(HTTPException) as rejected:
+            _prepare_recipe_image_upload(tmp_path, "a" * 64)
+        assert rejected.value.status_code == 409
+        assert partial.read_bytes() == b"partial archive"
+    finally:
+        os.close(descriptor)
+    resumed, resumed_path = _prepare_recipe_image_upload(tmp_path, "a" * 64)
+    try:
+        assert resumed_path == partial
+        assert os.fstat(resumed).st_size == len(b"partial archive")
+    finally:
+        os.close(resumed)
 
 
 def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
@@ -1350,6 +1392,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         "content-type": "application/x-tar",
         "x-vonk-image-digest": "sha256:" + "d" * 64,
         "x-vonk-oci-layout-sha256": layout_digest,
+        "x-vonk-image-bytes": str(len(payload)),
     }
 
     def observe_responsiveness() -> bool:

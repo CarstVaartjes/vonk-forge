@@ -191,12 +191,18 @@ pub struct DistributionProgress {
     pub total_bytes: Option<u64>,
 }
 
+struct ProgressSnapshot {
+    operation_id: uuid::Uuid,
+    phase: String,
+    counters: Option<(u64, u64)>,
+}
+
 #[derive(Clone)]
 pub struct AgentHttpClient {
     client: Arc<RwLock<Client>>,
     controller: Url,
     node_id: String,
-    progress_phase: Arc<Mutex<Option<(uuid::Uuid, String)>>>,
+    progress_phase: Arc<Mutex<Option<ProgressSnapshot>>>,
 }
 
 impl AgentHttpClient {
@@ -327,21 +333,47 @@ impl AgentHttpClient {
         *self
             .progress_phase
             .lock()
-            .expect("progress phase lock poisoned") = Some((operation_id, phase.to_owned()));
+            .expect("progress phase lock poisoned") = Some(ProgressSnapshot {
+            operation_id,
+            phase: phase.to_owned(),
+            counters: None,
+        });
+    }
+
+    pub(crate) fn set_progress_bytes(&self, operation_id: uuid::Uuid, bytes: u64, total: u64) {
+        if let Some(snapshot) = self
+            .progress_phase
+            .lock()
+            .expect("progress phase lock poisoned")
+            .as_mut()
+            && snapshot.operation_id == operation_id
+        {
+            let high_water = snapshot
+                .counters
+                .map(|(current, _)| current)
+                .unwrap_or(0)
+                .max(bytes);
+            snapshot.counters = Some((high_water, total));
+        }
     }
 
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
         if let Some(measured) = progress.progress.as_mut()
             && measured.phase == "executing"
-            && let Some((operation_id, phase)) = self
+            && let Some(snapshot) = self
                 .progress_phase
                 .lock()
                 .expect("progress phase lock poisoned")
                 .as_ref()
-            && *operation_id == progress.operation_id
+            && snapshot.operation_id == progress.operation_id
         {
-            measured.phase.clone_from(phase);
+            measured.phase.clone_from(&snapshot.phase);
+            if let Some((bytes, total)) = snapshot.counters {
+                measured.completed_bytes = bytes;
+                measured.total_bytes = Some(total);
+                measured.total_bytes_known = true;
+            }
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         if progress.node_id != self.node_id {
@@ -719,14 +751,20 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn upload_recipe_image(
+    pub async fn upload_recipe_image<F>(
         &self,
         build_id: uuid::Uuid,
         image_digest: &str,
         oci_layout_sha256: &str,
         image_bytes: u64,
         path: &Path,
-    ) -> Result<(), ClientError> {
+        progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: Fn(u64) + Send + Sync + 'static,
+    {
+        use futures_util::StreamExt;
+        let progress = Arc::new(progress);
         if !valid_oci_digest(image_digest)
             || !valid_sha256(oci_layout_sha256)
             || !(1..=16 * 1024_u64.pow(4)).contains(&image_bytes)
@@ -734,26 +772,87 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let file = tokio::fs::File::open(path).await?;
-        let response = self
-            .current_client()
-            .put(self.endpoint(&format!("/agent/v1/recipe-builds/{build_id}/image"))?)
-            // The historical evidence field names the immutable layout digest,
-            // while Spark's native Docker runtime consumes a docker-save tar.
-            .header("content-type", "application/x-tar")
-            .header("content-length", image_bytes)
-            .header("x-vonk-image-digest", image_digest)
-            .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
-            .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
-            .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-            .send()
-            .await?;
-        if response.status() == StatusCode::NO_CONTENT {
-            Ok(())
-        } else {
-            classify_status(response.status())?;
-            Err(ClientError::Protocol)
+        use tokio::io::AsyncSeekExt;
+        let endpoint = self.endpoint(&format!("/agent/v1/recipe-builds/{build_id}/image"))?;
+        // Retry from the Controller's persisted cursor, never from optimistic sent bytes.
+        for attempt in 0..3 {
+            let transfer = async {
+                let status = self
+                    .current_client()
+                    .head(endpoint.clone())
+                    .header("x-vonk-image-digest", image_digest)
+                    .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
+                    .header("x-vonk-image-bytes", image_bytes)
+                    .send()
+                    .await?;
+                if status.status() == StatusCode::CONFLICT {
+                    return Err(ClientError::Retryable);
+                }
+                if status.status() != StatusCode::OK {
+                    classify_status(status.status())?;
+                    return Err(ClientError::Protocol);
+                }
+                let offset = status
+                    .headers()
+                    .get("x-vonk-upload-offset")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|value| *value <= image_bytes)
+                    .ok_or(ClientError::Protocol)?;
+                match status
+                    .headers()
+                    .get("x-vonk-upload-complete")
+                    .and_then(|value| value.to_str().ok())
+                {
+                    Some("true") if offset == image_bytes => {
+                        progress(image_bytes);
+                        return Ok(());
+                    }
+                    Some("false") => (),
+                    _ => return Err(ClientError::Protocol),
+                }
+                progress(offset);
+                let mut file = tokio::fs::File::open(path).await?;
+                file.seek(std::io::SeekFrom::Start(offset)).await?;
+                let report = Arc::clone(&progress);
+                let mut sent = offset;
+                let body = ReaderStream::with_capacity(file, 1024 * 1024).inspect(move |chunk| {
+                    if let Ok(bytes) = chunk {
+                        sent += bytes.len() as u64;
+                        report(sent);
+                    }
+                });
+                let response = self
+                    .current_client()
+                    .put(endpoint.clone())
+                    .header("content-type", "application/x-tar")
+                    .header("content-length", image_bytes - offset)
+                    .header("x-vonk-image-bytes", image_bytes)
+                    .header("x-vonk-upload-offset", offset)
+                    .header("x-vonk-image-digest", image_digest)
+                    .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
+                    .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
+                    .body(reqwest::Body::wrap_stream(body))
+                    .send()
+                    .await?;
+                if response.status() == StatusCode::NO_CONTENT {
+                    Ok(())
+                } else if response.status() == StatusCode::CONFLICT {
+                    Err(ClientError::Retryable)
+                } else {
+                    classify_status(response.status())?;
+                    Err(ClientError::Protocol)
+                }
+            }
+            .await;
+            match transfer {
+                Err(error) if error.retryable() && attempt < 2 => {
+                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                }
+                result => return result,
+            }
         }
+        unreachable!("last transfer attempt returns")
     }
 
     pub async fn download_artifact(
@@ -2807,8 +2906,47 @@ mod tests {
     fn delayed_upload_client(
         response_delay: Duration,
     ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let (base_client, server) =
-            request_capture_client(204, Vec::new(), Vec::new(), Some(response_delay));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let base_client = authenticated_test_client(&format!("http://{address}"), "spk_test");
+        let server = thread::spawn(move || {
+            for offset in [0, 9] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 1024];
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let size = stream.read(&mut buffer).unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&buffer[..size]);
+                }
+                assert!(request.starts_with(b"HEAD "));
+                write!(stream,"HTTP/1.1 200 OK\r\nx-vonk-upload-offset: {offset}\r\nx-vonk-upload-complete: false\r\nConnection: close\r\n\r\n").unwrap();
+                drop(stream);
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let size = stream.read(&mut buffer).unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&buffer[..size]);
+                    if request.ends_with(b"archive") {
+                        break;
+                    }
+                }
+                if offset == 0 {
+                    // The receiver persisted only nine bytes before losing the connection.
+                    // No response reaches the sender; its retry must discover the cursor.
+                    assert!(request.ends_with(b"accepted archive"));
+                    drop(stream);
+                    continue;
+                }
+                thread::sleep(response_delay);
+                stream
+                    .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                    .unwrap();
+                return request;
+            }
+            unreachable!()
+        });
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(50))
             .build()
@@ -2894,6 +3032,39 @@ mod tests {
                 .total_bytes,
             Some(42)
         );
+    }
+
+    #[tokio::test]
+    async fn ordinary_heartbeat_preserves_active_upload_counters() {
+        let mut progress = progress();
+        progress.progress.as_mut().unwrap().phase = "executing".to_owned();
+        let directive = AgentDirective {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline + chrono::Duration::seconds(30),
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id.clone(),
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        };
+        let (client, server) = heartbeat_client(directive);
+        client.set_progress_phase(progress.operation_id, "uploading");
+        client.set_progress_bytes(progress.operation_id, 512, 1024);
+        client.heartbeat(&progress).await.unwrap();
+        let request = server.join().unwrap();
+        let start = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        let received = vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..])
+            .unwrap()
+            .progress
+            .unwrap();
+        assert_eq!(received.phase, "uploading");
+        assert_eq!(received.completed_bytes, 512);
+        assert_eq!(received.total_bytes, Some(1024));
     }
 
     #[tokio::test]
@@ -3330,7 +3501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recipe_image_upload_overrides_the_short_ordinary_request_timeout() {
+    async fn recipe_image_upload_resumes_interruption_and_overrides_ordinary_timeout() {
         let directory = tempfile::tempdir().unwrap();
         let archive = directory.path().join("image.docker.tar");
         std::fs::write(&archive, b"accepted archive").unwrap();
@@ -3343,6 +3514,7 @@ mod tests {
                 &"a".repeat(64),
                 16,
                 &archive,
+                |_| {},
             )
             .await;
         let request = server.join().unwrap();
@@ -3352,7 +3524,10 @@ mod tests {
             "large upload inherited ordinary timeout: {result:?}"
         );
         assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
-        assert!(request.ends_with(b"accepted archive"));
+        assert!(request.ends_with(b"archive"));
+        let headers = String::from_utf8_lossy(&request);
+        assert!(headers.contains("x-vonk-upload-offset: 9"));
+        assert!(headers.contains("content-length: 7"));
     }
 
     #[tokio::test]

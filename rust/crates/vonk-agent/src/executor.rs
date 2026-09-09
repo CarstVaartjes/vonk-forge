@@ -939,7 +939,40 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     Ok(evidence) => {
                         self.report_phase(claim, "uploading").await;
-                        if self
+                        let (sender, mut receiver) = tokio::sync::watch::channel(0_u64);
+                        let progress_client = self.client.clone();
+                        let progress_claim = claim.clone();
+                        let progress_deadline = lease_deadline.clone();
+                        let total_bytes = evidence.image_bytes;
+                        let progress_task = tokio::spawn(async move {
+                            let mut completed_bytes = 0;
+                            let mut cadence = tokio::time::interval(Duration::from_secs(1));
+                            cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                            while receiver.changed().await.is_ok() {
+                                cadence.tick().await;
+                                completed_bytes =
+                                    completed_bytes.max(*receiver.borrow_and_update());
+                                let progress = AgentProgress {
+                                    attempt: progress_claim.attempt,
+                                    deadline: *progress_deadline.borrow(),
+                                    fence: progress_claim.fence,
+                                    job_id: progress_claim.job_id,
+                                    node_id: progress_claim.node_id.clone(),
+                                    operation_id: progress_claim.operation_id,
+                                    progress: Some(OperationProgress {
+                                        completed_bytes,
+                                        total_bytes: Some(total_bytes),
+                                        total_bytes_known: true,
+                                        ..phase_progress("uploading")
+                                    }),
+                                    schema_version: 1,
+                                };
+                                let _ = progress_client.heartbeat(&progress).await;
+                            }
+                        });
+                        let transfer_client = self.client.clone();
+                        let transfer_operation_id = claim.operation_id;
+                        let result = self
                             .client
                             .upload_recipe_image(
                                 request.build_id,
@@ -947,10 +980,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 &evidence.oci_layout_sha256,
                                 evidence.image_bytes,
                                 &builder.layout_path(claim.operation_id),
+                                move |bytes| {
+                                    transfer_client.set_progress_bytes(
+                                        transfer_operation_id,
+                                        bytes,
+                                        total_bytes,
+                                    );
+                                    sender.send_replace(bytes);
+                                },
                             )
-                            .await
-                            .is_err()
-                        {
+                            .await;
+                        // The transfer owns the sender; finishing closes the channel.
+                        // The reporter drains its last snapshot independently of transfer IO.
+                        let _ = progress_task.await;
+                        if result.is_err() {
                             return failed("built OCI image could not be stored by the controller");
                         }
                         ExecutionResult {
