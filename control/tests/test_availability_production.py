@@ -689,3 +689,41 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_cache.close()
     model_http.close()
     production.close()
+
+
+def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> None:
+    from vonk_control.models import AgentOperation, AgentOperationAttempt
+
+    engine = create_engine("sqlite://")
+    AgentOperation.__table__.create(engine)
+    AgentOperationAttempt.__table__.create(engine)
+    sessions = sessionmaker(bind=engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(AgentOperation(
+            id="operation", parent_job_id="build-job", node_id="builder", kind="recipe.build.v1",
+            payload_digest="a" * 64, payload={}, authority_revision="current", state="running",
+            current_attempt=2, created_at=now, updated_at=now,
+        ))
+        for attempt, completed in [(1, 999), (2, 128)]:
+            session.add(AgentOperationAttempt(
+                id=f"attempt-{attempt}", operation_id="operation", attempt=attempt,
+                fence=f"fence-{attempt}", lease_deadline=now, agent_certificate_serial="serial",
+                state="running", progress={
+                    "phase": "uploading", "completed_bytes": completed,
+                    "total_bytes": 256, "total_bytes_known": True,
+                    "members": [],
+                },
+            ))
+    with sessions() as session:
+        progress = availability_production._build_progress(session, "build-job", "builder")
+        assert progress is not None
+        assert progress.phase == "uploading"
+        assert progress.completed_bytes == 128
+        assert progress.total_bytes == 256
+        assert availability_production._build_progress(session, "build-job", "other") is None
+        current = session.get(AgentOperationAttempt, "attempt-2")
+        current.progress = {"completed_bytes": 128}
+        session.flush()
+        with pytest.raises(ValueError):
+            availability_production._build_progress(session, "build-job", "builder")

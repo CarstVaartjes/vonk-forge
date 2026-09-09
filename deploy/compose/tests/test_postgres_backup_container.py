@@ -78,6 +78,10 @@ def test_postgres_backup_restore():
         time.sleep(7)
         files = sorted((tmp / "backups").glob("*.gz"))
         assert len(files) == 2, files
+        assert all(
+            (path.stat().st_mode & 0o777) == 0o600 and path.stat().st_uid == os.getuid()
+            for path in files
+        ), [(path, path.stat().st_uid, oct(path.stat().st_mode & 0o777)) for path in files]
         data = gzip.decompress(files[-1].read_bytes())
         run(
             "run",

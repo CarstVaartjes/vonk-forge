@@ -80,7 +80,10 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         .map(|entry| entry.expect("directory entry").file_name())
         .collect::<Vec<_>>();
     entries.sort();
-    assert_eq!(entries, [".env", "docker-compose.yaml", "secrets"]);
+    assert_eq!(
+        entries,
+        [".env", "backups", "docker-compose.yaml", "secrets"]
+    );
     assert_eq!(
         std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
         "services:\n  api:\n    image: example.invalid/api:latest\n"
@@ -110,6 +113,14 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         assert_eq!(
             std::fs::metadata(result.root.join("secrets"))
                 .expect("secrets metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(result.root.join("backups"))
+                .expect("backup metadata")
                 .permissions()
                 .mode()
                 & 0o777,
@@ -352,6 +363,42 @@ fn runtime_files_are_materialized_and_replaced_beneath_the_bundle() {
                 .mode()
                 & 0o777,
             0o755
+        );
+    }
+}
+
+#[test]
+fn upgrade_adds_a_private_backup_directory_to_an_existing_bundle() {
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::new()), &mut output);
+    let installed = prepare(
+        &runtime_file_payload("services: {}\n", "first\n", 0o644),
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle installed");
+    std::fs::remove_dir(installed.root.join("backups")).expect("simulate pre-backup bundle");
+
+    prepare(
+        &runtime_file_payload("services: {}\n", "second\n", 0o644),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("backup directory added during upgrade");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(installed.root.join("backups"))
+                .expect("backup metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
         );
     }
 }

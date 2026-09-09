@@ -84,6 +84,7 @@ class _Transport:
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        progress=None,
     ) -> PulledImageEvidence:
         destination.write_bytes(ARCHIVE)
         return PulledImageEvidence(

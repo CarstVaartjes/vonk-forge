@@ -225,11 +225,16 @@ def discover_contracts(
             if not success:
                 raise ContractGraphError(f"Missing success contract: {method} {path}")
             for code, response in success.items():
-                if code in {"204", "205"}:
+                if method == "HEAD" or code in {"204", "205"}:
                     if response.get("content"):
                         raise ContractGraphError(
                             f"No-content response declares a body: {method} {path}"
                         )
+                    for name, header in response.get("headers", {}).items():
+                        if not header.get("schema"):
+                            raise ContractGraphError(
+                                f"Untyped response header: {method} {path} {name}"
+                            )
                     continue
                 content = response.get("content", {})
                 if not content or any(

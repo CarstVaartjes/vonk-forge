@@ -50,6 +50,7 @@ from .model_cache_contract import (
     parse_model_cache_result,
 )
 from .model_cache_progress import cache_phase, cache_progress
+from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
@@ -70,6 +71,8 @@ _DIGEST_LENGTH = 64
 _MAX_ARTIFACTS = 1024
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
+_PARALLEL_RANGE_MIN_BYTES = 64 * 1024 * 1024
+_PARALLEL_RANGE_WORKERS = 4
 _MAX_HTTP_REDIRECTS = 3
 _MAX_OPERATION_ATTEMPTS = 3
 _MAX_OPERATOR_RETRIES = 3
@@ -994,6 +997,8 @@ class ModelCacheService:
         self._digest_events: dict[str, threading.Event] = {}
         self._hf_cooldown_until: datetime | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._range_reserved_bytes = 0
 
     def close(self) -> None:
         """Stop the Controller-wide transfer pool during service shutdown."""
@@ -1532,7 +1537,12 @@ class ModelCacheService:
         """Return only a bounded, reusable partial checkpoint length."""
         partial = self._partial_path(set_digest, spec.sha256)
         try:
-            if not partial.is_file() or partial.is_symlink():
+            if partial.is_symlink():
+                return 0
+            if spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES:
+                return range_partial_bytes(partial, spec.expected_bytes,
+                                           workers=_PARALLEL_RANGE_WORKERS)
+            if not partial.is_file():
                 return 0
             size = partial.stat().st_size
         except OSError:
@@ -1850,7 +1860,9 @@ class ModelCacheService:
             # digest transfer, then reuses its verified object. This prevents
             # concurrent writers from sharing a partial path or replacing a
             # valid object out of order.
-            event.wait(timeout=_TRANSFER_CLAIM_SECONDS)
+            event.wait(timeout=0.25)
+            if self._closed.is_set() or self._transfer_stop(operation_id).is_set():
+                raise InterruptedError("model download cancelled while waiting for shared bytes")
             if not force and self._object_is_verified(spec):
                 self._mark_artifact_verified(spec, set_digest)
                 return
@@ -1861,7 +1873,14 @@ class ModelCacheService:
             # The shared NAS lock also covers overlapping Controller worker
             # processes; an in-process Event alone cannot deduplicate them.
             with (self._root / "locks" / spec.sha256).open("a+b") as lock_file:
-                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                while True:
+                    try:
+                        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if (self._transfer_stop(operation_id).wait(0.25)
+                            or self._closed.is_set()):
+                            raise InterruptedError("model download cancelled while waiting for cache lock")
                 self._download_locked(
                     spec, set_digest, operation_id=operation_id, force=force,
                     interrupt_after_bytes=interrupt_after_bytes,
@@ -1909,6 +1928,53 @@ class ModelCacheService:
                 ).model_dump(mode="json")
                 operation.payload = _write_operation_payload("repair", payload)
 
+    def _transfer_stop(self, operation_id: str) -> threading.Event:
+        with self._lock:
+            return self._cancel_events.setdefault(operation_id, threading.Event())
+
+    @contextmanager
+    def _sample_transfer(self, spec: ArtifactSpec, set_digest: str, operation_id: str,
+                         completed_artifacts: int, initial_bytes: int):
+        """Sample transfer counters independently of socket reads and disk writes."""
+        stopped = threading.Event()
+        latest = [initial_bytes]
+        errors: list[Exception] = []
+        cancel = self._transfer_stop(operation_id)
+
+        def sample() -> None:
+            while not stopped.wait(1):
+                if self._closed.is_set():
+                    cancel.set()
+                    return
+                try:
+                    self._checkpoint_artifact(
+                        spec, operation_id=operation_id, set_digest=set_digest,
+                        actual_bytes=latest[0], state="partial",
+                        completed_artifacts=completed_artifacts,
+                    )
+                except Exception as error:  # noqa: BLE001 - propagate sampler failures to owner
+                    errors.append(error)
+                    cancel.set()
+                    return
+
+        def observe(count: int) -> None:
+            latest[0] = count
+            if errors:
+                raise errors[0]
+            if cancel.is_set() or self._closed.is_set():
+                raise InterruptedError("model download stopped; partial files preserved")
+
+        thread = threading.Thread(target=sample, name="vonk-model-progress", daemon=True)
+        thread.start()
+        try:
+            observe(initial_bytes)
+            yield observe
+        finally:
+            stopped.set()
+            thread.join()
+            if errors:
+                raise errors[0]
+
     def _download_artifact(
         self,
         spec: ArtifactSpec,
@@ -1951,26 +2017,33 @@ class ModelCacheService:
             part.unlink(missing_ok=True)
             received = 0
             offset = 0
+        if (spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES
+            and urlsplit(spec.source).scheme in {"http", "https"}
+            and interrupt_after_bytes is None
+            and self._download_parallel_ranges(
+                spec, part, set_digest, operation_id, completed_artifacts,
+            )):
+            self._complete_download(spec, set_digest, part, operation_id, completed_artifacts)
+            return
         stream, effective_offset, close = self._open_source(spec, offset)
         if effective_offset != offset:
             received = effective_offset
         durable_received = received
         try:
             mode = "ab" if effective_offset else "wb"
-            with part.open(mode) as output:
-                synced_at = time.monotonic()
+            with part.open(mode) as output, self._sample_transfer(
+                spec, set_digest, operation_id, completed_artifacts, received
+            ) as observe:
 
                 def sync_received() -> None:
-                    nonlocal durable_received, synced_at
+                    nonlocal durable_received
                     output.flush()
                     os.fsync(output.fileno())
                     durable_received = received
-                    synced_at = time.monotonic()
 
                 try:
                     while True:
-                        if self._closed.is_set():
-                            raise InterruptedError("model cache service is shutting down")
+                        observe(received)
                         if hasattr(stream, "read"):
                             chunk = stream.read(_CHUNK_BYTES)
                         else:
@@ -1990,17 +2063,10 @@ class ModelCacheService:
                         received = next_received
                         if interrupt_after_bytes is not None and received >= interrupt_after_bytes:
                             raise InterruptedError("download interrupted at a durable checkpoint")
-                        # Keep reading individual network fragments so shutdown is
-                        # observed promptly; batch only durable disk/DB work. The
-                        # file object's bounded buffer avoids another model buffer.
-                        if (received - durable_received >= _CHUNK_BYTES
-                            or time.monotonic() - synced_at >= 1):
-                            sync_received()
-                            self._checkpoint_artifact(
-                                spec, operation_id=operation_id, set_digest=set_digest,
-                                actual_bytes=durable_received, state="partial",
-                                completed_artifacts=completed_artifacts, force_progress=False,
-                            )
+                        # Ordinary buffered writes remain independent of progress.
+                        # Completion/interruption syncs once; a crash resumes from
+                        # the actual retained file length, never a progress counter.
+                        observe(received)
                 except (OSError, httpx.HTTPError, ModelCacheError):
                     # Preserve even a sub-MiB tail when a source fails. Never
                     # publish its byte count until the sync has succeeded.
@@ -2031,6 +2097,13 @@ class ModelCacheService:
                 "source ended before the immutable artifact size",
                 recovery="resume",
             )
+        self._complete_download(spec, set_digest, part, operation_id, completed_artifacts)
+
+    def _complete_download(self, spec: ArtifactSpec, set_digest: str, part: Path,
+                           operation_id: str, completed_artifacts: int) -> None:
+        if self._transfer_stop(operation_id).is_set() or self._closed.is_set():
+            raise InterruptedError("model download stopped; partial files preserved")
+        received = spec.expected_bytes
         self._checkpoint_artifact(
             spec, operation_id=operation_id, set_digest=set_digest,
             actual_bytes=received, state="verifying", completed_artifacts=completed_artifacts,
@@ -2048,16 +2121,106 @@ class ModelCacheService:
                 "downloaded artifact failed SHA-256 verification",
                 recovery="download_again",
             )
+        if (self._transfer_stop(operation_id).is_set() or self._closed.is_set()
+            or self.get_operation(operation_id).state == "cancelled"):
+            raise InterruptedError("model download cancelled during verification")
         self._publish_object(spec, part)
         self._mark_artifact_verified(spec, set_digest)
+
+    def _validate_http_download(self, spec: ArtifactSpec) -> None:
+        try:
+            parsed = urlsplit(spec.source)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (TypeError, ValueError) as error:
+            raise ModelCacheStorageError(
+                "model_cache.source_invalid", "cache source URL is invalid"
+            ) from error
+        if not self._fixture_sources and (
+            parsed.scheme != "https"
+            or hostname is None
+            or port is not None
+            or hostname.lower().rstrip(".")
+            not in self._trusted_source_hosts
+            or _is_private_host(hostname)
+        ):
+            raise ModelCacheStorageError(
+                "model_cache.source_untrusted",
+                "production cache downloads require a trusted HTTPS artifact host",
+            )
+
+    def _download_parallel_ranges(self, spec: ArtifactSpec, part: Path, set_digest: str,
+                                  operation_id: str, completed_artifacts: int) -> bool:
+        self._validate_http_download(spec)
+        # Range segments and atomic assembly coexist temporarily. Reserve the
+        # worst-case additional footprint across this process's active files.
+        # The retained prefix is already excluded from current free space:
+        # peak total is prefix + 2*object, but growth is at most 2*object.
+        # Existing range segments make growth smaller, never larger. A tight
+        # disk uses the ordinary sequential stream instead.
+        if (self._http is not None and not self._fixture_sources
+            and getattr(self._http, "follow_redirects", False)):
+            raise ModelCacheStorageError("model_cache.redirect_forbidden",
+                                        "production cache HTTP clients must not follow redirects")
+        reservation = 2 * spec.expected_bytes
+        with self._lock:
+            free = shutil.disk_usage(self._root).free
+            if free - self._reserve_bytes - self._range_reserved_bytes < reservation:
+                cleanup_ranges(part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS)
+                self._checkpoint_artifact(
+                    spec, operation_id=operation_id, set_digest=set_digest,
+                    actual_bytes=part.stat().st_size if part.exists() else 0,
+                    state="partial", completed_artifacts=completed_artifacts,
+                )
+                return False
+            self._range_reserved_bytes += reservation
+        client = self._http
+        owns_client = client is None
+        try:
+            if client is None:
+                client = httpx.Client(follow_redirects=False, timeout=httpx.Timeout(30.0),
+                                      trust_env=False)
+
+            def open_range(start: int, end: int) -> httpx.Response:
+                return self._open_http_response(
+                    client, spec.source,
+                    {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"},
+                )
+
+            with self._sample_transfer(
+                spec, set_digest, operation_id, completed_artifacts,
+                range_partial_bytes(part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS),
+            ) as observe:
+                completed = download_ranges(
+                    part, spec.expected_bytes, open_range, self._transfer_stop(operation_id),
+                    observe, workers=_PARALLEL_RANGE_WORKERS,
+                )
+            if not completed:
+                self._checkpoint_artifact(
+                    spec, operation_id=operation_id, set_digest=set_digest,
+                    actual_bytes=part.stat().st_size if part.exists() else 0,
+                    state="partial", completed_artifacts=completed_artifacts,
+                )
+            return completed
+        except (OSError, httpx.HTTPError, ValueError, ModelCacheError):
+            self._checkpoint_artifact(
+                spec, operation_id=operation_id, set_digest=set_digest,
+                actual_bytes=range_partial_bytes(part, spec.expected_bytes,
+                                                 workers=_PARALLEL_RANGE_WORKERS),
+                state="partial", completed_artifacts=completed_artifacts,
+            )
+            raise
+        finally:
+            if owns_client and client is not None:
+                client.close()
+            with self._lock:
+                self._range_reserved_bytes -= reservation
 
     def _open_source(
         self, spec: ArtifactSpec, offset: int
     ) -> tuple[object, int, callable]:
         try:
             parsed = urlsplit(spec.source)
-            hostname = parsed.hostname
-            port = parsed.port
         except (TypeError, ValueError) as error:
             raise ModelCacheStorageError(
                 "model_cache.source_invalid", "cache source URL is invalid"
@@ -2082,18 +2245,7 @@ class ModelCacheService:
                 )
             handle.seek(offset)
             return handle, offset, handle.close
-        if not self._fixture_sources and (
-            parsed.scheme != "https"
-            or hostname is None
-            or port is not None
-            or hostname.lower().rstrip(".")
-            not in self._trusted_source_hosts
-            or _is_private_host(hostname)
-        ):
-            raise ModelCacheStorageError(
-                "model_cache.source_untrusted",
-                "production cache downloads require a trusted HTTPS artifact host",
-            )
+        self._validate_http_download(spec)
         client = self._http
         owns_client = client is None
         if client is None:
@@ -2151,6 +2303,15 @@ class ModelCacheService:
         except ValueError:
             source_host = None
         source_is_huggingface = _is_hf_authority(source_host)
+        if source_is_huggingface:
+            with self._lock:
+                cooldown = self._hf_cooldown_until
+            if cooldown is not None and cooldown > self._clock():
+                raise ModelCacheStorageError(
+                    "model_cache.rate_limited", "Hugging Face download cooldown is active",
+                    retry_after_seconds=max(1, int((cooldown - self._clock()).total_seconds())),
+                    recovery="resume",
+                )
         authenticated = False
         token: str | None = None
         token_loaded = False
@@ -2176,6 +2337,11 @@ class ModelCacheService:
             status_code = response.status_code
             if status_code == 429:
                 retry_after = _retry_after_seconds(response.headers, now=self._clock())
+                if source_is_huggingface:
+                    until = self._clock() + timedelta(seconds=retry_after or _RETRY_BASE_SECONDS)
+                    with self._lock:
+                        if self._hf_cooldown_until is None or until > self._hf_cooldown_until:
+                            self._hf_cooldown_until = until
                 response.close()
                 raise ModelCacheStorageError(
                     "model_cache.rate_limited",
@@ -2328,6 +2494,11 @@ class ModelCacheService:
             }
             with self._session(write=True) as session:
                 operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                if operation is not None and operation.state == "cancelled":
+                    self._transfer_stop(operation_id).set()
+                    return
+                if operation is not None and operation.state in {"succeeded", "failed"}:
+                    return
                 if operation is not None and not force_progress:
                     prior = _validated_operation_progress(operation).measurement
                     if (prior.phase == "download" and prior.observed_at is not None
@@ -2444,6 +2615,9 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if operation is not None and operation.state == "cancelled":
+                return
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
                 row.state = "incomplete"
@@ -2513,6 +2687,9 @@ class ModelCacheService:
         if not isinstance(failure_code, str) or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,95}", failure_code) is None:
             failure_code = "model_cache.operation_failed"
         with self._session(write=True) as session:
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if operation is not None and operation.state == "cancelled":
+                return
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
                 row.verified_bytes = self._verified_bytes(session, set_digest)
@@ -2930,9 +3107,11 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id)
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            if operation.state == "cancelled":
+                return
             if state == "running":
                 if operation.state in {"partial", "failed"}:
                     operation.attempt = int(operation.attempt) + 1
@@ -2973,9 +3152,11 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id)
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            if operation.state == "cancelled":
+                return
             old_progress = _validated_operation_progress(operation)
             old_downloaded = old_progress.downloaded_bytes
             old_completed = old_progress.completed_artifacts
@@ -2996,6 +3177,34 @@ class ModelCacheService:
             operation.current_artifact_key = current_artifact_key
             operation.state = "running"
             operation.updated_at = now
+
+    def cancel_operation(self, operation_id: str) -> CacheOperationView:
+        """Stop queued/running transfers without deleting resumable cache files."""
+        with self._lock, self._session(write=True) as session:
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if operation is None:
+                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            if operation.state == "cancelled":
+                return self._operation_view(operation)
+            if operation.kind not in {"download", "repair"} or operation.state not in {
+                "queued", "running", "partial"
+            }:
+                raise ModelCacheConflict("model_cache.not_cancellable", "cache transfer is not active")
+            operation.state = "cancelled"
+            operation.completed_at = operation.updated_at = self._clock()
+            payload = _validated_operation_payload(operation)
+            payload.pop("claim", None)
+            operation.payload = _write_operation_payload(operation.kind, payload)
+            operation.progress = cache_phase(
+                _validated_operation_progress(operation).model_dump(mode="json"),
+                "failed", self._clock(),
+            )
+            row = session.get(ModelCacheSet, operation.artifact_set_sha256)
+            if row is not None and row.state != "cached":
+                row.state = "incomplete"
+                row.updated_at = self._clock()
+            self._transfer_stop(operation_id).set()
+            return self._operation_view(operation)
 
     def get_operation(self, operation_id: str) -> CacheOperationView:
         with self._session() as session:
@@ -3280,6 +3489,8 @@ class ModelCacheService:
 
     def _fill_background_slots(self, operation_id: str, capacity: int) -> None:
         record = self._background_operations.get(operation_id)
+        if self._transfer_stop(operation_id).is_set():
+            return
         if record is None:
             return
         specs = record["specs"]
@@ -3406,6 +3617,11 @@ class ModelCacheService:
             for operation_id in self._background_operations:
                 operation = session.get(ModelCacheOperation, operation_id)
                 if operation is None:
+                    continue
+                if operation.state == "cancelled":
+                    self._transfer_stop(operation_id).set()
+                    record = self._background_operations[operation_id]
+                    record["failure"] = InterruptedError("download cancelled")
                     continue
                 operation_payload = _validated_operation_payload(operation)
                 claim = operation_payload.get("claim")
