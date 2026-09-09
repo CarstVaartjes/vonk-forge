@@ -1522,7 +1522,13 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
                 "minLength": 1,
                 "title": "Detail",
                 "type": "string",
-            }
+            },
+            "context": {
+                "anyOf": [
+                    {"$ref": "#/components/schemas/ErrorContextResponse"},
+                    {"type": "null"},
+                ]
+            },
         },
         "required": ["detail"],
         "title": "BoundedErrorResponse",
