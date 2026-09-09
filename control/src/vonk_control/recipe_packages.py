@@ -13,9 +13,11 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import validate_recipe_models
 
@@ -44,6 +46,19 @@ _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _INDEX_MEDIA_TYPES = {"application/json", "text/plain"}
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
+
+
+class _GitRefObject(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    sha: str
+    type: Literal["commit"]
+
+
+class _GitRefResponse(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    object: _GitRefObject
 
 
 class RecipePackageError(RecipeLibraryError):
@@ -261,7 +276,7 @@ class RecipePackageClient:
     def _resolve_publication_commit(self) -> str:
         try:
             response = self._client.get(
-                f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/commits/main",
+                f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/git/ref/heads/main",
                 headers={"Accept": "application/vnd.github+json"},
             )
         except (httpx.HTTPError, OSError) as error:
@@ -272,10 +287,15 @@ class RecipePackageClient:
             payload = _json(response.content)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise RecipePackageError("recipe_package.response_invalid", "recipe publication response is invalid") from error
-        commit = payload.get("sha") if isinstance(payload, Mapping) else None
-        if not isinstance(commit, str) or not _SHA1.fullmatch(commit):
+        try:
+            ref = _GitRefResponse.model_validate(payload)
+        except ValidationError as error:
+            raise RecipePackageError(
+                "recipe_package.response_invalid", "recipe publication identity is invalid"
+            ) from error
+        if not _SHA1.fullmatch(ref.object.sha):
             raise RecipePackageError("recipe_package.response_invalid", "recipe publication identity is invalid")
-        return commit
+        return ref.object.sha
 
     def _parse_index(
         self, raw: bytes, *, publication_commit: str | None = None

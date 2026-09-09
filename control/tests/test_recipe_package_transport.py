@@ -281,8 +281,8 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
-        if request.url.path.endswith("/commits/main"):
-            return httpx.Response(200, json={"sha": publication})
+        if request.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": publication, "type": "commit"}})
         if request.url.path.endswith("/catalog-index.json"):
             return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
         if request.url.path.endswith("tiny-recipe.tar.gz"):
@@ -307,7 +307,7 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
             if entry.slug == "tiny-recipe"
         )
     )
-    assert requests[0].endswith("/repos/CarstVaartjes/vonk-forge-recipes/commits/main")
+    assert requests[0].endswith("/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main")
     assert requests[1] == (
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
         f"{publication}/catalog-index.json"
@@ -331,8 +331,8 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
-        if request.url.port == 8083 and request.url.path.endswith("/commits/main"):
-            return httpx.Response(200, json={"sha": publication})
+        if request.url.port == 8083 and request.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": publication, "type": "commit"}})
         if request.url.port == 8085 and request.url.path.endswith("/catalog-index.json"):
             return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
         if request.url.port == 8085 and request.url.path.endswith("tiny-recipe.tar.gz"):
@@ -350,7 +350,7 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
     item = client.fetch(next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe"))
 
     assert requests == [
-        "http://127.0.0.1:8083/repos/CarstVaartjes/vonk-forge-recipes/commits/main",
+        "http://127.0.0.1:8083/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main",
         (
             "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/"
             f"{publication}/catalog-index.json"
@@ -361,6 +361,56 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
         ),
     ]
     assert item.package_handle is not None
+    client.close()
+
+
+def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
+    tmp_path: Path,
+) -> None:
+    index, row, package = _canonical_package_fixture()
+    publication = "4" * 40
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(
+                200,
+                json={
+                    "ref": "refs/heads/main",
+                    "object": {
+                        "sha": publication,
+                        "type": "commit",
+                        "url": "https://api.github.com/repos/example/git/commits/" + publication,
+                    },
+                    "node_id": "MDM6UmVm" + "x" * 130_000,
+                },
+            )
+        if request.url.path.endswith("/catalog-index.json"):
+            return httpx.Response(200, headers={"content-type": "application/json"}, content=index)
+        if request.url.path.endswith("tiny-recipe.tar.gz"):
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/octet-stream"},
+                content=package,
+            )
+        return httpx.Response(404)
+
+    client = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = client.list()
+    item = client.fetch(next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe"))
+
+    assert calls[0].endswith(
+        "/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main"
+    )
+    assert item.package_handle is not None
+    assert item.package_handle.publication_commit == publication
+    assert item.package_handle.package_sha256 == row["package"]["sha256"]
     client.close()
 
 
@@ -404,8 +454,8 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(tmp_
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
-        if request.url.path.endswith("/commits/main"):
-            return httpx.Response(200, json={"sha": "2" * 40})
+        if request.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": "2" * 40, "type": "commit"}})
         if request.url.path.endswith(("catalog-index.json", "index.json")):
             return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
         return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
@@ -434,8 +484,8 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
-        if request.url.path.endswith("/commits/main"):
-            return httpx.Response(200, json={"sha": "2" * 40})
+        if request.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": "2" * 40, "type": "commit"}})
         if request.url.path.endswith(("catalog-index.json", "index.json")):
             return httpx.Response(200, headers={"content-type": "application/json"}, content=state["index"])
         return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=state["package"])
