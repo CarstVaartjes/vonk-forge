@@ -23,7 +23,7 @@ function completeNode(): VisualFleetNode {
     },
     telemetry: {
       age_seconds: 2, freshness: "live", sample: {
-        id: "00000000-0000-4000-8000-000000000001", node_id: "spk_0123456789abcdef0123456789abcdef", boot_id: "00000000-0000-0000-0000-000000000001", sequence: 2,
+        id: "00000000-0000-4000-8000-000000000001", node_id: "spk_0123456789abcdef0123456789abcdef", boot_id: "00000000-0000-0000-0000-000000000001",
         observed_at: "2026-08-15T11:59:58Z", received_at: "2026-08-15T11:59:59Z",
         cpu_utilization_percent: 12.5, load_average_1m: 1.5,
         memory_total_bytes: 100 * GIB, memory_available_bytes: 80 * GIB,
@@ -160,7 +160,7 @@ test("uses a friendly hostname fallback and renders an accessible live trend", (
     resolution: "raw",
     maximum_points: 60,
     metadata: historyMetadata("2026-08-15T11:00:00Z", "2026-08-15T12:00:00Z", "raw", 2),
-    points: [18, 42].map((gpu, index) => ({...projected.telemetry!.sample, id: `00000000-0000-4000-8000-00000000000${index + 2}`, sequence: index + 3, gpu_utilization_percent: gpu})),
+    points: [18, 42].map((gpu, index) => ({...projected.telemetry!.sample, id: `00000000-0000-4000-8000-00000000000${index + 2}`, gpu_utilization_percent: gpu})),
   };
   render(<NodeCard node={projected} now={NOW} selected={false} history={history} onEdit={() => undefined} onSelect={() => undefined}/>);
 

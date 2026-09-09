@@ -60,7 +60,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
     maximum_points: 360,
     metadata: historyMetadata("2026-08-15T11:00:00.000Z", "2026-08-15T12:00:00.000Z", "raw", 2),
     points: [{
-      id: "sample-1", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 1,
+      id: "sample-1", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001",
       observed_at: "2026-08-15T11:30:00Z", received_at: "2026-08-15T11:30:01Z",
       cpu_utilization_percent: 10, load_average_1m: 1,
       memory_total_bytes: 100, memory_available_bytes: 80,
@@ -71,7 +71,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
       gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
       metrics: richHistoryMetrics("2026-08-15T11:30:00Z", {gpu: 20, cpuTemperature: 40, cpuUtilization: 10, memory: 80, power: 18, storageRead: 40, storageWrite: 8, networkReceive: 1000, networkTransmit: 500, decode: 100, prefill: 800, queue: 1, ttft: 200, e2e: 900, itl: 20}),
     }, {
-      id: "sample-2", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 2,
+      id: "sample-2", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001",
       observed_at: "2026-08-15T11:45:00Z", received_at: "2026-08-15T11:45:01Z",
       cpu_utilization_percent: null, load_average_1m: null,
       memory_total_bytes: 100, memory_available_bytes: 75,
