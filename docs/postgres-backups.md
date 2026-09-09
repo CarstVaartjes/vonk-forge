@@ -2,7 +2,7 @@
 
 The PostgreSQL container writes a compressed SQL dump to `./backups/` beside
 `docker-compose.yaml` after startup, then every 24 hours. It retains the newest
-14 successful dumps. Set `VONK_BACKUP_INTERVAL_SECONDS` and `VONK_BACKUP_KEEP` in
+7 successful dumps. Set `VONK_BACKUP_INTERVAL_SECONDS` and `VONK_BACKUP_KEEP` in
 `.env` to change these positive values. Failures appear in the PostgreSQL logs
 and retry after five minutes. An incomplete dump never replaces a completed
 backup. Dumps contain all databases, roles and password hashes: keep the folder

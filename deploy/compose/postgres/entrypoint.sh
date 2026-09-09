@@ -65,7 +65,7 @@ fi
 backup_loop() (
   umask 077
   interval=${VONK_BACKUP_INTERVAL_SECONDS:-86400}
-  keep=${VONK_BACKUP_KEEP:-14}
+  keep=${VONK_BACKUP_KEEP:-7}
   case "$interval:$keep" in *[!0-9:]*|:*|*:) echo "Invalid backup settings" >&2; exit 1;; esac
   if [ "$interval" -eq 0 ] || [ "$keep" -eq 0 ]; then
     echo "Backup interval and retention must be positive" >&2; exit 1

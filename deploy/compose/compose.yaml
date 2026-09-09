@@ -64,7 +64,7 @@ services:
     logging: *bounded-logging
     environment:
       VONK_BACKUP_INTERVAL_SECONDS: ${VONK_BACKUP_INTERVAL_SECONDS:-86400}
-      VONK_BACKUP_KEEP: ${VONK_BACKUP_KEEP:-14}
+      VONK_BACKUP_KEEP: ${VONK_BACKUP_KEEP:-7}
       POSTGRES_DB: control
       POSTGRES_USER: control
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
