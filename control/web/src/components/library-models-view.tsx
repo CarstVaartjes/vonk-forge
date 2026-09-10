@@ -27,15 +27,19 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
   const normalizedQuery = query.trim().toLowerCase();
   const visible = models
     .filter(model => !filters.model || modelKey(model.model) === filters.model)
+    .filter(model => !filters.usage || model.usage.includes(filters.usage))
+    .filter(model => !filters.family || model.family === filters.family)
+    .filter(model => !filters.version || model.version === filters.version)
+    .filter(model => !filters.quantization || model.quantization === filters.quantization)
     .filter(model => !normalizedQuery || filteredRecipes.some(record => record.modelKey === modelKey(model.model)) || modelTitle(model).toLowerCase().includes(normalizedQuery));
   const refresh = () => void onRefresh(new AbortController().signal);
 
-  function updateModel(value: string) {
-    onFiltersChange({...filters, model: value});
+  function updateFilter(name: keyof LibraryWorkcellFilters, value: string) {
+    onFiltersChange({...filters, [name]: value});
     if (!onNavigatePath) return;
     const url = new URL(path, location.origin);
-    if (value) url.searchParams.set("model", value);
-    else url.searchParams.delete("model");
+    if (value) url.searchParams.set(name, value);
+    else url.searchParams.delete(name);
     onNavigatePath(`${url.pathname}${url.search}`, true);
   }
 
@@ -46,7 +50,11 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     </header>
     <div className="library-model-controls">
       <label>Search models<input type="search" aria-label="Search models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability" /></label>
-      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
+      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
+      <label>Usage<select aria-label="Filter model usage" value={filters.usage} onChange={event => updateFilter("usage", event.target.value)}><option value="">All usage</option>{[...new Set(models.flatMap(model => model.usage))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Family<select aria-label="Filter model family" value={filters.family} onChange={event => updateFilter("family", event.target.value)}><option value="">All families</option>{[...new Set(models.map(model => model.family).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Version<select aria-label="Filter model version" value={filters.version} onChange={event => updateFilter("version", event.target.value)}><option value="">All versions</option>{[...new Set(models.map(model => model.version).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Quantization<select aria-label="Filter model quantization" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">All quantization</option>{[...new Set(models.map(model => model.quantization).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
     </div>
     <div className="library-model-list" aria-label="Model library">
       {visible.map(model => <ModelRow key={modelKey(model.model)} api={api} model={model} onNavigate={onNavigate} onPrepared={refresh} />)}

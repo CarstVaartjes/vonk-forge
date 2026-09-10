@@ -38,12 +38,19 @@ test("lists the recipes that use a model so a selected model leads to its recipe
 test("prepares the Controller cache for an uncached model", async () => {
   const api = cacheApi();
   renderModels("", api);
-  const button = screen.getAllByRole("button", {name: "Prepare cache"})[0]!;
+  const button = screen.getAllByRole("button", {name: "Download model"})[0]!;
   fireEvent.click(button);
   await waitFor(() => expect(api.prepareModelCache).toHaveBeenCalledTimes(1));
   const [selector, requestKey] = (api.prepareModelCache as unknown as {mock: {calls: [string, string][]}}).mock.calls[0]!;
   expect(selector).toMatch(/^[^/]+\/[^/]+$/);
   expect(requestKey).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+test("offers the same model filters as vonkctl model library", () => {
+  renderModels();
+  for (const name of ["Filter model usage", "Filter model family", "Filter model version", "Filter model quantization", "Filter exact model"]) {
+    expect(screen.getByRole("combobox", {name})).toBeVisible();
+  }
 });
 
 test("filters models by exact selector and preserves the current route shape", () => {

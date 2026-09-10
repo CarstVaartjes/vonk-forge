@@ -5,15 +5,26 @@ import type {LibraryRoute} from "../lib/library-route";
 import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
 import {formatBytes} from "../lib/fleet";
 
-export type LibraryWorkcellFilters = {model: string; capability: string};
-export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", capability: ""};
+// Filter names mirror `vonkctl model library` and `vonkctl recipe library`
+// one-for-one: --model --usage --family --version --quantization.
+export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string};
+export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: ""};
+
+const FILTER_PARAMS = ["model", "usage", "family", "version", "quantization"] as const;
 
 export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkcellFilters {
-  return {model: params.get("model") ?? "", capability: params.get("capability") ?? ""};
+  return {
+    model: params.get("model") ?? "",
+    usage: params.get("usage") ?? "",
+    family: params.get("family") ?? "",
+    version: params.get("version") ?? "",
+    quantization: params.get("quantization") ?? "",
+  };
 }
 export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params = new URLSearchParams()): URLSearchParams {
-  if (filters.model) params.set("model", filters.model); else params.delete("model");
-  if (filters.capability) params.set("capability", filters.capability); else params.delete("capability");
+  for (const name of FILTER_PARAMS) {
+    if (filters[name]) params.set(name, filters[name]); else params.delete(name);
+  }
   return params;
 }
 
@@ -56,11 +67,21 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
   });
 }
 
+export function recordFamily(record: LibraryRecipeRecord): string {
+  const family = record.modelDocument?.identity.family;
+  return family ? `${family.publisher}/${family.slug}` : "";
+}
+
 export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filters: LibraryWorkcellFilters, query: string): LibraryRecipeRecord[] {
   const needle = query.trim().toLocaleLowerCase();
   return records.filter(record => {
     const text = [record.title, record.modelTitle, record.recipe?.slug ?? "", ...record.capabilities].join(" ").toLocaleLowerCase();
-    return (!needle || text.includes(needle)) && (!filters.model || record.modelKey === filters.model) && (!filters.capability || record.capabilities.includes(filters.capability));
+    return (!needle || text.includes(needle))
+      && (!filters.model || record.modelKey === filters.model)
+      && (!filters.usage || record.capabilities.includes(filters.usage))
+      && (!filters.family || recordFamily(record) === filters.family)
+      && (!filters.version || record.modelDocument?.identity.version === filters.version)
+      && (!filters.quantization || record.modelDocument?.format.quantization === filters.quantization);
   });
 }
 
@@ -105,7 +126,10 @@ export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filt
     <div className="library-workcell-toolbar">
       <label>Find models or recipes<input type="search" aria-label="Search Library" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search names, slugs, capabilities" /></label>
       <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => onFiltersChange({...filters, model: event.target.value})}><option value="">All models</option>{modelOptions.map(([key, title]) => <option key={key} value={key}>{title}</option>)}</select></label>
-      <label>Capability<select aria-label="Filter capability" value={filters.capability} onChange={event => onFiltersChange({...filters, capability: event.target.value})}><option value="">All capabilities</option>{[...new Set(records.flatMap(record => record.capabilities))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Usage<select aria-label="Filter usage" value={filters.usage} onChange={event => onFiltersChange({...filters, usage: event.target.value})}><option value="">All usage</option>{[...new Set(records.flatMap(record => record.capabilities))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Family<select aria-label="Filter family" value={filters.family} onChange={event => onFiltersChange({...filters, family: event.target.value})}><option value="">All families</option>{[...new Set(records.map(recordFamily).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Version<select aria-label="Filter version" value={filters.version} onChange={event => onFiltersChange({...filters, version: event.target.value})}><option value="">All versions</option>{[...new Set(records.map(record => record.modelDocument?.identity.version).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Quantization<select aria-label="Filter quantization" value={filters.quantization} onChange={event => onFiltersChange({...filters, quantization: event.target.value})}><option value="">All quantization</option>{[...new Set(records.map(record => record.modelDocument?.format.quantization).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
     </div>
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>

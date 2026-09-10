@@ -80,7 +80,7 @@ export function LibraryCacheAction({api, selector, state, onPrepared}: {
   }
   return <div className="library-cache-action">
     <button type="button" className="button secondary" disabled={busy || state === "preparing"} onClick={() => void prepare()}>
-      {busy || state === "preparing" ? "Preparing cache…" : state === "failed" ? "Retry cache preparation" : "Prepare cache"}
+      {busy || state === "preparing" ? "Downloading…" : state === "failed" ? "Retry download" : "Download model"}
     </button>
     {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}

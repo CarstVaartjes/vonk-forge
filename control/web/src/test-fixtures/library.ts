@@ -32,8 +32,10 @@ function model(index: number, recipes: LibraryViewRecipe[]): LibraryViewModel {
   const document = modelDocument(index);
   const actual = index >= 2 && index <= 6 ? actualLtxModels[index - 2]!.model : undefined;
   const local = {controller: "not_cached" as const, running_on: [], preparation: null};
-  if (actual) return {...clone(actualLtxModels[index - 2]!), model_document: document, local, recipes};
-  return {page_local: true, model: {kind: "model", publisher: document.identity.publisher, slug: document.identity.slug, content_sha256: digest(`m${index}`)}, model_document: document, model_capabilities: {...document.capabilities, state: "declared"}, local, recipes};
+  const facets = {family: `${document.identity.family.publisher}/${document.identity.family.slug}`, version: document.identity.version, quantization: document.format.quantization};
+  const usage = (document.capabilities?.facts ?? []).filter(fact => fact.support === "supported").map(fact => fact.capability);
+  if (actual) return {...clone(actualLtxModels[index - 2]!), model_document: document, local, ...facets, usage, recipes};
+  return {page_local: true, model: {kind: "model", publisher: document.identity.publisher, slug: document.identity.slug, content_sha256: digest(`m${index}`)}, model_document: document, model_capabilities: {...document.capabilities, state: "declared"}, local, ...facets, usage, recipes};
 }
 
 const syntheticModelTargets = [0, 1, ...Array.from({length: 72}, (_, offset) => offset + 7)];

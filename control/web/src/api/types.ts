@@ -68,6 +68,13 @@ export type LibraryViewModel = {
   model_document: ModelDefinition;
   model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
   local: components["schemas"]["LibraryLocalState"];
+  // Projected facets, named exactly as the CLI filter flags and the
+  // /api/model/library query parameters: --usage --family --version
+  // --quantization.
+  family: string;
+  version: string;
+  quantization: string;
+  usage: string[];
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
