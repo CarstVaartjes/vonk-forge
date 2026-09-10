@@ -25,6 +25,7 @@ from .catalog_entities import (
     CatalogError,
     CatalogValidationError,
 )
+from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     read_catalog_document,
     read_catalog_projection,
@@ -175,14 +176,7 @@ class CatalogService:
 
     def get_recipe(self, recipe_id: str) -> RecipeRevisionView:
         with self._sessions() as session:
-            revision = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                    (CatalogDocumentRevision.document_id == recipe_id)
-                    | (CatalogDocumentRevision.id == recipe_id),
-                )
-            )
+            revision = _get_active_recipe(session, recipe_id)
         if revision is None:
             raise KeyError(recipe_id)
         return _view(revision)
@@ -223,6 +217,7 @@ class CatalogService:
                         select(CatalogDocumentRevision).where(
                             CatalogDocumentRevision.kind == "recipe",
                             CatalogDocumentRevision.state == "active",
+                            active_head_revision(),
                             or_(*predicates),
                         )
                     )
@@ -289,6 +284,7 @@ class CatalogService:
             for model in models:
                 self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
             revision = self._upsert_canonical_document(session, recipe.model_dump(mode="json"), actor=actor)
+            self._select_imported_recipe_head(session, revision)
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )
@@ -310,6 +306,40 @@ class CatalogService:
             )
             session.expire(revision, ["projected"])
             return _view(revision)
+
+    def _select_imported_recipe_head(
+        self, session: Session, revision: CatalogDocumentRevision
+    ) -> None:
+        """Select a retained recipe without reactivating its Model dependencies.
+
+        New imports already move the head when resolving their candidate.  A
+        retained digest must also become current when the imported catalog pins
+        it again; its immutable revision and exact dependency bindings survive.
+        """
+        root = session.get(CatalogDocument, revision.document_id, with_for_update=True)
+        if root is None:
+            raise CatalogValidationError("catalog.document_missing", "catalog document is missing")
+        head = session.scalar(select(CatalogDocumentHead).where(
+            CatalogDocumentHead.kind == root.kind,
+            CatalogDocumentHead.publisher == root.publisher,
+            CatalogDocumentHead.slug == root.slug,
+        ).with_for_update())
+        if head is None:
+            raise CatalogValidationError("catalog.head_missing", "catalog document head is missing")
+        if head.active_revision_id == revision.id:
+            return
+        if head.candidate_revision_id is not None:
+            CatalogEntityService(session, clock=self._clock).fail_candidate(
+                root.id,
+                reason=f"Superseded by imported recipe {revision.content_digest}.",
+            )
+        head.active_revision_id = revision.id
+        head.generation += 1
+        recipe = read_catalog_document(revision)
+        if not isinstance(recipe, RecipeDefinition):
+            raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
+        root.title = recipe.metadata.title
+        root.updated_at = self._clock()
 
     def _upsert_canonical_document(self, session: Session, document: Mapping[str, object], *, actor: str) -> CatalogDocumentRevision:
         parsed = ModelDefinition.model_validate(document) if document.get("kind") == "model" else RecipeDefinition.model_validate(document)
@@ -346,7 +376,9 @@ class CatalogService:
                 ).with_for_update()
             )
             if head is not None and head.candidate_revision_id is not None:
-                service.fail_candidate(root.id)
+                service.fail_candidate(
+                    root.id, reason=f"Superseded by imported {kind} {digest}."
+                )
             latest = session.scalar(
                 select(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.document_id == root.id)
@@ -408,7 +440,13 @@ def _get_active_recipe(session: Session, recipe_id: str) -> CatalogDocumentRevis
         select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == "recipe",
             CatalogDocumentRevision.state == "active",
-            (CatalogDocumentRevision.document_id == recipe_id) | (CatalogDocumentRevision.id == recipe_id),
+            or_(
+                CatalogDocumentRevision.id == recipe_id,
+                and_(
+                    CatalogDocumentRevision.document_id == recipe_id,
+                    active_head_revision(),
+                ),
+            ),
         )
     )
 

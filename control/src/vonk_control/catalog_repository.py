@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .catalog_queries import active_head_revision
 from .models import CatalogDocument, CatalogDocumentRevision
 
 _SENSITIVE_KEY = re.compile(
@@ -53,6 +54,7 @@ class CatalogRepository:
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.document_id == document_id,
                 CatalogDocumentRevision.state == "active",
+                active_head_revision(),
             )
         )
 
