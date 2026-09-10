@@ -820,19 +820,6 @@ def create_app(
         if authenticated.role not in MUTATION_ROLES[(method, path)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def browser_session_actor(request: Request) -> Actor:
-        encoded = request.cookies.get("vonk_session", "")
-        if not encoded:
-            raise HTTPException(status_code=401, detail="authentication required")
-        if browser_auth is None:
-            raise HTTPException(status_code=401, detail="authentication failed")
-        try:
-            return browser_auth.resolve(encoded).actor
-        except BrowserAuthenticationError:
-            raise HTTPException(
-                status_code=401, detail="authentication failed"
-            ) from None
-
     install_agent_routes(
         app,
         actor_dependency=actor,
@@ -842,7 +829,6 @@ def create_app(
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
     authenticated_actor = Depends(actor)
-    authenticated_browser_actor = Depends(browser_session_actor)
 
     if browser_auth is not None:
         from .auth_api import install_auth_routes
@@ -994,7 +980,7 @@ def create_app(
                 ),
             ),
         ] = None,
-        _actor: Actor = authenticated_browser_actor,
+        _actor: Actor = authenticated_actor,
     ) -> StreamingResponse:
         try:
             last_event_id = parse_last_event_id(

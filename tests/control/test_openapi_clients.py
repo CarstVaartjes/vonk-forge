@@ -290,10 +290,12 @@ def test_admin_schema_is_secret_free() -> None:
         },
     }
     operations = _operations(schema)
-    assert operations["streamFleetEvents"]["security"] == [{"BrowserSession": []}]
+    assert operations["streamFleetEvents"]["security"] == [
+        {"BearerAuth": []}, {"BrowserSession": []}
+    ]
     assert operations["downloadCliToken"]["security"] == [{"BrowserSession": []}]
     assert all(
-        operation["security"] == [{"BearerAuth": []}]
+        operation["security"] == [{"BearerAuth": []}, {"BrowserSession": []}]
         for operation_id, operation in operations.items()
         if operation_id
         not in {

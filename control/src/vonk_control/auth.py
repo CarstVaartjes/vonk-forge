@@ -23,7 +23,6 @@ _CURSOR_DOMAIN = b"vonk-forge/control-cursor/v1\0"
 _MAX_CURSOR_LENGTH = 512
 
 MUTATION_ROLES = {
-    ("POST", "/api/fleet-profile-applications/{application_id}/retry"): frozenset({"administrator"}),
     ("POST", "/api/library/placements/{placement_id}/retry"): frozenset({"administrator"}),
     ("PATCH", "/api/nodes/{node_id}/profile"): frozenset(
         {"operator", "administrator"}
@@ -35,28 +34,9 @@ MUTATION_ROLES = {
     ("POST", "/api/agents/nodes/{node_id}/revoke"): frozenset({"administrator"}),
     ("POST", "/api/agents/upgrades/preview"): frozenset({"administrator"}),
     ("POST", "/api/agents/upgrades"): frozenset({"administrator"}),
-    ("POST", "/api/fleet-profiles"): frozenset({"administrator"}),
-    ("POST", "/api/fleet-profiles/capture-current"): frozenset(
-        {"administrator"}
-    ),
-    ("PUT", "/api/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
-    ("DELETE", "/api/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
-    ("POST", "/api/fleet-profiles/{profile_id}/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
-    ("POST", "/api/fleet-profiles/{profile_id}/duplicate"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/fleet-profiles/{profile_id}/prepare"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/fleet-profiles/{profile_id}/prepare/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/fleet-profiles/{profile_id}/switch"): frozenset(
-        {"administrator"}
-    ),
+    ("PUT", "/api/profile/{number}"): frozenset({"administrator"}),
+    ("POST", "/api/profile/{number}/preview"): frozenset({"administrator"}),
+    ("POST", "/api/profile/{number}/load"): frozenset({"administrator"}),
     ("POST", "/api/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/library/placements"): frozenset({"administrator"}),
     ("POST", "/api/library/recipe-image-availability"): frozenset(

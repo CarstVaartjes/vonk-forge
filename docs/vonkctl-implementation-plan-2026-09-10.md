@@ -12,6 +12,8 @@ Controller cache removal cancels the object's download/build, preserves saved as
 
 Implementation is authorized, including necessary API simplification. No live fleet deployment or recipe catalog edits are part of this plan. Existing web consumers receive mechanical contract updates where necessary; visual redesign waits.
 
+Web and CLI consume one identical operator API: same routes, canonical request/response types, operation semantics and role authorization. Only authentication transport differs (browser session cookie with CSRF protection versus CLI bearer token). No CLI-only/web-only business endpoints, DTOs, presentation-dependent service behavior or duplicate orchestration. Agent transport is separate by function, not by UI audience.
+
 Explicit user clarification: all databases are development databases; no production databases exist. Deleting development data and recreating the schema is authorized where needed for this implementation. Resolve each actual database target before a reset; never run an indiscriminate volume deletion. Do not add Alembic/data migration, dual readers, old-field adapters or compatibility tables.
 
 Final route naming correction: remove `/v1` from all Vonk-owned API routes, callers, generated schemas and tests. The final namespaces are `/api/fleet`, `/api/model`, `/api/recipe`, `/api/profile`. References below to `/api` describe the inspected baseline or earlier proposal only and are superseded. Integrator owns the comprehensive mechanical replacement after worker commits; workers use final unversioned paths in their changed files. Third-party/OpenAI-compatible inference protocol paths retain `/v1` where required by that external protocol.
@@ -68,6 +70,18 @@ Own this plan, approved design copy, shared database/schema edits, `api.py` wiri
 4. Run connected CLI→Controller tests for the accepted journeys, persisted JSON round trips, required/optional/null semantics, operation outcomes and failures. Do not accept a parser mock as proof that removal cancels a real worker or load changes the fleet.
 5. Review removed aliases/routes/types for remaining callers, check formatting and relevant test suites, and record exact evidence plus deployment/hardware boundaries.
 
+## Mandatory legacy removal audit
+
+Explicit user requirement: earlier simplifications left multiple versions of the same logic. Completion requires one current implementation, not another facade alongside retired behavior.
+
+- Each slice supplies a removal ledger: retired route/command, DTO/table/field, implementation branch, generated asset and corresponding callers/tests replaced or deleted.
+- No old plural/admin/library CLI aliases, subset-profile authoring, pinned-profile authoring, alternative persistence readers, compatibility adapters or schema migrations remain active.
+- Compare actual registered OpenAPI routes and auth/operation registries, not only router filenames. Superseded routes must disappear, including generated clients and hidden or indirectly mounted routes.
+- Trace each operation end to end: CLI → route → authoritative service → durable state → worker → observed result. Internal reusable helpers are allowed; duplicate orchestration implementations for the same operation are not.
+- Search deleted symbols, old route families and retired table/field references across production code, packaging, tests, web callers, installers and documentation. Historical documents may remain only explicitly inert history; no executable consumer can restore retired behavior.
+- Tests must exercise the replacement connected path and fail closed on retired forms where that proves the current public contract. Do not keep old fixtures or compatibility constructors just to preserve passing tests.
+- Record any necessary remaining distinct path with its distinct job (for example profile authoring versus a frozen execution snapshot), rather than calling overlapping behavior a special case.
+
 ## Required acceptance scenarios
 
 - Default and numbered profile persisted across clients; concurrent save rejection; every enrolled Spark visible; new Spark idle; empty profile idles fleet on load.
@@ -89,8 +103,8 @@ Use task-specific writable uv caches and the sibling recipe contract package. Ru
 
 - Latest main fetched and isolated at `ff6abaa5`.
 - Initial API inventory and concrete authoring/eviction mismatches recorded above.
-- Four Luna/high workers dispatched: A CLI, B profiles, C cache lifecycle, D Fleet/library API.
+- Four Luna/high implementation workers dispatched: A CLI, B profiles, C cache lifecycle, D Fleet/library API. An additional Luna/high read-only audit checks cross-slice legacy-removal blind spots.
 - Integration commit `903d3c37` removes owned API/agent version prefixes across 246 tracked files; no old `/api/v1` or `/agent/v1` references remain at this stage. External inference paths and protocol identifiers are retained.
 - Prefix-change checks: 42 schema-completeness/client-request tests passed; another 184 auth/agent/healthcheck/generated-client tests passed. Regenerating OpenAPI with `--schema-only` produced no diff. All 29 native agent client tests passed under OrbStack Linux/Rust 1.97.1 after replacing an old positional test-server path parser with an explicit prefix parser. Native macOS compilation encountered existing Linux-only helper filesystem APIs, so Linux was used. These checks validate the prefix change, not yet the new CLI/profile/cache implementation.
-- OrbStack verified as `orbstack`, operating system `OrbStack`, architecture `aarch64`.
+- OrbStack verified as `orbstack`, operating system `OrbStack`, architecture `aarch64`. Full native agent library follow-up passed all 144 tests (including the 29 client tests), covering additional enrollment/execution route consumers.
 - Final worker integration and full acceptance evidence remain pending.

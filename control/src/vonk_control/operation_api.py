@@ -81,17 +81,6 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/deployment-provenance"): "getDeploymentProvenance",
     ("get", "/api/operations/{operation_id}/evidence"): "getOperationEvidence",
     ("get", "/api/fleet/stream"): "streamFleetEvents",
-    ("get", "/api/fleet-profiles"): "listFleetProfiles",
-    ("post", "/api/fleet-profiles"): "createFleetProfile",
-    ("get", "/api/fleet-profiles/{profile_id}"): "getFleetProfile",
-    ("put", "/api/fleet-profiles/{profile_id}"): "updateFleetProfile",
-    ("delete", "/api/fleet-profiles/{profile_id}"): "deleteFleetProfile",
-    ("post", "/api/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
-    ("post", "/api/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
-    (
-        "get",
-        "/api/fleet-profile-applications/{application_id}",
-    ): "getFleetProfileApplication",
     ("get", "/api/library"): "listLibrary",
     ("post", "/api/recipes/job-runs"): "activateRecipeJobRun",
     (
@@ -1658,11 +1647,7 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         "/api/auth/logout",
         "/api/auth/session",
         "/api/auth/cli-token",
-        "/api/fleet/stream",
     }
-    includes_browser_auth = any(
-        path in source.get("paths", {}) for path in browser_auth_paths
-    )
     for path, path_item in source.get("paths", {}).items():
         if path in {"/api/healthz", "/api/readyz"}:
             continue
@@ -1683,17 +1668,16 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
             elif path in browser_auth_paths:
                 operation["security"] = [{"BrowserSession": []}]
             else:
-                operation["security"] = [{"BearerAuth": []}]
+                operation["security"] = [{"BearerAuth": []}, {"BrowserSession": []}]
         paths[path] = selected
     source["paths"] = paths
     components = source.setdefault("components", {})
     components["securitySchemes"] = {"BearerAuth": {"scheme": "bearer", "type": "http"}}
-    if includes_browser_auth:
-        components["securitySchemes"]["BrowserSession"] = {
-            "in": "cookie",
-            "name": "vonk_session",
-            "type": "apiKey",
-        }
+    components["securitySchemes"]["BrowserSession"] = {
+        "in": "cookie",
+        "name": "vonk_session",
+        "type": "apiKey",
+    }
 
     referenced: set[str] = set()
 
