@@ -66,7 +66,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/v1/nodes/{node_id}/telemetry/current".format(node_id=node_id,),
+        "url": "/api/nodes/{node_id}/telemetry/current".format(node_id=node_id,),
         "params": params,
     }
 

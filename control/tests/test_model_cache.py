@@ -1148,11 +1148,11 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         audits=[],
     )
     client = TestClient(app)
-    inventory = client.get("/api/v1/model-cache")
+    inventory = client.get("/api/model-cache")
     assert inventory.status_code == 200
     assert inventory.json()["schema_version"] == 2
     assert inventory.json()["storage"]["unique_used_bytes"] == 0
-    operations = client.get("/api/v1/model-cache/operations")
+    operations = client.get("/api/model-cache/operations")
     assert operations.status_code == 200
     assert operations.json() == {
         "schema_version": 2,
@@ -1160,7 +1160,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         "total": 0,
         "next_cursor": None,
     }
-    updates = client.get("/api/v1/model-cache/updates")
+    updates = client.get("/api/model-cache/updates")
     assert updates.status_code == 200
     assert updates.json() == {
         "schema_version": 2,
@@ -1170,7 +1170,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         "next_cursor": None,
     }
     bad = client.post(
-        "/api/v1/model-cache/download",
+        "/api/model-cache/download",
         json={
             "schema_version": 2,
             "request_key": "00000000-0000-4000-8000-000000000012",
@@ -1182,18 +1182,18 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
     )
     assert bad.status_code == 422
     assert {route.path for route in app.routes} >= {
-        "/api/v1/model-cache",
-        "/api/v1/model-cache/download-preview",
-        "/api/v1/model-cache/download",
-        "/api/v1/model-cache/repair-preview",
-        "/api/v1/model-cache/repair",
-        "/api/v1/model-cache/eviction-preview",
-        "/api/v1/model-cache/evict",
-        "/api/v1/model-cache/updates",
-        "/api/v1/model-cache/operations",
-        "/api/v1/model-cache/operations/{operation_id}",
-        "/api/v1/model-cache/operations/{operation_id}/retry",
-        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        "/api/model-cache",
+        "/api/model-cache/download-preview",
+        "/api/model-cache/download",
+        "/api/model-cache/repair-preview",
+        "/api/model-cache/repair",
+        "/api/model-cache/eviction-preview",
+        "/api/model-cache/evict",
+        "/api/model-cache/updates",
+        "/api/model-cache/operations",
+        "/api/model-cache/operations/{operation_id}",
+        "/api/model-cache/operations/{operation_id}/retry",
+        "/api/model-cache/operations/{operation_id}/check-access-and-resume",
     }
 
 
@@ -1330,7 +1330,7 @@ def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, 
         service=restarted, audits=[],
     )
     client = TestClient(app)
-    response = client.get(f"/api/v1/model-cache/operations/{operation.id}")
+    response = client.get(f"/api/model-cache/operations/{operation.id}")
     assert response.status_code == 200
     document = response.json()
     assert document["state"] == "failed"
@@ -1340,7 +1340,7 @@ def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, 
     from vonk_control.model_cache_contract import ModelCacheOperationResponse
     with pytest.raises(ValidationError, match="requires failure evidence"):
         ModelCacheOperationResponse.model_validate(document | {"failure": None})
-    succeeded = client.get(f"/api/v1/model-cache/operations/{downloaded.id}").json()
+    succeeded = client.get(f"/api/model-cache/operations/{downloaded.id}").json()
     assert succeeded["state"] == "succeeded"
     with pytest.raises(ValidationError, match="requires a result"):
         ModelCacheOperationResponse.model_validate(succeeded | {"result": None})

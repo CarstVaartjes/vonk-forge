@@ -191,7 +191,7 @@ def test_profile_api_uses_the_composed_run_switch_service() -> None:
     client, headers, _audits = _setup(composed_run_switch=True)
 
     created = client.post(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         headers=headers(),
         json=_body(),
     )
@@ -199,7 +199,7 @@ def test_profile_api_uses_the_composed_run_switch_service() -> None:
     profile_id = created.json()["id"]
 
     preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        f"/api/fleet-profiles/{profile_id}/preview",
         headers=headers(),
         json={},
     )
@@ -210,16 +210,16 @@ def test_profile_api_uses_the_composed_run_switch_service() -> None:
 def test_profiles_are_authenticated_role_bound_and_audited() -> None:
     client, headers, audits = _setup()
     denied = client.post(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         headers=headers("operator"),
         json=_body(),
     )
     created = client.post(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         headers={**headers(), "x-request-id": "20000000-0000-4000-8000-000000000001"},
         json=_body(),
     )
-    listed = client.get("/api/v1/fleet-profiles", headers=headers("viewer"))
+    listed = client.get("/api/fleet-profiles", headers=headers("viewer"))
 
     assert denied.status_code == 403
     assert created.status_code == 201
@@ -239,10 +239,10 @@ def test_profile_json_input_rejects_extra_fields_and_type_coercion() -> None:
     malformed = {**_body(), "favorite": 1}
 
     extra_response = client.post(
-        "/api/v1/fleet-profiles", headers=headers(), json=extra
+        "/api/fleet-profiles", headers=headers(), json=extra
     )
     malformed_response = client.post(
-        "/api/v1/fleet-profiles", headers=headers(), json=malformed
+        "/api/fleet-profiles", headers=headers(), json=malformed
     )
 
     assert extra_response.status_code == 422
@@ -275,15 +275,15 @@ def test_profile_preview_contract_rejects_duplicate_or_out_of_scope_nodes() -> N
 
 def test_profile_preview_exposes_blockers_and_apply_rejects_stale_plan() -> None:
     client, headers, _audits = _setup()
-    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    created = client.post("/api/fleet-profiles", headers=headers(), json=_body())
     profile_id = created.json()["id"]
     preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        f"/api/fleet-profiles/{profile_id}/preview",
         headers=headers(),
         json={},
     )
     applied = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/apply",
+        f"/api/fleet-profiles/{profile_id}/apply",
         headers=headers(),
         json={
             "plan_digest": "f" * 64,
@@ -310,18 +310,18 @@ def test_profile_routes_have_stable_openapi_operation_ids() -> None:
     document = client.get("/openapi.json", headers=headers()).json()
 
     assert (
-        document["paths"]["/api/v1/fleet-profiles"]["get"]["operationId"]
+        document["paths"]["/api/fleet-profiles"]["get"]["operationId"]
         == "listFleetProfiles"
     )
     assert (
-        document["paths"]["/api/v1/fleet-profiles/{profile_id}/apply"]["post"][
+        document["paths"]["/api/fleet-profiles/{profile_id}/apply"]["post"][
             "operationId"
         ]
         == "applyFleetProfile"
     )
     assert (
         document["paths"][
-            "/api/v1/fleet-profiles/{profile_id}/prepare/preview"
+            "/api/fleet-profiles/{profile_id}/prepare/preview"
         ]["post"]["operationId"]
         == "previewFleetProfilePreparation"
     )
@@ -329,34 +329,34 @@ def test_profile_routes_have_stable_openapi_operation_ids() -> None:
 
 def test_profile_contract_exposes_capture_duplicate_status_prepare_and_switch() -> None:
     client, headers, _audits = _setup()
-    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    created = client.post("/api/fleet-profiles", headers=headers(), json=_body())
     profile_id = created.json()["id"]
 
     duplicate = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/duplicate",
+        f"/api/fleet-profiles/{profile_id}/duplicate",
         headers=headers(),
         json={"name": "Studio copy"},
     )
     captured = client.post(
-        "/api/v1/fleet-profiles/capture-current",
+        "/api/fleet-profiles/capture-current",
         headers=headers(),
         json={"name": "Captured"},
     )
     profile_status = client.get(
-        f"/api/v1/fleet-profiles/{profile_id}/status", headers=headers("viewer")
+        f"/api/fleet-profiles/{profile_id}/status", headers=headers("viewer")
     )
     preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        f"/api/fleet-profiles/{profile_id}/preview",
         headers=headers(),
         json={},
     ).json()
     preparation_preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare/preview",
+        f"/api/fleet-profiles/{profile_id}/prepare/preview",
         headers=headers(),
         json={},
     )
     prepare = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        f"/api/fleet-profiles/{profile_id}/prepare",
         headers=headers(),
         json={
             "plan_digest": preparation_preview.json()["plan_digest"],
@@ -364,7 +364,7 @@ def test_profile_contract_exposes_capture_duplicate_status_prepare_and_switch() 
         },
     )
     switched = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/switch",
+        f"/api/fleet-profiles/{profile_id}/switch",
         headers=headers(),
         json={
             "plan_digest": preview["plan_digest"],
@@ -387,15 +387,15 @@ def test_profile_contract_exposes_capture_duplicate_status_prepare_and_switch() 
 
 def test_prepare_requires_the_reviewed_digest_and_replays_by_request_key() -> None:
     client, headers, _audits = _setup()
-    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    created = client.post("/api/fleet-profiles", headers=headers(), json=_body())
     profile_id = created.json()["id"]
     preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare/preview",
+        f"/api/fleet-profiles/{profile_id}/prepare/preview",
         headers=headers(),
         json={},
     )
     stale = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        f"/api/fleet-profiles/{profile_id}/prepare",
         headers=headers(),
         json={
             "plan_digest": "f" * 64,
@@ -403,7 +403,7 @@ def test_prepare_requires_the_reviewed_digest_and_replays_by_request_key() -> No
         },
     )
     applied = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        f"/api/fleet-profiles/{profile_id}/prepare",
         headers=headers(),
         json={
             "plan_digest": preview.json()["plan_digest"],
@@ -411,7 +411,7 @@ def test_prepare_requires_the_reviewed_digest_and_replays_by_request_key() -> No
         },
     )
     replay = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        f"/api/fleet-profiles/{profile_id}/prepare",
         headers=headers(),
         json={
             "plan_digest": preview.json()["plan_digest"],

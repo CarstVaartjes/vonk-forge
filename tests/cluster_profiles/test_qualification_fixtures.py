@@ -387,14 +387,14 @@ class _ArtifactClient(_DownloadClient):
         query: object = None,
     ) -> dict[str, object]:
         self.calls.append((method, path))
-        if path == "/api/v1/artifact-jobs/capabilities":
+        if path == "/api/artifact-jobs/capabilities":
             return {"schema_version": 1, "transport": {}, "storage": {}}
         if path.endswith("/artifact-jobs"):
             assert extra_headers == {"X-Request-ID": extra_headers["X-Request-ID"]}
             self.request_ids.append(extra_headers["X-Request-ID"])
             self.created += 1
             return {"id": f"job-{self.created}", "state": "draft"}
-        if re.fullmatch(r"/api/v1/artifact-jobs/job-\d+", path) and method == "GET":
+        if re.fullmatch(r"/api/artifact-jobs/job-\d+", path) and method == "GET":
             job_id = path.rsplit("/", 1)[-1]
             self.status_reads[job_id] = self.status_reads.get(job_id, 0) + 1
             if self.status_reads[job_id] == 1:

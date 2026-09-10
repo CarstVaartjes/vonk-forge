@@ -27,7 +27,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/v1/library/recipe-image-availability/{operation_id}".format(operation_id=operation_id,),
+        "url": "/api/library/recipe-image-availability/{operation_id}".format(operation_id=operation_id,),
     }
 
 

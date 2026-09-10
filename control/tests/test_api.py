@@ -168,14 +168,14 @@ def repair_preview_document() -> dict[str, object]:
 
 def test_health_is_public_but_fleet_requires_authentication() -> None:
     client, _, _, _ = _client("viewer")
-    assert client.get("/api/v1/healthz").status_code == 200
-    assert client.get("/api/v1/fleet").status_code == 401
+    assert client.get("/api/healthz").status_code == 200
+    assert client.get("/api/fleet").status_code == 401
 
 
 def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None:
     client, _, _, _ = _client("viewer")
 
-    response = client.get("/api/v1/fleet")
+    response = client.get("/api/fleet")
 
     assert response.status_code == 401
     assert BoundedErrorResponse.model_validate_json(response.content).detail == (
@@ -189,7 +189,7 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
     client, headers, _, _ = _client("viewer")
 
     response = client.post(
-        "/api/v1/model-cache/operations/00000000-0000-4000-8000-000000000001/cancel",
+        "/api/model-cache/operations/00000000-0000-4000-8000-000000000001/cancel",
         headers=headers,
     )
 
@@ -205,7 +205,7 @@ def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
         raise RuntimeError("private token and request body must stay server-side")
 
     jobs.get = fail
-    response = client.get("/api/v1/jobs/job-1", headers=headers)
+    response = client.get("/api/jobs/job-1", headers=headers)
 
     assert response.status_code == 500
     problem = BoundedErrorResponse.model_validate_json(response.content)
@@ -213,7 +213,7 @@ def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
     assert problem.context is not None
     assert problem.context.code == "controller.internal_error"
     assert problem.context.http_status == 500
-    assert problem.context.endpoint == "/api/v1/jobs/job-1"
+    assert problem.context.endpoint == "/api/jobs/job-1"
     assert problem.context.request_id == response.headers["x-request-id"]
     assert response.headers["x-vonk-error-code"] == "controller.internal_error"
     assert b"private token" not in response.content
@@ -222,7 +222,7 @@ def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
 def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:
     client, _, _, _ = _client("viewer")
 
-    response = client.get("/api/v1/catalog/source-bundles/" + "a" * 64)
+    response = client.get("/api/catalog/source-bundles/" + "a" * 64)
 
     assert response.status_code == 401
     problem = CatalogProblem.model_validate_json(response.content)
@@ -233,7 +233,7 @@ def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None
 def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -> None:
     client, _, _, _ = _client("viewer")
     build_id = "00000000-0000-4000-8000-000000000001"
-    route = f"/agent/v1/recipe-builds/{build_id}/image"
+    route = f"/agent/recipe-builds/{build_id}/image"
     body = b"x" * 1_048_577
 
     # The missing trusted-proxy identity is rejected after the request-size
@@ -248,8 +248,8 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
 
 def test_removed_package_and_deployment_routes_are_not_registered() -> None:
     client, _, _, _ = _client("administrator")
-    package_prefix = "/api/v1/" + "packages/"
-    deployment_prefix = "/api/v1/" + "deployments"
+    package_prefix = "/api/" + "packages/"
+    deployment_prefix = "/api/" + "deployments"
     legacy_paths = {
         route.path
         for route in client.app.routes
@@ -263,7 +263,7 @@ def test_generic_job_submission_route_is_retired() -> None:
     client, headers, jobs, _audits = _client("administrator")
 
     assert client.post(
-        "/api/v1/jobs",
+        "/api/jobs",
         headers=headers,
         json={"kind": "probe", "authority_revision": "abc", "targets": [], "payload": {}},
     ).status_code == 405
@@ -275,7 +275,7 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
     client, issued, _service, _sessions, _clock, _codec, _jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
 
-    response = client.get("/api/v1/audit")
+    response = client.get("/api/audit")
 
     assert response.status_code == 200
 
@@ -285,11 +285,11 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     client.cookies.set("vonk_session", issued.token)
     document = {"proposal_digest": "a" * 64}
 
-    assert client.post("/api/v1/changes", json=document).status_code == 403
+    assert client.post("/api/changes", json=document).status_code == 403
     client.cookies.set("vonk_csrf", issued.csrf)
     assert (
         client.post(
-            "/api/v1/changes",
+            "/api/changes",
             headers={"x-csrf-token": "wrong"},
             json=document,
         ).status_code
@@ -298,7 +298,7 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     assert jobs.calls == []
     assert (
         client.post(
-            "/api/v1/changes",
+            "/api/changes",
             headers={"x-csrf-token": issued.csrf},
             json=document,
         ).status_code
@@ -314,7 +314,7 @@ def test_browser_admin_can_preview_node_bound_repair_with_matching_csrf() -> Non
     document = repair_preview_document()
 
     response = client.post(
-        "/api/v1/agents/upgrades/preview",
+        "/api/agents/upgrades/preview",
         headers={"x-csrf-token": issued.csrf},
         json=document,
     )
@@ -338,7 +338,7 @@ def test_browser_repair_preview_rejects_legacy_schema_one() -> None:
     document["repair_manifest"]["schema_version"] = 1
 
     response = client.post(
-        "/api/v1/agents/upgrades/preview",
+        "/api/agents/upgrades/preview",
         headers=headers,
         json=document,
     )
@@ -349,7 +349,7 @@ def test_browser_repair_preview_rejects_legacy_schema_one() -> None:
     assert any(issue.loc[-1] == "schema_version" for issue in problem.issues)
     assert all(set(issue) == {"type", "loc", "msg"} for issue in response.json()["issues"])
     schema = client.app.openapi()
-    response_schema = schema["paths"]["/api/v1/agents/upgrades/preview"]["post"][
+    response_schema = schema["paths"]["/api/agents/upgrades/preview"]["post"][
         "responses"
     ]["422"]["content"]["application/json"]["schema"]
     Draft202012Validator({**schema, **response_schema}).validate(response.json())
@@ -361,7 +361,7 @@ def test_browser_repair_preview_requires_csrf_and_administrator_role() -> None:
     client.cookies.set("vonk_session", issued.token)
     assert (
         client.post(
-            "/api/v1/agents/upgrades/preview", json=repair_preview_document()
+            "/api/agents/upgrades/preview", json=repair_preview_document()
         ).status_code
         == 403
     )
@@ -373,7 +373,7 @@ def test_browser_repair_preview_requires_csrf_and_administrator_role() -> None:
     )
     assert (
         operator.post(
-            "/api/v1/agents/upgrades/preview",
+            "/api/agents/upgrades/preview",
             headers=operator_headers,
             json=repair_preview_document(),
         ).status_code
@@ -400,13 +400,13 @@ def test_upgrade_preview_accepts_current_package_echo_but_rejects_unsigned_custo
 
     assert (
         client.post(
-            "/api/v1/agents/upgrades/preview", headers=headers, json=ordinary
+            "/api/agents/upgrades/preview", headers=headers, json=ordinary
         ).status_code
         == 200
     )
     custom = {**current_package, "package_signature": "f" * 128}
     response = client.post(
-        "/api/v1/agents/upgrades/preview",
+        "/api/agents/upgrades/preview",
         headers=headers,
         json={**ordinary, "package": custom},
     )
@@ -424,7 +424,7 @@ def test_upgrade_preview_response_is_canonical_and_closed() -> None:
     client.cookies.set("vonk_csrf", issued.csrf)
 
     response = client.post(
-        "/api/v1/agents/upgrades/preview",
+        "/api/agents/upgrades/preview",
         headers={"x-csrf-token": issued.csrf},
         json=repair_preview_document(),
     )
@@ -447,7 +447,7 @@ def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
     client, headers, _jobs, _audits = _client("administrator")
     client.cookies.set("vonk_session", headers["Authorization"].removeprefix("Bearer "))
 
-    assert client.get("/api/v1/audit").status_code == 401
+    assert client.get("/api/audit").status_code == 401
 
 
 def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -> None:
@@ -457,14 +457,14 @@ def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -
     bearer = codec.issue(Actor("operator", "operator"), ttl_seconds=1000, now=0)
 
     response = client.get(
-        "/api/v1/audit", headers={"authorization": f"Bearer {bearer}"}
+        "/api/audit", headers={"authorization": f"Bearer {bearer}"}
     )
 
     assert response.status_code == 200
     client.cookies.set("vonk_session", issued.token)
     assert (
         client.get(
-            "/api/v1/audit", headers={"authorization": f"Bearer {issued.token}"}
+            "/api/audit", headers={"authorization": f"Bearer {issued.token}"}
         ).status_code
         == 401
     )
@@ -485,4 +485,4 @@ def test_cookie_sessions_reflect_revocation_disablement_and_expiry() -> None:
         else:
             clock.value += timedelta(hours=12)
 
-        assert client.get("/api/v1/audit").status_code == 401
+        assert client.get("/api/audit").status_code == 401

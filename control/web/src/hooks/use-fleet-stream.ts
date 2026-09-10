@@ -205,7 +205,7 @@ export function useFleetStream(api: ControlApi) {
 
     void requestSnapshot("initial");
     const source = typeof EventSource === "function"
-      ? new EventSource("/api/v1/fleet/stream")
+      ? new EventSource("/api/fleet/stream")
       : undefined;
     if (source) {
       source.addEventListener("open", onOpen);

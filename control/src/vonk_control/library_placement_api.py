@@ -19,10 +19,10 @@ from .library_placements import LibraryPlacementConflict
 from .operation_api import bounded_error_responses
 
 LIBRARY_PLACEMENT_OPERATION_IDS = {
-    ("post", "/api/v1/library/placements/{placement_id}/retry"): "retryLibraryPlacement",
-    ("post", "/api/v1/library/placements/preview"): "previewLibraryPlacement",
-    ("post", "/api/v1/library/placements"): "applyLibraryPlacement",
-    ("get", "/api/v1/library/placements/{placement_id}"): "getLibraryPlacement",
+    ("post", "/api/library/placements/{placement_id}/retry"): "retryLibraryPlacement",
+    ("post", "/api/library/placements/preview"): "previewLibraryPlacement",
+    ("post", "/api/library/placements"): "applyLibraryPlacement",
+    ("get", "/api/library/placements/{placement_id}"): "getLibraryPlacement",
 }
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -52,7 +52,7 @@ def install_library_placement_routes(
             raise HTTPException(status_code=403, detail="insufficient role")
 
     @app.post(
-        "/api/v1/library/placements/preview",
+        "/api/library/placements/preview",
         response_model=LibraryPlacementPreview,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewLibraryPlacement",
@@ -61,7 +61,7 @@ def install_library_placement_routes(
         body: LibraryPlacementPreviewRequest,
         actor: Actor = authenticated,
     ) -> LibraryPlacementPreview:
-        require_mutation(actor, "/api/v1/library/placements/preview")
+        require_mutation(actor, "/api/library/placements/preview")
         try:
             return placements().preview(body, actor=actor.subject)
         except KeyError:
@@ -78,7 +78,7 @@ def install_library_placement_routes(
             ) from None
 
     @app.post(
-        "/api/v1/library/placements",
+        "/api/library/placements",
         response_model=LibraryPlacementApplication,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -89,7 +89,7 @@ def install_library_placement_routes(
         body: LibraryPlacementApplyRequest,
         actor: Actor = authenticated,
     ) -> LibraryPlacementApplication:
-        require_mutation(actor, "/api/v1/library/placements")
+        require_mutation(actor, "/api/library/placements")
         try:
             result = placements().apply(body, actor=actor.subject)
         except KeyError:
@@ -116,7 +116,7 @@ def install_library_placement_routes(
         return result
 
     @app.get(
-        "/api/v1/library/placements/{placement_id}",
+        "/api/library/placements/{placement_id}",
         response_model=LibraryPlacementApplication,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getLibraryPlacement",
@@ -140,7 +140,7 @@ def install_library_placement_routes(
 
 
     @app.post(
-        "/api/v1/library/placements/{placement_id}/retry",
+        "/api/library/placements/{placement_id}/retry",
         response_model=LibraryPlacementApplication,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -152,7 +152,7 @@ def install_library_placement_routes(
         body: FleetProfileRetryRequest,
         actor: Actor = authenticated,
     ) -> LibraryPlacementApplication:
-        require_mutation(actor, "/api/v1/library/placements/{placement_id}/retry")
+        require_mutation(actor, "/api/library/placements/{placement_id}/retry")
         try:
             result = placements().retry(placement_id, request_key=body.request_key, actor=actor.subject)
         except KeyError:

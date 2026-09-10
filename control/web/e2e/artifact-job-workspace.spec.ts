@@ -88,18 +88,18 @@ async function installArtifactFixture(page: Page) {
     artifactJob("00000000-0000-4000-8000-000000000021", "succeeded", "2026-08-28T11:55:00Z"),
     artifactJob("00000000-0000-4000-8000-000000000020", "failed", "2026-08-28T11:42:00Z"),
   ];
-  await page.route("**/api/v1/**", route => {
+  await page.route("**/api/**", route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
-    if (path === "/api/v1/library") return route.fulfill({json: librarySnapshot});
-    if (path === "/api/v1/library/recipes/recipe-chat") return route.fulfill({json: detail});
-    if (path === "/api/v1/artifact-jobs/capabilities") return route.fulfill({json: {
+    if (path === "/api/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
+    if (path === "/api/library") return route.fulfill({json: librarySnapshot});
+    if (path === "/api/library/recipes/recipe-chat") return route.fulfill({json: detail});
+    if (path === "/api/artifact-jobs/capabilities") return route.fulfill({json: {
       schema_version: 1,
       transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]},
       storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 768 * 1024 ** 2, remaining_bytes: 3.25 * 1024 ** 3},
     }});
-    if (path === `/api/v1/recipes/runs/${runId}/artifact-jobs`) {
+    if (path === `/api/recipes/runs/${runId}/artifact-jobs`) {
       const jobs = state.mode === "empty" ? [] : state.mode === "failed"
         ? [artifactJob("00000000-0000-4000-8000-000000000024", "failed", "2026-08-28T12:08:00Z")]
         : normalJobs;

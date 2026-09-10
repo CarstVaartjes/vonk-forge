@@ -118,7 +118,7 @@ function api(initialJobs: ArtifactJob[] = []) {
     finalizeArtifactJob: vi.fn().mockResolvedValue(job({operation_id: null, state: "ready"})),
     submitArtifactJob: vi.fn().mockResolvedValue(submitted),
     cancelArtifactJob: vi.fn().mockResolvedValue(job({state: "cancelled", status_reason: "Cancelled by operator"})),
-    artifactJobResultUrl: vi.fn((jobId: string, digest: string) => `/api/v1/artifact-jobs/${jobId}/results/${digest}`),
+    artifactJobResultUrl: vi.fn((jobId: string, digest: string) => `/api/artifact-jobs/${jobId}/results/${digest}`),
   };
 }
 

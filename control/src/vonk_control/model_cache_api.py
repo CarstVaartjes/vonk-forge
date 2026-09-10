@@ -45,26 +45,26 @@ from .operation_api import (
 from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
-    ("get", "/api/v1/model-cache"): "getModelCacheInventory",
-    ("get", "/api/v1/model-cache/entries/{artifact_set_sha256}"):
+    ("get", "/api/model-cache"): "getModelCacheInventory",
+    ("get", "/api/model-cache/entries/{artifact_set_sha256}"):
         "getModelCacheEntry",
-    ("post", "/api/v1/model-cache/download-preview"):
+    ("post", "/api/model-cache/download-preview"):
         "previewModelCacheDownload",
-    ("post", "/api/v1/model-cache/download"): "downloadModelCache",
-    ("post", "/api/v1/model-cache/repair-preview"): "previewModelCacheRepair",
-    ("post", "/api/v1/model-cache/repair"): "repairModelCache",
-    ("post", "/api/v1/model-cache/eviction-preview"):
+    ("post", "/api/model-cache/download"): "downloadModelCache",
+    ("post", "/api/model-cache/repair-preview"): "previewModelCacheRepair",
+    ("post", "/api/model-cache/repair"): "repairModelCache",
+    ("post", "/api/model-cache/eviction-preview"):
         "previewModelCacheEviction",
-    ("post", "/api/v1/model-cache/evict"): "evictModelCache",
-    ("get", "/api/v1/model-cache/updates"): "getModelCacheUpdates",
-    ("get", "/api/v1/model-cache/operations"): "listModelCacheOperations",
-    ("get", "/api/v1/model-cache/operations/{operation_id}"):
+    ("post", "/api/model-cache/evict"): "evictModelCache",
+    ("get", "/api/model-cache/updates"): "getModelCacheUpdates",
+    ("get", "/api/model-cache/operations"): "listModelCacheOperations",
+    ("get", "/api/model-cache/operations/{operation_id}"):
         "getModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/cancel"):
+    ("post", "/api/model-cache/operations/{operation_id}/cancel"):
         "cancelModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
+    ("post", "/api/model-cache/operations/{operation_id}/retry"):
         "retryModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume"):
+    ("post", "/api/model-cache/operations/{operation_id}/check-access-and-resume"):
         "checkModelCacheAccessAndResume",
 }
 
@@ -191,7 +191,7 @@ def install_model_cache_routes(
         )
 
     @app.get(
-        "/api/v1/model-cache",
+        "/api/model-cache",
         response_model=ModelCacheInventoryResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="getModelCacheInventory",
@@ -229,7 +229,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache inventory unavailable") from None
 
     @app.get(
-        "/api/v1/model-cache/entries/{artifact_set_sha256}",
+        "/api/model-cache/entries/{artifact_set_sha256}",
         response_model=CacheEntryResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getModelCacheEntry",
@@ -246,7 +246,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache entry unavailable") from None
 
     @app.post(
-        "/api/v1/model-cache/download-preview",
+        "/api/model-cache/download-preview",
         response_model=ModelCacheDownloadPreviewResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewModelCacheDownload",
@@ -255,7 +255,7 @@ def install_model_cache_routes(
         body: ModelCacheDownloadPreviewRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheDownloadPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/download-preview")
+        require_mutation(actor, "POST", "/api/model-cache/download-preview")
         try:
             result = cache().download_preview(
                 artifact_set_sha256=body.artifact_set_sha256,
@@ -272,7 +272,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache download preview unavailable") from None
 
     @app.post(
-        "/api/v1/model-cache/download",
+        "/api/model-cache/download",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -283,7 +283,7 @@ def install_model_cache_routes(
         body: ModelCacheDownloadRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/download")
+        require_mutation(actor, "POST", "/api/model-cache/download")
         try:
             result = cache().start_download(
                 actor=actor.subject,
@@ -302,7 +302,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
     @app.post(
-        "/api/v1/model-cache/repair-preview",
+        "/api/model-cache/repair-preview",
         response_model=ModelCacheRepairPreviewResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewModelCacheRepair",
@@ -311,7 +311,7 @@ def install_model_cache_routes(
         body: ModelCacheRepairPreviewRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheRepairPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/repair-preview")
+        require_mutation(actor, "POST", "/api/model-cache/repair-preview")
         try:
             return cache().repair_preview(body.artifact_set_sha256)
         except HTTPException:
@@ -320,7 +320,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache repair preview unavailable") from None
 
     @app.post(
-        "/api/v1/model-cache/repair",
+        "/api/model-cache/repair",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -331,7 +331,7 @@ def install_model_cache_routes(
         body: ModelCacheRepairRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/repair")
+        require_mutation(actor, "POST", "/api/model-cache/repair")
         try:
             result = cache().start_repair(
                 actor=actor.subject,
@@ -347,7 +347,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
     @app.post(
-        "/api/v1/model-cache/eviction-preview",
+        "/api/model-cache/eviction-preview",
         response_model=ModelCacheEvictionPreviewResponse,
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         operation_id="previewModelCacheEviction",
@@ -356,7 +356,7 @@ def install_model_cache_routes(
         body: ModelCacheEvictionPreviewRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheEvictionPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/eviction-preview")
+        require_mutation(actor, "POST", "/api/model-cache/eviction-preview")
         try:
             result = cache().eviction_preview(target_bytes=body.target_bytes)
             return {
@@ -370,7 +370,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache eviction preview unavailable") from None
 
     @app.post(
-        "/api/v1/model-cache/evict",
+        "/api/model-cache/evict",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -381,7 +381,7 @@ def install_model_cache_routes(
         body: ModelCacheEvictRequest,
         actor: Actor = authenticated,
     ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/evict")
+        require_mutation(actor, "POST", "/api/model-cache/evict")
         try:
             result = cache().evict(
                 actor=actor.subject,
@@ -397,7 +397,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
     @app.get(
-        "/api/v1/model-cache/updates",
+        "/api/model-cache/updates",
         response_model=ModelCacheUpdatesResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="getModelCacheUpdates",
@@ -441,7 +441,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache updates unavailable") from None
 
     @app.get(
-        "/api/v1/model-cache/operations",
+        "/api/model-cache/operations",
         response_model=ModelCacheOperationsResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="listModelCacheOperations",
@@ -479,7 +479,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache operations unavailable") from None
 
     @app.get(
-        "/api/v1/model-cache/operations/{operation_id}",
+        "/api/model-cache/operations/{operation_id}",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getModelCacheOperation",
@@ -496,7 +496,7 @@ def install_model_cache_routes(
             raise error(exc, "model cache operation unavailable") from None
 
     @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/cancel",
+        "/api/model-cache/operations/{operation_id}/cancel",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelModelCacheOperation",
@@ -507,7 +507,7 @@ def install_model_cache_routes(
         operation_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
     ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/cancel")
+        require_mutation(actor, "POST", "/api/model-cache/operations/{operation_id}/cancel")
         try:
             result = cache().cancel_operation(operation_id)
         except HTTPException:
@@ -518,7 +518,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
     @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/retry",
+        "/api/model-cache/operations/{operation_id}/retry",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -530,7 +530,7 @@ def install_model_cache_routes(
         operation_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
     ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/retry")
+        require_mutation(actor, "POST", "/api/model-cache/operations/{operation_id}/retry")
         try:
             result = cache().retry(
                 operation_id,
@@ -545,7 +545,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
     @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        "/api/model-cache/operations/{operation_id}/check-access-and-resume",
         response_model=ModelCacheOperationResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -560,7 +560,7 @@ def install_model_cache_routes(
         require_mutation(
             actor,
             "POST",
-            "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+            "/api/model-cache/operations/{operation_id}/check-access-and-resume",
         )
         try:
             result = cache().check_access_and_resume(

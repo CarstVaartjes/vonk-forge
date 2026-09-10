@@ -40,16 +40,16 @@ def test_profile_handoff_covers_persisted_view_update_apply_and_delete() -> None
     from .test_fleet_profile_api import _body, _setup
 
     client, headers, _audits = _setup()
-    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    created = client.post("/api/fleet-profiles", headers=headers(), json=_body())
     assert created.status_code == 201, created.text
     profile_id = created.json()["id"]
 
-    fetched = client.get(f"/api/v1/fleet-profiles/{profile_id}", headers=headers("viewer"))
+    fetched = client.get(f"/api/fleet-profiles/{profile_id}", headers=headers("viewer"))
     assert fetched.status_code == 200
     assert fetched.json()["id"] == profile_id
 
     updated = client.put(
-        f"/api/v1/fleet-profiles/{profile_id}",
+        f"/api/fleet-profiles/{profile_id}",
         headers=headers(),
         json={**_body(), "name": "Updated studio profile"},
     )
@@ -57,13 +57,13 @@ def test_profile_handoff_covers_persisted_view_update_apply_and_delete() -> None
     assert updated.json()["name"] == "Updated studio profile"
 
     preview = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        f"/api/fleet-profiles/{profile_id}/preview",
         headers=headers(),
         json={},
     )
     assert preview.status_code == 200, preview.text
     applied = client.post(
-        f"/api/v1/fleet-profiles/{profile_id}/apply",
+        f"/api/fleet-profiles/{profile_id}/apply",
         headers=headers(),
         json={
             "plan_digest": preview.json()["plan_digest"],
@@ -72,7 +72,7 @@ def test_profile_handoff_covers_persisted_view_update_apply_and_delete() -> None
     )
     assert applied.status_code == 202, applied.text
     application = client.get(
-        f"/api/v1/fleet-profile-applications/{applied.json()['id']}",
+        f"/api/fleet-profile-applications/{applied.json()['id']}",
         headers=headers("viewer"),
     )
     assert application.status_code == 200
@@ -81,13 +81,13 @@ def test_profile_handoff_covers_persisted_view_update_apply_and_delete() -> None
     # Capture-current has no active assignment in this seeded fixture, which
     # gives the delete route an independently valid, inactive profile target.
     captured = client.post(
-        "/api/v1/fleet-profiles/capture-current",
+        "/api/fleet-profiles/capture-current",
         headers=headers(),
         json={"name": "Disposable current state"},
     )
     assert captured.status_code == 201
     deleted = client.delete(
-        f"/api/v1/fleet-profiles/{captured.json()['id']}", headers=headers()
+        f"/api/fleet-profiles/{captured.json()['id']}", headers=headers()
     )
     assert deleted.status_code == 204
 
@@ -115,7 +115,7 @@ def test_run_switch_handoff_covers_preview_apply_read_and_cancel(tmp_path) -> No
     )
     client = TestClient(app)
     preview = client.post(
-        "/api/v1/recipes/run-switch-plans/preview",
+        "/api/recipes/run-switch-plans/preview",
         headers=_headers(codec),
         json=preview_request.model_dump(mode="json"),
     )
@@ -126,20 +126,20 @@ def test_run_switch_handoff_covers_preview_apply_read_and_cancel(tmp_path) -> No
         request_key=str(uuid4()),
     )
     applied = client.post(
-        "/api/v1/recipes/run-switches",
+        "/api/recipes/run-switches",
         headers=_headers(codec),
         json=apply_body.model_dump(mode="json"),
     )
     assert applied.status_code == 202, applied.text
     operation_id = applied.json()["operation_id"]
     fetched = client.get(
-        f"/api/v1/recipes/run-switches/{operation_id}", headers=_headers(codec, "viewer")
+        f"/api/recipes/run-switches/{operation_id}", headers=_headers(codec, "viewer")
     )
     assert fetched.status_code == 200
     assert fetched.json()["operation_id"] == operation_id
 
     cancelled = client.post(
-        f"/api/v1/recipes/run-switches/{operation_id}/cancel",
+        f"/api/recipes/run-switches/{operation_id}/cancel",
         headers=_headers(codec),
         json={"request_key": str(uuid4()), "reason": "handoff coverage"},
     )
@@ -210,7 +210,7 @@ def test_recipe_availability_handoff_covers_start_list_read_and_retry() -> None:
     )
     client = TestClient(app)
     started = client.post(
-        "/api/v1/library/recipe-image-availability",
+        "/api/library/recipe-image-availability",
         headers=_headers(codec),
         json={"request_key": str(uuid4()), "recipe_revision_id": "recipe-revision"},
     )
@@ -219,17 +219,17 @@ def test_recipe_availability_handoff_covers_start_list_read_and_retry() -> None:
     operation_id = started.json()["id"]
 
     listed = client.get(
-        "/api/v1/library/recipe-image-availability", headers=_headers(codec, "viewer")
+        "/api/library/recipe-image-availability", headers=_headers(codec, "viewer")
     )
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
     fetched = client.get(
-        f"/api/v1/library/recipe-image-availability/{operation_id}",
+        f"/api/library/recipe-image-availability/{operation_id}",
         headers=_headers(codec, "viewer"),
     )
     assert fetched.status_code == 200
     retried = client.post(
-        f"/api/v1/library/recipe-image-availability/{operation_id}/retry",
+        f"/api/library/recipe-image-availability/{operation_id}/retry",
         headers=_headers(codec),
         json={"request_key": str(uuid4())},
     )
@@ -334,17 +334,17 @@ def test_model_cache_handoff_covers_inventory_preview_operations_and_client_read
     )
     client = TestClient(app)
     headers = _headers(codec)
-    assert client.get("/api/v1/model-cache", headers=headers).status_code == 200
-    assert client.get("/api/v1/model-cache/operations", headers=headers).status_code == 200
-    assert client.get("/api/v1/model-cache/updates", headers=headers).status_code == 200
+    assert client.get("/api/model-cache", headers=headers).status_code == 200
+    assert client.get("/api/model-cache/operations", headers=headers).status_code == 200
+    assert client.get("/api/model-cache/updates", headers=headers).status_code == 200
     preview = client.post(
-        "/api/v1/model-cache/download-preview",
+        "/api/model-cache/download-preview",
         headers=headers,
         json={"artifact_set_sha256": "a" * 64},
     )
     assert preview.status_code == 200, preview.text
     downloaded = client.post(
-        "/api/v1/model-cache/download",
+        "/api/model-cache/download",
         headers=headers,
         json={
             "request_key": cache.operation.request_key,
@@ -354,7 +354,7 @@ def test_model_cache_handoff_covers_inventory_preview_operations_and_client_read
     )
     assert downloaded.status_code == 202, downloaded.text
     fetched = client.get(
-        f"/api/v1/model-cache/operations/{cache.operation.id}", headers=headers
+        f"/api/model-cache/operations/{cache.operation.id}", headers=headers
     )
     assert fetched.status_code == 200
     assert fetched.json()["id"] == cache.operation.id

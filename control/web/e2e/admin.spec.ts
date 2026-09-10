@@ -36,12 +36,12 @@ async function expectNoDocumentOverflow(page: Page) {
 }
 
 test.beforeEach(async ({page}) => {
-  await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
+  await page.route("**/api/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
 });
 
 test("the redesigned shell exposes the focused workspace routes", async ({page}) => {
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
-  await page.route("**/api/v1/library**", route => route.fulfill({json: {
+  await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
+  await page.route("**/api/library**", route => route.fulfill({json: {
     schema_version: 2,
     generated_at: new Date().toISOString(),
     freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
@@ -71,8 +71,8 @@ test("Activity combines friendly audit history and current operations", async ({
   const expectedBinary = "b".repeat(64);
   const expectedBuild = `sha256:${"c".repeat(64)}`;
   let detailRequests = 0;
-  await page.route("**/api/v1/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
-  await page.route("**/api/v1/audit", route => route.fulfill({json: {events: [{
+  await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
+  await page.route("**/api/audit", route => route.fulfill({json: {events: [{
     request_id: requestId,
     actor: "admin",
     action: "recipe.start",
@@ -80,12 +80,12 @@ test("Activity combines friendly audit history and current operations", async ({
     occurred_at: "2026-08-24T08:55:00Z",
     targets: [targetId],
   }]}}));
-  await page.route("**/api/v1/jobs?*", route => route.fulfill({json: {
+  await page.route("**/api/jobs?*", route => route.fulfill({json: {
     jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-24T08:58:00Z"}],
     next_cursor: null,
     total: 1,
   }}));
-  await page.route("**/api/v1/jobs/upgrade-1?*", route => {
+  await page.route("**/api/jobs/upgrade-1?*", route => {
     detailRequests += 1;
     return route.fulfill({json: {
       id: "upgrade-1",
@@ -143,7 +143,7 @@ test("Activity combines friendly audit history and current operations", async ({
 });
 
 test("the sign-in screen remains focused, accessible, and usable on small screens", async ({page}) => {
-  await page.route("**/api/v1/auth/session", route => route.fulfill({status: 401, json: {detail: "Authentication required"}}));
+  await page.route("**/api/auth/session", route => route.fulfill({status: 401, json: {detail: "Authentication required"}}));
   await page.goto("/fleet");
   await expect(page.getByRole("heading", {name: "Sign in"})).toBeVisible();
   await expect(page.getByRole("textbox", {name: "Administrator account"})).toHaveAttribute("autocomplete", "username");
@@ -173,22 +173,22 @@ for (const scenario of [
       recovery: {uncertain: true, actions: ["inspect", "retry"], explanation: "Inspect installed state before retrying."},
     };
     await page.setViewportSize({width: scenario.width, height: 900});
-    await page.route("**/api/v1/audit", route => route.fulfill({json: {events: []}}));
-    await page.route("**/api/v1/jobs?*", route => route.fulfill({json: {jobs: [], total: 0, next_cursor: null}}));
-    await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: "2026-09-07T12:00:00Z", authority_revision: commit, nodes: []}}));
-    await page.route("**/api/v1/library?*", route => route.fulfill({json: {
+    await page.route("**/api/audit", route => route.fulfill({json: {events: []}}));
+    await page.route("**/api/jobs?*", route => route.fulfill({json: {jobs: [], total: 0, next_cursor: null}}));
+    await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: "2026-09-07T12:00:00Z", authority_revision: commit, nodes: []}}));
+    await page.route("**/api/library?*", route => route.fulfill({json: {
       schema_version: 2, generated_at: "2026-09-07T12:00:00Z",
       freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
       models: [], unlinked_recipes: [], next_cursor: null,
     }}));
-    await page.route("**/api/v1/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [failed], total: 1, next_cursor: null}}));
-    await page.route(`**/api/v1/${scenario.endpoint}/${originalId}/retry`, route => {
+    await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [failed], total: 1, next_cursor: null}}));
+    await page.route(`**/api/${scenario.endpoint}/${originalId}/retry`, route => {
       expect(route.request().method()).toBe("POST");
       requests.push(route.request().postDataJSON());
       if (requests.length === 1) return route.abort("failed");
       return route.fulfill({json: {schema_version: 1, id: retryId, retry_of_application_id: originalId, attempt: 2, state: "running"}});
     });
-    await page.route(`**/api/v1/operations/${retryId}`, route => {
+    await page.route(`**/api/operations/${retryId}`, route => {
       detailRequests += 1;
       return route.fulfill({json: {
         ...failed, id: retryId, parent_id: originalId, attempt: 2,

@@ -26,7 +26,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/v1/fleet-profile-applications/{application_id}".format(application_id=application_id,),
+        "url": "/api/fleet-profile-applications/{application_id}".format(application_id=application_id,),
     }
 
 

@@ -913,7 +913,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     }
     with TestClient(app) as client:
         response = client.get(
-            f"/agent/v1/recipe-installations/{installation_id}/spec",
+            f"/agent/recipe-installations/{installation_id}/spec",
             headers=headers,
         )
     assert response.status_code == 200

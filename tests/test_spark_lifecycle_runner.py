@@ -566,7 +566,7 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         def request(method, path, body):
             assert (method, path, body) == (
                 "POST",
-                "/api/v1/agents/enrollments/grants",
+                "/api/agents/enrollments/grants",
                 {"ttl_seconds": 600},
             )
             return 201, dict(grant)

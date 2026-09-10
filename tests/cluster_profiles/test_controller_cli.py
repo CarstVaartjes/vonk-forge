@@ -44,11 +44,11 @@ class _Client:
         self.extra_headers: list[dict[str, str] | None] = []
 
     def fleet(self) -> _Model:
-        response = self.responses.get(("GET", "/api/v1/fleet"), {"nodes": []})
+        response = self.responses.get(("GET", "/api/fleet"), {"nodes": []})
         if isinstance(response, list):
-            assert response, "No fake responses remain for GET /api/v1/fleet"
+            assert response, "No fake responses remain for GET /api/fleet"
             response = response.pop(0)
-        self.calls.append(("GET", "/api/v1/fleet", None, None))
+        self.calls.append(("GET", "/api/fleet", None, None))
         self.extra_headers.append(None)
         return _Model(response)
 
@@ -156,18 +156,18 @@ class _StrictTaskClient(_Client):
         query=None,
     ):
         allowed = {
-            ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
-            ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name"},
-            ("POST", "/api/v1/fleet-profiles/capture-current"): {"name", "description", "installation_policy"},
-            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): set(),
-            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
-            ("GET", "/api/v1/fleet-profile-applications/application-1"): set(),
-            ("POST", "/api/v1/model-cache/eviction-preview"): {"target_bytes"},
-            ("POST", "/api/v1/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
-            ("POST", "/api/v1/model-cache/repair-preview"): {"artifact_set_sha256"},
-            ("POST", "/api/v1/model-cache/repair"): {"artifact_set_sha256", "plan_digest", "request_key"},
-            ("GET", "/api/v1/operations"): {"limit", "state"},
-            ("GET", "/api/v1/operations/profile-switch-1"): set(),
+            ("POST", "/api/fleet-profiles"): {"name", "scope", "assignments"},
+            ("POST", "/api/fleet-profiles/profile-1/duplicate"): {"name"},
+            ("POST", "/api/fleet-profiles/capture-current"): {"name", "description", "installation_policy"},
+            ("POST", "/api/fleet-profiles/profile-1/preview"): set(),
+            ("POST", "/api/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
+            ("GET", "/api/fleet-profile-applications/application-1"): set(),
+            ("POST", "/api/model-cache/eviction-preview"): {"target_bytes"},
+            ("POST", "/api/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
+            ("POST", "/api/model-cache/repair-preview"): {"artifact_set_sha256"},
+            ("POST", "/api/model-cache/repair"): {"artifact_set_sha256", "plan_digest", "request_key"},
+            ("GET", "/api/operations"): {"limit", "state"},
+            ("GET", "/api/operations/profile-switch-1"): set(),
         }
         if (method, path) not in allowed:
             raise AssertionError(f"unexpected Controller route: {method} {path}")
@@ -179,17 +179,17 @@ class _StrictTaskClient(_Client):
             raise AssertionError(f"unexpected body for {path}: {payload}")
         self.calls.append((method, path, payload, query))
         self.extra_headers.append(extra_headers)
-        if path == "/api/v1/fleet-profiles/profile-1/switch":
+        if path == "/api/fleet-profiles/profile-1/switch":
             return {"schema_version": 2, "operation_id": "profile-switch-1", "state": "queued"}
-        if path == "/api/v1/fleet-profile-applications/application-1":
+        if path == "/api/fleet-profile-applications/application-1":
             return {"schema_version": 2, "id": "application-1"}
-        if path == "/api/v1/operations/profile-switch-1":
+        if path == "/api/operations/profile-switch-1":
             return {"schema_version": 2, "id": "profile-switch-1", "state": "succeeded"}
-        if path == "/api/v1/model-cache/eviction-preview":
+        if path == "/api/model-cache/eviction-preview":
             return {"schema_version": 2, "plan_digest": "d" * 64}
-        if path == "/api/v1/model-cache/evict":
+        if path == "/api/model-cache/evict":
             return {"schema_version": 2, "operation_id": "op-1"}
-        if path in {"/api/v1/model-cache/repair-preview", "/api/v1/model-cache/repair"}:
+        if path in {"/api/model-cache/repair-preview", "/api/model-cache/repair"}:
             return {"schema_version": 2, "plan_digest": "d" * 64}
         return {"schema_version": 2, "id": "profile-1", "profiles": []}
 
@@ -228,7 +228,7 @@ def _artifact_capabilities(*, remaining: int = 16 * 1024**3) -> dict[str, object
 def test_fleet_list_uses_the_same_health_and_warning_filters_as_the_web_view() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/fleet"): {
+            ("GET", "/api/fleet"): {
                 "nodes": [
                     {
                         "id": "spk_live",
@@ -264,7 +264,7 @@ def test_fleet_list_uses_the_same_health_and_warning_filters_as_the_web_view() -
 def test_human_list_output_is_a_readable_table() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/jobs"): {
+            ("GET", "/api/jobs"): {
                 "jobs": [
                     {
                         "created_at": "2026-08-26T10:00:00Z",
@@ -298,7 +298,7 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
     old_build = "sha256:" + "e" * 64
     client = _Client(
         {
-            ("GET", "/api/v1/jobs/upgrade-1"): {
+            ("GET", "/api/jobs/upgrade-1"): {
                 "id": "upgrade-1",
                 "kind": "agent-upgrade",
                 "state": "waiting-for-operator",
@@ -371,7 +371,7 @@ def test_activity_and_library_pagination_are_forwarded_to_the_api() -> None:
     assert result == 0
     assert client.calls[-1] == (
         "GET",
-        "/api/v1/jobs",
+        "/api/jobs",
         None,
         {"cursor": "next", "limit": 50, "status": "running", "target": "spk_target"},
     )
@@ -411,7 +411,7 @@ def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
             ]
         },
     }
-    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry/current"): metrics})
+    client = _Client({("GET", "/api/nodes/spk_node/telemetry/current"): metrics})
 
     result, payload = _invoke(
         client, "--json", "fleet", "metrics", "current", "spk_node"
@@ -420,16 +420,16 @@ def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
     assert result == 0
     assert payload == metrics
     assert client.calls == [
-        ("GET", "/api/v1/nodes/spk_node/telemetry/current", None, None)
+        ("GET", "/api/nodes/spk_node/telemetry/current", None, None)
     ]
 
 
 def test_telemetry_subcommands_match_metrics_routes() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/nodes/spk_node/telemetry/current"): {"sample": {}},
-            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {},
-            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {},
+            ("GET", "/api/nodes/spk_node/telemetry/current"): {"sample": {}},
+            ("GET", "/api/nodes/spk_node/telemetry/capabilities"): {},
+            ("GET", "/api/nodes/spk_node/telemetry/workloads"): {},
         }
     )
     assert _invoke(client, "--json", "fleet", "telemetry", "current", "spk_node")[0] == 0
@@ -445,23 +445,23 @@ def test_telemetry_subcommands_match_metrics_routes() -> None:
         "run-1",
     )[0] == 0
     assert [call[1] for call in client.calls] == [
-        "/api/v1/nodes/spk_node/telemetry/current",
-        "/api/v1/nodes/spk_node/telemetry/capabilities",
-        "/api/v1/nodes/spk_node/telemetry/workloads",
+        "/api/nodes/spk_node/telemetry/current",
+        "/api/nodes/spk_node/telemetry/capabilities",
+        "/api/nodes/spk_node/telemetry/workloads",
     ]
 
 
 def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/nodes/spk_node/telemetry"): {
+            ("GET", "/api/nodes/spk_node/telemetry"): {
                 "samples": [{"schema_version": 2, "metrics": []}],
             },
-            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {
+            ("GET", "/api/nodes/spk_node/telemetry/capabilities"): {
                 "schema_version": 2,
                 "capabilities": [],
             },
-            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {
+            ("GET", "/api/nodes/spk_node/telemetry/workloads"): {
                 "schema_version": 2,
                 "workloads": [],
             },
@@ -506,7 +506,7 @@ def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
     }
     assert client.calls[1] == (
         "GET",
-        "/api/v1/nodes/spk_node/telemetry/capabilities",
+        "/api/nodes/spk_node/telemetry/capabilities",
         None,
         None,
     )
@@ -519,7 +519,7 @@ def test_metrics_export_writes_the_unchanged_server_projection(tmp_path: Path) -
         "provenance": {"source": "agent"},
     }
     destination = tmp_path / "metrics.json"
-    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry"): response})
+    client = _Client({("GET", "/api/nodes/spk_node/telemetry"): response})
 
     result, payload = _invoke(
         client,
@@ -540,7 +540,7 @@ def test_metrics_export_writes_the_unchanged_server_projection(tmp_path: Path) -
 def test_fleet_search_and_attention_sort_match_friendly_web_names() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/fleet"): {
+            ("GET", "/api/fleet"): {
                 "nodes": [
                     {
                         "id": "spk_" + "1" * 32,
@@ -606,7 +606,7 @@ def test_library_search_matches_only_the_fields_exposed_by_the_web_browser() -> 
         "unlinked_recipes": [],
         "next_cursor": None,
     }
-    client = _Client({("GET", "/api/v1/library"): snapshot})
+    client = _Client({("GET", "/api/library"): snapshot})
 
     result, payload = _invoke(
         client, "--json", "library", "list", "--search", "technical-id"
@@ -615,7 +615,7 @@ def test_library_search_matches_only_the_fields_exposed_by_the_web_browser() -> 
     assert result == 0
     assert payload["models"] == []
 
-    client = _Client({("GET", "/api/v1/library"): snapshot})
+    client = _Client({("GET", "/api/library"): snapshot})
     result, payload = _invoke(client, "--json", "library", "list", "--search", "chat")
     assert result == 0
     assert payload["models"][0]["recipes"][0]["recipe_id"] == "hidden-technical-id"
@@ -625,7 +625,7 @@ def test_library_all_follows_and_merges_bounded_server_pages() -> None:
     model = {"publisher": "qwen", "slug": "chat", "content_sha256": "a" * 64}
     client = _Client(
         {
-            ("GET", "/api/v1/library"): [
+            ("GET", "/api/library"): [
                 {
                     "models": [{"model": model, "recipes": [{"recipe_id": "r1"}]}],
                     "unlinked_recipes": [],
@@ -655,11 +655,11 @@ def test_library_all_follows_and_merges_bounded_server_pages() -> None:
 def test_local_comparison_requires_two_or_three_unique_recipes() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/library/recipes/one"): {
+            ("GET", "/api/library/recipes/one"): {
                 "recipe_id": "one",
                 "title": "One",
             },
-            ("GET", "/api/v1/library/recipes/two"): {
+            ("GET", "/api/library/recipes/two"): {
                 "recipe_id": "two",
                 "title": "Two",
             },
@@ -678,7 +678,7 @@ def test_local_comparison_requires_two_or_three_unique_recipes() -> None:
 def test_activity_list_combines_web_sources_filters_and_attention_sort() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/audit"): {
+            ("GET", "/api/audit"): {
                 "events": [
                     {
                         "request_id": "audit-1",
@@ -696,7 +696,7 @@ def test_activity_list_combines_web_sources_filters_and_attention_sort() -> None
                     },
                 ]
             },
-            ("GET", "/api/v1/jobs"): {
+            ("GET", "/api/jobs"): {
                 "jobs": [
                     {
                         "id": "job-1",
@@ -708,8 +708,8 @@ def test_activity_list_combines_web_sources_filters_and_attention_sort() -> None
                 "total": 1,
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): {"nodes": []},
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/fleet"): {"nodes": []},
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [
                     {
@@ -746,7 +746,7 @@ def test_activity_list_combines_web_sources_filters_and_attention_sort() -> None
 def test_activity_jobs_all_follows_continuation_cursors() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/jobs"): [
+            ("GET", "/api/jobs"): [
                 {"jobs": [{"id": "one"}], "total": 2, "next_cursor": "older"},
                 {"jobs": [{"id": "two"}], "total": 2, "next_cursor": None},
             ]
@@ -763,7 +763,7 @@ def test_activity_jobs_all_follows_continuation_cursors() -> None:
 def test_fleet_enrollments_all_follows_continuation_cursors() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/agents/enrollments"): [
+            ("GET", "/api/agents/enrollments"): [
                 {
                     "enrollments": [{"id": "one"}],
                     "total": 2,
@@ -797,47 +797,47 @@ def test_fleet_enrollments_all_follows_continuation_cursors() -> None:
         (
             ("fleet", "node-profile", "spk/node", "--display-name", "Studio", "--apply"),
             "PATCH",
-            "/api/v1/nodes/spk%2Fnode/profile",
+            "/api/nodes/spk%2Fnode/profile",
         ),
         (
             ("fleet", "enroll", "--apply"),
             "POST",
-            "/api/v1/agents/enrollments/grants",
+            "/api/agents/enrollments/grants",
         ),
         (
             ("fleet", "re-enroll", "spk_" + "1" * 32, "--apply"),
             "POST",
-            "/api/v1/agents/enrollments/grants",
+            "/api/agents/enrollments/grants",
         ),
         (
             ("fleet", "revoke", "spk/node", "--apply"),
             "POST",
-            "/api/v1/agents/nodes/spk%2Fnode/revoke",
+            "/api/agents/nodes/spk%2Fnode/revoke",
         ),
         (
             ("library", "operation", "show", "operation/id"),
             "GET",
-            "/api/v1/recipes/operations/operation%2Fid",
+            "/api/recipes/operations/operation%2Fid",
         ),
         (
             ("library", "operation", "retry", "operation/id", "--apply"),
             "POST",
-            "/api/v1/recipes/operations/operation%2Fid/retry",
+            "/api/recipes/operations/operation%2Fid/retry",
         ),
         (
             ("library", "run", "run/id"),
             "GET",
-            "/api/v1/recipes/runs/run%2Fid",
+            "/api/recipes/runs/run%2Fid",
         ),
         (
             ("activity", "job", "job/id"),
             "GET",
-            "/api/v1/jobs/job%2Fid",
+            "/api/jobs/job%2Fid",
         ),
         (
             ("activity", "resume", "job/id", "--apply"),
             "POST",
-            "/api/v1/jobs/job%2Fid/resume",
+            "/api/jobs/job%2Fid/resume",
         ),
     ],
 )
@@ -873,7 +873,7 @@ def test_enrollment_grants_distinguish_new_and_replacement_certificates() -> Non
 def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     node_id = "spk_" + "a" * 32
     client = _Client(
-        {("POST", "/api/v1/agents/upgrades/preview"): {"plan_digest": "b" * 64}}
+        {("POST", "/api/agents/upgrades/preview"): {"plan_digest": "b" * 64}}
     )
 
     result, preview = _invoke(
@@ -889,7 +889,7 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     assert preview["plan_digest"] == "b" * 64
     assert client.calls[-1][:3] == (
         "POST",
-        "/api/v1/agents/upgrades/preview",
+        "/api/agents/upgrades/preview",
         {"strategy": "one-at-a-time", "node_ids": [node_id]},
     )
 
@@ -906,7 +906,7 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     )
     assert result == 0
     assert plan["mode"] == "plan"
-    assert client.calls[-1][1] == "/api/v1/agents/upgrades/preview"
+    assert client.calls[-1][1] == "/api/agents/upgrades/preview"
 
     result, _applied = _invoke(
         client,
@@ -923,7 +923,7 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     assert result == 0
     assert client.calls[-1][:3] == (
         "POST",
-        "/api/v1/agents/upgrades",
+        "/api/agents/upgrades",
         {
             "strategy": "one-at-a-time",
             "node_ids": [node_id],
@@ -980,13 +980,13 @@ def test_removed_legacy_command_surface_is_rejected(
 def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/model-cache"): {"schema_version": 2, "entries": []},
-            ("POST", "/api/v1/model-cache/download"): {"id": "download-1"},
-            ("POST", "/api/v1/model-cache/repair"): {"id": "repair-1"},
-            ("GET", "/api/v1/fleet-profiles"): {"profiles": []},
-            ("POST", "/api/v1/fleet-profiles"): {"id": "profile-1"},
-            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): {"plan_digest": "d" * 64},
-            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"id": "application-1"},
+            ("GET", "/api/model-cache"): {"schema_version": 2, "entries": []},
+            ("POST", "/api/model-cache/download"): {"id": "download-1"},
+            ("POST", "/api/model-cache/repair"): {"id": "repair-1"},
+            ("GET", "/api/fleet-profiles"): {"profiles": []},
+            ("POST", "/api/fleet-profiles"): {"id": "profile-1"},
+            ("POST", "/api/fleet-profiles/profile-1/preview"): {"plan_digest": "d" * 64},
+            ("POST", "/api/fleet-profiles/profile-1/switch"): {"id": "application-1"},
         }
     )
     stdout = StringIO()
@@ -1014,22 +1014,22 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
              "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
             control_client=client,
         ) == 0
-    assert client.calls[0][0:2] == ("GET", "/api/v1/model-cache")
-    assert ("POST", "/api/v1/model-cache/download") in [call[0:2] for call in client.calls]
-    assert ("POST", "/api/v1/model-cache/repair") in [call[0:2] for call in client.calls]
-    assert ("POST", "/api/v1/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
+    assert client.calls[0][0:2] == ("GET", "/api/model-cache")
+    assert ("POST", "/api/model-cache/download") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/model-cache/repair") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
 
 
 def test_provenance_and_explicit_upstream_check_use_current_routes() -> None:
     document = {"platform": [], "agents": [], "workloads": []}
-    client = _Client({("GET", "/api/v1/deployment-provenance"): document})
+    client = _Client({("GET", "/api/deployment-provenance"): document})
     result, payload = _invoke(client, "--json", "fleet", "provenance")
     assert result == 0
     assert payload == document
-    assert client.calls[-1][0:2] == ("GET", "/api/v1/deployment-provenance")
+    assert client.calls[-1][0:2] == ("GET", "/api/deployment-provenance")
     result, _ = _invoke(client, "--json", "cache", "update")
     assert result == 0
-    assert client.calls[-1][0:2] == ("GET", "/api/v1/model-cache/updates")
+    assert client.calls[-1][0:2] == ("GET", "/api/model-cache/updates")
     assert client.calls[-1][3]["check_upstream"] is True
 
 
@@ -1043,8 +1043,8 @@ def test_operation_evidence_download_uses_exact_attempt_and_current_bundle(
     }
     client = _Client(
         {
-            ("GET", "/api/v1/operations/op-1"): {"attempt": 3},
-            ("GET", "/api/v1/operations/op-1/evidence"): document,
+            ("GET", "/api/operations/op-1"): {"attempt": 3},
+            ("GET", "/api/operations/op-1/evidence"): document,
         }
     )
     target = tmp_path / "failure.json"
@@ -1055,7 +1055,7 @@ def test_operation_evidence_download_uses_exact_attempt_and_current_bundle(
     assert json.loads(target.read_text()) == document
     assert client.calls[-1] == (
         "GET",
-        "/api/v1/operations/op-1/evidence",
+        "/api/operations/op-1/evidence",
         None,
         {"attempt": 3},
     )
@@ -1065,7 +1065,7 @@ def test_operation_evidence_download_uses_exact_attempt_and_current_bundle(
 def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/operations/op-1"): [
+            ("GET", "/api/operations/op-1"): [
                 {"id": "op-1", "state": "running"},
                 {"id": "op-1", "state": "succeeded"},
             ]
@@ -1087,7 +1087,7 @@ def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
 def test_models_show_uses_library_identity_projection() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [
                     {"model": {"publisher": "acme", "slug": "demo", "content_sha256": "a" * 64}, "recipes": []}
                 ],
@@ -1103,7 +1103,7 @@ def test_models_show_uses_library_identity_projection() -> None:
 def test_models_list_keeps_unlinked_models_in_a_dynamic_canonical_fixture() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [
                     {
                         "model": {
@@ -1161,8 +1161,8 @@ def test_recipes_list_and_show_use_independent_canonical_routes() -> None:
     }
     client = _Client(
         {
-            ("GET", "/api/v1/library/recipes"): recipes,
-            ("GET", "/api/v1/library/recipes/recipe%2F1"): {
+            ("GET", "/api/library/recipes"): recipes,
+            ("GET", "/api/library/recipes/recipe%2F1"): {
                 "recipe": {"recipe_id": "recipe/1", "title": "Chat engine"}
             },
         }
@@ -1176,7 +1176,7 @@ def test_recipes_list_and_show_use_independent_canonical_routes() -> None:
     assert [recipe["recipe_id"] for recipe in payload["recipes"]] == ["recipe-2"]
     assert client.calls[0] == (
         "GET",
-        "/api/v1/library/recipes",
+        "/api/library/recipes",
         None,
         {"limit": 100},
     )
@@ -1187,14 +1187,14 @@ def test_recipes_list_and_show_use_independent_canonical_routes() -> None:
     assert payload["recipe"]["recipe_id"] == "recipe/1"
     assert client.calls[-1][:2] == (
         "GET",
-        "/api/v1/library/recipes/recipe%2F1",
+        "/api/library/recipes/recipe%2F1",
     )
 
 
 def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> None:
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [
                     {
                         "model": {
@@ -1275,28 +1275,28 @@ def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...
             {"model": {"publisher": "a", "slug": "model", "content_sha256": "a" * 64}, "recipes": []},
             {"model": {"publisher": "b", "slug": "model", "content_sha256": "b" * 64}, "recipes": []},
         ]
-    client = _Client({("GET", "/api/v1/library"): response})
+    client = _Client({("GET", "/api/library"): response})
     result, _payload = _invoke(client, "--json", *argv)
     assert result == 0
 
 
 @pytest.mark.parametrize("command", ["current", "state"])
 def test_fleet_summary_commands_use_canonical_fleet_snapshot(command: str) -> None:
-    client = _Client({("GET", "/api/v1/fleet"): {"nodes": []}})
+    client = _Client({("GET", "/api/fleet"): {"nodes": []}})
 
     result, _payload = _invoke(client, "--json", "fleet", command)
 
     assert result == 0
-    assert [call[1] for call in client.calls] == ["/api/v1/fleet"]
+    assert [call[1] for call in client.calls] == ["/api/fleet"]
 
 
 @pytest.mark.parametrize(
     ("argv", "method", "path"),
     [
-        (("models", "run", "preview", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
-        (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switches"),
-        (("models", "run", "stop", "preview", "run-1"), "POST", "/api/v1/recipes/run-switch-stops/preview"),
-        (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switch-stops"),
+        (("models", "run", "preview", "--input", '{"model_content_sha256":"' + "a" * 64 + '"}'), "POST", "/api/recipes/run-switch-plans/preview"),
+        (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/recipes/run-switches"),
+        (("models", "run", "stop", "preview", "run-1"), "POST", "/api/recipes/run-switch-stops/preview"),
+        (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/recipes/run-switch-stops"),
     ],
 )
 def test_high_level_run_routes_are_plan_bound(
@@ -1336,7 +1336,7 @@ def test_run_cancel_uses_current_typed_contract_and_explicit_request_key(apply: 
     assert result == 0
     expected = {"schema_version": 2, "request_key": request_key, "reason": "Change of plan"}
     if apply:
-        assert client.calls[-1][:3] == ("POST", "/api/v1/recipes/run-switches/run-1/cancel", expected)
+        assert client.calls[-1][:3] == ("POST", "/api/recipes/run-switches/run-1/cancel", expected)
     else:
         assert document["body"] == expected
         assert client.calls == []
@@ -1345,15 +1345,15 @@ def test_run_cancel_uses_current_typed_contract_and_explicit_request_key(apply: 
 def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+            ("POST", "/api/recipes/run-switch-plans/preview"): {
                 "schema_version": 2,
                 "plan_digest": "d" * 64,
             },
-            ("POST", "/api/v1/recipes/run-switches"): {
+            ("POST", "/api/recipes/run-switches"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
             },
-            ("GET", "/api/v1/operations/op-1"): {
+            ("GET", "/api/operations/op-1"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
                 "state": "succeeded",
@@ -1394,9 +1394,9 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     assert result == 0
     assert payload["request_key"] == request_key
     assert [call[1] for call in client.calls] == [
-        "/api/v1/recipes/run-switch-plans/preview",
-        "/api/v1/recipes/run-switches",
-        "/api/v1/operations/op-1",
+        "/api/recipes/run-switch-plans/preview",
+        "/api/recipes/run-switches",
+        "/api/operations/op-1",
     ]
     assert client.calls[1][2] == {**run_input, "plan_digest": "d" * 64, "request_key": request_key}
 
@@ -1404,15 +1404,15 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
 def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/model-cache/download-preview"): {
+            ("POST", "/api/model-cache/download-preview"): {
                 "schema_version": 2,
                 "plan_digest": "d" * 64,
             },
-            ("POST", "/api/v1/model-cache/download"): {
+            ("POST", "/api/model-cache/download"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
             },
-            ("GET", "/api/v1/operations/op-1"): {
+            ("GET", "/api/operations/op-1"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
                 "state": "succeeded",
@@ -1449,11 +1449,11 @@ def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
 def test_models_download_uses_the_same_exact_cache_routes() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/model-cache/download-preview"): {
+            ("POST", "/api/model-cache/download-preview"): {
                 "plan_digest": "d" * 64
             },
-            ("POST", "/api/v1/model-cache/download"): {"operation_id": "op-1"},
-            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+            ("POST", "/api/model-cache/download"): {"operation_id": "op-1"},
+            ("GET", "/api/operations/op-1"): {"state": "succeeded"},
         }
     )
     result, _payload = _invoke(
@@ -1471,9 +1471,9 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
 
     assert result == 0
     assert [call[1] for call in client.calls] == [
-        "/api/v1/model-cache/download-preview",
-        "/api/v1/model-cache/download",
-        "/api/v1/operations/op-1",
+        "/api/model-cache/download-preview",
+        "/api/model-cache/download",
+        "/api/operations/op-1",
     ]
     assert client.calls[0][2] == {
         "model_content_sha256": "a" * 64,
@@ -1484,15 +1484,15 @@ def test_models_download_uses_the_same_exact_cache_routes() -> None:
 def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/fleet-profiles/p/preview"): {
+            ("POST", "/api/fleet-profiles/p/preview"): {
                 "schema_version": 2,
                 "plan_digest": "d" * 64,
             },
-            ("POST", "/api/v1/fleet-profiles/p/switch"): {
+            ("POST", "/api/fleet-profiles/p/switch"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
             },
-            ("GET", "/api/v1/operations/op-1"): {
+            ("GET", "/api/operations/op-1"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
                 "state": "succeeded",
@@ -1522,11 +1522,11 @@ def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> 
 def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+            ("POST", "/api/recipes/run-switch-plans/preview"): {
                 "plan_digest": "d" * 64
             },
-            ("POST", "/api/v1/recipes/run-switches"): {"operation_id": "op-1"},
-            ("GET", "/api/v1/operations/op-1"): [
+            ("POST", "/api/recipes/run-switches"): {"operation_id": "op-1"},
+            ("GET", "/api/operations/op-1"): [
                 {
                     "state": "running",
                     "progress": {
@@ -1570,11 +1570,11 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
 def test_model_download_reports_canonical_cache_progress_and_terminal_error() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/model-cache/download-preview"): {
+            ("POST", "/api/model-cache/download-preview"): {
                 "plan_digest": "d" * 64
             },
-            ("POST", "/api/v1/model-cache/download"): {"operation_id": "op-1"},
-            ("GET", "/api/v1/operations/op-1"): [
+            ("POST", "/api/model-cache/download"): {"operation_id": "op-1"},
+            ("GET", "/api/operations/op-1"): [
                 {
                     "state": "running",
                     "progress": {
@@ -1621,15 +1621,15 @@ def test_forced_model_download_uses_repair_without_changing_exact_identity() -> 
     artifact_set = "b" * 64
     client = _Client(
         {
-            ("POST", "/api/v1/model-cache/download-preview"): {
+            ("POST", "/api/model-cache/download-preview"): {
                 "plan_digest": "d" * 64,
                 "artifact_set_sha256": artifact_set,
             },
-            ("POST", "/api/v1/model-cache/repair-preview"): {
+            ("POST", "/api/model-cache/repair-preview"): {
                 "plan_digest": "e" * 64,
             },
-            ("POST", "/api/v1/model-cache/repair"): {"operation_id": "op-1"},
-            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+            ("POST", "/api/model-cache/repair"): {"operation_id": "op-1"},
+            ("GET", "/api/operations/op-1"): {"state": "succeeded"},
         }
     )
     result, payload = _invoke(
@@ -1652,12 +1652,12 @@ def test_forced_model_download_uses_repair_without_changing_exact_identity() -> 
 def test_recipe_availability_start_and_status_use_the_durable_exact_route() -> None:
     client = _Client(
         {
-            ("POST", "/api/v1/library/recipe-image-availability"): {
+            ("POST", "/api/library/recipe-image-availability"): {
                 "schema_version": 2,
                 "id": "op-1",
                 "state": "queued",
             },
-            ("GET", "/api/v1/library/recipe-image-availability/op-1"): {
+            ("GET", "/api/library/recipe-image-availability/op-1"): {
                 "schema_version": 2,
                 "id": "op-1",
                 "state": "succeeded",
@@ -1680,11 +1680,11 @@ def test_recipe_availability_start_and_status_use_the_durable_exact_route() -> N
     assert client.calls == [
         (
             "POST",
-            "/api/v1/library/recipe-image-availability",
+            "/api/library/recipe-image-availability",
             {"request_key": "request-1", "recipe_revision_id": "recipe-revision-1", "force": True},
             None,
         ),
-        ("GET", "/api/v1/library/recipe-image-availability/op-1", None, None),
+        ("GET", "/api/library/recipe-image-availability/op-1", None, None),
     ]
 
 
@@ -1704,13 +1704,13 @@ def test_recipe_availability_retry_requires_apply_and_returns_json_plan() -> Non
         "body": {"request_key": "request-1"},
         "method": "POST",
         "mode": "plan",
-        "path": "/api/v1/library/recipe-image-availability/op-1/retry",
+        "path": "/api/library/recipe-image-availability/op-1/retry",
     }
 
 
 def test_model_cache_check_access_and_resume_uses_exact_identity_and_json_plan() -> None:
     client = _Client({
-        ("POST", "/api/v1/model-cache/operations/op-1/check-access-and-resume"): {
+        ("POST", "/api/model-cache/operations/op-1/check-access-and-resume"): {
             "schema_version": 2,
             "id": "op-1",
             "state": "queued",
@@ -1737,7 +1737,7 @@ def test_model_cache_check_access_and_resume_uses_exact_identity_and_json_plan()
     assert payload["state"] == "queued"
     assert client.calls == [(
         "POST",
-        "/api/v1/model-cache/operations/op-1/check-access-and-resume",
+        "/api/model-cache/operations/op-1/check-access-and-resume",
         {"request_key": "request-1", "artifact_set_sha256": artifact_set, "plan_digest": plan_digest},
         None,
     )]
@@ -1808,17 +1808,17 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
     for command in commands:
         result, _payload = _invoke(client, "--json", *command)
         assert result == 0
-    assert ("GET", "/api/v1/operations/profile-switch-1", None, None) in client.calls
+    assert ("GET", "/api/operations/profile-switch-1", None, None) in client.calls
 
 
 def test_profile_routes_match_bundled_openapi_request_contracts() -> None:
     _request_contract(
-        "/api/v1/fleet-profiles/profile-1/duplicate",
+        "/api/fleet-profiles/profile-1/duplicate",
         "POST",
         {"name": "Copy"},
     )
     _request_contract(
-        "/api/v1/fleet-profiles/capture-current",
+        "/api/fleet-profiles/capture-current",
         "POST",
         {
             "name": "Current",
@@ -1827,23 +1827,23 @@ def test_profile_routes_match_bundled_openapi_request_contracts() -> None:
         },
     )
     _request_contract(
-        "/api/v1/fleet-profile-applications/application-1",
+        "/api/fleet-profile-applications/application-1",
         "GET",
         None,
     )
     assert _operation(
-        "/api/v1/fleet-profile-applications/application-1", "GET"
+        "/api/fleet-profile-applications/application-1", "GET"
     )["operationId"] == "getFleetProfileApplication"
 
     with pytest.raises(ControlClientError, match="OpenAPI schema"):
         _request_contract(
-            "/api/v1/fleet-profiles/profile-1/duplicate",
+            "/api/fleet-profiles/profile-1/duplicate",
             "POST",
             {"name": "Copy", "request_key": "11111111-1111-4111-8111-111111111111"},
         )
     with pytest.raises(ControlClientError, match="OpenAPI schema"):
         _request_contract(
-            "/api/v1/fleet-profiles/capture-current",
+            "/api/fleet-profiles/capture-current",
             "POST",
             {"name": "Current", "request_key": "11111111-1111-4111-8111-111111111111"},
         )
@@ -1878,7 +1878,7 @@ def test_artifact_job_create_declares_hashed_bounded_local_inputs(
     assert plan["steps"] == [
         {
             "method": "POST",
-            "path": "/api/v1/recipes/runs/run%2Fid/artifact-jobs",
+            "path": "/api/recipes/runs/run%2Fid/artifact-jobs",
             "request_key": "request-1",
             "body": {
                 "interface": "image-job",
@@ -1906,13 +1906,13 @@ def test_artifact_job_create_declares_hashed_bounded_local_inputs(
 
 def test_artifact_job_capabilities_surface_storage_headroom() -> None:
     capabilities = _artifact_capabilities(remaining=123_456)
-    client = _Client({("GET", "/api/v1/artifact-jobs/capabilities"): capabilities})
+    client = _Client({("GET", "/api/artifact-jobs/capabilities"): capabilities})
 
     result, payload = _invoke(client, "--json", "library", "job", "capabilities")
 
     assert result == 0
     assert payload == capabilities
-    assert client.calls == [("GET", "/api/v1/artifact-jobs/capabilities", None, None)]
+    assert client.calls == [("GET", "/api/artifact-jobs/capabilities", None, None)]
 
 
 def test_artifact_job_list_finds_resumable_jobs_for_a_run() -> None:
@@ -1923,13 +1923,13 @@ def test_artifact_job_list_finds_resumable_jobs_for_a_run() -> None:
     assert result == 0
     assert payload == {"ok": True}
     assert client.calls == [
-        ("GET", "/api/v1/recipes/runs/run%2Fid/artifact-jobs", None, None)
+        ("GET", "/api/recipes/runs/run%2Fid/artifact-jobs", None, None)
     ]
 
 
 def test_artifact_job_activation_uses_the_logical_job_run_route() -> None:
     client = _Client(
-        {("POST", "/api/v1/recipes/run-plans/preview"): {"plan_digest": "a" * 64}}
+        {("POST", "/api/recipes/run-plans/preview"): {"plan_digest": "a" * 64}}
     )
 
     result, preview = _invoke(
@@ -1948,7 +1948,7 @@ def test_artifact_job_activation_uses_the_logical_job_run_route() -> None:
     assert preview["plan_digest"] == "a" * 64
     assert client.calls[-1][:3] == (
         "POST",
-        "/api/v1/recipes/run-plans/preview",
+        "/api/recipes/run-plans/preview",
         {"installation_id": "installation-1", "alias": "image-worker"},
     )
 
@@ -1968,7 +1968,7 @@ def test_artifact_job_activation_uses_the_logical_job_run_route() -> None:
     )
     assert result == 0
     assert plan["mode"] == "plan"
-    assert client.calls[-1][1] == "/api/v1/recipes/run-plans/preview"
+    assert client.calls[-1][1] == "/api/recipes/run-plans/preview"
 
     result, _response = _invoke(
         client,
@@ -1988,7 +1988,7 @@ def test_artifact_job_activation_uses_the_logical_job_run_route() -> None:
     assert result == 0
     assert client.calls[-1][:3] == (
         "POST",
-        "/api/v1/recipes/job-runs",
+        "/api/recipes/job-runs",
         {
             "installation_id": "installation-1",
             "alias": "image-worker",
@@ -2002,16 +2002,16 @@ def test_artifact_job_launch_runs_the_resumable_steps_in_order(tmp_path: Path) -
     source = tmp_path / "image.png"
     source.write_bytes(b"not really a png")
     job_id = "12345678-1234-4123-8123-123456789abc"
-    create_path = "/api/v1/recipes/runs/run-1/artifact-jobs"
+    create_path = "/api/recipes/runs/run-1/artifact-jobs"
     client = _Client(
         {
-            ("GET", "/api/v1/artifact-jobs/capabilities"): _artifact_capabilities(),
+            ("GET", "/api/artifact-jobs/capabilities"): _artifact_capabilities(),
             ("POST", create_path): {"id": job_id, "state": "draft"},
-            ("POST", f"/api/v1/artifact-jobs/{job_id}/finalize"): {
+            ("POST", f"/api/artifact-jobs/{job_id}/finalize"): {
                 "id": job_id,
                 "state": "ready",
             },
-            ("POST", f"/api/v1/artifact-jobs/{job_id}/submit"): {
+            ("POST", f"/api/artifact-jobs/{job_id}/submit"): {
                 "id": job_id,
                 "state": "queued",
             },
@@ -2043,14 +2043,14 @@ def test_artifact_job_launch_runs_the_resumable_steps_in_order(tmp_path: Path) -
     assert payload["steps_completed"] == 4
     assert payload["storage_preflight"]["fits_without_server_reuse"] is True
     assert [call[:2] for call in client.calls] == [
-        ("GET", "/api/v1/artifact-jobs/capabilities"),
+        ("GET", "/api/artifact-jobs/capabilities"),
         ("POST", create_path),
-        ("POST", f"/api/v1/artifact-jobs/{job_id}/finalize"),
-        ("POST", f"/api/v1/artifact-jobs/{job_id}/submit"),
+        ("POST", f"/api/artifact-jobs/{job_id}/finalize"),
+        ("POST", f"/api/artifact-jobs/{job_id}/submit"),
     ]
     assert client.uploads == [
         (
-            f"/api/v1/artifact-jobs/{job_id}/inputs/image.png",
+            f"/api/artifact-jobs/{job_id}/inputs/image.png",
             source,
             "image/png",
             digest,
@@ -2063,7 +2063,7 @@ def test_artifact_job_launch_runs_the_resumable_steps_in_order(tmp_path: Path) -
 def test_artifact_job_status_result_cancel_and_download_routes(tmp_path: Path) -> None:
     job_id = "12345678-1234-4123-8123-123456789abc"
     digest = hashlib.sha256(b"result").hexdigest()
-    base = f"/api/v1/artifact-jobs/{job_id}"
+    base = f"/api/artifact-jobs/{job_id}"
     metadata = {
         "id": job_id,
         "state": "succeeded",
@@ -2164,7 +2164,7 @@ def test_artifact_job_rejects_symlink_input_and_unsafe_output_metadata(
 
     client = _Client(
         {
-            ("GET", "/api/v1/artifact-jobs/job-1/result"): {
+            ("GET", "/api/artifact-jobs/job-1/result"): {
                 "output_files": [
                     {
                         "name": "../escape.png",
@@ -2202,7 +2202,7 @@ def test_library_placement_preview_apply_and_get_preserve_controller_contract(tm
     }
     source = tmp_path / "placement.json"
     source.write_text(json.dumps(intent))
-    base = "/api/v1/library/placements"
+    base = "/api/library/placements"
     preview = {"allowed": False, "blockers": [{"code": "capacity", "detail": "Insufficient memory"}], "plan_digest": "d" * 64}
     application = {"id": recipe_id, "state": "failed", "status_reason": "Spark offline", "progress": {"completed_steps": [0]}, "locations": {"installed": True, "running": False}}
 
@@ -2238,8 +2238,8 @@ def test_library_placement_preview_apply_and_get_preserve_controller_contract(tm
 
 
 @pytest.mark.parametrize("command,path", [
-    (("library", "placement", "retry", "application/id"), "/api/v1/library/placements/application%2Fid/retry"),
-    (("profiles", "retry", "application/id"), "/api/v1/fleet-profile-applications/application%2Fid/retry"),
+    (("library", "placement", "retry", "application/id"), "/api/library/placements/application%2Fid/retry"),
+    (("profiles", "retry", "application/id"), "/api/fleet-profile-applications/application%2Fid/retry"),
 ])
 def test_application_retry_requires_apply_and_returns_linked_attempt(command: tuple[str, ...], path: str) -> None:
     key = "22222222-2222-4222-8222-222222222222"

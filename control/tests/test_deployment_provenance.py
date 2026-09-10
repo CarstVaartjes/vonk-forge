@@ -100,9 +100,9 @@ def test_composed_app_serves_provenance_with_authentication(tmp_path):
         deployment_provenance=DeploymentProvenanceService(sessions, clock=lambda: now),
     )
     client = TestClient(app)
-    assert client.get("/api/v1/deployment-provenance").status_code == 401
+    assert client.get("/api/deployment-provenance").status_code == 401
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
-    response = client.get("/api/v1/deployment-provenance", headers={"Authorization": f"Bearer {token}"})
+    response = client.get("/api/deployment-provenance", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert DeploymentProvenance.model_validate_json(response.content).agents
 
@@ -231,13 +231,13 @@ def test_authenticated_endpoint_serves_typed_projection_and_bounds_errors(tmp_pa
         app, actor_dependency=Depends(unauthorized), provenance=service
     )
     client = TestClient(app)
-    assert client.get("/api/v1/deployment-provenance").status_code == 401
+    assert client.get("/api/deployment-provenance").status_code == 401
     app.dependency_overrides[unauthorized] = lambda: object()
-    response = client.get("/api/v1/deployment-provenance")
+    response = client.get("/api/deployment-provenance")
     assert response.status_code == 200
     assert DeploymentProvenance.model_validate_json(response.text) == service.snapshot()
     service._observations = lambda: (_ for _ in ()).throw(ValueError("secret details"))
-    response = client.get("/api/v1/deployment-provenance")
+    response = client.get("/api/deployment-provenance")
     assert response.status_code == 503
     assert "secret" not in response.text
 

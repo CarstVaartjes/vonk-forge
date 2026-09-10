@@ -144,7 +144,7 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
         "expires_in_seconds": 60,
     }
     response = client.post(
-        "/agent/v1/host-runtime/grant",
+        "/agent/host-runtime/grant",
         headers=agent_headers(NODE_A, "serial-a"),
         json=request,
     )

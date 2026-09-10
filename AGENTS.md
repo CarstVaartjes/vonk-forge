@@ -124,7 +124,7 @@ catalog, recovery, and authority paths use schema 2. Do not add schema-1
 fallbacks, dual readers/writers, migration shims, or stale schema-1 fixtures to
 those paths. Keep schema 1 only where the code explicitly defines it as the
 current wire/build/job/evidence contract or as an inert historical migration;
-the `/api/v1` URL prefix is API versioning, not permission to restore an old
+the `/api` URL prefix is API versioning, not permission to restore an old
 document schema. “Dual-Spark” means two-node topology and remains supported; it
 does not mean maintaining schema-1/schema-2 runtime paths.
 

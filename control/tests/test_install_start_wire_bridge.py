@@ -440,7 +440,7 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     service.register(assignment)
     object.__setattr__(services, "distribution", service)
     response = client.get(
-        f"/agent/v1/distribution/manifests/{assignment.plan_digest}",
+        f"/agent/distribution/manifests/{assignment.plan_digest}",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert response.status_code == 200

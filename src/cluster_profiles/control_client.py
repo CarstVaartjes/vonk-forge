@@ -868,7 +868,7 @@ class ControlClient:
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
-        if not path.startswith("/api/v1/") or ".." in path:
+        if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         route_path = path
         if query:
@@ -985,7 +985,7 @@ class ControlClient:
         expected_size: int,
     ) -> dict[str, object]:
         """Stream one previously declared input after rechecking its identity."""
-        if not path.startswith("/api/v1/") or ".." in path:
+        if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         _request_media_contract(path, "PUT", "application/octet-stream")
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
@@ -1133,7 +1133,7 @@ class ControlClient:
         overwrite: bool,
     ) -> dict[str, object]:
         """Stream, verify, and atomically publish one result file."""
-        if not path.startswith("/api/v1/") or ".." in path:
+        if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         _operation(path, "GET")
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
@@ -1308,13 +1308,13 @@ class ControlClient:
         }
 
     def create_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
-        return self.request("POST", "/api/v1/proposals", payload)
+        return self.request("POST", "/api/proposals", payload)
 
     def get(self, path: str) -> dict[str, object]:
         return self.request("GET", path)
 
     def submit_change(self, digest: str) -> dict[str, object]:
-        return self.request("POST", "/api/v1/changes", {"proposal_digest": digest})
+        return self.request("POST", "/api/changes", {"proposal_digest": digest})
 
     def fleet(self) -> FleetSnapshot:
         return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]

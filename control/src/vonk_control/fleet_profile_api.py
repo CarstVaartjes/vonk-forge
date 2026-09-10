@@ -27,33 +27,33 @@ from .fleet_profiles import FleetProfileConflict
 from .operation_api import bounded_error_responses
 
 FLEET_PROFILE_OPERATION_IDS = {
-    ("post", "/api/v1/fleet-profile-applications/{application_id}/retry"): "retryFleetProfileApplication",
-    ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
-    ("post", "/api/v1/fleet-profiles"): "createFleetProfile",
-    ("post", "/api/v1/fleet-profiles/capture-current"): (
+    ("post", "/api/fleet-profile-applications/{application_id}/retry"): "retryFleetProfileApplication",
+    ("get", "/api/fleet-profiles"): "listFleetProfiles",
+    ("post", "/api/fleet-profiles"): "createFleetProfile",
+    ("post", "/api/fleet-profiles/capture-current"): (
         "captureCurrentFleetProfile"
     ),
-    ("get", "/api/v1/fleet-profiles/{profile_id}"): "getFleetProfile",
-    ("put", "/api/v1/fleet-profiles/{profile_id}"): "updateFleetProfile",
-    ("delete", "/api/v1/fleet-profiles/{profile_id}"): "deleteFleetProfile",
-    ("post", "/api/v1/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
-    ("post", "/api/v1/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
-    ("post", "/api/v1/fleet-profiles/{profile_id}/duplicate"): (
+    ("get", "/api/fleet-profiles/{profile_id}"): "getFleetProfile",
+    ("put", "/api/fleet-profiles/{profile_id}"): "updateFleetProfile",
+    ("delete", "/api/fleet-profiles/{profile_id}"): "deleteFleetProfile",
+    ("post", "/api/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
+    ("post", "/api/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
+    ("post", "/api/fleet-profiles/{profile_id}/duplicate"): (
         "duplicateFleetProfile"
     ),
-    ("get", "/api/v1/fleet-profiles/{profile_id}/status"): (
+    ("get", "/api/fleet-profiles/{profile_id}/status"): (
         "getFleetProfileStatus"
     ),
-    ("post", "/api/v1/fleet-profiles/{profile_id}/prepare"): (
+    ("post", "/api/fleet-profiles/{profile_id}/prepare"): (
         "prepareFleetProfile"
     ),
-    ("post", "/api/v1/fleet-profiles/{profile_id}/prepare/preview"): (
+    ("post", "/api/fleet-profiles/{profile_id}/prepare/preview"): (
         "previewFleetProfilePreparation"
     ),
-    ("post", "/api/v1/fleet-profiles/{profile_id}/switch"): "switchFleetProfile",
+    ("post", "/api/fleet-profiles/{profile_id}/switch"): "switchFleetProfile",
     (
         "get",
-        "/api/v1/fleet-profile-applications/{application_id}",
+        "/api/fleet-profile-applications/{application_id}",
     ): "getFleetProfileApplication",
 }
 _UUID = (
@@ -91,7 +91,7 @@ def install_fleet_profile_routes(
         )
 
     @app.get(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         response_model=FleetProfileList,
         responses=bounded_error_responses(401, 503),
         operation_id="listFleetProfiles",
@@ -107,7 +107,7 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.post(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         response_model=FleetProfileView,
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,
@@ -116,7 +116,7 @@ def install_fleet_profile_routes(
     def create_profile(
         request: Request, body: FleetProfileInput, actor: Actor = authenticated
     ) -> FleetProfileView:
-        require_mutation(actor, "POST", "/api/v1/fleet-profiles")
+        require_mutation(actor, "POST", "/api/fleet-profiles")
         try:
             result = service().create(body, actor=actor.subject)
         except FleetProfileConflict as error:
@@ -129,7 +129,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.post(
-        "/api/v1/fleet-profiles/capture-current",
+        "/api/fleet-profiles/capture-current",
         response_model=FleetProfileView,
         responses=bounded_error_responses(401, 403, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,
@@ -140,7 +140,7 @@ def install_fleet_profile_routes(
         body: FleetProfileCaptureInput,
         actor: Actor = authenticated,
     ) -> FleetProfileView:
-        require_mutation(actor, "POST", "/api/v1/fleet-profiles/capture-current")
+        require_mutation(actor, "POST", "/api/fleet-profiles/capture-current")
         try:
             result = service().capture_current(
                 name=body.name,
@@ -160,7 +160,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.get(
-        "/api/v1/fleet-profiles/{profile_id}",
+        "/api/fleet-profiles/{profile_id}",
         response_model=FleetProfileView,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetProfile",
@@ -182,7 +182,7 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.put(
-        "/api/v1/fleet-profiles/{profile_id}",
+        "/api/fleet-profiles/{profile_id}",
         response_model=FleetProfileView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="updateFleetProfile",
@@ -193,7 +193,7 @@ def install_fleet_profile_routes(
         body: FleetProfileInput,
         actor: Actor = authenticated,
     ) -> FleetProfileView:
-        route = "/api/v1/fleet-profiles/{profile_id}"
+        route = "/api/fleet-profiles/{profile_id}"
         require_mutation(actor, "PUT", route)
         try:
             result = service().update(profile_id, body, actor=actor.subject)
@@ -211,7 +211,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.delete(
-        "/api/v1/fleet-profiles/{profile_id}",
+        "/api/fleet-profiles/{profile_id}",
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_204_NO_CONTENT,
         operation_id="deleteFleetProfile",
@@ -221,7 +221,7 @@ def install_fleet_profile_routes(
         profile_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
     ) -> Response:
-        route = "/api/v1/fleet-profiles/{profile_id}"
+        route = "/api/fleet-profiles/{profile_id}"
         require_mutation(actor, "DELETE", route)
         try:
             service().delete(profile_id)
@@ -239,7 +239,7 @@ def install_fleet_profile_routes(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/preview",
+        "/api/fleet-profiles/{profile_id}/preview",
         response_model=FleetProfilePreview,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewFleetProfile",
@@ -250,7 +250,7 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfilePreview:
         del body
-        route = "/api/v1/fleet-profiles/{profile_id}/preview"
+        route = "/api/fleet-profiles/{profile_id}/preview"
         require_mutation(actor, "POST", route)
         try:
             return service().preview(profile_id)
@@ -266,7 +266,7 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.get(
-        "/api/v1/fleet-profiles/{profile_id}/status",
+        "/api/fleet-profiles/{profile_id}/status",
         response_model=FleetProfileStatusView,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetProfileStatus",
@@ -287,7 +287,7 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/duplicate",
+        "/api/fleet-profiles/{profile_id}/duplicate",
         response_model=FleetProfileView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,
@@ -300,7 +300,7 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfileView:
         require_mutation(
-            actor, "POST", "/api/v1/fleet-profiles/{profile_id}/duplicate"
+            actor, "POST", "/api/fleet-profiles/{profile_id}/duplicate"
         )
         try:
             result = service().duplicate(
@@ -322,7 +322,7 @@ def install_fleet_profile_routes(
         audit(request, actor, "fleet-profile.duplicate", (profile_id, result.id))
         return result
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/apply",
+        "/api/fleet-profiles/{profile_id}/apply",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -334,7 +334,7 @@ def install_fleet_profile_routes(
         body: FleetProfileApplyRequest,
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
-        route = "/api/v1/fleet-profiles/{profile_id}/apply"
+        route = "/api/fleet-profiles/{profile_id}/apply"
         require_mutation(actor, "POST", route)
         try:
             result = service().apply(
@@ -357,7 +357,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/prepare/preview",
+        "/api/fleet-profiles/{profile_id}/prepare/preview",
         response_model=FleetProfilePreview,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="previewFleetProfilePreparation",
@@ -368,7 +368,7 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfilePreview:
         del body
-        route = "/api/v1/fleet-profiles/{profile_id}/prepare/preview"
+        route = "/api/fleet-profiles/{profile_id}/prepare/preview"
         require_mutation(actor, "POST", route)
         try:
             return service().prepare_preview(profile_id)
@@ -384,7 +384,7 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/prepare",
+        "/api/fleet-profiles/{profile_id}/prepare",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -397,7 +397,7 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         require_mutation(
-            actor, "POST", "/api/v1/fleet-profiles/{profile_id}/prepare"
+            actor, "POST", "/api/fleet-profiles/{profile_id}/prepare"
         )
         try:
             result = service().prepare(
@@ -420,7 +420,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.post(
-        "/api/v1/fleet-profiles/{profile_id}/switch",
+        "/api/fleet-profiles/{profile_id}/switch",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -433,7 +433,7 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         require_mutation(
-            actor, "POST", "/api/v1/fleet-profiles/{profile_id}/switch"
+            actor, "POST", "/api/fleet-profiles/{profile_id}/switch"
         )
         try:
             result = service().switch(
@@ -456,7 +456,7 @@ def install_fleet_profile_routes(
         return result
 
     @app.get(
-        "/api/v1/fleet-profile-applications/{application_id}",
+        "/api/fleet-profile-applications/{application_id}",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetProfileApplication",
@@ -480,7 +480,7 @@ def install_fleet_profile_routes(
 
 
     @app.post(
-        "/api/v1/fleet-profile-applications/{application_id}/retry",
+        "/api/fleet-profile-applications/{application_id}/retry",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -492,7 +492,7 @@ def install_fleet_profile_routes(
         body: FleetProfileRetryRequest,
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
-        require_mutation(actor, "POST", "/api/v1/fleet-profile-applications/{application_id}/retry")
+        require_mutation(actor, "POST", "/api/fleet-profile-applications/{application_id}/retry")
         try:
             result = service().retry(application_id, request_key=body.request_key, actor=actor.subject)
         except KeyError:

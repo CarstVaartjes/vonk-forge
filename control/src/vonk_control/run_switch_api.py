@@ -28,25 +28,25 @@ from .run_switch_operations import (
 from .strict_json import StrictJSONModel
 
 RUN_SWITCH_OPERATION_IDS = {
-    ("post", "/api/v1/recipes/run-switches/{operation_id}/cancel"): "cancelRecipeRunSwitchOperation",
+    ("post", "/api/recipes/run-switches/{operation_id}/cancel"): "cancelRecipeRunSwitchOperation",
     (
         "post",
-        "/api/v1/recipes/run-switch-plans/preview",
+        "/api/recipes/run-switch-plans/preview",
     ): "previewRecipeRunSwitch",
-    ("post", "/api/v1/recipes/run-switches"): "applyRecipeRunSwitch",
+    ("post", "/api/recipes/run-switches"): "applyRecipeRunSwitch",
     (
         "get",
-        "/api/v1/recipes/run-switches/{operation_id}",
+        "/api/recipes/run-switches/{operation_id}",
     ): "getRecipeRunSwitchOperation",
     (
         "post",
-        "/api/v1/recipes/run-switches/{operation_id}/retry",
+        "/api/recipes/run-switches/{operation_id}/retry",
     ): "retryRecipeRunSwitchOperation",
     (
         "post",
-        "/api/v1/recipes/run-switch-stops/preview",
+        "/api/recipes/run-switch-stops/preview",
     ): "previewRecipeRunSwitchStop",
-    ("post", "/api/v1/recipes/run-switch-stops"): "applyRecipeRunSwitchStop",
+    ("post", "/api/recipes/run-switch-stops"): "applyRecipeRunSwitchStop",
 }
 
 _UUID = (
@@ -104,7 +104,7 @@ def install_run_switch_routes(
         return responses
 
     @app.post(
-        "/api/v1/recipes/run-switch-plans/preview",
+        "/api/recipes/run-switch-plans/preview",
         response_model=RunSwitchPlan,
         responses=errors(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeRunSwitch",
@@ -123,7 +123,7 @@ def install_run_switch_routes(
             raise HTTPException(status_code=503, detail=f"run/switch preview unavailable: {error}") from None
 
     @app.post(
-        "/api/v1/recipes/run-switches",
+        "/api/recipes/run-switches",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
         responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
@@ -155,7 +155,7 @@ def install_run_switch_routes(
         return result
 
     @app.get(
-        "/api/v1/recipes/run-switches/{operation_id}",
+        "/api/recipes/run-switches/{operation_id}",
         response_model=RunSwitchOperation,
         responses=errors(401, 404, 422, 503),
         operation_id="getRecipeRunSwitchOperation",
@@ -171,7 +171,7 @@ def install_run_switch_routes(
             raise HTTPException(status_code=503, detail=f"run/switch operation unavailable: {error}") from None
 
     @app.post(
-        "/api/v1/recipes/run-switches/{operation_id}/retry",
+        "/api/recipes/run-switches/{operation_id}/retry",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
         responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
@@ -208,7 +208,7 @@ def install_run_switch_routes(
         return result
 
     @app.post(
-        "/api/v1/recipes/run-switches/{operation_id}/cancel",
+        "/api/recipes/run-switches/{operation_id}/cancel",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
         responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
@@ -228,7 +228,7 @@ def install_run_switch_routes(
         return result
 
     @app.post(
-        "/api/v1/recipes/run-switch-stops/preview",
+        "/api/recipes/run-switch-stops/preview",
         response_model=RunSwitchPlan,
         responses=errors(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeRunSwitchStop",
@@ -247,7 +247,7 @@ def install_run_switch_routes(
             raise HTTPException(status_code=503, detail=f"run/switch stop preview unavailable: {error}") from None
 
     @app.post(
-        "/api/v1/recipes/run-switch-stops",
+        "/api/recipes/run-switch-stops",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
         responses=errors(401, 403, 404, 409, 422, 503, conflict=True),

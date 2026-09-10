@@ -100,12 +100,12 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
                         // no retry queue or replay exists.
                         if let Err(error) = client.report_telemetry(&[sample]).await {
                             eprintln!(
-                                "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry error={error}; decision=discard-and-collect-next-interval"
+                                "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error={error}; decision=discard-and-collect-next-interval"
                             );
                         }
                     }
                     None => eprintln!(
-                        "vonk-monitor: operation=telemetry.upload endpoint=/agent/v1/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
+                        "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
                     ),
                 }
             }

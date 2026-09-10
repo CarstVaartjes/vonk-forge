@@ -45,19 +45,19 @@ _RECIPE_LIBRARY_UNAVAILABLE_CODES = frozenset(
 CATALOG_OPERATION_IDS = {
     (
         "get",
-        "/api/v1/catalog/source-bundles/{sha256}",
+        "/api/catalog/source-bundles/{sha256}",
     ): "downloadRecipeSourceBundle",
     (
         "put",
-        "/api/v1/catalog/source-bundles/{sha256}",
+        "/api/catalog/source-bundles/{sha256}",
     ): "uploadRecipeSourceBundle",
     (
         "post",
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
     ): "syncManagedRecipeCatalog",
     (
         "get",
-        "/api/v1/catalog/managed-recipes/sync-status",
+        "/api/catalog/managed-recipes/sync-status",
     ): "getManagedRecipeCatalogSyncStatus",
 }
 
@@ -221,7 +221,7 @@ def install_catalog_routes(
         return managed_sync
 
     @app.get(
-        "/api/v1/catalog/source-bundles/{sha256}",
+        "/api/catalog/source-bundles/{sha256}",
         response_class=Response,
         responses={
             200: {
@@ -263,7 +263,7 @@ def install_catalog_routes(
         )
 
     @app.put(
-        "/api/v1/catalog/source-bundles/{sha256}",
+        "/api/catalog/source-bundles/{sha256}",
         response_model=SourceBundleResponse,
         responses={
             401: {"model": CatalogProblem},
@@ -317,7 +317,7 @@ def install_catalog_routes(
         }
 
     @app.post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         response_model=ManagedCatalogSyncResponse,
         responses={
             401: {"model": CatalogProblem},
@@ -373,7 +373,7 @@ def install_catalog_routes(
         return _managed_sync(value)
 
     @app.get(
-        "/api/v1/catalog/managed-recipes/sync-status",
+        "/api/catalog/managed-recipes/sync-status",
         response_model=ManagedCatalogSyncResponse,
         responses={
             401: {"model": CatalogProblem},

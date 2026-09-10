@@ -143,7 +143,7 @@ def test_production_app_recipe_availability_auth_status_and_retry(
     headers = {"Authorization": f"Bearer {operator}"}
     with TestClient(app) as client:
         denied = client.post(
-            "/api/v1/library/recipe-image-availability",
+            "/api/library/recipe-image-availability",
             headers={"Authorization": f"Bearer {viewer}"},
             json={
                 "request_key": "v" * 36,
@@ -153,7 +153,7 @@ def test_production_app_recipe_availability_auth_status_and_retry(
         assert denied.status_code == 403
 
         started = client.post(
-            "/api/v1/library/recipe-image-availability",
+            "/api/library/recipe-image-availability",
             headers=headers,
             json={
                 "request_key": "o" * 36,
@@ -163,7 +163,7 @@ def test_production_app_recipe_availability_auth_status_and_retry(
         assert started.status_code == 202, started.text
         operation_id = started.json()["id"]
         status = client.get(
-            f"/api/v1/library/recipe-image-availability/{operation_id}",
+            f"/api/library/recipe-image-availability/{operation_id}",
             headers=headers,
         )
         assert status.status_code == 200
@@ -184,7 +184,7 @@ def test_production_app_recipe_availability_auth_status_and_retry(
                 "retry": {"automatic_attempts": 1, "operator_retries": 0},
             }
         retried = client.post(
-            f"/api/v1/library/recipe-image-availability/{operation_id}/retry",
+            f"/api/library/recipe-image-availability/{operation_id}/retry",
             headers=headers,
             json={"request_key": "r" * 36},
         )

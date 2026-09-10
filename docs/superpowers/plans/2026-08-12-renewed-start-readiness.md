@@ -115,8 +115,8 @@ git commit -m "fix: honor renewed leases during workload start"
 - Modify: `scripts/tests/test_run_development_slices.py`
 
 **Interfaces:**
-- Consumes: run status `state=stopped` and `route_state=withdrawn` from `GET /api/v1/recipes/runs/{run_id}`.
-- Produces: one replacement `POST /api/v1/recipes/runs` using `request_key("running", "start-retry")` and a fresh preview digest.
+- Consumes: run status `state=stopped` and `route_state=withdrawn` from `GET /api/recipes/runs/{run_id}`.
+- Produces: one replacement `POST /api/recipes/runs` using `request_key("running", "start-retry")` and a fresh preview digest.
 - Produces: evidence fields `failed_run_id` and `failed_run_operation_id` when replacement recovery is used; existing `run_id` and `run_operation_id` identify the successful replacement.
 - Produces: restart checkpoints `<purpose>_plan_digest`, `<purpose>_operation_id`, and `<purpose>_run_id` for purposes `start` and `start_retry`.
 

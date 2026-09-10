@@ -117,17 +117,17 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
         payload["inputs"] = []
     assert (
         client.post(
-            f"/api/v1/recipes/runs/{run_id}/artifact-jobs",
+            f"/api/recipes/runs/{run_id}/artifact-jobs",
             json={**payload, "timeout_seconds": 3601},
         ).status_code
         == 422
     )
-    created = client.post(f"/api/v1/recipes/runs/{run_id}/artifact-jobs", json=payload)
+    created = client.post(f"/api/recipes/runs/{run_id}/artifact-jobs", json=payload)
     assert created.status_code == 201, created.text
     job_id = created.json()["id"]
     if has_input:
         upload = client.put(
-            f"/api/v1/artifact-jobs/{job_id}/inputs/input.png",
+            f"/api/artifact-jobs/{job_id}/inputs/input.png",
             content=b"png",
             headers={
                 "content-type": "image/png",
@@ -135,8 +135,8 @@ def test_job_api_compiles_changed_seed_through_production_runtime(
             },
         )
         assert upload.status_code == 200, upload.text
-    assert client.post(f"/api/v1/artifact-jobs/{job_id}/finalize").status_code == 200
-    submitted = client.post(f"/api/v1/artifact-jobs/{job_id}/submit")
+    assert client.post(f"/api/artifact-jobs/{job_id}/finalize").status_code == 200
+    submitted = client.post(f"/api/artifact-jobs/{job_id}/submit")
     assert submitted.status_code == 202, submitted.text
     claim = claim_agent(agent_jobs, node_id, "serial-0", 60)
     document = json.loads(canonical_message(claim))

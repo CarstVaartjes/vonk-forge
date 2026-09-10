@@ -139,10 +139,10 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     app = FastAPI()
     install_recipe_image_availability_routes(app, actor_dependency=lambda: None, service=None)
     schema = app.openapi()
-    start = schema["paths"]["/api/v1/library/recipe-image-availability"]["post"]
-    listing = schema["paths"]["/api/v1/library/recipe-image-availability"]["get"]
+    start = schema["paths"]["/api/library/recipe-image-availability"]["post"]
+    listing = schema["paths"]["/api/library/recipe-image-availability"]["get"]
     retry = schema["paths"][
-        "/api/v1/library/recipe-image-availability/{operation_id}/retry"
+        "/api/library/recipe-image-availability/{operation_id}/retry"
     ]["post"]
     assert start["responses"]["202"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "RecipeImageAvailabilityResponse"

@@ -47,8 +47,8 @@ to their old immutable revision and are reported as stale until the operator
 reviews an update.
 
 The latest durable result is available from
-`GET /api/v1/catalog/managed-recipes/sync-status`. An explicit refresh uses
-`POST /api/v1/catalog/managed-recipes/sync` with a fresh UUID `request_key` and,
+`GET /api/catalog/managed-recipes/sync-status`. An explicit refresh uses
+`POST /api/catalog/managed-recipes/sync` with a fresh UUID `request_key` and,
 when the caller already reviewed a snapshot, its 40-character
 `expected_commit`. Reusing a request key with different semantics or racing a
 second sync fails closed.
@@ -93,8 +93,8 @@ requires the designated physical lane.
 The Controller is the only import path. It resolves the configured library
 branch to one immutable commit, validates the package index and dependency
 closure, and records the durable result through
-`POST /api/v1/catalog/managed-recipes/sync`. Use the matching
-`GET /api/v1/catalog/managed-recipes/sync-status` response to inspect the
+`POST /api/catalog/managed-recipes/sync`. Use the matching
+`GET /api/catalog/managed-recipes/sync-status` response to inspect the
 commit, counts, conflicts, and withdrawn revisions. There is no platform-local
 Model or Recipe ledger to edit or import around the Controller.
 

@@ -675,7 +675,7 @@ def _library_recipe_rows(
             query["cursor"] = cursor
         try:
             page = LibraryRecipeList.from_dict(
-                client.request("GET", "/api/v1/library/recipes", query=query)
+                client.request("GET", "/api/library/recipes", query=query)
             )
         except (KeyError, TypeError, ValueError) as error:
             raise QualificationError("current Library recipe list is invalid") from error
@@ -698,7 +698,7 @@ def _library_recipe_rows(
             digest = summary.content_sha256
             detail, definition, model_documents = _parse_library_detail(
                 client.request(
-                    "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                    "GET", f"/api/library/recipes/{_quote(recipe_id)}"
                 )
             )
             identity = detail.recipe
@@ -823,7 +823,7 @@ def build_plan(
     policy: Mapping[str, Blocker],
     fixtures: FixtureRegistry | None = None,
 ) -> dict[str, object]:
-    fleet = client.request("GET", "/api/v1/fleet")
+    fleet = client.request("GET", "/api/fleet")
     library, library_rows = _library_recipe_rows(client)
     online_nodes = _fleet_nodes(fleet)
     authority_node_ids = {
@@ -1195,7 +1195,7 @@ class OperationMonitor:
         deadline = self.clock() + self.options.operation_timeout_seconds
         while True:
             value = self.client.request(
-                "GET", f"/api/v1/recipes/operations/{_quote(operation_id)}"
+                "GET", f"/api/recipes/operations/{_quote(operation_id)}"
             )
             state = value.get("state")
             if state in _TERMINAL_OPERATION_STATES:
@@ -1269,7 +1269,7 @@ class ArtifactJobSmokeAdapter:
                 "available": False,
                 "blocker": blocker,
                 "fixture_manifest_sha256": self.fixtures.manifest_sha256,
-                "capabilities_path": "/api/v1/artifact-jobs/capabilities",
+                "capabilities_path": "/api/artifact-jobs/capabilities",
             }
         return {
             **recipe.preview(),
@@ -1347,7 +1347,7 @@ class ArtifactJobSmokeAdapter:
         records = ledger.recipe_records(plan_digest, recipe_key)
         created_records = _payloads(records, f"{event_prefix}.created")
         request_key = _request_key(plan_digest, recipe_key, event_prefix)
-        capabilities = client.request("GET", "/api/v1/artifact-jobs/capabilities")
+        capabilities = client.request("GET", "/api/artifact-jobs/capabilities")
         if capabilities.get("schema_version") != 1:
             raise QualificationError(
                 "controller artifact-job capabilities are incompatible"
@@ -1357,7 +1357,7 @@ class ArtifactJobSmokeAdapter:
         else:
             created = client.request(
                 "POST",
-                f"/api/v1/recipes/runs/{_quote(run_id)}/artifact-jobs",
+                f"/api/recipes/runs/{_quote(run_id)}/artifact-jobs",
                 {
                     "interface": recipe.interface,
                     "parameters": recipe.parameters,
@@ -1378,7 +1378,7 @@ class ArtifactJobSmokeAdapter:
         job_id = created.get("id")
         if not isinstance(job_id, str):
             raise QualificationError("controller returned an invalid artifact job ID")
-        status = client.request("GET", f"/api/v1/artifact-jobs/{_quote(job_id)}")
+        status = client.request("GET", f"/api/artifact-jobs/{_quote(job_id)}")
         uploaded = {
             str(payload.get("name"))
             for payload in _payloads(records, f"{event_prefix}.input-uploaded")
@@ -1390,7 +1390,7 @@ class ArtifactJobSmokeAdapter:
                     if name in uploaded:
                         continue
                     client.upload_file(
-                        f"/api/v1/artifact-jobs/{_quote(job_id)}/inputs/{_quote(name)}",
+                        f"/api/artifact-jobs/{_quote(job_id)}/inputs/{_quote(name)}",
                         source,
                         media_type=str(declaration["media_type"]),
                         expected_sha256=str(declaration["sha256"]),
@@ -1403,7 +1403,7 @@ class ArtifactJobSmokeAdapter:
                         payload={"job_id": job_id, **declaration},
                     )
                 status = client.request(
-                    "POST", f"/api/v1/artifact-jobs/{_quote(job_id)}/finalize"
+                    "POST", f"/api/artifact-jobs/{_quote(job_id)}/finalize"
                 )
                 ledger.append(
                     f"{event_prefix}.finalized",
@@ -1413,7 +1413,7 @@ class ArtifactJobSmokeAdapter:
                 )
             if status.get("state") == "ready":
                 status = client.request(
-                    "POST", f"/api/v1/artifact-jobs/{_quote(job_id)}/submit"
+                    "POST", f"/api/artifact-jobs/{_quote(job_id)}/submit"
                 )
                 ledger.append(
                     f"{event_prefix}.submitted",
@@ -1426,7 +1426,7 @@ class ArtifactJobSmokeAdapter:
                 if clock() >= deadline:
                     client.request(
                         "POST",
-                        f"/api/v1/artifact-jobs/{_quote(job_id)}/cancel",
+                        f"/api/artifact-jobs/{_quote(job_id)}/cancel",
                         {"reason": "qualification smoke timed out"},
                     )
                     raise QualificationError(
@@ -1434,7 +1434,7 @@ class ArtifactJobSmokeAdapter:
                     )
                 sleeper(poll_interval_seconds)
                 status = client.request(
-                    "GET", f"/api/v1/artifact-jobs/{_quote(job_id)}"
+                    "GET", f"/api/artifact-jobs/{_quote(job_id)}"
                 )
             ledger.append(
                 f"{event_prefix}.completed",
@@ -1447,7 +1447,7 @@ class ArtifactJobSmokeAdapter:
                     f"artifact-job smoke entered terminal state {status.get('state')}"
                 )
             result = client.request(
-                "GET", f"/api/v1/artifact-jobs/{_quote(job_id)}/result"
+                "GET", f"/api/artifact-jobs/{_quote(job_id)}/result"
             )
             try:
                 assertions = validate_outputs(recipe, result, client)
@@ -1586,7 +1586,7 @@ class ServiceSmokeAdapter:
     def run(
         self, client: ControllerClient, alias: str, preview: Mapping[str, object]
     ) -> Mapping[str, object]:
-        endpoint = client.request("GET", f"/api/v1/endpoints/{_quote(alias)}")
+        endpoint = client.request("GET", f"/api/endpoints/{_quote(alias)}")
         base = endpoint.get("api_base")
         if not isinstance(base, str):
             raise QualificationError("published endpoint API base is invalid")
@@ -1819,7 +1819,7 @@ class QualificationRunner:
             )
         _detail, _definition, _models = _parse_library_detail(
             self.client.request(
-                "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                "GET", f"/api/library/recipes/{_quote(recipe_id)}"
             )
         )
         identity = _detail.recipe
@@ -1833,7 +1833,7 @@ class QualificationRunner:
     def _initialize_capacity_state(self, digest: str) -> None:
         if self._capacity_remaining:
             return
-        fleet = self.client.request("GET", "/api/v1/fleet")
+        fleet = self.client.request("GET", "/api/fleet")
         for node in _fleet_nodes(fleet):
             node_id = node.get("id")
             free = _node_allocatable_disk(node)
@@ -1900,7 +1900,7 @@ class QualificationRunner:
             try:
                 recipe_id, revision_id = self._resolve_current_recipe(digest, item)
                 detail = self.client.request(
-                    "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                    "GET", f"/api/library/recipes/{_quote(recipe_id)}"
                 )
                 parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
                 selected_revision = parsed_detail.recipe
@@ -2000,7 +2000,7 @@ class QualificationRunner:
             self._prepared[key] = (recipe_id, revision_id, detail)
             jobs.append({"key": key, "item": item, "candidates": candidates})
 
-        fleet = self.client.request("GET", "/api/v1/fleet")
+        fleet = self.client.request("GET", "/api/fleet")
         current_allocatable = {
             node_id: _node_allocatable_disk(node)
             for node in _fleet_nodes(fleet)
@@ -2760,7 +2760,7 @@ class QualificationRunner:
                 raise QualificationError(
                     f"{key} planned retained placement is no longer eligible"
                 )
-            fleet = self.client.request("GET", "/api/v1/fleet")
+            fleet = self.client.request("GET", "/api/fleet")
             available = {
                 str(node.get("id")): _node_allocatable_disk(node)
                 for node in _fleet_nodes(fleet)
@@ -3171,7 +3171,7 @@ class QualificationRunner:
             if cursor is not None:
                 query["cursor"] = cursor
             try:
-                snapshot = self.client.request("GET", "/api/v1/library", query=query)
+                snapshot = self.client.request("GET", "/api/library", query=query)
             except Exception as error:  # noqa: BLE001 - record bounded inventory gaps
                 errors.append(
                     {
@@ -3242,7 +3242,7 @@ class QualificationRunner:
             if summary.get("installation_total_count", 0):
                 try:
                     detail = self.client.request(
-                        "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                        "GET", f"/api/library/recipes/{_quote(recipe_id)}"
                     )
                     operational = detail.get("operational_state")
                     detailed = (
@@ -3395,7 +3395,7 @@ class QualificationRunner:
             if isinstance(recipe_id, str):
                 try:
                     detail = self.client.request(
-                        "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                        "GET", f"/api/library/recipes/{_quote(recipe_id)}"
                     )
                     candidate = detail.get("operational_state")
                     if isinstance(candidate, Mapping):
@@ -3449,7 +3449,7 @@ class QualificationRunner:
             and installation.get("retained") is True
         ]
         any_installation = any_installation or bool(retained_installations)
-        fleet = self.client.request("GET", "/api/v1/fleet")
+        fleet = self.client.request("GET", "/api/fleet")
         assigned_bytes: dict[str, int] = {}
         artifact_ids: dict[str, set[str]] = {}
         assignments: dict[str, Mapping[str, object]] = {}
@@ -3567,7 +3567,7 @@ class QualificationRunner:
         ):
             raise QualificationError(f"{key} temporary build requirement is invalid")
         required = max(installed, download) + temporary
-        fleet = self.client.request("GET", "/api/v1/fleet")
+        fleet = self.client.request("GET", "/api/fleet")
         nodes = {
             node.get("id"): node
             for node in (
@@ -3632,7 +3632,7 @@ class QualificationRunner:
         else:
             recipe_id, revision_id, _ = prepared
         detail = self.client.request(
-            "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+            "GET", f"/api/library/recipes/{_quote(recipe_id)}"
         )
         parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
         selected_revision = parsed_detail.recipe
@@ -3669,7 +3669,7 @@ class QualificationRunner:
         if not isinstance(mapping_id, str):
             mapping_preview = self.client.request(
                 "POST",
-                "/api/v1/recipes/mapping-plans/preview",
+                "/api/recipes/mapping-plans/preview",
                 {
                     "recipe_revision_id": revision_id,
                     "node_ids": node_ids,
@@ -3679,7 +3679,7 @@ class QualificationRunner:
             self._record_preview(digest, key, "mapping", mapping_preview)
             mapping = self.client.request(
                 "POST",
-                "/api/v1/recipes/mappings",
+                "/api/recipes/mappings",
                 {
                     "recipe_revision_id": revision_id,
                     "node_ids": node_ids,
@@ -3702,14 +3702,14 @@ class QualificationRunner:
         if not isinstance(build_id, str):
             source = self.client.request(
                 "POST",
-                "/api/v1/recipes/source-checks",
+                "/api/recipes/source-checks",
                 {"recipe_revision_id": revision_id},
             )
             if source.get("passed") is not True:
                 raise QualificationError(f"{key} build source policy failed")
             build_preview = self.client.request(
                 "POST",
-                "/api/v1/recipes/build-plans/preview",
+                "/api/recipes/build-plans/preview",
                 {"recipe_revision_id": revision_id, "builder_node_id": node_ids[0]},
             )
             self._record_preview(digest, key, "build", build_preview)
@@ -3717,7 +3717,7 @@ class QualificationRunner:
                 digest,
                 key,
                 "build",
-                "/api/v1/recipes/builds",
+                "/api/recipes/builds",
                 {
                     "recipe_revision_id": revision_id,
                     "builder_node_id": node_ids[0],
@@ -3755,7 +3755,7 @@ class QualificationRunner:
             raise QualificationError(f"{key} mapping generation is unavailable")
         distribution_preview = self.client.request(
             "POST",
-            "/api/v1/recipes/image-distribution-plans/preview",
+            "/api/recipes/image-distribution-plans/preview",
             {
                 "recipe_build_id": build_id,
                 "mapping_id": mapping_id,
@@ -3767,7 +3767,7 @@ class QualificationRunner:
             digest,
             key,
             "image-distribution",
-            "/api/v1/recipes/image-distributions",
+            "/api/recipes/image-distributions",
             {
                 "recipe_build_id": build_id,
                 "mapping_id": mapping_id,
@@ -3797,7 +3797,7 @@ class QualificationRunner:
             self._prove_storage_capacity(digest, key, item, node_ids)
             install_preview = self.client.request(
                 "POST",
-                "/api/v1/recipes/install-plans/preview",
+                "/api/recipes/install-plans/preview",
                 {"mapping_id": mapping_id, "recipe_build_id": build_id},
             )
             self._record_preview(digest, key, "install", install_preview)
@@ -3822,7 +3822,7 @@ class QualificationRunner:
                 digest,
                 key,
                 "install",
-                "/api/v1/recipes/installations",
+                "/api/recipes/installations",
                 {
                     "mapping_id": mapping_id,
                     "recipe_build_id": build_id,
@@ -3849,7 +3849,7 @@ class QualificationRunner:
         if operation is None:
             run_preview = self.client.request(
                 "POST",
-                "/api/v1/recipes/run-plans/preview",
+                "/api/recipes/run-plans/preview",
                 {"installation_id": installation_id, "alias": alias},
             )
             self._record_preview(digest, key, "run", run_preview)
@@ -3874,7 +3874,7 @@ class QualificationRunner:
                 digest,
                 key,
                 run_step,
-                "/api/v1/recipes/job-runs" if is_job else "/api/v1/recipes/runs",
+                "/api/recipes/job-runs" if is_job else "/api/recipes/runs",
                 {
                     "installation_id": installation_id,
                     "alias": alias,
@@ -3969,14 +3969,14 @@ class QualificationRunner:
         ):
             try:
                 stop_preview = self.client.request(
-                    "POST", "/api/v1/recipes/stop-plans/preview", {"run_id": run_id}
+                    "POST", "/api/recipes/stop-plans/preview", {"run_id": run_id}
                 )
                 self._record_preview(digest, key, "stop", stop_preview)
                 self._operation(
                     digest,
                     key,
                     "stop",
-                    f"/api/v1/recipes/runs/{_quote(run_id)}/stop",
+                    f"/api/recipes/runs/{_quote(run_id)}/stop",
                     {
                         "plan_digest": stop_preview["plan_digest"],
                         "request_key": _request_key(digest, key, "stop"),
@@ -4016,7 +4016,7 @@ class QualificationRunner:
                 if redeploy is None:
                     redeploy_preview = self.client.request(
                         "POST",
-                        "/api/v1/recipes/run-plans/preview",
+                        "/api/recipes/run-plans/preview",
                         {"installation_id": installation_id, "alias": alias},
                     )
                     self._record_preview(digest, key, "warm-redeploy", redeploy_preview)
@@ -4028,9 +4028,9 @@ class QualificationRunner:
                         digest,
                         key,
                         "warm-redeploy",
-                        "/api/v1/recipes/job-runs"
+                        "/api/recipes/job-runs"
                         if is_job
-                        else "/api/v1/recipes/runs",
+                        else "/api/recipes/runs",
                         {
                             "installation_id": installation_id,
                             "alias": alias,
@@ -4106,7 +4106,7 @@ class QualificationRunner:
                         ):
                             redeploy_stop_preview = self.client.request(
                                 "POST",
-                                "/api/v1/recipes/stop-plans/preview",
+                                "/api/recipes/stop-plans/preview",
                                 {"run_id": redeploy_id},
                             )
                             self._record_preview(
@@ -4119,7 +4119,7 @@ class QualificationRunner:
                                 digest,
                                 key,
                                 "warm-redeploy-stop",
-                                f"/api/v1/recipes/runs/{_quote(redeploy_id)}/stop",
+                                f"/api/recipes/runs/{_quote(redeploy_id)}/stop",
                                 {
                                     "plan_digest": redeploy_stop_preview["plan_digest"],
                                     "request_key": _request_key(
@@ -4170,7 +4170,7 @@ class QualificationRunner:
             elif self._completed_operation(digest, key, "uninstall") is None:
                 uninstall_preview = self.client.request(
                     "POST",
-                    "/api/v1/recipes/uninstall-plans/preview",
+                    "/api/recipes/uninstall-plans/preview",
                     {"installation_id": installation_id},
                 )
                 self._record_preview(digest, key, "uninstall", uninstall_preview)
@@ -4178,7 +4178,7 @@ class QualificationRunner:
                     digest,
                     key,
                     "uninstall",
-                    f"/api/v1/recipes/installations/{_quote(installation_id)}/uninstall",
+                    f"/api/recipes/installations/{_quote(installation_id)}/uninstall",
                     {
                         "plan_digest": uninstall_preview["plan_digest"],
                         "request_key": _request_key(digest, key, "uninstall"),

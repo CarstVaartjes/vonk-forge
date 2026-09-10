@@ -301,17 +301,17 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
             tls_port,
             HOSTNAMES[0],
             material["root"],
-            "/agent/v1/enroll",
+            "/agent/enroll",
             method="POST",
         )
         assert peer == expected_der
         assert enrollment.startswith(b"HTTP/1.1 502")
 
         with pytest.raises((ssl.SSLError, ConnectionError, OSError)):
-            _tls_request(tls_port, HOSTNAMES[1], material["root"], "/agent/v1/claim")
+            _tls_request(tls_port, HOSTNAMES[1], material["root"], "/agent/claim")
 
         for hostname, path in (
-            (HOSTNAMES[1], "/agent/v1/claim"),
+            (HOSTNAMES[1], "/agent/claim"),
             (HOSTNAMES[2], "/v2/"),
         ):
             peer, response = _tls_request(

@@ -936,7 +936,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 )
             )
     manifest_response = client.get(
-        "/agent/v1/distribution/manifests/" + plan.plan_digest,
+        "/agent/distribution/manifests/" + plan.plan_digest,
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert manifest_response.status_code == 200
@@ -946,13 +946,13 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     }
     for node, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
         response = client.get(
-            "/agent/v1/distribution/manifests/" + plan.plan_digest,
+            "/agent/distribution/manifests/" + plan.plan_digest,
             headers=agent_headers(node, serial),
         )
         assert response.status_code == 200
         for item in response.json()["objects"]:
             payload_response = client.get(
-                "/agent/v1/distribution/objects/"
+                "/agent/distribution/objects/"
                 + item["sha256"]
                 + "?plan_digest="
                 + plan.plan_digest,

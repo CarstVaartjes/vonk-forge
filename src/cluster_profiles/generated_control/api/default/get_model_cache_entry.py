@@ -26,7 +26,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/v1/model-cache/entries/{artifact_set_sha256}".format(artifact_set_sha256=artifact_set_sha256,),
+        "url": "/api/model-cache/entries/{artifact_set_sha256}".format(artifact_set_sha256=artifact_set_sha256,),
     }
 
 

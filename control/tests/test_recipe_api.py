@@ -489,12 +489,12 @@ def setup():
 def test_preview_install_and_run_expose_exact_capacity_math() -> None:
     client, headers, _recipes, _audits = setup()
     install = client.post(
-        "/api/v1/recipes/install-plans/preview",
+        "/api/recipes/install-plans/preview",
         headers=headers(),
         json={"mapping_id": MAPPING, "recipe_build_id": BUILD},
     )
     run = client.post(
-        "/api/v1/recipes/run-plans/preview",
+        "/api/recipes/run-plans/preview",
         headers=headers(),
         json={"installation_id": INSTALLATION, "alias": "qwen"},
     )
@@ -526,7 +526,7 @@ def test_preview_install_exposes_structured_admission_error() -> None:
     )
 
     response = client.post(
-        "/api/v1/recipes/install-plans/preview",
+        "/api/recipes/install-plans/preview",
         headers=headers(),
         json={"mapping_id": MAPPING, "recipe_build_id": BUILD},
     )
@@ -546,7 +546,7 @@ def test_preview_install_returns_structured_conflict_for_invalid_topology() -> N
 
     recipes.preview_install = invalid_topology
     response = client.post(
-        "/api/v1/recipes/install-plans/preview",
+        "/api/recipes/install-plans/preview",
         headers=headers(),
         json={"mapping_id": MAPPING, "recipe_build_id": BUILD},
     )
@@ -559,12 +559,12 @@ def test_preview_install_returns_structured_conflict_for_invalid_topology() -> N
 def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
     client, headers, recipes, audits = setup()
     checked = client.post(
-        "/api/v1/recipes/source-checks",
+        "/api/recipes/source-checks",
         headers=headers(),
         json={"recipe_revision_id": REVISION},
     )
     mapping_preview = client.post(
-        "/api/v1/recipes/mapping-plans/preview",
+        "/api/recipes/mapping-plans/preview",
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
@@ -573,7 +573,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         },
     )
     mapping = client.post(
-        "/api/v1/recipes/mappings",
+        "/api/recipes/mappings",
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
@@ -584,12 +584,12 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         },
     )
     build_preview = client.post(
-        "/api/v1/recipes/build-plans/preview",
+        "/api/recipes/build-plans/preview",
         headers=headers(),
         json={"recipe_revision_id": REVISION, "builder_node_id": NODE},
     )
     built = client.post(
-        "/api/v1/recipes/builds",
+        "/api/recipes/builds",
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
@@ -599,7 +599,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         },
     )
     distribution_preview = client.post(
-        "/api/v1/recipes/image-distribution-plans/preview",
+        "/api/recipes/image-distribution-plans/preview",
         headers=headers(),
         json={
             "recipe_build_id": BUILD,
@@ -608,7 +608,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         },
     )
     distributed = client.post(
-        "/api/v1/recipes/image-distributions",
+        "/api/recipes/image-distributions",
         headers=headers(),
         json={
             "recipe_build_id": BUILD,
@@ -647,7 +647,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
 def test_execute_requires_exact_plan_hash_admin_and_idempotency_key() -> None:
     client, headers, recipes, audits = setup()
     denied = client.post(
-        "/api/v1/recipes/installations",
+        "/api/recipes/installations",
         headers=headers("operator"),
         json={
             "mapping_id": MAPPING,
@@ -658,7 +658,7 @@ def test_execute_requires_exact_plan_hash_admin_and_idempotency_key() -> None:
     )
     request_id = "20000000-0000-4000-8000-000000000001"
     accepted = client.post(
-        "/api/v1/recipes/installations",
+        "/api/recipes/installations",
         headers={**headers(), "x-request-id": request_id},
         json={
             "mapping_id": MAPPING,
@@ -678,7 +678,7 @@ def test_execute_requires_exact_plan_hash_admin_and_idempotency_key() -> None:
 def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
     client, headers, _recipes, _audits = setup()
     start = client.post(
-        "/api/v1/recipes/runs",
+        "/api/recipes/runs",
         headers=headers(),
         json={
             "installation_id": INSTALLATION,
@@ -688,15 +688,15 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         },
     )
     progress = client.get(
-        f"/api/v1/recipes/operations/{OPERATION}", headers=headers("viewer")
+        f"/api/recipes/operations/{OPERATION}", headers=headers("viewer")
     )
     stop_preview = client.post(
-        "/api/v1/recipes/stop-plans/preview",
+        "/api/recipes/stop-plans/preview",
         headers=headers(),
         json={"run_id": RUN},
     )
     stop = client.post(
-        f"/api/v1/recipes/runs/{RUN}/stop",
+        f"/api/recipes/runs/{RUN}/stop",
         headers=headers(),
         json={
             "plan_digest": "4" * 64,
@@ -704,17 +704,17 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         },
     )
     retry = client.post(
-        f"/api/v1/recipes/operations/{OPERATION}/retry",
+        f"/api/recipes/operations/{OPERATION}/retry",
         headers=headers(),
         json={"request_key": "10000000-0000-4000-8000-000000000004"},
     )
     uninstall_preview = client.post(
-        "/api/v1/recipes/uninstall-plans/preview",
+        "/api/recipes/uninstall-plans/preview",
         headers=headers(),
         json={"installation_id": INSTALLATION},
     )
     uninstall = client.post(
-        f"/api/v1/recipes/installations/{INSTALLATION}/uninstall",
+        f"/api/recipes/installations/{INSTALLATION}/uninstall",
         headers=headers(),
         json={
             "plan_digest": "5" * 64,
@@ -738,16 +738,16 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
     }
     paths = client.get("/openapi.json").json()["paths"]
     assert (
-        paths["/api/v1/recipes/install-plans/preview"]["post"]["operationId"]
+        paths["/api/recipes/install-plans/preview"]["post"]["operationId"]
         == "previewRecipeInstall"
     )
-    assert paths["/api/v1/recipes/runs"]["post"]["operationId"] == "startRecipeRun"
+    assert paths["/api/recipes/runs"]["post"]["operationId"] == "startRecipeRun"
     assert (
-        paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"]
+        paths["/api/recipes/stop-plans/preview"]["post"]["operationId"]
         == "previewRecipeStop"
     )
     assert (
-        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
+        paths["/api/recipes/uninstall-plans/preview"]["post"]["operationId"]
         == "previewRecipeUninstall"
     )
 
@@ -760,7 +760,7 @@ def test_build_conflict_route_returns_validated_json_document() -> None:
 
     recipes.build = conflict
     response = client.post(
-        "/api/v1/recipes/builds",
+        "/api/recipes/builds",
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
@@ -782,18 +782,18 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     client, headers, recipes, audits = setup()
     model_digest = "f" * 64
     denied = client.post(
-        "/api/v1/library/model-deletion-plans/preview",
+        "/api/library/model-deletion-plans/preview",
         headers=headers("operator"),
         json={"model_content_sha256": model_digest},
     )
     preview = client.post(
-        "/api/v1/library/model-deletion-plans/preview",
+        "/api/library/model-deletion-plans/preview",
         headers=headers(),
         json={"model_content_sha256": model_digest},
     )
     request_id = "20000000-0000-4000-8000-000000000099"
     applied = client.post(
-        f"/api/v1/library/models/{model_digest}/delete",
+        f"/api/library/models/{model_digest}/delete",
         headers={**headers(), "x-request-id": request_id},
         json={
             "plan_digest": "6" * 64,
@@ -813,11 +813,11 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     assert audits.for_request(request_id).action == "model.delete"
 
     paths = client.get("/openapi.json").json()["paths"]
-    assert paths["/api/v1/library/model-deletion-plans/preview"]["post"][
+    assert paths["/api/library/model-deletion-plans/preview"]["post"][
         "operationId"
     ] == "previewLibraryModelDeletion"
     assert paths[
-        "/api/v1/library/models/{model_content_sha256}/delete"
+        "/api/library/models/{model_content_sha256}/delete"
     ]["post"]["operationId"] == "deleteLibraryModel"
 
 
@@ -833,12 +833,12 @@ def test_identical_start_api_replay_audits_without_repreview_or_mutation() -> No
     replay_request_id = "20000000-0000-4000-8000-000000000010"
 
     first = client.post(
-        "/api/v1/recipes/runs",
+        "/api/recipes/runs",
         headers={**headers(), "x-request-id": first_request_id},
         json=body,
     )
     replayed = client.post(
-        "/api/v1/recipes/runs",
+        "/api/recipes/runs",
         headers={**headers(), "x-request-id": replay_request_id},
         json=body,
     )
@@ -868,22 +868,22 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
     client, headers, _recipes, _audits = setup()
 
     denied = client.post(
-        "/api/v1/recipes/stop-plans/preview",
+        "/api/recipes/stop-plans/preview",
         headers=headers("operator"),
         json={"run_id": RUN},
     )
     extra = client.post(
-        "/api/v1/recipes/uninstall-plans/preview",
+        "/api/recipes/uninstall-plans/preview",
         headers=headers(),
         json={"installation_id": INSTALLATION, "force": True},
     )
     stop_unbound = client.post(
-        f"/api/v1/recipes/runs/{RUN}/stop",
+        f"/api/recipes/runs/{RUN}/stop",
         headers=headers(),
         json={"request_key": "10000000-0000-4000-8000-000000000006"},
     )
     uninstall_unbound = client.post(
-        f"/api/v1/recipes/installations/{INSTALLATION}/uninstall",
+        f"/api/recipes/installations/{INSTALLATION}/uninstall",
         headers=headers(),
         json={"request_key": "10000000-0000-4000-8000-000000000007"},
     )
@@ -893,7 +893,7 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
     assert stop_unbound.status_code == uninstall_unbound.status_code == 422
 
     malformed = client.post(
-        "/api/v1/recipes/mapping-plans/preview",
+        "/api/recipes/mapping-plans/preview",
         headers=headers(),
         json={
             "recipe_revision_id": 1,
@@ -907,8 +907,8 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
 def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:
     client, headers, _recipes, _audits = setup()
 
-    response = client.get(f"/api/v1/recipes/runs/{RUN}", headers=headers())
-    denied = client.get(f"/api/v1/recipes/runs/{RUN}", headers=headers("operator"))
+    response = client.get(f"/api/recipes/runs/{RUN}", headers=headers())
+    denied = client.get(f"/api/recipes/runs/{RUN}", headers=headers("operator"))
 
     assert response.status_code == 200
     assert denied.status_code == 403
@@ -939,6 +939,6 @@ def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None
     } & set(response.text.split('"'))
     paths = client.get("/openapi.json").json()["paths"]
     assert (
-        paths["/api/v1/recipes/runs/{run_id}"]["get"]["operationId"]
+        paths["/api/recipes/runs/{run_id}"]["get"]["operationId"]
         == "getRecipeRunStatus"
     )

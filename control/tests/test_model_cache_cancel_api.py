@@ -16,7 +16,7 @@ from vonk_control.model_cache_contract import ModelCacheOperationResponse
 from vonk_control.model_cache_progress import cache_progress
 
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"
-PATH = f"/api/v1/model-cache/operations/{OPERATION_ID}/cancel"
+PATH = f"/api/model-cache/operations/{OPERATION_ID}/cancel"
 
 
 def _client(service, role="administrator"):
@@ -57,7 +57,7 @@ def test_cancel_returns_canonical_operation_and_audits_action():
     service.cancel_operation.assert_called_once_with(OPERATION_ID)
     assert len(audits) == 1
     schema = client.get("/openapi.json").json()
-    endpoint = schema["paths"]["/api/v1/model-cache/operations/{operation_id}/cancel"]["post"]
+    endpoint = schema["paths"]["/api/model-cache/operations/{operation_id}/cancel"]["post"]
     assert endpoint["operationId"] == "cancelModelCacheOperation"
 
 

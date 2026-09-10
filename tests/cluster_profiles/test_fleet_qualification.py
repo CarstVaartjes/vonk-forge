@@ -66,7 +66,7 @@ class _Client:
             for key, value in responses.items()
         }
         self._library: dict[str, dict[str, object]] = {}
-        page = self.responses.get(("GET", "/api/v1/library/recipes"))
+        page = self.responses.get(("GET", "/api/library/recipes"))
         if isinstance(page, Mapping) and isinstance(page.get("recipes"), list):
             for recipe in page["recipes"]:
                 if not isinstance(recipe, Mapping):
@@ -86,7 +86,7 @@ class _Client:
         query: object = None,
     ) -> dict[str, object]:
         self.calls.append((method, path, payload, query))
-        if method == "GET" and path == "/api/v1/library/recipes" and self._library:
+        if method == "GET" and path == "/api/library/recipes" and self._library:
             return {
                 "schema_version": 2,
                 "generated_at": "2026-09-07T00:00:00Z",
@@ -94,7 +94,7 @@ class _Client:
                 "freshness_policy": {},
                 "recipes": [item["summary"] for item in self._library.values()],
             }
-        if method == "GET" and path.startswith("/api/v1/library/recipes/"):
+        if method == "GET" and path.startswith("/api/library/recipes/"):
             recipe_id = path.rsplit("/", 1)[-1]
             if recipe_id in self._library:
                 value = self._library[recipe_id]["detail"]
@@ -401,13 +401,13 @@ def test_plan_reads_exact_role_disk_from_top_level_library_topology() -> None:
     recipe["topology"]["roles"][0]["resources"]["disk"] = disk
     client = _Client(
         {
-            ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/library/recipes"): {
+            ("GET", "/api/fleet"): _fleet(1),
+            ("GET", "/api/library/recipes"): {
                 "repository": "CarstVaartjes/vonk-forge-recipes",
                 "commit": "b" * 40,
                 "recipes": [recipe],
             },
-            ("GET", f"/api/v1/library/recipes/{recipe_id}"): {
+            ("GET", f"/api/library/recipes/{recipe_id}"): {
                 "selected_revision": {
                     "id": revision_id,
                     "content_sha256": "c" * 64,
@@ -438,8 +438,8 @@ def test_intent_digest_ignores_observed_fleet_drift_but_evidence_snapshot_change
         node["inventory"]["host_memory_free_bytes"] = memory
         client = _Client(
             {
-                ("GET", "/api/v1/fleet"): fleet,
-                ("GET", "/api/v1/library/recipes"): {
+                ("GET", "/api/fleet"): fleet,
+                ("GET", "/api/library/recipes"): {
                     "repository": "CarstVaartjes/vonk-forge-recipes",
                     "commit": "b" * 40,
                     "recipes": [recipe],
@@ -465,8 +465,8 @@ def test_intent_digest_binds_catalog_authority_and_fixture_manifest() -> None:
         fleet["authority_revision"] = authority
         client = _Client(
             {
-                ("GET", "/api/v1/fleet"): fleet,
-                ("GET", "/api/v1/library/recipes"): {
+                ("GET", "/api/fleet"): fleet,
+                ("GET", "/api/library/recipes"): {
                     "repository": "CarstVaartjes/vonk-forge-recipes",
                     "commit": commit,
                     "recipes": [recipe],
@@ -504,8 +504,8 @@ def test_node_pins_require_explicit_single_spark_recipes_and_known_authority() -
     )
     client = _Client(
         {
-            ("GET", "/api/v1/fleet"): _fleet(1),
-            ("GET", "/api/v1/library/recipes"): {
+            ("GET", "/api/fleet"): _fleet(1),
+            ("GET", "/api/library/recipes"): {
                 "repository": "test",
                 "commit": "b" * 40,
                 "recipes": [_recipe("tiny")],
@@ -518,8 +518,8 @@ def test_node_pins_require_explicit_single_spark_recipes_and_known_authority() -
     dual = _recipe("dual", nodes=2)
     dual_client = _Client(
         {
-            ("GET", "/api/v1/fleet"): _fleet(2),
-            ("GET", "/api/v1/library/recipes"): {
+            ("GET", "/api/fleet"): _fleet(2),
+            ("GET", "/api/library/recipes"): {
                 "repository": "test",
                 "commit": "b" * 40,
                 "recipes": [dual],
@@ -546,8 +546,8 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
     def planned(allowed: frozenset[str]) -> dict[str, object]:
         client = _Client(
             {
-                ("GET", "/api/v1/fleet"): _fleet(2),
-                ("GET", "/api/v1/library/recipes"): {
+                ("GET", "/api/fleet"): _fleet(2),
+                ("GET", "/api/library/recipes"): {
                     "repository": "test",
                     "commit": "b" * 40,
                     "recipes": [recipe],
@@ -568,8 +568,8 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
     unpinned = build_plan(
         _Client(
             {
-                ("GET", "/api/v1/fleet"): _fleet(2),
-                ("GET", "/api/v1/library/recipes"): {
+                ("GET", "/api/fleet"): _fleet(2),
+                ("GET", "/api/library/recipes"): {
                     "repository": "test",
                     "commit": "b" * 40,
                     "recipes": [recipe],
@@ -663,12 +663,12 @@ def test_transient_blocker_is_retried_under_same_campaign_intent(
     assert first["plan_digest"] == second["plan_digest"]
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [],
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/fleet"): _fleet(1),
         }
     )
     ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
@@ -697,7 +697,7 @@ def test_storage_capacity_is_previewed_and_never_auto_evicts(tmp_path: Path) -> 
     node_id = "spk_" + "1" * 32
     fleet = _fleet(1)
     fleet["nodes"][0]["id"] = node_id
-    client = _Client({("GET", "/api/v1/fleet"): fleet})
+    client = _Client({("GET", "/api/fleet"): fleet})
     ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
     runner = QualificationRunner(client, ledger, RunnerOptions())
 
@@ -729,7 +729,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
         node["reservations"] = {"disk_bytes": 0}
     sizes = {"a": 3, "b": 3, "c": 3, "d": 3, "e": 5}
     temporary = {"a": 0, "b": 1, "c": 2, "d": 3, "e": 0}
-    responses: dict[tuple[str, str], object] = {("GET", "/api/v1/fleet"): fleet}
+    responses: dict[tuple[str, str], object] = {("GET", "/api/fleet"): fleet}
     items = []
     for index, (slug, size) in enumerate(sizes.items(), start=1):
         recipe_id = f"00000000-0000-4000-8000-{index:012d}"
@@ -749,7 +749,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
                 "artifact_identities": [],
             }
         )
-        responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
+        responses[("GET", f"/api/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
                 "content_sha256": _recipe_digest(),
@@ -813,7 +813,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
     for node in drifted_fleet["nodes"]:
         node["inventory"]["disk_free_bytes"] += 1
     drifted_responses = dict(responses)
-    drifted_responses[("GET", "/api/v1/fleet")] = drifted_fleet
+    drifted_responses[("GET", "/api/fleet")] = drifted_fleet
     drifted = QualificationRunner(
         _Client(drifted_responses), runner.ledger, RunnerOptions()
     )
@@ -832,7 +832,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
     resident_detail = json.loads(
         json.dumps(
             responses[
-                ("GET", "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001")
+                ("GET", "/api/library/recipes/00000000-0000-4000-8000-000000000001")
             ]
         )
     )
@@ -841,7 +841,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
         if candidate["node_ids"] == assigned_nodes:
             candidate["installation_ids"] = ["installation-a"]
     resident_runner = QualificationRunner(
-        _Client({("GET", "/api/v1/fleet"): full_fleet}),
+        _Client({("GET", "/api/fleet"): full_fleet}),
         EvidenceLedger(tmp_path / "resident-capacity.jsonl"),
         RunnerOptions(),
     )
@@ -876,13 +876,13 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
             responses[
                 (
                     "GET",
-                    "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001",
+                    "/api/library/recipes/00000000-0000-4000-8000-000000000001",
                 )
             ]
         )
     )
     runtime_drift = QualificationRunner(
-        _Client({("GET", "/api/v1/fleet"): drift_fleet}),
+        _Client({("GET", "/api/fleet"): drift_fleet}),
         EvidenceLedger(tmp_path / "runtime-capacity-drift.jsonl"),
         RunnerOptions(),
     )
@@ -903,7 +903,7 @@ def test_global_capacity_backtracking_finds_order_independent_balanced_plan(
     for node in constrained["nodes"]:
         node["inventory"]["disk_free_bytes"] = 10_000_000_002
     blocked_responses = dict(responses)
-    blocked_responses[("GET", "/api/v1/fleet")] = constrained
+    blocked_responses[("GET", "/api/fleet")] = constrained
     blocked_ledger = EvidenceLedger(tmp_path / "blocked-capacity.jsonl")
     blocked = QualificationRunner(
         _Client(blocked_responses), blocked_ledger, RunnerOptions()
@@ -978,10 +978,10 @@ def test_node_pin_filters_capacity_and_resume_rejects_candidate_escape(
     first = QualificationRunner(
         _Client(
             {
-                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail(
+                ("GET", f"/api/library/recipes/{recipe_id}"): detail(
                     (pinned_node, other_node)
                 ),
-                ("GET", "/api/v1/fleet"): fleet,
+                ("GET", "/api/fleet"): fleet,
             }
         ),
         ledger,
@@ -1002,8 +1002,8 @@ def test_node_pin_filters_capacity_and_resume_rejects_candidate_escape(
     resumed = QualificationRunner(
         _Client(
             {
-                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail((other_node,)),
-                ("GET", "/api/v1/fleet"): fleet,
+                ("GET", f"/api/library/recipes/{recipe_id}"): detail((other_node,)),
+                ("GET", "/api/fleet"): fleet,
             }
         ),
         ledger,
@@ -1081,8 +1081,8 @@ def test_pinned_lane_only_blocks_uncertain_installation_on_its_node(
     runner = QualificationRunner(
         _Client(
             {
-                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail,
-                ("GET", "/api/v1/fleet"): _fleet(2),
+                ("GET", f"/api/library/recipes/{recipe_id}"): detail,
+                ("GET", "/api/fleet"): _fleet(2),
             }
         ),
         EvidenceLedger(tmp_path / f"uncertain-{expected_blocked}.jsonl"),
@@ -1147,12 +1147,12 @@ def test_apply_honors_persisted_capacity_execution_order(
     plan = _campaign_plan(items, options)
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [],
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/fleet"): _fleet(1),
         }
     )
     ledger = EvidenceLedger(tmp_path / "ordered-apply.jsonl")
@@ -1234,8 +1234,8 @@ def test_capacity_plan_binds_staging_build_and_controller_safety_floor(
     runner = QualificationRunner(
         _Client(
             {
-                ("GET", "/api/v1/fleet"): fleet,
-                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail,
+                ("GET", "/api/fleet"): fleet,
+                ("GET", f"/api/library/recipes/{recipe_id}"): detail,
             }
         ),
         EvidenceLedger(tmp_path / "staging-capacity.jsonl"),
@@ -1258,7 +1258,7 @@ def test_capacity_search_explores_recipe_order_for_transient_peaks(
     fleet = _fleet(1)
     fleet["nodes"][0]["id"] = node_id
     fleet["nodes"][0]["inventory"]["disk_free_bytes"] = 10_000_000_150
-    responses: dict[tuple[str, str], object] = {("GET", "/api/v1/fleet"): fleet}
+    responses: dict[tuple[str, str], object] = {("GET", "/api/fleet"): fleet}
     items = []
     for index, (slug, persistent, temporary) in enumerate(
         (("a", 100, 0), ("b", 1, 100)), start=1
@@ -1280,7 +1280,7 @@ def test_capacity_search_explores_recipe_order_for_transient_peaks(
                 "artifact_identities": [],
             }
         )
-        responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
+        responses[("GET", f"/api/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
                 "content_sha256": _recipe_digest(),
@@ -1370,8 +1370,8 @@ def test_dual_capacity_charges_build_temp_to_rank_zero_builder(
     runner = QualificationRunner(
         _Client(
             {
-                ("GET", "/api/v1/fleet"): fleet,
-                ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail,
+                ("GET", "/api/fleet"): fleet,
+                ("GET", f"/api/library/recipes/{recipe_id}"): detail,
             }
         ),
         EvidenceLedger(tmp_path / "dual-builder.jsonl"),
@@ -1401,12 +1401,12 @@ def test_failed_capacity_provider_blocks_dependent_before_mutation(
     plan = _campaign_plan(items, options)
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [],
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): _fleet(1),
+            ("GET", "/api/fleet"): _fleet(1),
         }
     )
     ledger = EvidenceLedger(tmp_path / "provider-block.jsonl")
@@ -1480,7 +1480,7 @@ def test_capacity_resume_replans_when_dedup_provider_becomes_ineligible(
         "roles": ["solo"],
     }
     items: list[dict[str, object]] = []
-    responses: dict[tuple[str, str], object] = {("GET", "/api/v1/fleet"): fleet}
+    responses: dict[tuple[str, str], object] = {("GET", "/api/fleet"): fleet}
     for index, slug in enumerate(("a-provider", "z-consumer"), start=1):
         recipe_id = f"00000000-0000-4000-8000-{index:012d}"
         revision_id = f"10000000-0000-4000-8000-{index:012d}"
@@ -1498,7 +1498,7 @@ def test_capacity_resume_replans_when_dedup_provider_becomes_ineligible(
             "artifact_identities": [dict(artifact)],
         }
         items.append(item)
-        responses[("GET", f"/api/v1/library/recipes/{recipe_id}")] = {
+        responses[("GET", f"/api/library/recipes/{recipe_id}")] = {
             "selected_revision": {
                 "id": revision_id,
                 "content_sha256": _recipe_digest(),
@@ -1532,7 +1532,7 @@ def test_capacity_resume_replans_when_dedup_provider_becomes_ineligible(
     changed = dict(responses)
     provider_path = (
         "GET",
-        "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001",
+        "/api/library/recipes/00000000-0000-4000-8000-000000000001",
     )
     provider_detail = json.loads(json.dumps(changed[provider_path]))
     provider_detail["placement"][0]["recommendations"][0]["eligible"] = False
@@ -1614,7 +1614,7 @@ def test_apply_rejects_placement_escape_before_mapping_or_build(
     key = "vonk/tiny"
     client = _Client(
         {
-            ("GET", f"/api/v1/library/recipes/{recipe_id}"): {
+            ("GET", f"/api/library/recipes/{recipe_id}"): {
                 "selected_revision": {
                     "id": revision_id,
                     "content_sha256": _recipe_digest(),
@@ -1649,7 +1649,7 @@ def test_apply_rejects_placement_escape_before_mapping_or_build(
         )
 
     assert [call[:2] for call in client.calls] == [
-        ("GET", f"/api/v1/library/recipes/{recipe_id}")
+        ("GET", f"/api/library/recipes/{recipe_id}")
     ]
 
 
@@ -1672,12 +1672,12 @@ def test_apply_continues_after_recipe_failure_but_exits_nonzero(
     runner = QualificationRunner(
         _Client(
             {
-                ("GET", "/api/v1/library"): {
+                ("GET", "/api/library"): {
                     "models": [],
                     "unlinked_recipes": [],
                     "next_cursor": None,
                 },
-                ("GET", "/api/v1/fleet"): _fleet(1),
+                ("GET", "/api/fleet"): _fleet(1),
             }
         ),
         ledger,
@@ -1846,13 +1846,13 @@ def test_plan_reads_current_library_detail_for_revision_and_license() -> None:
     )
     client = _Client(
         {
-            ("GET", "/api/v1/fleet"): _fleet(),
-            ("GET", "/api/v1/library/recipes"): {
+            ("GET", "/api/fleet"): _fleet(),
+            ("GET", "/api/library/recipes"): {
                 "repository": "CarstVaartjes/vonk-forge-recipes",
                 "commit": "b" * 40,
                 "recipes": [recipe],
             },
-            ("GET", "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001"): {},
+            ("GET", "/api/library/recipes/00000000-0000-4000-8000-000000000001"): {},
         }
     )
 
@@ -1910,7 +1910,7 @@ def test_operation_monitor_resumes_submitted_operation_without_resubmitting(
     )
     client = _Client(
         {
-            ("GET", "/api/v1/recipes/operations/operation-1"): {
+            ("GET", "/api/recipes/operations/operation-1"): {
                 "id": "operation-1",
                 "state": "succeeded",
                 "owner_id": "installation-1",
@@ -1931,7 +1931,7 @@ def test_operation_monitor_resumes_submitted_operation_without_resubmitting(
 
     assert result["owner_id"] == "installation-1"
     assert client.calls == [
-        ("GET", "/api/v1/recipes/operations/operation-1", None, None)
+        ("GET", "/api/recipes/operations/operation-1", None, None)
     ]
 
 
@@ -1974,7 +1974,7 @@ class _CleanupFailureClient(_Client):
         extra_headers: object = None,
         query: object = None,
     ) -> dict[str, object]:
-        if path == "/api/v1/recipes/stop-plans/preview":
+        if path == "/api/recipes/stop-plans/preview":
             self.calls.append((method, path, payload, query))
             raise RuntimeError("cleanup failure")
         return super().request(
@@ -1995,7 +1995,7 @@ def test_service_smoke_uses_published_https_route_and_records_digest() -> None:
 
     client = _Client(
         {
-            ("GET", "/api/v1/endpoints/qual-tiny"): {
+            ("GET", "/api/endpoints/qual-tiny"): {
                 "alias": "qual-tiny",
                 "api_base": "https://models.example.test/v1",
                 "node_id": "spk_" + "1" * 32,
@@ -2059,12 +2059,12 @@ def test_apply_records_static_blockers_without_mutation(tmp_path: Path) -> None:
     ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
     client = _Client(
         {
-            ("GET", "/api/v1/library"): {
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [],
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): _fleet(0),
+            ("GET", "/api/fleet"): _fleet(0),
         }
     )
 
@@ -2142,8 +2142,8 @@ def test_resume_never_uninstalls_a_preexisting_installation(tmp_path: Path) -> N
     }
     client = _Client(
         {
-            ("GET", "/api/v1/library/recipes/recipe-1"): detail,
-            ("POST", "/api/v1/recipes/image-distribution-plans/preview"): {
+            ("GET", "/api/library/recipes/recipe-1"): detail,
+            ("POST", "/api/recipes/image-distribution-plans/preview"): {
                 "plan_digest": "f" * 64
             },
         }
@@ -2207,13 +2207,13 @@ def test_final_residency_is_per_revision_and_includes_stale_retained_installs(
     fleet["nodes"][0]["id"] = node_id
     client = _Client(
         {
-            ("GET", f"/api/v1/library/recipes/{recipe_id}"): detail,
-            ("GET", "/api/v1/library"): {
+            ("GET", f"/api/library/recipes/{recipe_id}"): detail,
+            ("GET", "/api/library"): {
                 "models": [],
                 "unlinked_recipes": [summary],
                 "next_cursor": None,
             },
-            ("GET", "/api/v1/fleet"): fleet,
+            ("GET", "/api/fleet"): fleet,
         }
     )
     ledger = EvidenceLedger(tmp_path / "residency.jsonl")
@@ -2314,8 +2314,8 @@ def test_warm_smoke_failure_always_attempts_release_and_preserves_primary_error(
     }
     client = _CleanupFailureClient(
         {
-            ("GET", "/api/v1/library/recipes/recipe-1"): detail,
-            ("POST", "/api/v1/recipes/image-distribution-plans/preview"): {
+            ("GET", "/api/library/recipes/recipe-1"): detail,
+            ("POST", "/api/recipes/image-distribution-plans/preview"): {
                 "plan_digest": "f" * 64
             },
         }
@@ -2344,7 +2344,7 @@ def test_warm_smoke_failure_always_attempts_release_and_preserves_primary_error(
     ]
     assert failures[-1]["payload"]["error"] == "cleanup failure"
     assert failures[-1]["payload"]["original_error"] == "original smoke failure"
-    assert any(call[1] == "/api/v1/recipes/stop-plans/preview" for call in client.calls)
+    assert any(call[1] == "/api/recipes/stop-plans/preview" for call in client.calls)
 
 
 @pytest.mark.parametrize(
@@ -2399,8 +2399,8 @@ def test_initial_smoke_failure_always_attempts_release_and_preserves_primary_err
     }
     client = _CleanupFailureClient(
         {
-            ("GET", "/api/v1/library/recipes/recipe-1"): detail,
-            ("POST", "/api/v1/recipes/image-distribution-plans/preview"): {
+            ("GET", "/api/library/recipes/recipe-1"): detail,
+            ("POST", "/api/recipes/image-distribution-plans/preview"): {
                 "plan_digest": "f" * 64
             },
         }

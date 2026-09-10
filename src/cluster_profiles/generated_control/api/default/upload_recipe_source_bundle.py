@@ -30,7 +30,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "put",
-        "url": "/api/v1/catalog/source-bundles/{sha256}".format(sha256=sha256,),
+        "url": "/api/catalog/source-bundles/{sha256}".format(sha256=sha256,),
     }
 
     _kwargs["content"] = body.payload

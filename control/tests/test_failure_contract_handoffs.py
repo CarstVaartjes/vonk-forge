@@ -129,12 +129,12 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
             .result
         )
     client, headers = client_for(sessions, tmp_path)
-    response = client.get(f"/api/v1/operations/{operation.id}", headers=headers)
+    response = client.get(f"/api/operations/{operation.id}", headers=headers)
     assert response.status_code == 200, response.text
     assert response.json()["failure"] == serialize_json_value(
         AgentFailureResult.model_validate(persisted)
     )
-    listing = client.get("/api/v1/operations", headers=headers)
+    listing = client.get("/api/operations", headers=headers)
     assert listing.status_code == 200, listing.text
     assert listing.json()["operations"][0]["failure"] == response.json()["failure"]
 
@@ -179,9 +179,9 @@ def test_cache_failure_is_identical_in_persistence_family_api_and_activity(
         persisted = session.get(ModelCacheOperation, operation.id).payload["failure"]
     client, headers = client_for(sessions, tmp_path, cache)
     family = client.get(
-        f"/api/v1/model-cache/operations/{operation.id}", headers=headers
+        f"/api/model-cache/operations/{operation.id}", headers=headers
     )
-    activity = client.get(f"/api/v1/operations/{operation.id}", headers=headers)
+    activity = client.get(f"/api/operations/{operation.id}", headers=headers)
     assert family.status_code == activity.status_code == 200, (
         family.text,
         activity.text,
@@ -208,7 +208,7 @@ def test_cache_failure_is_identical_in_persistence_family_api_and_activity(
             cache.get_operation(operation.id)
         assert (
             client.get(
-                f"/api/v1/model-cache/operations/{operation.id}", headers=headers
+                f"/api/model-cache/operations/{operation.id}", headers=headers
             ).status_code
             == 503
         )

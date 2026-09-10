@@ -469,9 +469,9 @@ def _admin(
             "apply": False,
         }
     endpoint = {
-        "fleet": "/api/v1/fleet",
-        "jobs": "/api/v1/jobs",
-        "audit": "/api/v1/audit",
+        "fleet": "/api/fleet",
+        "jobs": "/api/jobs",
+        "audit": "/api/audit",
     }[args.admin_command]
     return client.get(endpoint)  # type: ignore[attr-defined, no-any-return]
 

@@ -254,14 +254,14 @@ def _api_page_limit(api: TestClient, path: str) -> int:
 
 
 def _library_models(api: TestClient) -> list[Any]:
-    limit = _api_page_limit(api, "/api/v1/library")
+    limit = _api_page_limit(api, "/api/library")
     cursor: str | None = None
     models: list[Any] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
-        response = api.get("/api/v1/library", params=params)
+        response = api.get("/api/library", params=params)
         assert response.status_code == 200, response.text
         page = LibrarySnapshot.model_validate_json(response.content)
         models.extend(page.models)
@@ -272,14 +272,14 @@ def _library_models(api: TestClient) -> list[Any]:
 
 
 def _library_recipes(api: TestClient) -> list[Any]:
-    limit = _api_page_limit(api, "/api/v1/library/recipes")
+    limit = _api_page_limit(api, "/api/library/recipes")
     cursor: str | None = None
     recipes: list[Any] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
-        response = api.get("/api/v1/library/recipes", params=params)
+        response = api.get("/api/library/recipes", params=params)
         assert response.status_code == 200, response.text
         page = LibraryRecipeList.model_validate_json(response.content)
         recipes.extend(page.recipes)
@@ -444,7 +444,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     multi_model_detail_seen = False
     for row in corpus.index["recipes"]:
         digest = _recipe_key(row)[2]
-        detail_response = api.get(f"/api/v1/library/recipes/{by_digest[digest].recipe_id}")
+        detail_response = api.get(f"/api/library/recipes/{by_digest[digest].recipe_id}")
         assert detail_response.status_code == 200, detail_response.text
         detail = LibraryRecipeDetail.model_validate_json(detail_response.content)
         assert detail.recipe.content_sha256 == digest
@@ -471,15 +471,15 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 
     forbidden_paths = {
-        "/api/v1/catalog/entities",
-        "/api/v1/catalog/entities/{entity_id}",
-        "/api/v1/catalog/entities/{entity_id}/draft",
-        "/api/v1/catalog/entities/{entity_id}/resolve",
-        "/api/v1/catalog/recipes",
-        "/api/v1/catalog/recipes/{recipe_id}",
-        "/api/v1/catalog/imports/global",
-        "/api/v1/catalog/imports/recipe-library",
-        "/api/v1/catalog/imports/public",
+        "/api/catalog/entities",
+        "/api/catalog/entities/{entity_id}",
+        "/api/catalog/entities/{entity_id}/draft",
+        "/api/catalog/entities/{entity_id}/resolve",
+        "/api/catalog/recipes",
+        "/api/catalog/recipes/{recipe_id}",
+        "/api/catalog/imports/global",
+        "/api/catalog/imports/recipe-library",
+        "/api/catalog/imports/public",
     }
     assert not forbidden_paths.intersection(
         path for _method, path in CATALOG_OPERATION_IDS
@@ -496,9 +496,9 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         for _method, path in CATALOG_OPERATION_IDS
     )
     canonical_library_paths = {
-        "/api/v1/library",
-        "/api/v1/library/recipes",
-        "/api/v1/library/recipes/{recipe_id}",
+        "/api/library",
+        "/api/library/recipes",
+        "/api/library/recipes/{recipe_id}",
     }
     assert canonical_library_paths <= set(api.app.openapi()["paths"])
     operation_ids = {

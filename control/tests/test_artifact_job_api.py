@@ -147,7 +147,7 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
     }
     assert "oneOf" in components["ParameterDefinition"]
 
-    status = paths["/api/v1/artifact-jobs/{job_id}"]["get"]
+    status = paths["/api/artifact-jobs/{job_id}"]["get"]
     assert status["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ArtifactJobResponse"
     }
@@ -164,7 +164,7 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
         "waiting-for-operator",
     ]
 
-    upload = paths["/api/v1/artifact-jobs/{job_id}/inputs/{name}"]["put"]
+    upload = paths["/api/artifact-jobs/{job_id}/inputs/{name}"]["put"]
     assert upload["x-vonk-streaming-transport"] is True
     assert upload["requestBody"] == {
         "required": True,
@@ -175,7 +175,7 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
         },
     }
 
-    download = paths["/api/v1/artifact-jobs/{job_id}/results/{sha256}"]["get"]
+    download = paths["/api/artifact-jobs/{job_id}/results/{sha256}"]["get"]
     assert download["x-vonk-streaming-transport"] is True
     assert download["responses"]["200"]["content"] == {
         "*/*": {"schema": {"type": "string", "format": "binary"}}
@@ -191,7 +191,7 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     digest = hashlib.sha256(content).hexdigest()
 
     upload = client.put(
-        f"/api/v1/artifact-jobs/{JOB_ID}/inputs/input.png",
+        f"/api/artifact-jobs/{JOB_ID}/inputs/input.png",
         content=content,
         headers={
             "Content-Type": "image/png",
@@ -238,7 +238,7 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     }
 
     result_digest = hashlib.sha256(b"png-result").hexdigest()
-    download = client.get(f"/api/v1/artifact-jobs/{JOB_ID}/results/{result_digest}")
+    download = client.get(f"/api/artifact-jobs/{JOB_ID}/results/{result_digest}")
     assert download.status_code == 200
     assert download.content == b"png-result"
     assert download.headers["content-type"] == "image/png"
@@ -265,13 +265,13 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
     assert accepted.parameters == {"future_argument": {"enabled": True}}
 
     unknown_field = client.post(
-        f"/api/v1/recipes/runs/{JOB_ID}/artifact-jobs",
+        f"/api/recipes/runs/{JOB_ID}/artifact-jobs",
         json={**body, "unexpected": True},
     )
     assert unknown_field.status_code == 422
 
     coerced_scalar = client.post(
-        f"/api/v1/recipes/runs/{JOB_ID}/artifact-jobs",
+        f"/api/recipes/runs/{JOB_ID}/artifact-jobs",
         json={**body, "timeout_seconds": "60"},
     )
     assert coerced_scalar.status_code == 422

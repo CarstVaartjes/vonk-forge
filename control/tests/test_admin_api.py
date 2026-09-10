@@ -40,7 +40,7 @@ def test_admin_proposal_returns_canonical_patch_and_digest() -> None:
     )
     client = TestClient(app)
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
-    response = client.post("/api/v1/proposals", headers={"Authorization": f"Bearer {token}"}, json={
+    response = client.post("/api/proposals", headers={"Authorization": f"Bearer {token}"}, json={
         "base_revision": "a" * 64,
         "changes": [{"path": "docs/audits/authority-review.json", "document": {"kind": "authority-review"}}],
     })
@@ -75,7 +75,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
 
     assert (
         client.post(
-            "/api/v1/proposals",
+            "/api/proposals",
             headers=headers,
             json={**document, "unexpected": True},
         ).status_code
@@ -83,7 +83,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
     )
     assert (
         client.post(
-            "/api/v1/proposals",
+            "/api/proposals",
             headers=headers,
             json={**document, "base_revision": 7},
         ).status_code
@@ -121,7 +121,7 @@ def test_authority_document_reads_require_authentication() -> None:
     codec = TokenCodec(b"k" * 32)
     app = create_app(jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), admin=AdminServices(Repository(), Proposals(), None))
     client = TestClient(app)
-    assert client.get("/api/v1/authority", params={"revision": "a" * 64}).status_code == 401
+    assert client.get("/api/authority", params={"revision": "a" * 64}).status_code == 401
 
 
 def test_spa_falls_back_to_index_for_client_routes_but_not_assets(tmp_path) -> None:

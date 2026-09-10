@@ -153,11 +153,11 @@ class RecipeImageAvailabilityErrorResponse(StrictJSONModel):
 
 
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
-    ("post", "/api/v1/library/recipe-image-availability"): "startRecipeImageAvailability",
-    ("get", "/api/v1/library/recipe-image-availability"): "listRecipeImageAvailability",
-    ("get", "/api/v1/library/recipe-image-availability/{operation_id}"):
+    ("post", "/api/library/recipe-image-availability"): "startRecipeImageAvailability",
+    ("get", "/api/library/recipe-image-availability"): "listRecipeImageAvailability",
+    ("get", "/api/library/recipe-image-availability/{operation_id}"):
         "getRecipeImageAvailability",
-    ("post", "/api/v1/library/recipe-image-availability/{operation_id}/retry"):
+    ("post", "/api/library/recipe-image-availability/{operation_id}/retry"):
         "retryRecipeImageAvailability",
 }
 
@@ -295,7 +295,7 @@ def install_recipe_image_availability_routes(
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
     @app.post(
-        "/api/v1/library/recipe-image-availability",
+        "/api/library/recipe-image-availability",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
         responses=bounded_error_responses(401, 403, 409, 422, 503)
@@ -310,7 +310,7 @@ def install_recipe_image_availability_routes(
             return JSONResponse(status_code=409, content=_failure_response(error).model_dump(mode="json"))
 
     @app.get(
-        "/api/v1/library/recipe-image-availability",
+        "/api/library/recipe-image-availability",
         response_model=RecipeImageAvailabilityListResponse,
         responses=bounded_error_responses(400, 401, 422, 503),
         operation_id="listRecipeImageAvailability",
@@ -344,7 +344,7 @@ def install_recipe_image_availability_routes(
         return RecipeImageAvailabilityListResponse(operations=[_view_document(row) for row in rows], total=total, next_cursor=next_cursor)
 
     @app.get(
-        "/api/v1/library/recipe-image-availability/{operation_id}",
+        "/api/library/recipe-image-availability/{operation_id}",
         response_model=RecipeImageAvailabilityResponse,
         responses=bounded_error_responses(401, 404, 422, 503)
         | {409: {"model": RecipeImageAvailabilityErrorResponse}},
@@ -357,7 +357,7 @@ def install_recipe_image_availability_routes(
             raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
 
     @app.post(
-        "/api/v1/library/recipe-image-availability/{operation_id}/retry",
+        "/api/library/recipe-image-availability/{operation_id}/retry",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503)

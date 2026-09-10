@@ -62,15 +62,15 @@ def test_published_contract_graph_only_leaves_engine_and_document_values_open() 
 def test_download_responses_describe_actual_bytes_and_range_support() -> None:
     paths = _application().openapi()["paths"]
     downloads = {
-        "/agent/v1/source-bundles/{source_sha256}": (
+        "/agent/source-bundles/{source_sha256}": (
             "application/vnd.vonk-forge.source-bundle.v1+tar",
             False,
         ),
-        "/agent/v1/artifacts/{sha256}": ("application/octet-stream", True),
-        "/agent/v1/distribution/objects/{sha256}": ("application/octet-stream", True),
-        "/agent/v1/workload-tuf/metadata/{name}": ("application/json", False),
-        "/agent/v1/workload-tuf/targets/{name}": ("application/octet-stream", False),
-        "/api/v1/jobs/{job_id}/logs/{digest}": ("text/plain", False),
+        "/agent/artifacts/{sha256}": ("application/octet-stream", True),
+        "/agent/distribution/objects/{sha256}": ("application/octet-stream", True),
+        "/agent/workload-tuf/metadata/{name}": ("application/json", False),
+        "/agent/workload-tuf/targets/{name}": ("application/octet-stream", False),
+        "/api/jobs/{job_id}/logs/{digest}": ("text/plain", False),
     }
     for path, (media_type, partial) in downloads.items():
         operation = paths[path]["get"]
@@ -98,7 +98,7 @@ def test_fleet_stream_describes_canonical_frames_under_only_its_actual_media_typ
     None
 ):
     schema = _application().openapi()
-    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    operation = schema["paths"]["/api/fleet/stream"]["get"]
     assert operation["x-vonk-streaming-transport"] is True
     content = operation["responses"]["200"]["content"]
     assert set(content) == {"text/event-stream"}

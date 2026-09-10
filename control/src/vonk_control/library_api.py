@@ -15,9 +15,9 @@ from .library_contract import (
 from .operation_api import bounded_error_responses
 
 LIBRARY_OPERATION_IDS = {
-    ("get", "/api/v1/library"): "listLibrary",
-    ("get", "/api/v1/library/recipes"): "listLibraryRecipes",
-    ("get", "/api/v1/library/recipes/{recipe_id}"): "getLibraryRecipe",
+    ("get", "/api/library"): "listLibrary",
+    ("get", "/api/library/recipes"): "listLibraryRecipes",
+    ("get", "/api/library/recipes/{recipe_id}"): "getLibraryRecipe",
 }
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -46,7 +46,7 @@ def install_library_routes(
         return projection
 
     @app.get(
-        "/api/v1/library",
+        "/api/library",
         response_model=LibrarySnapshot,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listLibrary",
@@ -68,7 +68,7 @@ def install_library_routes(
             ) from None
 
     @app.get(
-        "/api/v1/library/recipes",
+        "/api/library/recipes",
         response_model=LibraryRecipeList,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listLibraryRecipes",
@@ -90,7 +90,7 @@ def install_library_routes(
             ) from None
 
     @app.get(
-        "/api/v1/library/recipes/{recipe_id}",
+        "/api/library/recipes/{recipe_id}",
         response_model=LibraryRecipeDetail,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getLibraryRecipe",

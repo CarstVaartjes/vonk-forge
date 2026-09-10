@@ -250,7 +250,7 @@ def test_publication_fetch_does_not_forward_controller_authorization() -> None:
         trust_env=False,
         transport=transport,
     ) as controller:
-        controller_response = controller.get("/api/v1/library")
+        controller_response = controller.get("/api/library")
 
     assert publication.status_code == 200
     assert controller_response.status_code == 204
@@ -325,7 +325,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         assert remote_entry["package"] == entry["package"]
 
         sync = client.post(
-            "/api/v1/catalog/managed-recipes/sync",
+            "/api/catalog/managed-recipes/sync",
             json={"request_key": request_key, "expected_commit": index["source_commit"]},
         )
         assert sync.status_code == 200, sync.text[:1024]
@@ -340,7 +340,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         )
         assert sync_payload["problems"] == []
 
-        library_response = client.get("/api/v1/library", params={"limit": 512})
+        library_response = client.get("/api/library", params={"limit": 512})
         assert library_response.status_code == 200, library_response.text[:1024]
         library_payload = library_response.json()
         library = LibrarySnapshot.from_dict(library_payload)
@@ -365,7 +365,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
             assert model["model_document"]["capabilities"] == expected_models[key]["capabilities"]
         LibrarySnapshot.from_dict(library_payload)
 
-        recipe_list_response = client.get("/api/v1/library/recipes", params={"limit": 512})
+        recipe_list_response = client.get("/api/library/recipes", params={"limit": 512})
         assert recipe_list_response.status_code == 200, recipe_list_response.text[:1024]
         recipe_list_payload = recipe_list_response.json()
         recipe_list = LibraryRecipeList.from_dict(recipe_list_payload)
@@ -391,7 +391,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         }
 
         detail_response = client.get(
-            f"/api/v1/library/recipes/{candidate_summary['recipe_id']}"
+            f"/api/library/recipes/{candidate_summary['recipe_id']}"
         )
         assert detail_response.status_code == 200, detail_response.text[:1024]
         detail_payload = detail_response.json()

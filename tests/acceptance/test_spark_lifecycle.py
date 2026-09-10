@@ -775,7 +775,7 @@ class LocalBrowserController:
         ).encode("utf-8")
         status_code, headers, response = self.raw_request(
             "POST",
-            "/api/v1/auth/login",
+            "/api/auth/login",
             body,
             {
                 "Accept": "application/json",
@@ -1831,7 +1831,7 @@ class SparkLifecycle:
         assert self.control is not None
         try:
             _, response = self.control.request(
-                "POST", "/api/v1/agents/enrollments/grants", {"ttl_seconds": 600}
+                "POST", "/api/agents/enrollments/grants", {"ttl_seconds": 600}
             )
             grant = require_object(response, "enrollment grant")
         except SliceError as error:
@@ -1945,7 +1945,7 @@ class SparkLifecycle:
         try:
             _, sync_payload = self.control.request(
                 "POST",
-                "/api/v1/catalog/managed-recipes/sync",
+                "/api/catalog/managed-recipes/sync",
                 {
                     "request_key": self._canary_request_key(
                         fixture, node_id, "catalog-sync"
@@ -1965,7 +1965,7 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary catalog sync is incomplete")
             _, listed_payload = self.control.request(
-                "GET", "/api/v1/library/recipes"
+                "GET", "/api/library/recipes"
             )
             listed = require_object(listed_payload, "synthetic canary Library")
             recipes = listed.get("recipes")
@@ -1992,7 +1992,7 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary Recipe identity is invalid")
             _, detail_payload = self.control.request(
-                "GET", f"/api/v1/library/recipes/{recipe_id}"
+                "GET", f"/api/library/recipes/{recipe_id}"
             )
             detail = require_object(detail_payload, "synthetic canary Recipe detail")
             model_documents = detail.get("model_documents")
@@ -2038,7 +2038,7 @@ class SparkLifecycle:
                 },
             }
             _, preview_payload = self.control.request(
-                "POST", "/api/v1/recipes/run-switch-plans/preview", run_request
+                "POST", "/api/recipes/run-switch-plans/preview", run_request
             )
             preview = require_object(preview_payload, "synthetic canary run preview")
             plan_digest = preview.get("plan_digest")
@@ -2082,7 +2082,7 @@ class SparkLifecycle:
             completed.append("source-verified")
             _, operation_payload = self.control.request(
                 "POST",
-                "/api/v1/recipes/run-switches",
+                "/api/recipes/run-switches",
                 {
                     **run_request,
                     "plan_digest": plan_digest,
@@ -2153,7 +2153,7 @@ class SparkLifecycle:
                 },
             }
             _, stop_preview_payload = self.control.request(
-                "POST", "/api/v1/recipes/run-switch-stops/preview", stop_request
+                "POST", "/api/recipes/run-switch-stops/preview", stop_request
             )
             stop_preview = require_object(
                 stop_preview_payload, "synthetic canary stop preview"
@@ -2174,7 +2174,7 @@ class SparkLifecycle:
                 raise LifecycleError("synthetic canary stop is not admitted")
             _, stop_payload = self.control.request(
                 "POST",
-                "/api/v1/recipes/run-switch-stops",
+                "/api/recipes/run-switch-stops",
                 {
                     **stop_request,
                     "plan_digest": stop_digest,
@@ -2193,7 +2193,7 @@ class SparkLifecycle:
             completed.append("route-withdrawn")
             _, uninstall_preview_payload = self.control.request(
                 "POST",
-                "/api/v1/recipes/uninstall-plans/preview",
+                "/api/recipes/uninstall-plans/preview",
                 {"installation_id": installation_id},
             )
             uninstall_preview = require_object(
@@ -2212,7 +2212,7 @@ class SparkLifecycle:
                 raise LifecycleError("synthetic canary uninstall is not admitted")
             _, uninstall_payload = self.control.request(
                 "POST",
-                f"/api/v1/recipes/installations/{installation_id}/uninstall",
+                f"/api/recipes/installations/{installation_id}/uninstall",
                 {
                     "plan_digest": uninstall_digest,
                     "request_key": self._canary_request_key(
@@ -2321,7 +2321,7 @@ class SparkLifecycle:
                 raise LifecycleError(f"{label} did not converge")
             time.sleep(1)
             _, payload = self.control.request(
-                "GET", f"/api/v1/recipes/run-switches/{operation_id}"
+                "GET", f"/api/recipes/run-switches/{operation_id}"
             )
             operation = require_object(payload, label)
         if (
@@ -2384,7 +2384,7 @@ class SparkLifecycle:
                 raise LifecycleError("synthetic canary uninstall did not converge")
             time.sleep(1)
             _, payload = self.control.request(
-                "GET", f"/api/v1/recipes/operations/{operation_id}"
+                "GET", f"/api/recipes/operations/{operation_id}"
             )
             operation = require_object(payload, "synthetic canary uninstall")
         if (
@@ -2422,7 +2422,7 @@ class SparkLifecycle:
             allowed = (200,) if published else (404, 503)
             try:
                 status, payload = self.control.request(
-                    "GET", f"/api/v1/endpoints/{alias}", allowed=allowed
+                    "GET", f"/api/endpoints/{alias}", allowed=allowed
                 )
             except SliceError:
                 status, payload = 0, None
@@ -2585,7 +2585,7 @@ class SparkLifecycle:
                     os.fspath(bundle),
                     "--key",
                     os.fspath(key_v1),
-                    f"https://{AGENT_HOST}:8443/agent/v1/source-bundles/{'0' * 64}",
+                    f"https://{AGENT_HOST}:8443/agent/source-bundles/{'0' * 64}",
                 ],
                 cwd=Path("/"),
                 timeout=40,
@@ -2749,7 +2749,7 @@ class SparkLifecycle:
                         "installed package identity is unexpected: "
                         + ",".join(package_mismatches)
                     )
-                _, response = self.control.request("GET", "/api/v1/agents")
+                _, response = self.control.request("GET", "/api/agents")
                 agents = require_object(response, "agents").get("agents")
                 matching = [
                     agent

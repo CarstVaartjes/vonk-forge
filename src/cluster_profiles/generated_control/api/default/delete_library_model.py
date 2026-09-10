@@ -29,7 +29,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/library/models/{model_content_sha256}/delete".format(model_content_sha256=model_content_sha256,),
+        "url": "/api/library/models/{model_content_sha256}/delete".format(model_content_sha256=model_content_sha256,),
     }
 
     _kwargs["json"] = body.to_dict()

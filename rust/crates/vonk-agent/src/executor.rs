@@ -2997,7 +2997,7 @@ mod tests {
                     };
                     let headers = std::str::from_utf8(&request[..header_end]).unwrap();
                     assert!(
-                        headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n")
+                        headers.starts_with("POST /agent/recipe-runs/observations HTTP/1.1\r\n")
                     );
                     let content_length = headers
                         .lines()

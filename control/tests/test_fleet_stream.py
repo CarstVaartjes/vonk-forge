@@ -1138,7 +1138,7 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
 
 def test_sse_route_requires_cookie_before_header_parse_and_sets_exact_headers() -> None:
     client, browser_session, bearer, stream = _browser_client()
-    route = "/api/v1/fleet/stream"
+    route = "/api/fleet/stream"
 
     assert client.get(route, headers={"last-event-id": "+1"}).status_code == 401
     assert client.get(

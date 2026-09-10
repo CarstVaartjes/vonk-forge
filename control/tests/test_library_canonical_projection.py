@@ -193,7 +193,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         projection=projection,
     )
     client = TestClient(app)
-    response = client.get("/api/v1/library")
+    response = client.get("/api/library")
     assert response.status_code == 200
     payload = response.json()
     assert len(payload["models"]) == expected_model_count
@@ -213,7 +213,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     library_model_schema = app.openapi()["components"]["schemas"]["LibraryModel"]
     assert library_model_schema["properties"]["recipes"]["minItems"] == 0
     assert library_model_schema["properties"]["recipes"]["maxItems"] == 512
-    recipe_response = client.get("/api/v1/library/recipes")
+    recipe_response = client.get("/api/library/recipes")
     assert recipe_response.status_code == 200
     recipe_payload = recipe_response.json()
     assert len(recipe_payload["recipes"]) == expected_recipe_count
@@ -237,7 +237,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         selection.model_dump(mode="json") for selection in first_expected.models
     ]
     recipe_id = payload["models"][0]["recipes"][0]["recipe_id"]
-    detail = client.get(f"/api/v1/library/recipes/{recipe_id}")
+    detail = client.get(f"/api/library/recipes/{recipe_id}")
     assert detail.status_code == 200
     assert detail.json()["recipe"]["recipe_id"] == recipe_id
     detail_payload = detail.json()
@@ -308,7 +308,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     )
     multi_model_recipe = RecipeDefinition.model_validate(multi_model_row["document"])
     multi_model_detail = client.get(
-        "/api/v1/library/recipes/"
+        "/api/library/recipes/"
         + recipe_ids_by_slug[multi_model_recipe.identity.slug]
     )
     assert multi_model_detail.status_code == 200

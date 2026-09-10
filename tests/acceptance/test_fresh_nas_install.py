@@ -645,7 +645,7 @@ def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -
             f"{enrollment_hostname}:8443:{nas_ip}",
             "--cacert",
             str(root),
-            f"https://{enrollment_hostname}:8443/agent/v1/bootstrap",
+            f"https://{enrollment_hostname}:8443/agent/bootstrap",
         ],
         cwd=bundle,
     )
@@ -925,7 +925,7 @@ def verify_routed_service_behavior(
             hostname=control_hostname,
             connect_host=control_hostname,
             path=(
-                "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
+                "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
                 "query=up%7Bjob%3D%22vonk-control%22%7D"
             ),
             headers={"Authorization": grafana_authorization},

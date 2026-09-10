@@ -386,7 +386,7 @@ impl AgentHttpClient {
         )?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/claim")?)
+            .post(self.endpoint("/agent/claim")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -405,7 +405,7 @@ impl AgentHttpClient {
         let body = canonical_json(result).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/result")?)
+            .post(self.endpoint("/agent/result")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -474,7 +474,7 @@ impl AgentHttpClient {
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/heartbeat")?)
+            .post(self.endpoint("/agent/heartbeat")?)
             .header("content-type", "application/json")
             .timeout(Duration::from_secs(15))
             .body(body)
@@ -521,7 +521,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/host-runtime/grant")?)
+            .post(self.endpoint("/agent/host-runtime/grant")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -583,7 +583,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/recipe-runs/observation-grants")?)
+            .post(self.endpoint("/agent/recipe-runs/observation-grants")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -646,7 +646,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/agent-upgrade/activation-grant")?)
+            .post(self.endpoint("/agent/agent-upgrade/activation-grant")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -687,7 +687,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/agent-upgrade/grant")?)
+            .post(self.endpoint("/agent/agent-upgrade/grant")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -709,7 +709,7 @@ impl AgentHttpClient {
         let response = self
             .current_client()
             .get(self.endpoint(&format!(
-                "/agent/v1/recipe-installations/{installation_id}/spec"
+                "/agent/recipe-installations/{installation_id}/spec"
             ))?)
             .send()
             .await?;
@@ -736,7 +736,7 @@ impl AgentHttpClient {
         }
         let response = self
             .current_client()
-            .get(self.endpoint(&format!("/agent/v1/source-bundles/{source_sha256}"))?)
+            .get(self.endpoint(&format!("/agent/source-bundles/{source_sha256}"))?)
             .send()
             .await?;
         classify_response(&response)?;
@@ -759,7 +759,7 @@ impl AgentHttpClient {
         }
         let mut response = self
             .current_client()
-            .get(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}"))?)
+            .get(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/inputs/{sha256}"))?)
             .send()
             .await?;
         classify_response(&response)?;
@@ -827,7 +827,7 @@ impl AgentHttpClient {
         let file = tokio::fs::File::open(path).await?;
         let response = self
             .current_client()
-            .put(self.endpoint(&format!("/agent/v1/recipe-jobs/{job_id}/outputs/{sha256}"))?)
+            .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
             .header("x-vonk-artifact-name", name)
             .header("content-type", media_type)
             .header("content-length", expected_bytes)
@@ -865,7 +865,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         use tokio::io::AsyncSeekExt;
-        let endpoint = self.endpoint(&format!("/agent/v1/recipe-builds/{build_id}/image"))?;
+        let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
         // Retry from the Controller's persisted cursor, never from optimistic sent bytes.
         for attempt in 0..3 {
             let transfer = async {
@@ -954,7 +954,7 @@ impl AgentHttpClient {
         destination: &Path,
     ) -> Result<(), ClientError> {
         self.download_content_addressed(
-            &format!("/agent/v1/artifacts/{sha256}"),
+            &format!("/agent/artifacts/{sha256}"),
             None,
             sha256,
             expected_bytes,
@@ -998,7 +998,7 @@ impl AgentHttpClient {
         }
         let response = self
             .current_client()
-            .get(self.endpoint(&format!("/agent/v1/distribution/manifests/{plan_digest}"))?)
+            .get(self.endpoint(&format!("/agent/distribution/manifests/{plan_digest}"))?)
             .send()
             .await?;
         classify_response(&response)?;
@@ -1212,7 +1212,7 @@ impl AgentHttpClient {
             let end = expected_bytes
                 .saturating_sub(1)
                 .min(offset.saturating_add(8 * 1024 * 1024 - 1));
-            let mut url = self.endpoint(&format!("/agent/v1/distribution/objects/{sha256}"))?;
+            let mut url = self.endpoint(&format!("/agent/distribution/objects/{sha256}"))?;
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
             let attempt: Result<(), ClientError> = async {
@@ -1422,7 +1422,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/inventory")?)
+            .post(self.endpoint("/agent/inventory")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1444,7 +1444,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
+            .post(self.endpoint("/agent/recipe-runs/observations")?)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -1468,7 +1468,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/telemetry")?)
+            .post(self.endpoint("/agent/telemetry")?)
             .timeout(Duration::from_secs(2))
             .header("content-type", "application/json")
             .body(body)
@@ -1494,7 +1494,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/renew")?)
+            .post(self.endpoint("/agent/renew")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
@@ -1559,7 +1559,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/renew/recover")?)
+            .post(self.endpoint("/agent/renew/recover")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
@@ -1586,7 +1586,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .post(self.endpoint("/agent/v1/renew/activate")?)
+            .post(self.endpoint("/agent/renew/activate")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
@@ -2277,7 +2277,7 @@ mod tests {
                     .split_whitespace()
                     .nth(1)
                     .unwrap();
-                if target.starts_with("/agent/v1/distribution/manifests/") {
+                if target.starts_with("/agent/distribution/manifests/") {
                     write!(
                         stream,
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -2497,7 +2497,7 @@ mod tests {
                     .unwrap();
                     continue;
                 }
-                if target.starts_with("/agent/v1/distribution/manifests/") {
+                if target.starts_with("/agent/distribution/manifests/") {
                     assert!(target.ends_with(&assignment.plan_digest));
                     write!(
                         stream,
@@ -2515,7 +2515,7 @@ mod tests {
                     continue;
                 }
                 let (path, query) = target.split_once('?').unwrap();
-                assert!(path.starts_with("/agent/v1/distribution/objects/"));
+                assert!(path.starts_with("/agent/distribution/objects/"));
                 assert!(query == format!("plan_digest={}", assignment.plan_digest));
                 let digest = path.rsplit('/').next().unwrap();
                 let source = objects.get(digest).unwrap();
@@ -2679,7 +2679,7 @@ mod tests {
             .iter()
             .filter(|request| {
                 String::from_utf8_lossy(request).contains(&format!(
-                    "/agent/v1/distribution/objects/{}",
+                    "/agent/distribution/objects/{}",
                     assignment.oci_archive_sha256
                 ))
             })
@@ -3288,7 +3288,7 @@ mod tests {
         assert!(
             std::str::from_utf8(headers)
                 .unwrap()
-                .starts_with("POST /agent/v1/heartbeat HTTP/1.1\r\n")
+                .starts_with("POST /agent/heartbeat HTTP/1.1\r\n")
         );
         assert_eq!(
             serde_json::from_slice::<AgentProgress>(body).unwrap(),
@@ -3518,7 +3518,7 @@ mod tests {
         assert!(
             std::str::from_utf8(headers)
                 .unwrap()
-                .starts_with("POST /agent/v1/recipe-runs/observation-grants HTTP/1.1\r\n")
+                .starts_with("POST /agent/recipe-runs/observation-grants HTTP/1.1\r\n")
         );
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
         assert_eq!(body["node_id"], client.node_id);
@@ -3676,7 +3676,7 @@ mod tests {
             .map(|index| (&request[..index], &request[index + 4..]))
             .unwrap();
         let headers = std::str::from_utf8(headers).unwrap().to_ascii_lowercase();
-        assert!(headers.starts_with("post /agent/v1/telemetry http/1.1\r\n"));
+        assert!(headers.starts_with("post /agent/telemetry http/1.1\r\n"));
         assert!(headers.contains("content-type: application/json"));
 
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
@@ -3839,7 +3839,7 @@ mod tests {
             result.is_ok(),
             "large upload inherited ordinary timeout: {result:?}"
         );
-        assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
+        assert!(request.starts_with(b"PUT /agent/recipe-builds/"));
         assert!(request.ends_with(b"archive"));
         let headers = String::from_utf8_lossy(&request);
         assert!(headers.contains("x-vonk-upload-offset: 9"));

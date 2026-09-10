@@ -215,18 +215,18 @@ def test_openapi_exposes_only_current_document_contract() -> None:
 
     paths = client.app.openapi()["paths"]
 
-    assert not any(path.startswith("/api/v1/profiles/") for path in paths)
-    assert "/api/v1/reconciliations/plan" not in paths
-    assert "/api/v1/reconciliations" not in paths
-    assert not any(path.startswith("/api/v1/reconciliations/") for path in paths)
-    assert not any(path.startswith("/api/v1/updates") for path in paths)
-    assert "/api/v1/documents" not in paths
+    assert not any(path.startswith("/api/profiles/") for path in paths)
+    assert "/api/reconciliations/plan" not in paths
+    assert "/api/reconciliations" not in paths
+    assert not any(path.startswith("/api/reconciliations/") for path in paths)
+    assert not any(path.startswith("/api/updates") for path in paths)
+    assert "/api/documents" not in paths
 
 
 def test_job_activity_summaries_include_their_authoritative_creation_time() -> None:
     client, operator, *_ = _client()
 
-    response = client.get("/api/v1/jobs", headers=operator)
+    response = client.get("/api/jobs", headers=operator)
 
     assert response.status_code == 200
     assert response.json()["jobs"] == [
@@ -287,11 +287,11 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     client, operator, *_ = _client(operations=services)
 
     listed = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"state": "uncertain", "node_id": NODE_ID},
     )
-    detail = client.get(f"/api/v1/operations/{item['id']}", headers=operator)
+    detail = client.get(f"/api/operations/{item['id']}", headers=operator)
 
     assert listed.status_code == 200
     assert listed.json()["schema_version"] == 2
@@ -346,10 +346,10 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
-    assert client.get("/api/v1/operations", headers=operator).status_code == 503
+    assert client.get("/api/operations", headers=operator).status_code == 503
     assert (
         client.get(
-            "/api/v1/operations/33333333-3333-4333-8333-333333333333",
+            "/api/operations/33333333-3333-4333-8333-333333333333",
             headers=operator,
         ).status_code
         == 503
@@ -427,15 +427,15 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get("/api/v1/operations", headers=operator, params={"limit": "1"})
+    first = client.get("/api/operations", headers=operator, params={"limit": "1"})
     second = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"limit": "1", "cursor": first.json()["next_cursor"]},
     )
-    detail = client.get("/api/v1/operations/run-1", headers=operator)
+    detail = client.get("/api/operations/run-1", headers=operator)
     filtered = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"node_id": "spk_" + "2" * 32},
     )
@@ -545,15 +545,15 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get("/api/v1/operations", headers=operator, params={"limit": 1})
-    detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
+    first = client.get("/api/operations", headers=operator, params={"limit": 1})
+    detail = client.get(f"/api/operations/{newest_id}", headers=operator)
     second = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"limit": 1, "cursor": first.json()["next_cursor"]},
     )
     filtered = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"node_id": second_node},
     )
@@ -595,7 +595,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
 def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 
-    visual = client.get("/api/v1/fleet", headers=operator)
+    visual = client.get("/api/fleet", headers=operator)
 
     assert visual.status_code == 200
     assert visual.json() == {
@@ -619,7 +619,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
     }
 
     response = client.get(
-        f"/api/v1/nodes/{NODE_ID}/telemetry",
+        f"/api/nodes/{NODE_ID}/telemetry",
         headers=operator,
         params=params,
     )
@@ -656,7 +656,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
     ]
     assert (
         client.get(
-            f"/api/v1/nodes/{NODE_ID}/telemetry",
+            f"/api/nodes/{NODE_ID}/telemetry",
             headers=operator,
             params={key: value for key, value in params.items() if key != "resolution"},
         ).status_code
@@ -664,7 +664,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
     )
     assert (
         client.get(
-            f"/api/v1/nodes/{NODE_ID}/telemetry",
+            f"/api/nodes/{NODE_ID}/telemetry",
             headers=operator,
             params={**params, "maximum_points": "3001"},
         ).status_code
@@ -673,7 +673,7 @@ def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
     assert len(projection.history_calls) == 1
     assert (
         client.get(
-            f"/api/v1/nodes/{'spk_' + 'f' * 32}/telemetry",
+            f"/api/nodes/{'spk_' + 'f' * 32}/telemetry",
             headers=operator,
             params=params,
         ).status_code
@@ -686,7 +686,7 @@ def test_operator_can_rename_node_without_mutating_technical_identity() -> None:
     client, operator, _, audits = _client(fleet_projection=projection)
 
     response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
+        f"/api/nodes/{NODE_ID}/profile",
         headers=operator,
         json={"display_name": "  Studio Spark  "},
     )
@@ -714,7 +714,7 @@ def test_node_rename_maps_database_failures_to_bounded_unavailability() -> None:
     client, operator, *_ = _client(fleet_projection=UnavailableFleet())
 
     response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
+        f"/api/nodes/{NODE_ID}/profile",
         headers=operator,
         json={"display_name": "Studio Spark"},
     )
@@ -732,7 +732,7 @@ def test_node_rename_rejects_invalid_friendly_names(display_name: str) -> None:
     client, operator, *_ = _client(fleet_projection=projection)
 
     response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
+        f"/api/nodes/{NODE_ID}/profile",
         headers=operator,
         json={"display_name": display_name},
     )
@@ -746,7 +746,7 @@ def test_viewer_cannot_rename_node() -> None:
     client, viewer, *_ = _client(fleet_projection=projection, role="viewer")
 
     response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
+        f"/api/nodes/{NODE_ID}/profile",
         headers=viewer,
         json={"display_name": "Studio Spark"},
     )
@@ -758,8 +758,8 @@ def test_viewer_cannot_rename_node() -> None:
 def test_optional_operation_projections_fail_closed_when_unavailable() -> None:
     client, operator, _reconciler, _audits = _client()
 
-    endpoint = client.get("/api/v1/endpoints/model-a", headers=operator)
-    agents = client.get("/api/v1/agents", headers=operator)
+    endpoint = client.get("/api/endpoints/model-a", headers=operator)
+    agents = client.get("/api/agents", headers=operator)
 
     assert endpoint.status_code == 503
     assert endpoint.json() == {"detail": "endpoint publication unavailable"}
@@ -771,7 +771,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     client, operator, _reconciler, _audits = _client()
 
     response = client.get(
-        "/api/v1/jobs/11111111-1111-4111-8111-111111111111",
+        "/api/jobs/11111111-1111-4111-8111-111111111111",
         headers=operator,
     )
 
@@ -961,7 +961,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
 
     projection_client, projection_operator, *_ = _client(operations=services)
     agent_response = projection_client.get(
-        "/api/v1/agents", headers=projection_operator
+        "/api/agents", headers=projection_operator
     )
     assert agent_response.status_code == 200
     assert agent_response.json() == serialize_json_value(
@@ -970,7 +970,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
 
     (generation / "litellm.json").unlink()
     endpoint_client, operator, _reconciler, _audits = _client(operations=services)
-    unavailable = endpoint_client.get("/api/v1/endpoints/model-a", headers=operator)
+    unavailable = endpoint_client.get("/api/endpoints/model-a", headers=operator)
     assert unavailable.status_code == 503
     assert unavailable.json() == {"detail": "endpoint publication unavailable"}
     (generation / "litellm.json").write_bytes(litellm_bytes)
@@ -1001,17 +1001,17 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
 
     unexpected = client.post(
-        f"/api/v1/jobs/{job_id}/resume",
+        f"/api/jobs/{job_id}/resume",
         headers=operator,
         json={"force": True},
     )
     request_id = "33333333-3333-4333-8333-333333333333"
     response = client.post(
-        f"/api/v1/jobs/{job_id}/resume",
+        f"/api/jobs/{job_id}/resume",
         headers={**operator, "X-Request-ID": request_id},
     )
     viewer_client, viewer, *_ = _client(operations=services, role="viewer")
-    denied = viewer_client.post(f"/api/v1/jobs/{job_id}/resume", headers=viewer)
+    denied = viewer_client.post(f"/api/jobs/{job_id}/resume", headers=viewer)
 
     assert unexpected.status_code == 422
     assert denied.status_code == 403
@@ -1471,7 +1471,7 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
 
     for cursor in (other_job_cursor, operation_cursor):
         response = client.get(
-            f"/api/v1/jobs/{job_id}",
+            f"/api/jobs/{job_id}",
             headers=operator,
             params={"target_cursor": cursor, "limit": 1},
         )
@@ -1561,18 +1561,18 @@ def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> No
     schema = operation_api.admin_openapi_schema(client.app)
     paths = schema["paths"]
 
-    assert paths["/api/v1/fleet"]["get"]["operationId"] == "getFleetStatus"
-    assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
+    assert paths["/api/fleet"]["get"]["operationId"] == "getFleetStatus"
+    assert paths["/api/fleet"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert "/api/v1/nodes/status" not in paths
+    assert "/api/nodes/status" not in paths
     assert "NodeStatus" not in schema["components"]["schemas"]
     assert "FleetStatusResponse" not in schema["components"]["schemas"]
-    assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
+    assert paths["/api/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
         "getNodeTelemetryHistory"
     )
-    assert paths["/api/v1/fleet/stream"]["get"]["operationId"] == ("streamFleetEvents")
-    assert paths["/api/v1/fleet/stream"]["get"]["parameters"] == [
+    assert paths["/api/fleet/stream"]["get"]["operationId"] == ("streamFleetEvents")
+    assert paths["/api/fleet/stream"]["get"]["parameters"] == [
         {
             "description": (
                 "Optional durable Fleet cursor; duplicate and numeric validity "
@@ -1591,8 +1591,8 @@ def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> No
             },
         }
     ]
-    assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
-    assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
+    assert paths["/api/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
+    assert paths["/api/fleet"]["get"]["security"] == [{"BearerAuth": []}]
 
 
 def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
@@ -1601,18 +1601,18 @@ def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
     schema = operation_api.admin_openapi_schema(client.app)
     paths = schema["paths"]
 
-    assert paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"] == (
+    assert paths["/api/recipes/stop-plans/preview"]["post"]["operationId"] == (
         "previewRecipeStop"
     )
     assert (
-        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
+        paths["/api/recipes/uninstall-plans/preview"]["post"]["operationId"]
         == "previewRecipeUninstall"
     )
-    assert paths["/api/v1/recipes/runs/{run_id}/stop"]["post"]["operationId"] == (
+    assert paths["/api/recipes/runs/{run_id}/stop"]["post"]["operationId"] == (
         "stopRecipeRun"
     )
     assert (
-        paths["/api/v1/recipes/installations/{installation_id}/uninstall"]["post"][
+        paths["/api/recipes/installations/{installation_id}/uninstall"]["post"][
             "operationId"
         ]
         == "uninstallRecipe"

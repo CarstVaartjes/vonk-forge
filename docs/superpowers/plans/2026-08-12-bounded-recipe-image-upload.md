@@ -104,7 +104,7 @@ async fn recipe_image_upload_overrides_the_short_ordinary_request_timeout() {
     let request = server.join().unwrap();
 
     assert!(result.is_ok(), "large upload inherited ordinary timeout: {result:?}");
-    assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
+    assert!(request.starts_with(b"PUT /agent/recipe-builds/"));
     assert!(request.ends_with(b"accepted archive"));
 }
 ```

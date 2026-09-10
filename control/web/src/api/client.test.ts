@@ -88,10 +88,10 @@ it("uses canonical Activity and linked application retry endpoints with stable r
   const abort = new AbortController();
   expect((await api.retryLibraryPlacement(oldId, {request_key: requestKey}, abort.signal)).retry_of_application_id).toBe(oldId);
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/operations"],
-    ["GET", `/api/v1/operations/${oldId}`],
-    ["POST", `/api/v1/fleet-profile-applications/${oldId}/retry`],
-    ["POST", `/api/v1/library/placements/${oldId}/retry`],
+    ["GET", "/api/operations"],
+    ["GET", `/api/operations/${oldId}`],
+    ["POST", `/api/fleet-profile-applications/${oldId}/retry`],
+    ["POST", `/api/library/placements/${oldId}/retry`],
   ]);
   expect(new URL(requests[0]!.url).searchParams.get("cursor")).toBe("next-page");
   for (const request of requests.slice(2)) expect(await request.clone().json()).toEqual({request_key: requestKey});
@@ -169,7 +169,7 @@ it("loads the current Fleet snapshot endpoint for browser Fleet data", async () 
     authority_revision: "a".repeat(64),
     nodes: [],
   });
-  expect(captured.map(request => new URL(request.url).pathname)).toEqual(["/api/v1/fleet"]);
+  expect(captured.map(request => new URL(request.url).pathname)).toEqual(["/api/fleet"]);
   expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
 });
 
@@ -183,9 +183,9 @@ it("uses distinct digest-bound Library action operations", async () => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
     const path = new URL(request.url).pathname;
-    if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
-    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
-    if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
+    if (path === "/api/library") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
+    if (path === "/api/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
+    if (path.startsWith("/api/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
       plan_digest: "plan-1", nodes: ["node-a", "node-b"], result: null,
@@ -218,26 +218,26 @@ it("uses distinct digest-bound Library action operations", async () => {
   controller.abort();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/library"],
-    ["GET", "/api/v1/library/recipes/recipe%2Fone"],
-    ["POST", "/api/v1/recipes/build-plans/preview"],
-    ["POST", "/api/v1/recipes/builds"],
-    ["POST", "/api/v1/recipes/mapping-plans/preview"],
-    ["POST", "/api/v1/recipes/mappings"],
-    ["POST", "/api/v1/recipes/image-distribution-plans/preview"],
-    ["POST", "/api/v1/recipes/image-distributions"],
-    ["POST", "/api/v1/recipes/install-plans/preview"],
-    ["POST", "/api/v1/recipes/installations"],
-    ["POST", "/api/v1/recipes/run-plans/preview"],
-    ["POST", "/api/v1/recipes/runs"],
-    ["POST", "/api/v1/recipes/stop-plans/preview"],
-    ["POST", "/api/v1/recipes/runs/run-1/stop"],
-    ["POST", "/api/v1/recipes/uninstall-plans/preview"],
-    ["POST", "/api/v1/recipes/installations/installation-1/uninstall"],
-    ["GET", "/api/v1/recipes/operations/operation-1"],
-    ["POST", "/api/v1/recipes/operations/operation-1/retry"],
-    ["GET", "/api/v1/recipes/runs/run-1"],
-    ["GET", "/api/v1/jobs/job-1"],
+    ["GET", "/api/library"],
+    ["GET", "/api/library/recipes/recipe%2Fone"],
+    ["POST", "/api/recipes/build-plans/preview"],
+    ["POST", "/api/recipes/builds"],
+    ["POST", "/api/recipes/mapping-plans/preview"],
+    ["POST", "/api/recipes/mappings"],
+    ["POST", "/api/recipes/image-distribution-plans/preview"],
+    ["POST", "/api/recipes/image-distributions"],
+    ["POST", "/api/recipes/install-plans/preview"],
+    ["POST", "/api/recipes/installations"],
+    ["POST", "/api/recipes/run-plans/preview"],
+    ["POST", "/api/recipes/runs"],
+    ["POST", "/api/recipes/stop-plans/preview"],
+    ["POST", "/api/recipes/runs/run-1/stop"],
+    ["POST", "/api/recipes/uninstall-plans/preview"],
+    ["POST", "/api/recipes/installations/installation-1/uninstall"],
+    ["GET", "/api/recipes/operations/operation-1"],
+    ["POST", "/api/recipes/operations/operation-1/retry"],
+    ["GET", "/api/recipes/runs/run-1"],
+    ["GET", "/api/jobs/job-1"],
   ]);
   expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
   expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", builder_node_id: "node-a", build_input_sha256: "build-plan", request_key: "00000000-0000-4000-8000-000000000001"});
@@ -261,7 +261,7 @@ it("uses the generated deployment and explicit upstream-check operations", async
   const api = new ApiClient();
   await api.deploymentProvenance();
   await api.modelCacheUpdates(undefined, true);
-  expect(urls[0].pathname).toBe("/api/v1/deployment-provenance");
+  expect(urls[0].pathname).toBe("/api/deployment-provenance");
   expect(urls[1].searchParams.get("check_upstream")).toBe("true");
 });
 
@@ -288,7 +288,7 @@ it("requests bounded node telemetry history through the generated operation", as
   );
 
   const url = new URL(captured!.url);
-  expect(url.pathname).toBe("/api/v1/nodes/spk_0123456789abcdef0123456789abcdef/telemetry");
+  expect(url.pathname).toBe("/api/nodes/spk_0123456789abcdef0123456789abcdef/telemetry");
   expect(Object.fromEntries(url.searchParams)).toEqual({
     end: "2026-08-15T12:00:00.000Z",
     maximum_points: "360",
@@ -347,28 +347,28 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["POST", "/api/v1/recipes/run-switch-plans/preview"],
-    ["POST", "/api/v1/recipes/run-switches"],
-    ["GET", "/api/v1/recipes/run-switches/run-operation"],
-    ["GET", "/api/v1/model-cache"],
-    ["GET", `/api/v1/model-cache/entries/${artifactDigest}`],
-    ["POST", "/api/v1/model-cache/download-preview"],
-    ["POST", "/api/v1/model-cache/download"],
-    ["POST", "/api/v1/model-cache/repair-preview"],
-    ["POST", "/api/v1/model-cache/repair"],
-    ["POST", "/api/v1/model-cache/eviction-preview"],
-    ["POST", "/api/v1/model-cache/evict"],
-    ["GET", "/api/v1/model-cache/updates"],
-    ["GET", "/api/v1/model-cache/operations"],
-    ["GET", "/api/v1/model-cache/operations/cache-operation"],
-    ["POST", "/api/v1/model-cache/operations/cache-operation/check-access-and-resume"],
-    ["POST", "/api/v1/library/recipe-image-availability"],
-    ["GET", "/api/v1/library/recipe-image-availability"],
-    ["GET", "/api/v1/library/recipe-image-availability/recipe-operation"],
-    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
-    ["GET", "/api/v1/nodes/spark-a/telemetry/current"],
-    ["GET", "/api/v1/nodes/spark-a/telemetry/capabilities"],
-    ["GET", "/api/v1/nodes/spark-a/telemetry/workloads"],
+    ["POST", "/api/recipes/run-switch-plans/preview"],
+    ["POST", "/api/recipes/run-switches"],
+    ["GET", "/api/recipes/run-switches/run-operation"],
+    ["GET", "/api/model-cache"],
+    ["GET", `/api/model-cache/entries/${artifactDigest}`],
+    ["POST", "/api/model-cache/download-preview"],
+    ["POST", "/api/model-cache/download"],
+    ["POST", "/api/model-cache/repair-preview"],
+    ["POST", "/api/model-cache/repair"],
+    ["POST", "/api/model-cache/eviction-preview"],
+    ["POST", "/api/model-cache/evict"],
+    ["GET", "/api/model-cache/updates"],
+    ["GET", "/api/model-cache/operations"],
+    ["GET", "/api/model-cache/operations/cache-operation"],
+    ["POST", "/api/model-cache/operations/cache-operation/check-access-and-resume"],
+    ["POST", "/api/library/recipe-image-availability"],
+    ["GET", "/api/library/recipe-image-availability"],
+    ["GET", "/api/library/recipe-image-availability/recipe-operation"],
+    ["POST", "/api/library/recipe-image-availability/recipe-operation/retry"],
+    ["GET", "/api/nodes/spark-a/telemetry/current"],
+    ["GET", "/api/nodes/spark-a/telemetry/capabilities"],
+    ["GET", "/api/nodes/spark-a/telemetry/workloads"],
   ]);
   expect(Object.fromEntries(new URL(requests[3]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
   expect(Object.fromEntries(new URL(requests[12]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
@@ -397,9 +397,9 @@ it("uses the durable retry endpoints for Run and NAS cache operations", async ()
   await api.retryRecipeAvailability("recipe-operation", {request_key: cacheKey});
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["POST", "/api/v1/recipes/run-switches/run-operation/retry"],
-    ["POST", "/api/v1/model-cache/operations/cache-operation/retry"],
-    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
+    ["POST", "/api/recipes/run-switches/run-operation/retry"],
+    ["POST", "/api/model-cache/operations/cache-operation/retry"],
+    ["POST", "/api/library/recipe-image-availability/recipe-operation/retry"],
   ]);
   expect(await requests[0]!.clone().json()).toEqual({schema_version: 2, request_key: runKey});
   expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});
@@ -414,7 +414,7 @@ it("cancels a pending rollout with the exact typed request and retry identity", 
   });
   const input = {schema_version: 2 as const, request_key: "00000000-0000-4000-8000-000000000405", reason: "Change of plan"};
   await new ApiClient().cancelRecipeRunSwitchOperation("run-operation", input);
-  expect(new URL(requests[0]!.url).pathname).toBe("/api/v1/recipes/run-switches/run-operation/cancel");
+  expect(new URL(requests[0]!.url).pathname).toBe("/api/recipes/run-switches/run-operation/cancel");
   expect(requests[0]!.method).toBe("POST");
   expect(await requests[0]!.json()).toEqual(input);
 });
@@ -474,22 +474,22 @@ it("uses the durable artifact-job routes and preserves raw upload authority", as
   await api.artifactJobResult("job-1");
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/artifact-jobs/capabilities"],
-    ["GET", "/api/v1/recipes/runs/run-1/artifact-jobs"],
-    ["POST", "/api/v1/recipes/runs/run-1/artifact-jobs"],
-    ["PUT", "/api/v1/artifact-jobs/job-1/inputs/prompt.txt"],
-    ["POST", "/api/v1/artifact-jobs/job-1/finalize"],
-    ["POST", "/api/v1/artifact-jobs/job-1/submit"],
-    ["GET", "/api/v1/artifact-jobs/job-1"],
-    ["POST", "/api/v1/artifact-jobs/job-1/cancel"],
-    ["GET", "/api/v1/artifact-jobs/job-1/result"],
+    ["GET", "/api/artifact-jobs/capabilities"],
+    ["GET", "/api/recipes/runs/run-1/artifact-jobs"],
+    ["POST", "/api/recipes/runs/run-1/artifact-jobs"],
+    ["PUT", "/api/artifact-jobs/job-1/inputs/prompt.txt"],
+    ["POST", "/api/artifact-jobs/job-1/finalize"],
+    ["POST", "/api/artifact-jobs/job-1/submit"],
+    ["GET", "/api/artifact-jobs/job-1"],
+    ["POST", "/api/artifact-jobs/job-1/cancel"],
+    ["GET", "/api/artifact-jobs/job-1/result"],
   ]);
   expect(requests[3].headers.get("Content-Type")).toBe("text/plain");
   expect(requests[3].headers.get("X-Content-SHA256")).toBe(file.sha256);
   expect(requests[3].headers.get("X-CSRF-Token")).toBe("artifact-csrf");
   expect(uploadBody).toBe(blob);
   expect(progress).toHaveBeenCalledWith({loaded: 5, total: 5});
-  expect(api.artifactJobResultUrl("job-1", "b".repeat(64))).toBe(`/api/v1/artifact-jobs/job-1/results/${"b".repeat(64)}`);
+  expect(api.artifactJobResultUrl("job-1", "b".repeat(64))).toBe(`/api/artifact-jobs/job-1/results/${"b".repeat(64)}`);
   expect(() => api.artifactJobResultUrl("job-1", "../unsafe")).toThrow("Unsafe artifact result digest");
 });
 
@@ -532,8 +532,8 @@ it("uses exact browser-auth documents and the CSRF cookie for server logout", as
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
     const path = new URL(request.url).pathname;
-    if (path === "/api/v1/auth/logout") return new Response(null, {status: 204});
-    if (path === "/api/v1/auth/cli-token") {
+    if (path === "/api/auth/logout") return new Response(null, {status: 204});
+    if (path === "/api/auth/cli-token") {
       return new Response("signed-cli-token\n", {status: 200, headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "X-Vonk-Token-Expires-At": "2026-09-12T09:30:00Z",
@@ -551,10 +551,10 @@ it("uses exact browser-auth documents and the CSRF cookie for server logout", as
   await api.logout();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/auth/session"],
-    ["POST", "/api/v1/auth/login"],
-    ["POST", "/api/v1/auth/cli-token"],
-    ["POST", "/api/v1/auth/logout"],
+    ["GET", "/api/auth/session"],
+    ["POST", "/api/auth/login"],
+    ["POST", "/api/auth/cli-token"],
+    ["POST", "/api/auth/logout"],
   ]);
   expect(await requests[1].clone().json()).toEqual({subject: "admin", password: "synthetic-test-password"});
   expect(requests[2].headers.get("X-CSRF-Token")).toBe("synthetic-csrf-value");
@@ -717,9 +717,9 @@ it("previews, applies, and reads one durable atomic Library placement", async ()
   expect(await api.libraryPlacement(placementId)).toEqual(application);
 
   expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
-    ["/api/v1/library/placements/preview", "POST"],
-    ["/api/v1/library/placements", "POST"],
-    [`/api/v1/library/placements/${placementId}`, "GET"],
+    ["/api/library/placements/preview", "POST"],
+    ["/api/library/placements", "POST"],
+    [`/api/library/placements/${placementId}`, "GET"],
   ]);
   expect(await captured[0]!.json()).toEqual(intent);
   expect(await captured[1]!.json()).toEqual({...intent, plan_digest: preview.plan_digest, request_key: requestKey});
@@ -751,8 +751,8 @@ it("previews and applies one digest-bound fleet-wide model deletion", async () =
   expect(await api.deleteLibraryModel(modelDigest, {plan_digest: plan.plan_digest, request_key: requestKey})).toEqual(operation);
 
   expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
-    ["/api/v1/library/model-deletion-plans/preview", "POST"],
-    [`/api/v1/library/models/${modelDigest}/delete`, "POST"],
+    ["/api/library/model-deletion-plans/preview", "POST"],
+    [`/api/library/models/${modelDigest}/delete`, "POST"],
   ]);
   expect(await captured[0]!.json()).toEqual({model_content_sha256: modelDigest});
   expect(await captured[1]!.json()).toEqual({plan_digest: plan.plan_digest, request_key: requestKey});

@@ -47,41 +47,41 @@ _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 _DIGEST = r"^[0-9a-f]{64}$"
 
 RECIPE_OPERATION_IDS = {
-    ("post", "/api/v1/recipes/mapping-plans/preview"): "previewRecipeMapping",
-    ("post", "/api/v1/recipes/mappings"): "createRecipeMapping",
-    ("post", "/api/v1/recipes/build-plans/preview"): "previewRecipeBuild",
-    ("post", "/api/v1/recipes/source-checks"): "checkRecipeBuildSource",
-    ("post", "/api/v1/recipes/builds"): "buildRecipe",
+    ("post", "/api/recipes/mapping-plans/preview"): "previewRecipeMapping",
+    ("post", "/api/recipes/mappings"): "createRecipeMapping",
+    ("post", "/api/recipes/build-plans/preview"): "previewRecipeBuild",
+    ("post", "/api/recipes/source-checks"): "checkRecipeBuildSource",
+    ("post", "/api/recipes/builds"): "buildRecipe",
     (
         "post",
-        "/api/v1/recipes/image-distribution-plans/preview",
+        "/api/recipes/image-distribution-plans/preview",
     ): "previewRecipeImageDistribution",
-    ("post", "/api/v1/recipes/image-distributions"): "distributeRecipeImage",
-    ("post", "/api/v1/recipes/install-plans/preview"): "previewRecipeInstall",
-    ("post", "/api/v1/recipes/installations"): "installRecipe",
-    ("post", "/api/v1/recipes/run-plans/preview"): "previewRecipeRun",
-    ("post", "/api/v1/recipes/runs"): "startRecipeRun",
-    ("post", "/api/v1/recipes/job-runs"): "activateRecipeJobRun",
-    ("post", "/api/v1/recipes/stop-plans/preview"): "previewRecipeStop",
+    ("post", "/api/recipes/image-distributions"): "distributeRecipeImage",
+    ("post", "/api/recipes/install-plans/preview"): "previewRecipeInstall",
+    ("post", "/api/recipes/installations"): "installRecipe",
+    ("post", "/api/recipes/run-plans/preview"): "previewRecipeRun",
+    ("post", "/api/recipes/runs"): "startRecipeRun",
+    ("post", "/api/recipes/job-runs"): "activateRecipeJobRun",
+    ("post", "/api/recipes/stop-plans/preview"): "previewRecipeStop",
     (
         "post",
-        "/api/v1/recipes/uninstall-plans/preview",
+        "/api/recipes/uninstall-plans/preview",
     ): "previewRecipeUninstall",
-    ("get", "/api/v1/recipes/runs/{run_id}"): "getRecipeRunStatus",
-    ("get", "/api/v1/recipes/operations/{operation_id}"): "getRecipeOperation",
-    ("post", "/api/v1/recipes/operations/{operation_id}/retry"): "retryRecipeOperation",
-    ("post", "/api/v1/recipes/runs/{run_id}/stop"): "stopRecipeRun",
+    ("get", "/api/recipes/runs/{run_id}"): "getRecipeRunStatus",
+    ("get", "/api/recipes/operations/{operation_id}"): "getRecipeOperation",
+    ("post", "/api/recipes/operations/{operation_id}/retry"): "retryRecipeOperation",
+    ("post", "/api/recipes/runs/{run_id}/stop"): "stopRecipeRun",
     (
         "post",
-        "/api/v1/recipes/installations/{installation_id}/uninstall",
+        "/api/recipes/installations/{installation_id}/uninstall",
     ): "uninstallRecipe",
     (
         "post",
-        "/api/v1/library/model-deletion-plans/preview",
+        "/api/library/model-deletion-plans/preview",
     ): "previewLibraryModelDeletion",
     (
         "post",
-        "/api/v1/library/models/{model_content_sha256}/delete",
+        "/api/library/models/{model_content_sha256}/delete",
     ): "deleteLibraryModel",
 }
 
@@ -504,7 +504,7 @@ def install_recipe_operation_routes(
         )
 
     @app.post(
-        "/api/v1/recipes/mapping-plans/preview",
+        "/api/recipes/mapping-plans/preview",
         response_model=MappingPlanResponse,
         operation_id="previewRecipeMapping",
     )
@@ -526,7 +526,7 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
-        "/api/v1/recipes/mappings",
+        "/api/recipes/mappings",
         response_model=MappingResponse,
         status_code=status.HTTP_201_CREATED,
         operation_id="createRecipeMapping",
@@ -568,7 +568,7 @@ def install_recipe_operation_routes(
         )
 
     @app.post(
-        "/api/v1/recipes/source-checks",
+        "/api/recipes/source-checks",
         response_model=SourcePolicyResponse,
         operation_id="checkRecipeBuildSource",
     )
@@ -583,7 +583,7 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
-        "/api/v1/recipes/build-plans/preview",
+        "/api/recipes/build-plans/preview",
         response_model=BuildPlanResponse,
         operation_id="previewRecipeBuild",
     )
@@ -608,7 +608,7 @@ def install_recipe_operation_routes(
         )
 
     @app.post(
-        "/api/v1/recipes/builds",
+        "/api/recipes/builds",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="buildRecipe",
@@ -639,7 +639,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/image-distribution-plans/preview",
+        "/api/recipes/image-distribution-plans/preview",
         response_model=ImageDistributionPlanResponse,
         operation_id="previewRecipeImageDistribution",
     )
@@ -659,7 +659,7 @@ def install_recipe_operation_routes(
         return _response(ImageDistributionPlanResponse, asdict(value))
 
     @app.post(
-        "/api/v1/recipes/image-distributions",
+        "/api/recipes/image-distributions",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="distributeRecipeImage",
@@ -693,7 +693,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/install-plans/preview",
+        "/api/recipes/install-plans/preview",
         response_model=InstallPlanResponse,
         operation_id="previewRecipeInstall",
     )
@@ -712,7 +712,7 @@ def install_recipe_operation_routes(
         return _response(InstallPlanResponse, value)
 
     @app.post(
-        "/api/v1/recipes/installations",
+        "/api/recipes/installations",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="installRecipe",
@@ -741,7 +741,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/run-plans/preview",
+        "/api/recipes/run-plans/preview",
         response_model=RunPlanResponse,
         operation_id="previewRecipeRun",
     )
@@ -753,7 +753,7 @@ def install_recipe_operation_routes(
         )
 
     @app.post(
-        "/api/v1/recipes/stop-plans/preview",
+        "/api/recipes/stop-plans/preview",
         response_model=StopPlanResponse,
         operation_id="previewRecipeStop",
     )
@@ -768,7 +768,7 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
-        "/api/v1/recipes/uninstall-plans/preview",
+        "/api/recipes/uninstall-plans/preview",
         response_model=UninstallPlanResponse,
         operation_id="previewRecipeUninstall",
     )
@@ -783,7 +783,7 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
-        "/api/v1/library/model-deletion-plans/preview",
+        "/api/library/model-deletion-plans/preview",
         response_model=ModelDeletionPlanResponse,
         operation_id="previewLibraryModelDeletion",
     )
@@ -800,7 +800,7 @@ def install_recipe_operation_routes(
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
-        "/api/v1/recipes/job-runs",
+        "/api/recipes/job-runs",
         response_model=OperationResponse,
         status_code=status.HTTP_201_CREATED,
         operation_id="activateRecipeJobRun",
@@ -831,7 +831,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/runs",
+        "/api/recipes/runs",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="startRecipeRun",
@@ -867,7 +867,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.get(
-        "/api/v1/recipes/runs/{run_id}",
+        "/api/recipes/runs/{run_id}",
         response_model=RunStatusResponse,
         operation_id="getRecipeRunStatus",
     )
@@ -884,7 +884,7 @@ def install_recipe_operation_routes(
         return _response(RunStatusResponse, asdict(value))
 
     @app.get(
-        "/api/v1/recipes/operations/{operation_id}",
+        "/api/recipes/operations/{operation_id}",
         response_model=OperationResponse,
         operation_id="getRecipeOperation",
     )
@@ -899,7 +899,7 @@ def install_recipe_operation_routes(
             ) from None
 
     @app.post(
-        "/api/v1/recipes/operations/{operation_id}/retry",
+        "/api/recipes/operations/{operation_id}/retry",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="retryRecipeOperation",
@@ -929,7 +929,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/runs/{run_id}/stop",
+        "/api/recipes/runs/{run_id}/stop",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="stopRecipeRun",
@@ -962,7 +962,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/recipes/installations/{installation_id}/uninstall",
+        "/api/recipes/installations/{installation_id}/uninstall",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="uninstallRecipe",
@@ -995,7 +995,7 @@ def install_recipe_operation_routes(
         return operation(value)
 
     @app.post(
-        "/api/v1/library/models/{model_content_sha256}/delete",
+        "/api/library/models/{model_content_sha256}/delete",
         response_model=OperationResponse,
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="deleteLibraryModel",

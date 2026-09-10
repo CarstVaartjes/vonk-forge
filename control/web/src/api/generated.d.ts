@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/v1/agents": {
+    "/api/agents": {
         parameters: {
             query?: never;
             header?: never;
@@ -21,7 +21,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/enrollments": {
+    "/api/agents/enrollments": {
         parameters: {
             query?: never;
             header?: never;
@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/enrollments/grants": {
+    "/api/agents/enrollments/grants": {
         parameters: {
             query?: never;
             header?: never;
@@ -55,7 +55,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/nodes/{node_id}/revoke": {
+    "/api/agents/nodes/{node_id}/revoke": {
         parameters: {
             query?: never;
             header?: never;
@@ -72,7 +72,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/upgrades": {
+    "/api/agents/upgrades": {
         parameters: {
             query?: never;
             header?: never;
@@ -89,7 +89,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/upgrades/candidate": {
+    "/api/agents/upgrades/candidate": {
         parameters: {
             query?: never;
             header?: never;
@@ -106,7 +106,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/upgrades/preview": {
+    "/api/agents/upgrades/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -123,7 +123,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/capabilities": {
+    "/api/artifact-jobs/capabilities": {
         parameters: {
             query?: never;
             header?: never;
@@ -140,7 +140,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/{job_id}": {
+    "/api/artifact-jobs/{job_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -157,7 +157,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/{job_id}/cancel": {
+    "/api/artifact-jobs/{job_id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -174,7 +174,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/{job_id}/finalize": {
+    "/api/artifact-jobs/{job_id}/finalize": {
         parameters: {
             query?: never;
             header?: never;
@@ -191,7 +191,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/{job_id}/result": {
+    "/api/artifact-jobs/{job_id}/result": {
         parameters: {
             query?: never;
             header?: never;
@@ -208,7 +208,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifact-jobs/{job_id}/submit": {
+    "/api/artifact-jobs/{job_id}/submit": {
         parameters: {
             query?: never;
             header?: never;
@@ -225,7 +225,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/audit": {
+    "/api/audit": {
         parameters: {
             query?: never;
             header?: never;
@@ -242,7 +242,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/login": {
+    "/api/auth/login": {
         parameters: {
             query?: never;
             header?: never;
@@ -259,7 +259,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/logout": {
+    "/api/auth/logout": {
         parameters: {
             query?: never;
             header?: never;
@@ -276,7 +276,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/session": {
+    "/api/auth/session": {
         parameters: {
             query?: never;
             header?: never;
@@ -293,7 +293,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/authority": {
+    "/api/authority": {
         parameters: {
             query?: never;
             header?: never;
@@ -310,7 +310,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/managed-recipes/sync": {
+    "/api/catalog/managed-recipes/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -327,7 +327,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/managed-recipes/sync-status": {
+    "/api/catalog/managed-recipes/sync-status": {
         parameters: {
             query?: never;
             header?: never;
@@ -344,7 +344,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/source-bundles/{sha256}": {
+    "/api/catalog/source-bundles/{sha256}": {
         parameters: {
             query?: never;
             header?: never;
@@ -361,7 +361,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/changes": {
+    "/api/changes": {
         parameters: {
             query?: never;
             header?: never;
@@ -378,7 +378,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/deployment-provenance": {
+    "/api/deployment-provenance": {
         parameters: {
             query?: never;
             header?: never;
@@ -395,7 +395,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/endpoints/{alias}": {
+    "/api/endpoints/{alias}": {
         parameters: {
             query?: never;
             header?: never;
@@ -412,7 +412,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet": {
+    "/api/fleet": {
         parameters: {
             query?: never;
             header?: never;
@@ -429,7 +429,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profile-applications/{application_id}": {
+    "/api/fleet-profile-applications/{application_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -446,7 +446,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profile-applications/{application_id}/retry": {
+    "/api/fleet-profile-applications/{application_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -463,7 +463,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles": {
+    "/api/fleet-profiles": {
         parameters: {
             query?: never;
             header?: never;
@@ -481,7 +481,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/capture-current": {
+    "/api/fleet-profiles/capture-current": {
         parameters: {
             query?: never;
             header?: never;
@@ -498,7 +498,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}": {
+    "/api/fleet-profiles/{profile_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -517,7 +517,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/apply": {
+    "/api/fleet-profiles/{profile_id}/apply": {
         parameters: {
             query?: never;
             header?: never;
@@ -534,7 +534,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/duplicate": {
+    "/api/fleet-profiles/{profile_id}/duplicate": {
         parameters: {
             query?: never;
             header?: never;
@@ -551,7 +551,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/prepare": {
+    "/api/fleet-profiles/{profile_id}/prepare": {
         parameters: {
             query?: never;
             header?: never;
@@ -568,7 +568,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/prepare/preview": {
+    "/api/fleet-profiles/{profile_id}/prepare/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -585,7 +585,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/preview": {
+    "/api/fleet-profiles/{profile_id}/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -602,7 +602,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/status": {
+    "/api/fleet-profiles/{profile_id}/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -619,7 +619,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fleet-profiles/{profile_id}/switch": {
+    "/api/fleet-profiles/{profile_id}/switch": {
         parameters: {
             query?: never;
             header?: never;
@@ -636,7 +636,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/identity-history": {
+    "/api/identity-history": {
         parameters: {
             query?: never;
             header?: never;
@@ -653,7 +653,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs": {
+    "/api/jobs": {
         parameters: {
             query?: never;
             header?: never;
@@ -670,7 +670,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}": {
+    "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -687,7 +687,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}/logs": {
+    "/api/jobs/{job_id}/logs": {
         parameters: {
             query?: never;
             header?: never;
@@ -704,7 +704,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}/resume": {
+    "/api/jobs/{job_id}/resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -721,7 +721,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library": {
+    "/api/library": {
         parameters: {
             query?: never;
             header?: never;
@@ -738,7 +738,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/model-deletion-plans/preview": {
+    "/api/library/model-deletion-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -755,7 +755,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/models/{model_content_sha256}/delete": {
+    "/api/library/models/{model_content_sha256}/delete": {
         parameters: {
             query?: never;
             header?: never;
@@ -772,7 +772,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/placements": {
+    "/api/library/placements": {
         parameters: {
             query?: never;
             header?: never;
@@ -789,7 +789,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/placements/preview": {
+    "/api/library/placements/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -806,7 +806,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/placements/{placement_id}": {
+    "/api/library/placements/{placement_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -823,7 +823,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/placements/{placement_id}/retry": {
+    "/api/library/placements/{placement_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -840,7 +840,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/recipe-image-availability": {
+    "/api/library/recipe-image-availability": {
         parameters: {
             query?: never;
             header?: never;
@@ -858,7 +858,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/recipe-image-availability/{operation_id}": {
+    "/api/library/recipe-image-availability/{operation_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -875,7 +875,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/recipe-image-availability/{operation_id}/retry": {
+    "/api/library/recipe-image-availability/{operation_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -892,7 +892,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/recipes": {
+    "/api/library/recipes": {
         parameters: {
             query?: never;
             header?: never;
@@ -909,7 +909,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/library/recipes/{recipe_id}": {
+    "/api/library/recipes/{recipe_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -926,7 +926,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache": {
+    "/api/model-cache": {
         parameters: {
             query?: never;
             header?: never;
@@ -943,7 +943,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/download": {
+    "/api/model-cache/download": {
         parameters: {
             query?: never;
             header?: never;
@@ -960,7 +960,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/download-preview": {
+    "/api/model-cache/download-preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -977,7 +977,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/entries/{artifact_set_sha256}": {
+    "/api/model-cache/entries/{artifact_set_sha256}": {
         parameters: {
             query?: never;
             header?: never;
@@ -994,7 +994,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/evict": {
+    "/api/model-cache/evict": {
         parameters: {
             query?: never;
             header?: never;
@@ -1011,7 +1011,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/eviction-preview": {
+    "/api/model-cache/eviction-preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1028,7 +1028,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/operations": {
+    "/api/model-cache/operations": {
         parameters: {
             query?: never;
             header?: never;
@@ -1045,7 +1045,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/operations/{operation_id}": {
+    "/api/model-cache/operations/{operation_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1062,7 +1062,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/operations/{operation_id}/cancel": {
+    "/api/model-cache/operations/{operation_id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -1079,7 +1079,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume": {
+    "/api/model-cache/operations/{operation_id}/check-access-and-resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -1096,7 +1096,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/operations/{operation_id}/retry": {
+    "/api/model-cache/operations/{operation_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -1113,7 +1113,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/repair": {
+    "/api/model-cache/repair": {
         parameters: {
             query?: never;
             header?: never;
@@ -1130,7 +1130,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/repair-preview": {
+    "/api/model-cache/repair-preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1147,7 +1147,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/model-cache/updates": {
+    "/api/model-cache/updates": {
         parameters: {
             query?: never;
             header?: never;
@@ -1164,7 +1164,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/{node_id}/profile": {
+    "/api/nodes/{node_id}/profile": {
         parameters: {
             query?: never;
             header?: never;
@@ -1181,7 +1181,7 @@ export interface paths {
         patch: operations["updateNodeProfile"];
         trace?: never;
     };
-    "/api/v1/nodes/{node_id}/telemetry": {
+    "/api/nodes/{node_id}/telemetry": {
         parameters: {
             query?: never;
             header?: never;
@@ -1198,7 +1198,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/{node_id}/telemetry/capabilities": {
+    "/api/nodes/{node_id}/telemetry/capabilities": {
         parameters: {
             query?: never;
             header?: never;
@@ -1215,7 +1215,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/{node_id}/telemetry/current": {
+    "/api/nodes/{node_id}/telemetry/current": {
         parameters: {
             query?: never;
             header?: never;
@@ -1232,7 +1232,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/{node_id}/telemetry/workloads": {
+    "/api/nodes/{node_id}/telemetry/workloads": {
         parameters: {
             query?: never;
             header?: never;
@@ -1249,7 +1249,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/operations": {
+    "/api/operations": {
         parameters: {
             query?: never;
             header?: never;
@@ -1266,7 +1266,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/operations/{operation_id}": {
+    "/api/operations/{operation_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1283,7 +1283,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/operations/{operation_id}/evidence": {
+    "/api/operations/{operation_id}/evidence": {
         parameters: {
             query?: never;
             header?: never;
@@ -1300,7 +1300,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/proposals": {
+    "/api/proposals": {
         parameters: {
             query?: never;
             header?: never;
@@ -1317,7 +1317,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/build-plans/preview": {
+    "/api/recipes/build-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1334,7 +1334,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/builds": {
+    "/api/recipes/builds": {
         parameters: {
             query?: never;
             header?: never;
@@ -1351,7 +1351,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/image-distribution-plans/preview": {
+    "/api/recipes/image-distribution-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1368,7 +1368,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/image-distributions": {
+    "/api/recipes/image-distributions": {
         parameters: {
             query?: never;
             header?: never;
@@ -1385,7 +1385,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/install-plans/preview": {
+    "/api/recipes/install-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1402,7 +1402,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/installations": {
+    "/api/recipes/installations": {
         parameters: {
             query?: never;
             header?: never;
@@ -1419,7 +1419,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/installations/{installation_id}/uninstall": {
+    "/api/recipes/installations/{installation_id}/uninstall": {
         parameters: {
             query?: never;
             header?: never;
@@ -1436,7 +1436,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/job-runs": {
+    "/api/recipes/job-runs": {
         parameters: {
             query?: never;
             header?: never;
@@ -1453,7 +1453,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/mapping-plans/preview": {
+    "/api/recipes/mapping-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1470,7 +1470,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/mappings": {
+    "/api/recipes/mappings": {
         parameters: {
             query?: never;
             header?: never;
@@ -1487,7 +1487,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/operations/{operation_id}": {
+    "/api/recipes/operations/{operation_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1504,7 +1504,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/operations/{operation_id}/retry": {
+    "/api/recipes/operations/{operation_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -1521,7 +1521,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-plans/preview": {
+    "/api/recipes/run-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1538,7 +1538,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switch-plans/preview": {
+    "/api/recipes/run-switch-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1555,7 +1555,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switch-stops": {
+    "/api/recipes/run-switch-stops": {
         parameters: {
             query?: never;
             header?: never;
@@ -1572,7 +1572,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switch-stops/preview": {
+    "/api/recipes/run-switch-stops/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1589,7 +1589,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switches": {
+    "/api/recipes/run-switches": {
         parameters: {
             query?: never;
             header?: never;
@@ -1606,7 +1606,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switches/{operation_id}": {
+    "/api/recipes/run-switches/{operation_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1623,7 +1623,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+    "/api/recipes/run-switches/{operation_id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -1640,7 +1640,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/run-switches/{operation_id}/retry": {
+    "/api/recipes/run-switches/{operation_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -1657,7 +1657,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/runs": {
+    "/api/recipes/runs": {
         parameters: {
             query?: never;
             header?: never;
@@ -1674,7 +1674,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/runs/{run_id}": {
+    "/api/recipes/runs/{run_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1691,7 +1691,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/runs/{run_id}/artifact-jobs": {
+    "/api/recipes/runs/{run_id}/artifact-jobs": {
         parameters: {
             query?: never;
             header?: never;
@@ -1709,7 +1709,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/runs/{run_id}/stop": {
+    "/api/recipes/runs/{run_id}/stop": {
         parameters: {
             query?: never;
             header?: never;
@@ -1726,7 +1726,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/source-checks": {
+    "/api/recipes/source-checks": {
         parameters: {
             query?: never;
             header?: never;
@@ -1743,7 +1743,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/stop-plans/preview": {
+    "/api/recipes/stop-plans/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1760,7 +1760,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recipes/uninstall-plans/preview": {
+    "/api/recipes/uninstall-plans/preview": {
         parameters: {
             query?: never;
             header?: never;

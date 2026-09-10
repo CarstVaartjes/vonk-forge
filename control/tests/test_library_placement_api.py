@@ -142,21 +142,21 @@ def test_preview_and_apply_share_transport_neutral_contract_and_are_audited() ->
     client, headers, audits = setup()
 
     denied = client.post(
-        "/api/v1/library/placements/preview",
+        "/api/library/placements/preview",
         headers=headers("operator"),
         json=body(),
     )
     preview = client.post(
-        "/api/v1/library/placements/preview", headers=headers(), json=body()
+        "/api/library/placements/preview", headers=headers(), json=body()
     )
     request_id = "00000000-0000-4000-8000-000000000005"
     applied = client.post(
-        "/api/v1/library/placements",
+        "/api/library/placements",
         headers={**headers(), "x-request-id": request_id},
         json={**body("drag-drop"), "plan_digest": DIGEST, "request_key": REQUEST_KEY},
     )
     progress = client.get(
-        f"/api/v1/library/placements/{APPLICATION}", headers=headers("viewer")
+        f"/api/library/placements/{APPLICATION}", headers=headers("viewer")
     )
 
     assert denied.status_code == 403
@@ -178,15 +178,15 @@ def test_openapi_exposes_typed_stable_placement_operations() -> None:
     paths = schema["paths"]
 
     assert (
-        paths["/api/v1/library/placements/preview"]["post"]["operationId"]
+        paths["/api/library/placements/preview"]["post"]["operationId"]
         == "previewLibraryPlacement"
     )
     assert (
-        paths["/api/v1/library/placements"]["post"]["operationId"]
+        paths["/api/library/placements"]["post"]["operationId"]
         == "applyLibraryPlacement"
     )
     assert (
-        paths["/api/v1/library/placements/{placement_id}"]["get"]["operationId"]
+        paths["/api/library/placements/{placement_id}"]["get"]["operationId"]
         == "getLibraryPlacement"
     )
     assert "LibraryPlacementPreview" in schema["components"]["schemas"]

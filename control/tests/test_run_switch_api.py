@@ -79,7 +79,7 @@ def test_run_switch_conflict_route_serializes_the_declared_model() -> None:
         service=ConflictService(),
     )
     response = TestClient(app).post(
-        "/api/v1/recipes/run-switches",
+        "/api/recipes/run-switches",
         json={
             "schema_version": 2,
             "model_content_sha256": "a" * 64,
@@ -133,8 +133,8 @@ def test_cancel_route_records_durable_intent_and_audit(tmp_path):
     install_run_switch_routes(app, actor_dependency=Depends(_administrator), audits=audits, service=service)
     body = {"schema_version": 2, "request_key": str(uuid.uuid4()), "reason": "Keep the current profile"}
     client = TestClient(app)
-    response = client.post(f"/api/v1/recipes/run-switches/{operation.operation_id}/cancel", json=body)
+    response = client.post(f"/api/recipes/run-switches/{operation.operation_id}/cancel", json=body)
     assert response.status_code == 202
     assert response.json()["state"] == "cancelled"
     assert response.json()["result"]["cancellation"]["request_key"] == body["request_key"]
-    assert client.post(f"/api/v1/recipes/run-switches/{operation.operation_id}/cancel", json=body).json() == response.json()
+    assert client.post(f"/api/recipes/run-switches/{operation.operation_id}/cancel", json=body).json() == response.json()

@@ -82,7 +82,7 @@ Recipe identity.
 
 The updates endpoint normally returns accepted catalog candidates without
 network access. Explicit checks use
-`GET /api/v1/model-cache/updates?check_upstream=true`, optionally filtered by
+`GET /api/model-cache/updates?check_upstream=true`, optionally filtered by
 `artifact_set_sha256`. They fetch only repository metadata, once per repository
 and pin within the result page. Up to four checks run concurrently after the
 catalog DB session closes, within an eight-second page budget. Unfinished checks

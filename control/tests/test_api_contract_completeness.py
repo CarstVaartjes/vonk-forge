@@ -38,7 +38,7 @@ def test_all_mounted_routes_and_typed_agent_roots_are_registered(browser_auth):
     )
     require_wire_exports(models, json.loads(wire.read_text()))
     assert (
-        bool([op for op in operations if op["path"] == "/api/v1/auth/login"])
+        bool([op for op in operations if op["path"] == "/api/auth/login"])
         is browser_auth
     )
     agent = [op for op in operations if "/recipe-jobs/" in op["path"]]
@@ -60,9 +60,9 @@ def test_hidden_new_route_fails_even_when_absent_from_openapi():
 def test_mounted_child_routes_are_discovered_and_missing_exports_fail():
     app, child = FastAPI(), FastAPI()
     child.add_api_route("/new", added, methods=["POST"])
-    app.mount("/agent/v1", child)
+    app.mount("/agent", child)
     operations, models = discover_contracts(app)
-    assert operations[0]["path"] == "/agent/v1/new"
+    assert operations[0]["path"] == "/agent/new"
     assert models == {AddedRequest, AddedResponse}
     with pytest.raises(ContractGraphError, match="AddedRequest"):
         require_wire_exports(
@@ -115,7 +115,7 @@ def test_bounded_raw_model_is_discovered_without_an_exporter_name_list():
         return AddedResponse(accepted=True)
 
     app.add_api_route(
-        "/agent/v1/raw",
+        "/agent/raw",
         raw_json_body(AddedRequest)(bounded),
         methods=["POST"],
         openapi_extra={
@@ -148,7 +148,7 @@ def test_raw_json_declaration_must_match_its_actual_model():
         return AddedResponse(accepted=True)
 
     app.add_api_route(
-        "/agent/v1/raw",
+        "/agent/raw",
         raw_json_body(AddedRequest)(bounded),
         methods=["POST"],
         openapi_extra={
@@ -190,7 +190,7 @@ def test_exporter_discovers_new_api_models_without_a_curated_name_entry(monkeypa
 
     def application(**_kwargs):
         app = FastAPI()
-        app.add_api_route("/agent/v1/new", added, methods=["POST"])
+        app.add_api_route("/agent/new", added, methods=["POST"])
         return app
 
     monkeypatch.setattr(contract_graph, "schema_application", application)

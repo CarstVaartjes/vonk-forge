@@ -42,7 +42,7 @@ def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) 
 
     assert events == [
         ("drop", {"source_secrets": Path("/run/secrets")}),
-        ("request", "http://127.0.0.1:8000/api/v1/readyz", 3),
+        ("request", "http://127.0.0.1:8000/api/readyz", 3),
     ]
 
 

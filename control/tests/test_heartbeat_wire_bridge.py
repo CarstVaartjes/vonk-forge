@@ -65,7 +65,7 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"protocol_version": 3},
     ).json()
@@ -83,7 +83,7 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
     } | {"progress": {"phase": "checking"}}
 
     response = client.post(
-        "/agent/v1/heartbeat",
+        "/agent/heartbeat",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "x-vonk-agent-source": "10.0.0.43",

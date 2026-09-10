@@ -23,8 +23,8 @@ def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
 
 def test_cli_packages_the_generated_admin_openapi_contract() -> None:
     schema = json.loads(PACKAGED_CLI_OPENAPI.read_text())
-    assert "/api/v1/artifact-jobs/{job_id}" in schema["paths"]
-    assert "/api/v1/auth/login" not in schema["paths"]
+    assert "/api/artifact-jobs/{job_id}" in schema["paths"]
+    assert "/api/auth/login" not in schema["paths"]
     assert schema["openapi"].startswith("3.1.")
 
 
@@ -261,17 +261,17 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
     assert set(schema["paths"]) >= {
-        "/api/v1/agents",
-        "/api/v1/endpoints/{alias}",
-        "/api/v1/fleet",
-        "/api/v1/fleet/stream",
-        "/api/v1/jobs/{job_id}",
-        "/api/v1/jobs/{job_id}/logs",
-        "/api/v1/jobs/{job_id}/resume",
-        "/api/v1/nodes/{node_id}/telemetry",
+        "/api/agents",
+        "/api/endpoints/{alias}",
+        "/api/fleet",
+        "/api/fleet/stream",
+        "/api/jobs/{job_id}",
+        "/api/jobs/{job_id}/logs",
+        "/api/jobs/{job_id}/resume",
+        "/api/nodes/{node_id}/telemetry",
     }
-    assert "/api/v1/nodes/status" not in schema["paths"]
-    assert all(path.startswith("/api/v1/") for path in schema["paths"])
+    assert "/api/nodes/status" not in schema["paths"]
+    assert all(path.startswith("/api/") for path in schema["paths"])
     operation_list = [
         operation
         for path in schema["paths"].values()
@@ -305,7 +305,7 @@ def test_admin_schema_is_secret_free() -> None:
         }
     )
 
-    retired_prefixes = ("/api/v1/" + "packages", "/api/v1/" + "deployments")
+    retired_prefixes = ("/api/" + "packages", "/api/" + "deployments")
     assert not any(
         path.startswith(prefix)
         for path in schema["paths"]
@@ -338,7 +338,7 @@ def test_admin_schema_is_secret_free() -> None:
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
-        "/agent/v1/",
+        "/agent/",
         "certificate_pem",
         "chain_pem",
         "csr_pem",
@@ -463,9 +463,9 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
         for operation in methods.values()
         if isinstance(operation, dict)
     }
-    assert "/api/v1/catalog/public-recipes" not in paths
-    assert "/api/v1/catalog/imports/public" not in paths
-    assert "/api/v1/catalog/imports/recipe-library" not in paths
+    assert "/api/catalog/public-recipes" not in paths
+    assert "/api/catalog/imports/public" not in paths
+    assert "/api/catalog/imports/recipe-library" not in paths
     assert "listPublicRecipes" not in operations
     assert "previewPublicRecipeImport" not in operations
     assert "importPublicRecipe" not in operations
@@ -507,7 +507,7 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
 
 def test_stream_resume_header_is_in_openapi_custom_transport_contract() -> None:
     schema = json.loads(OPENAPI.read_text())
-    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    operation = schema["paths"]["/api/fleet/stream"]["get"]
     assert operation["parameters"] == [
         {
             "description": (

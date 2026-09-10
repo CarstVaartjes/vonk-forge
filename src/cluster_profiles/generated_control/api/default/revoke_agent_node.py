@@ -25,7 +25,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/agents/nodes/{node_id}/revoke".format(node_id=node_id,),
+        "url": "/api/agents/nodes/{node_id}/revoke".format(node_id=node_id,),
     }
 
 

@@ -1232,8 +1232,8 @@ def install_agent_routes(
     upgrades: AgentUpgradeService | None = None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
-    human = APIRouter(prefix="/api/v1/agents", route_class=ControllerAPIRoute)
-    agent = APIRouter(prefix="/agent/v1", route_class=ControllerAPIRoute)
+    human = APIRouter(prefix="/api/agents", route_class=ControllerAPIRoute)
+    agent = APIRouter(prefix="/agent", route_class=ControllerAPIRoute)
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
 
@@ -1246,7 +1246,7 @@ def install_agent_routes(
         body: AgentUpgradePreviewRequest,
         authenticated: Actor = authenticated_actor,
     ) -> AgentUpgradePreviewResponse:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
+        _require_administrator(authenticated, "/api/agents/upgrades/preview")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
@@ -1278,7 +1278,7 @@ def install_agent_routes(
     def current_agent_upgrade(
         authenticated: Actor = authenticated_actor,
     ) -> AgentUpgradePackageRequest:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
+        _require_administrator(authenticated, "/api/agents/upgrades/candidate")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
@@ -1299,7 +1299,7 @@ def install_agent_routes(
         request: Request,
         authenticated: Actor = authenticated_actor,
     ) -> AgentUpgradeApplyResponse:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades")
+        _require_administrator(authenticated, "/api/agents/upgrades")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
@@ -1339,7 +1339,7 @@ def install_agent_routes(
         request: Request,
         authenticated: Actor = authenticated_actor,
     ) -> EnrollmentGrantResponse:
-        _require_administrator(authenticated, "/api/v1/agents/enrollments/grants")
+        _require_administrator(authenticated, "/api/agents/enrollments/grants")
         required = _require_services(services)
         if required.bootstrap is None:
             raise HTTPException(
@@ -1390,7 +1390,7 @@ def install_agent_routes(
         limit: int = 100,
         authenticated: Actor = authenticated_actor,
     ) -> EnrollmentListResponse:
-        _require_administrator(authenticated, "/api/v1/agents/enrollments")
+        _require_administrator(authenticated, "/api/agents/enrollments")
         required = _require_services(services)
         if not 1 <= limit <= 100:
             raise HTTPException(
@@ -1444,7 +1444,7 @@ def install_agent_routes(
         request: Request,
         authenticated: Actor = authenticated_actor,
     ) -> Response:
-        _require_administrator(authenticated, "/api/v1/agents/nodes/{node_id}/revoke")
+        _require_administrator(authenticated, "/api/agents/nodes/{node_id}/revoke")
         required = _require_services(services)
         try:
             required.enrollment.revoke_node(node_id, authenticated.subject)
@@ -2868,7 +2868,7 @@ def install_agent_routes(
         components = document.setdefault("components", {}).setdefault("schemas", {})
         components.update(request_schema.pop("$defs", {}))
         components[EnrollmentSubmitRequest.__name__] = request_schema
-        document["paths"]["/agent/v1/enroll"]["post"]["requestBody"] = {
+        document["paths"]["/agent/enroll"]["post"]["requestBody"] = {
             "required": True,
             "content": {
                 "application/json": {

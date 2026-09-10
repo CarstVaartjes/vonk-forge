@@ -30,7 +30,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/fleet-profile-applications/{application_id}/retry".format(application_id=application_id,),
+        "url": "/api/fleet-profile-applications/{application_id}/retry".format(application_id=application_id,),
     }
 
     _kwargs["json"] = body.to_dict()

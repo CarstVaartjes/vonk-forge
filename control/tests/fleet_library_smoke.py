@@ -174,11 +174,11 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         Actor("admin", "administrator"), ttl_seconds=600, now=int(now.timestamp())
     )
     headers = {"Authorization": f"Bearer {token}"}
-    initial = client.get("/api/v1/fleet", headers=headers)
+    initial = client.get("/api/fleet", headers=headers)
     assert initial.status_code == 200, initial.text
 
     grant = client.post(
-        "/api/v1/agents/enrollments/grants",
+        "/api/agents/enrollments/grants",
         headers=headers,
         json={"ttl_seconds": 60},
     )
@@ -192,7 +192,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         )
     )
     issued = client.post(
-        "/agent/v1/enroll",
+        "/agent/enroll",
         json={
             "grant_token": grant.json()["token"],
             "csr": csr.decode(),
@@ -213,18 +213,18 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         },
     )
     assert issued.status_code == 200, issued.text
-    active = client.get("/api/v1/fleet", headers=headers)
+    active = client.get("/api/fleet", headers=headers)
     assert active.status_code == 200, active.text
     node_ids = [node["id"] for node in active.json()["nodes"]]
     assert node_ids == [NODE_ID]
 
-    revoked = client.post(f"/api/v1/agents/nodes/{NODE_ID}/revoke", headers=headers)
+    revoked = client.post(f"/api/agents/nodes/{NODE_ID}/revoke", headers=headers)
     assert revoked.status_code == 204, revoked.text
-    after_revoke = client.get("/api/v1/fleet", headers=headers)
+    after_revoke = client.get("/api/fleet", headers=headers)
     assert after_revoke.status_code == 200
-    audit = client.get("/api/v1/audit", headers=headers)
-    history = client.get("/api/v1/identity-history", headers=headers)
-    library = client.get("/api/v1/library", headers=headers)
+    audit = client.get("/api/audit", headers=headers)
+    history = client.get("/api/identity-history", headers=headers)
+    library = client.get("/api/library", headers=headers)
     assert library.status_code == 200, library.text
     return {
         "initial_fleet_nodes": initial.json()["nodes"],

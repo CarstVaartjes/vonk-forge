@@ -26,11 +26,11 @@ def test_actual_health_response_survives_scope_copy_and_nested_app(recorder):
     child = schema_application(browser_auth=False)
     parent = FastAPI()
     parent.mount("/nested", child)
-    response = TestClient(parent).get("/nested/api/v1/healthz")
+    response = TestClient(parent).get("/nested/api/healthz")
     assert response.status_code == 200
     recorder.flush()
     assert list(recorder.successes) == [
-        ("GET", "/nested/api/v1/healthz", 200, "application/json")
+        ("GET", "/nested/api/healthz", 200, "application/json")
     ]
     assert next(iter(recorder.successes.values()))["response_count"] == 1
 
@@ -51,7 +51,7 @@ def test_actual_final_middleware_bytes_are_validated_without_leaking_values(reco
             await self.app(scope, receive, corrupt)
 
     app.add_middleware(CorruptResponse)
-    assert TestClient(app).get("/api/v1/healthz").status_code == 200
+    assert TestClient(app).get("/api/healthz").status_code == 200
     with pytest.raises(AssertionError, match="schema_") as error:
         recorder.flush()
     assert "must-not-appear" not in str(error.value)
@@ -70,7 +70,7 @@ def test_actual_final_middleware_bytes_are_validated_without_leaking_values(reco
 def test_transport_decoder_uses_declared_media(recorder, media, schema, body):
     # Rebind the declaration on an actual route only to test the observer decoder.
     app = schema_application(browser_auth=False)
-    route = next(r for r in app.routes if getattr(r, "path", "") == "/api/v1/healthz")
+    route = next(r for r in app.routes if getattr(r, "path", "") == "/api/healthz")
     app.openapi()["paths"][route.path]["get"]["responses"]["200"] = {
         "content": {media: {"schema": schema}}
     }
@@ -88,8 +88,8 @@ def test_failed_requests_are_not_success_evidence_and_missing_routes_are_reporte
     recorder,
 ):
     app = schema_application(browser_auth=False)
-    assert TestClient(app).get("/api/v1/jobs").status_code == 401
+    assert TestClient(app).get("/api/jobs").status_code == 401
     recorder.flush()
     report = recorder.report()
     assert report["witnessed_operation_count"] == 0
-    assert {"method": "GET", "path": "/api/v1/healthz"} in report["missing_operations"]
+    assert {"method": "GET", "path": "/api/healthz"} in report["missing_operations"]

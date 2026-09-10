@@ -569,7 +569,7 @@ class _UncertainTransport(_AppTransport):
         result = super().request(
             method, path, payload, extra_headers=extra_headers, query=query
         )
-        if self._uncertain and method == "POST" and path == "/api/v1/model-cache/download":
+        if self._uncertain and method == "POST" and path == "/api/model-cache/download":
             self._uncertain = False
             raise ControlTransportError("response uncertain")
         return result
@@ -625,8 +625,8 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     transport = _AppTransport(api, headers)
 
     download_key = "00000000-0000-4000-8000-000000000101"
-    download_preview = api.post("/api/v1/model-cache/download-preview", headers=headers, json={"model_content_sha256": MODEL})
-    download = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
+    download_preview = api.post("/api/model-cache/download-preview", headers=headers, json={"model_content_sha256": MODEL})
+    download = api.post("/api/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
     assert download_preview.status_code == 200
     assert download.status_code == 202
     api_download = download.json()
@@ -638,8 +638,8 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
 
     run_key = "00000000-0000-4000-8000-000000000102"
     run_body = {"model_content_sha256": MODEL, "recipe_revision_id": RECIPE, "spark_group": {"nodes": [{"node_id": NODE, "rank": 0, "role": "entrypoint", "endpoint_owner": True}]}, "alias": "parity", "action": "run", "retention": "retain-cached", "invocation": {"origin": "operator", "correlation_id": None, "reason": None, "context": {}}}
-    api_run_preview = api.post("/api/v1/recipes/run-switch-plans/preview", headers=headers, json=run_body)
-    api_run = api.post("/api/v1/recipes/run-switches", headers=headers, json={**run_body, "plan_digest": api_run_preview.json()["plan_digest"], "request_key": run_key})
+    api_run_preview = api.post("/api/recipes/run-switch-plans/preview", headers=headers, json=run_body)
+    api_run = api.post("/api/recipes/run-switches", headers=headers, json={**run_body, "plan_digest": api_run_preview.json()["plan_digest"], "request_key": run_key})
     assert api_run_preview.status_code == 200
     assert api_run.status_code == 202
     api_run_body = api_run.json()
@@ -648,16 +648,16 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     assert cli_run["plan"]["model_content_sha256"] == api_run_preview.json()["model_content_sha256"] == MODEL
     assert cli_run["result"]["progress"]["members"][0]["member_id"] == NODE
 
-    profile_create = api.post("/api/v1/fleet-profiles", headers=headers, json={"name": "Parity profile", "scope": {"node_ids": [NODE]}, "assignments": []})
+    profile_create = api.post("/api/fleet-profiles", headers=headers, json={"name": "Parity profile", "scope": {"node_ids": [NODE]}, "assignments": []})
     assert profile_create.status_code == 201
     profile_id = profile_create.json()["id"]
-    profile_preview = api.post(f"/api/v1/fleet-profiles/{profile_id}/preview", headers=headers, json={})
+    profile_preview = api.post(f"/api/fleet-profiles/{profile_id}/preview", headers=headers, json={})
     profile_key = "00000000-0000-4000-8000-000000000103"
-    profile_apply = api.post(f"/api/v1/fleet-profiles/{profile_id}/switch", headers=headers, json={"plan_digest": profile_preview.json()["plan_digest"], "request_key": profile_key})
+    profile_apply = api.post(f"/api/fleet-profiles/{profile_id}/switch", headers=headers, json={"plan_digest": profile_preview.json()["plan_digest"], "request_key": profile_key})
     assert profile_apply.status_code == 202
     api_profile = profile_apply.json()
     cli_profile = _invoke(transport, "--json", "profiles", "switch", profile_id, "--request-key", profile_key)
-    observed_profile = api.get(f"/api/v1/operations/{api_profile['id']}", headers=headers)
+    observed_profile = api.get(f"/api/operations/{api_profile['id']}", headers=headers)
     assert observed_profile.status_code == 200
     assert cli_profile["result"] == observed_profile.json()
     assert cli_profile["result"]["id"] == api_profile["id"]
@@ -677,12 +677,12 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     original = {"id": original_id}
     retry = _invoke(transport, "--json", "library", "operation", "retry", original["id"], "--request-key", "00000000-0000-4000-8000-000000000105", "--apply")
     assert retry["id"] != original["id"]
-    activity = api.get("/api/v1/operations", headers=headers, params={"state": "succeeded"})
+    activity = api.get("/api/operations", headers=headers, params={"state": "succeeded"})
     assert activity.status_code == 200
     activity_ids = {item["id"] for item in activity.json()["operations"]}
     assert {api_download["id"], api_run_body["operation_id"], api_profile["current_operation_id"], retry["id"]} <= activity_ids
 
-    replay = api.post("/api/v1/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
+    replay = api.post("/api/model-cache/download", headers={**headers, "x-request-id": download_key}, json={"model_content_sha256": MODEL, "plan_digest": PLAN, "request_key": download_key})
     assert replay.status_code == 202
     assert replay.json()["id"] == api_download["id"]
 
@@ -863,13 +863,13 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
 
     download_key = "00000000-0000-4000-8000-000000000301"
     preview = api.post(
-        "/api/v1/model-cache/download-preview",
+        "/api/model-cache/download-preview",
         headers=headers,
         json={"model_content_sha256": model_digest},
     )
     assert preview.status_code == 200
     download = api.post(
-        "/api/v1/model-cache/download",
+        "/api/model-cache/download",
         headers={**headers, "x-request-id": download_key},
         json={
             "model_content_sha256": model_digest,
@@ -907,11 +907,11 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
         },
     }
     run_preview = api.post(
-        "/api/v1/recipes/run-switch-plans/preview", headers=headers, json=run_input
+        "/api/recipes/run-switch-plans/preview", headers=headers, json=run_input
     )
     assert run_preview.status_code == 200, run_preview.text
     run_apply = api.post(
-        "/api/v1/recipes/run-switches",
+        "/api/recipes/run-switches",
         headers=headers,
         json={
             **run_input,
@@ -936,18 +936,18 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     assert cli_run["result"]["progress"]["members"][0]["node_id"] == node_id, cli_run
 
     profile = api.post(
-        "/api/v1/fleet-profiles",
+        "/api/fleet-profiles",
         headers=headers,
         json={"name": "Production parity", "scope": {"node_ids": [node_id]}, "assignments": []},
     )
     assert profile.status_code == 201
     profile_id = profile.json()["id"]
     profile_plan = api.post(
-        f"/api/v1/fleet-profiles/{profile_id}/preview", headers=headers, json={}
+        f"/api/fleet-profiles/{profile_id}/preview", headers=headers, json={}
     )
     profile_key = "00000000-0000-4000-8000-000000000303"
     profile_apply = api.post(
-        f"/api/v1/fleet-profiles/{profile_id}/switch",
+        f"/api/fleet-profiles/{profile_id}/switch",
         headers=headers,
         json={"plan_digest": profile_plan.json()["plan_digest"], "request_key": profile_key},
     )
@@ -959,12 +959,12 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     assert cli_profile["result"]["id"] == profile_apply.json()["id"]
     assert cli_profile["plan"]["plan_digest"] == profile_plan.json()["plan_digest"]
     observed_profile = api.get(
-        f"/api/v1/operations/{profile_apply.json()['id']}", headers=headers
+        f"/api/operations/{profile_apply.json()['id']}", headers=headers
     )
     assert observed_profile.status_code == 200, observed_profile.text
     assert cli_profile["result"]["state"] == observed_profile.json()["state"]
 
-    activity = api.get("/api/v1/operations", headers=headers, params={"limit": 100})
+    activity = api.get("/api/operations", headers=headers, params={"limit": 100})
     assert activity.status_code == 200, activity.text
     activity_ids = {item["id"] for item in activity.json()["operations"]}
     assert {download.json()["id"], run_apply.json()["operation_id"], profile_apply.json()["id"]} <= activity_ids

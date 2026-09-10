@@ -187,10 +187,10 @@ def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
             "Authorization": f"Bearer {codec.issue(Actor(role, role), now=10, ttl_seconds=100)}"
         }
 
-    route = f"/api/v1/fleet-profile-applications/{original.id}/retry"
+    route = f"/api/fleet-profile-applications/{original.id}/retry"
     body = {"request_key": _uuid(801)}
     _request_contract(route, "POST", body)
-    activity = client.get(f"/api/v1/operations/{original.id}", headers=headers()).json()
+    activity = client.get(f"/api/operations/{original.id}", headers=headers()).json()
     assert activity["failure"]["detail"] == "Runtime temporarily unavailable"
     assert activity["failure"]["retryable"] is True
     assert activity["recovery"]["actions"] == ["inspect", "retry"]
@@ -212,9 +212,9 @@ def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
         json.dumps(generated.to_dict())
     ) == service.application(generated.id)
     assert client.post(route, headers=headers(), json=body).json() == response.json()
-    linked = client.get(f"/api/v1/operations/{generated.id}", headers=headers()).json()
+    linked = client.get(f"/api/operations/{generated.id}", headers=headers()).json()
     assert (linked["parent_id"], linked["attempt"]) == (original.id, 2)
-    historical = client.get(f"/api/v1/operations/{original.id}", headers=headers()).json()
+    historical = client.get(f"/api/operations/{original.id}", headers=headers()).json()
     assert historical["failure"]["detail"] == activity["failure"]["detail"]
     assert historical["recovery"]["actions"] == ["inspect"]
 
@@ -282,7 +282,7 @@ def test_placement_retry_api_keeps_original_metadata_and_returns_linked_receipt(
     headers = {
         "Authorization": f"Bearer {codec.issue(Actor('admin', 'administrator'), now=10, ttl_seconds=100)}"
     }
-    route = f"/api/v1/library/placements/{application.id}/retry"
+    route = f"/api/library/placements/{application.id}/retry"
     response = client.post(route, headers=headers, json={"request_key": _uuid(812)})
     assert response.status_code == 202, response.text
     body = response.json()
@@ -299,7 +299,7 @@ def test_placement_retry_api_keeps_original_metadata_and_returns_linked_receipt(
     operations.fail = False
     finish(service, body["id"])
     completed = client.get(
-        f"/api/v1/library/placements/{body['id']}", headers=headers
+        f"/api/library/placements/{body['id']}", headers=headers
     ).json()
     assert completed["state"] == "succeeded"
     assert completed["result"] == {"changed": True, "completed_steps": 1}

@@ -226,7 +226,7 @@ function CopyableValue({label, value}: {label: string; value?: string | null}) {
 }
 
 function DiagnosticDownload({id, attempt}: {id: string; attempt: number}) {
-  return <a className="button secondary" href={`/api/v1/operations/${encodeURIComponent(id)}/evidence?attempt=${attempt}`} download>Download diagnostics</a>;
+  return <a className="button secondary" href={`/api/operations/${encodeURIComponent(id)}/evidence?attempt=${attempt}`} download>Download diagnostics</a>;
 }
 
 function TechnicalDetails({event}: {event: ActivityRecord}) {

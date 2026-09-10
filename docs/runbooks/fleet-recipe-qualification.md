@@ -267,7 +267,7 @@ installs remain resident. A partial inventory is explicitly marked incomplete
 without masking an earlier campaign error.
 
 The runner has a typed artifact-job smoke boundary and uses the dedicated
-`/api/v1/recipes/job-runs` activation route. A job recipe still requires an
+`/api/recipes/job-runs` activation route. A job recipe still requires an
 exact recipe-library qualification entry: typed input slots with path, MIME
 type, SHA-256 and bytes; parameters; output limits; timeout; and output assertions.
 Until that recipe-specific contract is supplied, the recipe is recorded as

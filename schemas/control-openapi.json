@@ -28232,7 +28232,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/agents": {
+    "/api/agents": {
       "get": {
         "operationId": "listAgents",
         "responses": {
@@ -28285,7 +28285,7 @@
         "summary": "Agent List"
       }
     },
-    "/api/v1/agents/enrollments": {
+    "/api/agents/enrollments": {
       "get": {
         "operationId": "listAgentEnrollments",
         "parameters": [
@@ -28392,7 +28392,7 @@
         "summary": "List Enrollments"
       }
     },
-    "/api/v1/agents/enrollments/grants": {
+    "/api/agents/enrollments/grants": {
       "post": {
         "operationId": "createEnrollmentGrant",
         "requestBody": {
@@ -28465,7 +28465,7 @@
         "summary": "Create Grant"
       }
     },
-    "/api/v1/agents/nodes/{node_id}/revoke": {
+    "/api/agents/nodes/{node_id}/revoke": {
       "post": {
         "operationId": "revokeAgentNode",
         "parameters": [
@@ -28543,7 +28543,7 @@
         "x-vonk-request-body": "none"
       }
     },
-    "/api/v1/agents/upgrades": {
+    "/api/agents/upgrades": {
       "post": {
         "operationId": "applyAgentUpgrade",
         "requestBody": {
@@ -28626,7 +28626,7 @@
         "summary": "Apply Agent Upgrade"
       }
     },
-    "/api/v1/agents/upgrades/candidate": {
+    "/api/agents/upgrades/candidate": {
       "get": {
         "operationId": "getAgentUpgradeCandidate",
         "responses": {
@@ -28689,7 +28689,7 @@
         "summary": "Current Agent Upgrade"
       }
     },
-    "/api/v1/agents/upgrades/preview": {
+    "/api/agents/upgrades/preview": {
       "post": {
         "operationId": "previewAgentUpgrade",
         "requestBody": {
@@ -28772,7 +28772,7 @@
         "summary": "Preview Agent Upgrade"
       }
     },
-    "/api/v1/artifact-jobs/capabilities": {
+    "/api/artifact-jobs/capabilities": {
       "get": {
         "operationId": "getArtifactJobCapabilities",
         "responses": {
@@ -28825,7 +28825,7 @@
         "summary": "Capabilities"
       }
     },
-    "/api/v1/artifact-jobs/{job_id}": {
+    "/api/artifact-jobs/{job_id}": {
       "get": {
         "operationId": "getArtifactJobStatus",
         "parameters": [
@@ -28900,7 +28900,7 @@
         "summary": "Job Status"
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/cancel": {
+    "/api/artifact-jobs/{job_id}/cancel": {
       "post": {
         "operationId": "cancelArtifactJob",
         "parameters": [
@@ -29005,7 +29005,7 @@
         "summary": "Cancel Job"
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/finalize": {
+    "/api/artifact-jobs/{job_id}/finalize": {
       "post": {
         "operationId": "finalizeArtifactJob",
         "parameters": [
@@ -29100,7 +29100,7 @@
         "summary": "Finalize Job"
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/inputs/{name}": {
+    "/api/artifact-jobs/{job_id}/inputs/{name}": {
       "put": {
         "operationId": "uploadArtifactJobInput",
         "parameters": [
@@ -29251,7 +29251,7 @@
         "x-vonk-streaming-transport": true
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/result": {
+    "/api/artifact-jobs/{job_id}/result": {
       "get": {
         "operationId": "getArtifactJobResult",
         "parameters": [
@@ -29336,7 +29336,7 @@
         "summary": "Result Metadata"
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/results/{sha256}": {
+    "/api/artifact-jobs/{job_id}/results/{sha256}": {
       "get": {
         "operationId": "downloadArtifactJobResult",
         "parameters": [
@@ -29393,7 +29393,7 @@
         "x-vonk-streaming-transport": true
       }
     },
-    "/api/v1/artifact-jobs/{job_id}/submit": {
+    "/api/artifact-jobs/{job_id}/submit": {
       "post": {
         "operationId": "submitArtifactJob",
         "parameters": [
@@ -29489,7 +29489,7 @@
         "x-vonk-request-body": "none"
       }
     },
-    "/api/v1/audit": {
+    "/api/audit": {
       "get": {
         "operationId": "listAuditEvents",
         "responses": {
@@ -29532,7 +29532,7 @@
         "summary": "Audit View"
       }
     },
-    "/api/v1/authority": {
+    "/api/authority": {
       "get": {
         "operationId": "getAuthority",
         "parameters": [
@@ -29603,7 +29603,7 @@
         "summary": "Authority View"
       }
     },
-    "/api/v1/catalog/managed-recipes/sync": {
+    "/api/catalog/managed-recipes/sync": {
       "post": {
         "operationId": "syncManagedRecipeCatalog",
         "requestBody": {
@@ -29686,7 +29686,7 @@
         "summary": "Sync Managed Recipe Catalog"
       }
     },
-    "/api/v1/catalog/managed-recipes/sync-status": {
+    "/api/catalog/managed-recipes/sync-status": {
       "get": {
         "operationId": "getManagedRecipeCatalogSyncStatus",
         "responses": {
@@ -29759,7 +29759,7 @@
         "summary": "Get Managed Recipe Catalog Sync Status"
       }
     },
-    "/api/v1/catalog/source-bundles/{sha256}": {
+    "/api/catalog/source-bundles/{sha256}": {
       "get": {
         "operationId": "downloadRecipeSourceBundle",
         "parameters": [
@@ -29910,7 +29910,7 @@
         "summary": "Upload Source Bundle"
       }
     },
-    "/api/v1/changes": {
+    "/api/changes": {
       "post": {
         "operationId": "submitChange",
         "requestBody": {
@@ -30003,7 +30003,7 @@
         "summary": "Submit Change"
       }
     },
-    "/api/v1/deployment-provenance": {
+    "/api/deployment-provenance": {
       "get": {
         "operationId": "getDeploymentProvenance",
         "responses": {
@@ -30056,7 +30056,7 @@
         "summary": "Deployment Provenance"
       }
     },
-    "/api/v1/endpoints/{alias}": {
+    "/api/endpoints/{alias}": {
       "get": {
         "operationId": "getPublishedEndpoint",
         "parameters": [
@@ -30131,7 +30131,7 @@
         "summary": "Endpoint View"
       }
     },
-    "/api/v1/fleet": {
+    "/api/fleet": {
       "get": {
         "operationId": "getFleetStatus",
         "responses": {
@@ -30184,7 +30184,7 @@
         "summary": "Fleet View"
       }
     },
-    "/api/v1/fleet-profile-applications/{application_id}": {
+    "/api/fleet-profile-applications/{application_id}": {
       "get": {
         "operationId": "getFleetProfileApplication",
         "parameters": [
@@ -30259,7 +30259,7 @@
         "summary": "Get Application"
       }
     },
-    "/api/v1/fleet-profile-applications/{application_id}/retry": {
+    "/api/fleet-profile-applications/{application_id}/retry": {
       "post": {
         "operationId": "retryFleetProfileApplication",
         "parameters": [
@@ -30364,7 +30364,7 @@
         "summary": "Retry Application"
       }
     },
-    "/api/v1/fleet-profiles": {
+    "/api/fleet-profiles": {
       "get": {
         "operationId": "listFleetProfiles",
         "responses": {
@@ -30498,7 +30498,7 @@
         "summary": "Create Profile"
       }
     },
-    "/api/v1/fleet-profiles/capture-current": {
+    "/api/fleet-profiles/capture-current": {
       "post": {
         "operationId": "captureCurrentFleetProfile",
         "requestBody": {
@@ -30581,7 +30581,7 @@
         "summary": "Capture Current Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}": {
+    "/api/fleet-profiles/{profile_id}": {
       "delete": {
         "operationId": "deleteFleetProfile",
         "parameters": [
@@ -30845,7 +30845,7 @@
         "summary": "Update Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/apply": {
+    "/api/fleet-profiles/{profile_id}/apply": {
       "post": {
         "operationId": "applyFleetProfile",
         "parameters": [
@@ -30950,7 +30950,7 @@
         "summary": "Apply Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/duplicate": {
+    "/api/fleet-profiles/{profile_id}/duplicate": {
       "post": {
         "operationId": "duplicateFleetProfile",
         "parameters": [
@@ -31055,7 +31055,7 @@
         "summary": "Duplicate Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/prepare": {
+    "/api/fleet-profiles/{profile_id}/prepare": {
       "post": {
         "operationId": "prepareFleetProfile",
         "parameters": [
@@ -31160,7 +31160,7 @@
         "summary": "Prepare Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/prepare/preview": {
+    "/api/fleet-profiles/{profile_id}/prepare/preview": {
       "post": {
         "operationId": "previewFleetProfilePreparation",
         "parameters": [
@@ -31265,7 +31265,7 @@
         "summary": "Prepare Preview Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/preview": {
+    "/api/fleet-profiles/{profile_id}/preview": {
       "post": {
         "operationId": "previewFleetProfile",
         "parameters": [
@@ -31370,7 +31370,7 @@
         "summary": "Preview Profile"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/status": {
+    "/api/fleet-profiles/{profile_id}/status": {
       "get": {
         "operationId": "getFleetProfileStatus",
         "parameters": [
@@ -31445,7 +31445,7 @@
         "summary": "Profile Status"
       }
     },
-    "/api/v1/fleet-profiles/{profile_id}/switch": {
+    "/api/fleet-profiles/{profile_id}/switch": {
       "post": {
         "operationId": "switchFleetProfile",
         "parameters": [
@@ -31550,7 +31550,7 @@
         "summary": "Switch Profile"
       }
     },
-    "/api/v1/fleet/stream": {
+    "/api/fleet/stream": {
       "get": {
         "operationId": "streamFleetEvents",
         "parameters": [
@@ -31635,7 +31635,7 @@
         "x-vonk-streaming-transport": true
       }
     },
-    "/api/v1/identity-history": {
+    "/api/identity-history": {
       "get": {
         "operationId": "listIdentityHistory",
         "responses": {
@@ -31678,7 +31678,7 @@
         "summary": "Identity History View"
       }
     },
-    "/api/v1/jobs": {
+    "/api/jobs": {
       "get": {
         "operationId": "listJobs",
         "parameters": [
@@ -31786,7 +31786,7 @@
         "summary": "Jobs View"
       }
     },
-    "/api/v1/jobs/{job_id}": {
+    "/api/jobs/{job_id}": {
       "get": {
         "operationId": "getJob",
         "parameters": [
@@ -31896,7 +31896,7 @@
         "summary": "Job View"
       }
     },
-    "/api/v1/jobs/{job_id}/logs": {
+    "/api/jobs/{job_id}/logs": {
       "get": {
         "operationId": "listJobLogs",
         "parameters": [
@@ -31980,7 +31980,7 @@
         "summary": "Job Log List"
       }
     },
-    "/api/v1/jobs/{job_id}/logs/{digest}": {
+    "/api/jobs/{job_id}/logs/{digest}": {
       "get": {
         "operationId": "getJobLog",
         "parameters": [
@@ -32075,7 +32075,7 @@
         "x-vonk-streaming-transport": true
       }
     },
-    "/api/v1/jobs/{job_id}/resume": {
+    "/api/jobs/{job_id}/resume": {
       "post": {
         "operationId": "resumeJob",
         "parameters": [
@@ -32179,7 +32179,7 @@
         "summary": "Resume Job"
       }
     },
-    "/api/v1/library": {
+    "/api/library": {
       "get": {
         "operationId": "listLibrary",
         "parameters": [
@@ -32263,7 +32263,7 @@
         "summary": "List Library"
       }
     },
-    "/api/v1/library/model-deletion-plans/preview": {
+    "/api/library/model-deletion-plans/preview": {
       "post": {
         "operationId": "previewLibraryModelDeletion",
         "requestBody": {
@@ -32306,7 +32306,7 @@
         "summary": "Preview Model Deletion"
       }
     },
-    "/api/v1/library/models/{model_content_sha256}/delete": {
+    "/api/library/models/{model_content_sha256}/delete": {
       "post": {
         "operationId": "deleteLibraryModel",
         "parameters": [
@@ -32361,7 +32361,7 @@
         "summary": "Delete Model"
       }
     },
-    "/api/v1/library/placements": {
+    "/api/library/placements": {
       "post": {
         "operationId": "applyLibraryPlacement",
         "requestBody": {
@@ -32454,7 +32454,7 @@
         "summary": "Apply Placement"
       }
     },
-    "/api/v1/library/placements/preview": {
+    "/api/library/placements/preview": {
       "post": {
         "operationId": "previewLibraryPlacement",
         "requestBody": {
@@ -32547,7 +32547,7 @@
         "summary": "Preview Placement"
       }
     },
-    "/api/v1/library/placements/{placement_id}": {
+    "/api/library/placements/{placement_id}": {
       "get": {
         "operationId": "getLibraryPlacement",
         "parameters": [
@@ -32622,7 +32622,7 @@
         "summary": "Get Placement"
       }
     },
-    "/api/v1/library/placements/{placement_id}/retry": {
+    "/api/library/placements/{placement_id}/retry": {
       "post": {
         "operationId": "retryLibraryPlacement",
         "parameters": [
@@ -32727,7 +32727,7 @@
         "summary": "Retry Application"
       }
     },
-    "/api/v1/library/recipe-image-availability": {
+    "/api/library/recipe-image-availability": {
       "get": {
         "operationId": "listRecipeImageAvailability",
         "parameters": [
@@ -32942,7 +32942,7 @@
         "summary": "Start"
       }
     },
-    "/api/v1/library/recipe-image-availability/{operation_id}": {
+    "/api/library/recipe-image-availability/{operation_id}": {
       "get": {
         "operationId": "getRecipeImageAvailability",
         "parameters": [
@@ -33028,7 +33028,7 @@
         "summary": "Get"
       }
     },
-    "/api/v1/library/recipe-image-availability/{operation_id}/retry": {
+    "/api/library/recipe-image-availability/{operation_id}/retry": {
       "post": {
         "operationId": "retryRecipeImageAvailability",
         "parameters": [
@@ -33134,7 +33134,7 @@
         "summary": "Retry"
       }
     },
-    "/api/v1/library/recipes": {
+    "/api/library/recipes": {
       "get": {
         "operationId": "listLibraryRecipes",
         "parameters": [
@@ -33218,7 +33218,7 @@
         "summary": "List Library Recipes"
       }
     },
-    "/api/v1/library/recipes/{recipe_id}": {
+    "/api/library/recipes/{recipe_id}": {
       "get": {
         "operationId": "getLibraryRecipe",
         "parameters": [
@@ -33293,7 +33293,7 @@
         "summary": "Get Library Recipe"
       }
     },
-    "/api/v1/model-cache": {
+    "/api/model-cache": {
       "get": {
         "operationId": "getModelCacheInventory",
         "parameters": [
@@ -33377,7 +33377,7 @@
         "summary": "Get Inventory"
       }
     },
-    "/api/v1/model-cache/download": {
+    "/api/model-cache/download": {
       "post": {
         "operationId": "downloadModelCache",
         "requestBody": {
@@ -33470,7 +33470,7 @@
         "summary": "Download"
       }
     },
-    "/api/v1/model-cache/download-preview": {
+    "/api/model-cache/download-preview": {
       "post": {
         "operationId": "previewModelCacheDownload",
         "requestBody": {
@@ -33563,7 +33563,7 @@
         "summary": "Preview Download"
       }
     },
-    "/api/v1/model-cache/entries/{artifact_set_sha256}": {
+    "/api/model-cache/entries/{artifact_set_sha256}": {
       "get": {
         "operationId": "getModelCacheEntry",
         "parameters": [
@@ -33638,7 +33638,7 @@
         "summary": "Get Entry"
       }
     },
-    "/api/v1/model-cache/evict": {
+    "/api/model-cache/evict": {
       "post": {
         "operationId": "evictModelCache",
         "requestBody": {
@@ -33731,7 +33731,7 @@
         "summary": "Evict"
       }
     },
-    "/api/v1/model-cache/eviction-preview": {
+    "/api/model-cache/eviction-preview": {
       "post": {
         "operationId": "previewModelCacheEviction",
         "requestBody": {
@@ -33814,7 +33814,7 @@
         "summary": "Preview Eviction"
       }
     },
-    "/api/v1/model-cache/operations": {
+    "/api/model-cache/operations": {
       "get": {
         "operationId": "listModelCacheOperations",
         "parameters": [
@@ -33898,7 +33898,7 @@
         "summary": "List Operations"
       }
     },
-    "/api/v1/model-cache/operations/{operation_id}": {
+    "/api/model-cache/operations/{operation_id}": {
       "get": {
         "operationId": "getModelCacheOperation",
         "parameters": [
@@ -33973,7 +33973,7 @@
         "summary": "Get Operation"
       }
     },
-    "/api/v1/model-cache/operations/{operation_id}/cancel": {
+    "/api/model-cache/operations/{operation_id}/cancel": {
       "post": {
         "operationId": "cancelModelCacheOperation",
         "parameters": [
@@ -34069,7 +34069,7 @@
         "x-vonk-request-body": "none"
       }
     },
-    "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume": {
+    "/api/model-cache/operations/{operation_id}/check-access-and-resume": {
       "post": {
         "operationId": "checkModelCacheAccessAndResume",
         "parameters": [
@@ -34174,7 +34174,7 @@
         "summary": "Check Access And Resume"
       }
     },
-    "/api/v1/model-cache/operations/{operation_id}/retry": {
+    "/api/model-cache/operations/{operation_id}/retry": {
       "post": {
         "operationId": "retryModelCacheOperation",
         "parameters": [
@@ -34279,7 +34279,7 @@
         "summary": "Retry Operation"
       }
     },
-    "/api/v1/model-cache/repair": {
+    "/api/model-cache/repair": {
       "post": {
         "operationId": "repairModelCache",
         "requestBody": {
@@ -34372,7 +34372,7 @@
         "summary": "Repair"
       }
     },
-    "/api/v1/model-cache/repair-preview": {
+    "/api/model-cache/repair-preview": {
       "post": {
         "operationId": "previewModelCacheRepair",
         "requestBody": {
@@ -34465,7 +34465,7 @@
         "summary": "Preview Repair"
       }
     },
-    "/api/v1/model-cache/updates": {
+    "/api/model-cache/updates": {
       "get": {
         "operationId": "getModelCacheUpdates",
         "parameters": [
@@ -34576,7 +34576,7 @@
         "summary": "Get Updates"
       }
     },
-    "/api/v1/nodes/{node_id}/profile": {
+    "/api/nodes/{node_id}/profile": {
       "patch": {
         "operationId": "updateNodeProfile",
         "parameters": [
@@ -34671,7 +34671,7 @@
         "summary": "Update Node Profile"
       }
     },
-    "/api/v1/nodes/{node_id}/telemetry": {
+    "/api/nodes/{node_id}/telemetry": {
       "get": {
         "operationId": "getNodeTelemetryHistory",
         "parameters": [
@@ -34865,7 +34865,7 @@
         "summary": "Node Telemetry History"
       }
     },
-    "/api/v1/nodes/{node_id}/telemetry/capabilities": {
+    "/api/nodes/{node_id}/telemetry/capabilities": {
       "get": {
         "operationId": "getNodeTelemetryCapabilities",
         "parameters": [
@@ -35012,7 +35012,7 @@
         "summary": "Node Telemetry Capabilities"
       }
     },
-    "/api/v1/nodes/{node_id}/telemetry/current": {
+    "/api/nodes/{node_id}/telemetry/current": {
       "get": {
         "operationId": "getNodeTelemetryCurrent",
         "parameters": [
@@ -35159,7 +35159,7 @@
         "summary": "Node Telemetry Current"
       }
     },
-    "/api/v1/nodes/{node_id}/telemetry/workloads": {
+    "/api/nodes/{node_id}/telemetry/workloads": {
       "get": {
         "operationId": "listNodeTelemetryWorkloads",
         "parameters": [
@@ -35270,7 +35270,7 @@
         "summary": "Node Telemetry Workloads"
       }
     },
-    "/api/v1/operations": {
+    "/api/operations": {
       "get": {
         "operationId": "listOperations",
         "parameters": [
@@ -35388,7 +35388,7 @@
         "summary": "Operations View"
       }
     },
-    "/api/v1/operations/{operation_id}": {
+    "/api/operations/{operation_id}": {
       "get": {
         "operationId": "getOperation",
         "parameters": [
@@ -35464,7 +35464,7 @@
         "summary": "Operation View"
       }
     },
-    "/api/v1/operations/{operation_id}/evidence": {
+    "/api/operations/{operation_id}/evidence": {
       "get": {
         "operationId": "getOperationEvidence",
         "parameters": [
@@ -35548,7 +35548,7 @@
         "summary": "Evidence"
       }
     },
-    "/api/v1/proposals": {
+    "/api/proposals": {
       "post": {
         "operationId": "previewProposal",
         "requestBody": {
@@ -35621,7 +35621,7 @@
         "summary": "Proposal Preview"
       }
     },
-    "/api/v1/recipes/build-plans/preview": {
+    "/api/recipes/build-plans/preview": {
       "post": {
         "operationId": "previewRecipeBuild",
         "requestBody": {
@@ -35664,7 +35664,7 @@
         "summary": "Preview Build"
       }
     },
-    "/api/v1/recipes/builds": {
+    "/api/recipes/builds": {
       "post": {
         "operationId": "buildRecipe",
         "requestBody": {
@@ -35707,7 +35707,7 @@
         "summary": "Build"
       }
     },
-    "/api/v1/recipes/image-distribution-plans/preview": {
+    "/api/recipes/image-distribution-plans/preview": {
       "post": {
         "operationId": "previewRecipeImageDistribution",
         "requestBody": {
@@ -35750,7 +35750,7 @@
         "summary": "Preview Image Distribution"
       }
     },
-    "/api/v1/recipes/image-distributions": {
+    "/api/recipes/image-distributions": {
       "post": {
         "operationId": "distributeRecipeImage",
         "requestBody": {
@@ -35793,7 +35793,7 @@
         "summary": "Distribute Image"
       }
     },
-    "/api/v1/recipes/install-plans/preview": {
+    "/api/recipes/install-plans/preview": {
       "post": {
         "operationId": "previewRecipeInstall",
         "requestBody": {
@@ -35836,7 +35836,7 @@
         "summary": "Preview Install"
       }
     },
-    "/api/v1/recipes/installations": {
+    "/api/recipes/installations": {
       "post": {
         "operationId": "installRecipe",
         "requestBody": {
@@ -35879,7 +35879,7 @@
         "summary": "Install"
       }
     },
-    "/api/v1/recipes/installations/{installation_id}/uninstall": {
+    "/api/recipes/installations/{installation_id}/uninstall": {
       "post": {
         "operationId": "uninstallRecipe",
         "parameters": [
@@ -35934,7 +35934,7 @@
         "summary": "Uninstall"
       }
     },
-    "/api/v1/recipes/job-runs": {
+    "/api/recipes/job-runs": {
       "post": {
         "operationId": "activateRecipeJobRun",
         "requestBody": {
@@ -35977,7 +35977,7 @@
         "summary": "Activate Job Run"
       }
     },
-    "/api/v1/recipes/mapping-plans/preview": {
+    "/api/recipes/mapping-plans/preview": {
       "post": {
         "operationId": "previewRecipeMapping",
         "requestBody": {
@@ -36020,7 +36020,7 @@
         "summary": "Preview Mapping"
       }
     },
-    "/api/v1/recipes/mappings": {
+    "/api/recipes/mappings": {
       "post": {
         "operationId": "createRecipeMapping",
         "requestBody": {
@@ -36063,7 +36063,7 @@
         "summary": "Create Mapping"
       }
     },
-    "/api/v1/recipes/operations/{operation_id}": {
+    "/api/recipes/operations/{operation_id}": {
       "get": {
         "operationId": "getRecipeOperation",
         "parameters": [
@@ -36108,7 +36108,7 @@
         "summary": "Get Operation"
       }
     },
-    "/api/v1/recipes/operations/{operation_id}/retry": {
+    "/api/recipes/operations/{operation_id}/retry": {
       "post": {
         "operationId": "retryRecipeOperation",
         "parameters": [
@@ -36163,7 +36163,7 @@
         "summary": "Retry"
       }
     },
-    "/api/v1/recipes/run-plans/preview": {
+    "/api/recipes/run-plans/preview": {
       "post": {
         "operationId": "previewRecipeRun",
         "requestBody": {
@@ -36206,7 +36206,7 @@
         "summary": "Preview Run"
       }
     },
-    "/api/v1/recipes/run-switch-plans/preview": {
+    "/api/recipes/run-switch-plans/preview": {
       "post": {
         "operationId": "previewRecipeRunSwitch",
         "requestBody": {
@@ -36299,7 +36299,7 @@
         "summary": "Preview Run Switch"
       }
     },
-    "/api/v1/recipes/run-switch-stops": {
+    "/api/recipes/run-switch-stops": {
       "post": {
         "operationId": "applyRecipeRunSwitchStop",
         "requestBody": {
@@ -36392,7 +36392,7 @@
         "summary": "Apply Run Switch Stop"
       }
     },
-    "/api/v1/recipes/run-switch-stops/preview": {
+    "/api/recipes/run-switch-stops/preview": {
       "post": {
         "operationId": "previewRecipeRunSwitchStop",
         "requestBody": {
@@ -36485,7 +36485,7 @@
         "summary": "Preview Run Switch Stop"
       }
     },
-    "/api/v1/recipes/run-switches": {
+    "/api/recipes/run-switches": {
       "post": {
         "operationId": "applyRecipeRunSwitch",
         "requestBody": {
@@ -36578,7 +36578,7 @@
         "summary": "Apply Run Switch"
       }
     },
-    "/api/v1/recipes/run-switches/{operation_id}": {
+    "/api/recipes/run-switches/{operation_id}": {
       "get": {
         "operationId": "getRecipeRunSwitchOperation",
         "parameters": [
@@ -36653,7 +36653,7 @@
         "summary": "Get Run Switch"
       }
     },
-    "/api/v1/recipes/run-switches/{operation_id}/cancel": {
+    "/api/recipes/run-switches/{operation_id}/cancel": {
       "post": {
         "operationId": "cancelRecipeRunSwitchOperation",
         "parameters": [
@@ -36758,7 +36758,7 @@
         "summary": "Cancel Run Switch"
       }
     },
-    "/api/v1/recipes/run-switches/{operation_id}/retry": {
+    "/api/recipes/run-switches/{operation_id}/retry": {
       "post": {
         "operationId": "retryRecipeRunSwitchOperation",
         "parameters": [
@@ -36863,7 +36863,7 @@
         "summary": "Retry Run Switch"
       }
     },
-    "/api/v1/recipes/runs": {
+    "/api/recipes/runs": {
       "post": {
         "operationId": "startRecipeRun",
         "requestBody": {
@@ -36906,7 +36906,7 @@
         "summary": "Start"
       }
     },
-    "/api/v1/recipes/runs/{run_id}": {
+    "/api/recipes/runs/{run_id}": {
       "get": {
         "operationId": "getRecipeRunStatus",
         "parameters": [
@@ -36951,7 +36951,7 @@
         "summary": "Run Status"
       }
     },
-    "/api/v1/recipes/runs/{run_id}/artifact-jobs": {
+    "/api/recipes/runs/{run_id}/artifact-jobs": {
       "get": {
         "operationId": "listArtifactJobsForRun",
         "parameters": [
@@ -37129,7 +37129,7 @@
         "summary": "Create Job"
       }
     },
-    "/api/v1/recipes/runs/{run_id}/stop": {
+    "/api/recipes/runs/{run_id}/stop": {
       "post": {
         "operationId": "stopRecipeRun",
         "parameters": [
@@ -37184,7 +37184,7 @@
         "summary": "Stop"
       }
     },
-    "/api/v1/recipes/source-checks": {
+    "/api/recipes/source-checks": {
       "post": {
         "operationId": "checkRecipeBuildSource",
         "requestBody": {
@@ -37227,7 +37227,7 @@
         "summary": "Check Source"
       }
     },
-    "/api/v1/recipes/stop-plans/preview": {
+    "/api/recipes/stop-plans/preview": {
       "post": {
         "operationId": "previewRecipeStop",
         "requestBody": {
@@ -37270,7 +37270,7 @@
         "summary": "Preview Stop"
       }
     },
-    "/api/v1/recipes/uninstall-plans/preview": {
+    "/api/recipes/uninstall-plans/preview": {
       "post": {
         "operationId": "previewRecipeUninstall",
         "requestBody": {

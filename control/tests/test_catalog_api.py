@@ -66,7 +66,7 @@ def test_source_bundle_download_preserves_raw_bytes() -> None:
     )
 
     response = TestClient(app).get(
-        "/api/v1/catalog/source-bundles/" + "a" * 64
+        "/api/catalog/source-bundles/" + "a" * 64
     )
 
     assert response.status_code == 200
@@ -85,18 +85,18 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
         service=None,
     )
     paths = app.openapi()["paths"]
-    assert "/api/v1/catalog/source-bundles/{sha256}" in paths
-    assert paths["/api/v1/catalog/source-bundles/{sha256}"]["get"][
+    assert "/api/catalog/source-bundles/{sha256}" in paths
+    assert paths["/api/catalog/source-bundles/{sha256}"]["get"][
         "x-vonk-streaming-transport"
     ] is True
-    assert "/api/v1/catalog/managed-recipes/sync" in paths
-    assert "/api/v1/catalog/managed-recipes/sync-status" in paths
-    assert "/api/v1/catalog/public-recipes" not in paths
-    assert "/api/v1/catalog/imports/public" not in paths
-    assert "/api/v1/catalog/imports/recipe-library" not in paths
-    assert "/api/v1/catalog/imports/workload_run" not in paths
-    assert "/api/v1/catalog/imports/workload_run/preview" not in paths
-    assert "/api/v1/catalog/recipes" not in paths
+    assert "/api/catalog/managed-recipes/sync" in paths
+    assert "/api/catalog/managed-recipes/sync-status" in paths
+    assert "/api/catalog/public-recipes" not in paths
+    assert "/api/catalog/imports/public" not in paths
+    assert "/api/catalog/imports/recipe-library" not in paths
+    assert "/api/catalog/imports/workload_run" not in paths
+    assert "/api/catalog/imports/workload_run/preview" not in paths
+    assert "/api/catalog/recipes" not in paths
     operation_ids = {
         operation["operationId"]
         for methods in paths.values()
@@ -151,7 +151,7 @@ def test_managed_sync_maps_reader_failure_to_bounded_problem() -> None:
         RecipeLibraryError("recipe_package.unavailable", "reader detail " + "x" * 400)
     )
     response = client.post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
 
@@ -164,7 +164,7 @@ def test_managed_sync_maps_reader_failure_to_bounded_problem() -> None:
     transient = _sync_client(
         RecipeLibraryError("recipe_library.transient", "retryable reader failure")
     ).post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
     assert transient.status_code == 503
@@ -175,25 +175,25 @@ def test_managed_sync_maps_invalid_reader_and_catalog_errors() -> None:
     invalid = _sync_client(
         RecipeLibraryError("recipe_package.response_invalid", "invalid package")
     ).post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
     conflict = _sync_client(
         CatalogConflict("catalog.document_exists", "catalog conflict")
     ).post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
     plain_catalog = _sync_client(
         CatalogError("catalog.storage_invalid", "catalog invalid")
     ).post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
     in_progress = _sync_client(
         CatalogSyncError("catalog.sync_in_progress", "another sync is running")
     ).post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": str(uuid.uuid4())},
     )
 
@@ -239,7 +239,7 @@ def test_catalog_json_contract_rejects_coercion_and_top_level_extras() -> None:
         RecipeLibraryError("recipe_package.response_invalid", "invalid package")
     )
     response = client.post(
-        "/api/v1/catalog/managed-recipes/sync",
+        "/api/catalog/managed-recipes/sync",
         json={"request_key": 1},
     )
     assert response.status_code == 422

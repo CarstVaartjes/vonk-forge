@@ -429,23 +429,23 @@ async function installLocalFleetFixture(page: Page) {
   };
   const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
   libraryFixtures.set(page, libraryState);
-  await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
-  await page.route("**/api/v1/artifact-jobs/capabilities", route => route.fulfill({json: {schema_version: 1, transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]}, storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 0, remaining_bytes: 4 * 1024 ** 3}}}));
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({
+  await page.route("**/api/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
+  await page.route("**/api/artifact-jobs/capabilities", route => route.fulfill({json: {schema_version: 1, transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]}, storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 0, remaining_bytes: 4 * 1024 ** 3}}}));
+  await page.route("**/api/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
     headers: {"Cache-Control": "no-cache"},
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
-  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 2, generated_at: snapshot.generated_at, profiles: [profile]}}));
-  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
-  await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+  await page.route("**/api/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/fleet-profiles", route => route.fulfill({json: {schema_version: 2, generated_at: snapshot.generated_at, profiles: [profile]}}));
+  await page.route("**/api/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
+  await page.route("**/api/fleet-profiles/*/status", route => route.fulfill({json: {
     schema_version: 2, profile_id: profile.id, profile_digest: profile.profile_digest, generated_at: snapshot.generated_at,
     state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
     reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}],
   }}));
-  await page.route("**/api/v1/fleet-profiles/*/apply", async route => {
+  await page.route("**/api/fleet-profiles/*/apply", async route => {
     const body = await route.request().postDataJSON() as {request_key?: string; plan_digest?: string};
     return route.fulfill({status: 202, json: {
       schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
@@ -455,14 +455,14 @@ async function installLocalFleetFixture(page: Page) {
       status_reason: null, result: null,
     }});
   });
-  await page.route("**/api/v1/fleet-profile-applications/*", route => route.fulfill({json: {
+  await page.route("**/api/fleet-profile-applications/*", route => route.fulfill({json: {
     schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
     plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
     current_operation_id: null, current_step: 1, total_steps: 4,
       progress: {completed_steps: 0, total_steps: 3, child_progress: {phase: "target-copy", bytes: 32 * GIB, total_bytes: 80 * GIB, node_ids: [nodeId, borealisId]}},
     status_reason: null, result: null,
   }}));
-  await page.route("**/api/v1/nodes/*/profile", async route => {
+  await page.route("**/api/nodes/*/profile", async route => {
     const nodeId = route.request().url().split("/").at(-2) ?? "";
     const input = await route.request().postDataJSON() as {display_name: string};
     const node = snapshot.nodes.find(item => item.id === nodeId);
@@ -476,13 +476,13 @@ async function installLocalFleetFixture(page: Page) {
   const cacheStorage = {schema_version: 2, total_bytes: 1_000, free_bytes: 700, reserve_bytes: 100, available_bytes: 600, unique_used_bytes: 300, in_flight_bytes: 0, protected_bytes: 100, reclaimable_bytes: 200};
   const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
   const emptyRecipeAvailability: components["schemas"]["RecipeImageAvailabilityListResponse"] = {schema_version: 2, total: 0, operations: [], next_cursor: null};
-  await page.route("**/api/v1/model-cache", route => route.fulfill({json: emptyCacheInventory}));
-  await page.route("**/api/v1/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/model-cache", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
   const emptyModelUpdates = {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null};
-  await page.route("**/api/v1/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
-  await page.route("**/api/v1/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
-  await page.route("**/api/v1/library/recipe-image-availability", route => route.fulfill({json: emptyRecipeAvailability}));
-  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: emptyRecipeAvailability}));
+  await page.route("**/api/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
+  await page.route("**/api/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
+  await page.route("**/api/library/recipe-image-availability", route => route.fulfill({json: emptyRecipeAvailability}));
+  await page.route("**/api/library/recipe-image-availability?*", route => route.fulfill({json: emptyRecipeAvailability}));
   const librarySnapshotRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
@@ -491,27 +491,27 @@ async function installLocalFleetFixture(page: Page) {
     const body = libraryState.empty ? {...librarySnapshot, models: [], unlinked_recipes: []} : librarySnapshot;
     return route.fulfill({json: body});
   };
-  await page.route("**/api/v1/library", librarySnapshotRoute);
-  await page.route("**/api/v1/library?*", librarySnapshotRoute);
-  await page.route("**/api/v1/library/recipes/recipe-chat", route => {
+  await page.route("**/api/library", librarySnapshotRoute);
+  await page.route("**/api/library?*", librarySnapshotRoute);
+  await page.route("**/api/library/recipes/recipe-chat", route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     return route.fulfill({json: fullLibraryDetail});
   });
-  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => {
+  await page.route(`**/api/library/recipes/${pairedRecipeId}`, route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     return route.fulfill({json: canonicalRecipeDetail()});
   });
-  await page.route("**/api/v1/library/recipes/recipe-code", route => route.fulfill({json: {
+  await page.route("**/api/library/recipes/recipe-code", route => route.fulfill({json: {
     ...fullLibraryDetail,
     recipe: {...fullLibraryDetail.recipe, recipe_id: codeRecipe.recipe_id, slug: codeRecipe.slug, title: codeRecipe.title, description: codeRecipe.description},
   }}));
-  await page.route("**/api/v1/library/recipes/recipe-unlinked", route => route.fulfill({json: {
+  await page.route("**/api/library/recipes/recipe-unlinked", route => route.fulfill({json: {
     ...minimalLibraryDetail,
     recipe: {
       recipe_id: unlinkedRecipe.recipe_id,
@@ -521,7 +521,7 @@ async function installLocalFleetFixture(page: Page) {
       source_kind: unlinkedRecipe.source_kind,
     },
   }}));
-  await page.route("**/api/v1/library/recipes/*", route => {
+  await page.route("**/api/library/recipes/*", route => {
     const recipeId = new URL(route.request().url()).pathname.split("/").at(-1);
     if (recipeId !== pairedRecipeId) return route.fallback();
     if (libraryState.detailFailuresRemaining > 0) {
@@ -530,54 +530,54 @@ async function installLocalFleetFixture(page: Page) {
     }
     return route.fulfill({json: canonicalRecipeDetail()});
   });
-  await page.route("**/api/v1/recipes/run-plans/preview", route => route.fulfill({json: libraryLoadPlan()}));
-  await page.route("**/api/v1/recipes/runs", async route => {
+  await page.route("**/api/recipes/run-plans/preview", route => route.fulfill({json: libraryLoadPlan()}));
+  await page.route("**/api/recipes/runs", async route => {
     libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({json: libraryOperation("queued")});
   });
-  await page.route("**/api/v1/recipes/run-switch-plans/preview", async route => {
+  await page.route("**/api/recipes/run-switch-plans/preview", async route => {
     libraryState.lastRunSwitchPreviewBody = await route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({json: libraryRunSwitchPlan()});
   });
-  await page.route("**/api/v1/recipes/run-switches", async route => {
+  await page.route("**/api/recipes/run-switches", async route => {
     libraryState.lastRunSwitchApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
     const requestKey = String(libraryState.lastRunSwitchApplyBody.request_key ?? "");
     return route.fulfill({status: 202, json: libraryRunSwitchOperation(requestKey)});
   });
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
+  await page.route("**/api/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
     const requestKey = String(libraryFixtures.get(page)?.lastRunSwitchApplyBody?.request_key ?? "");
     return route.fulfill({json: libraryRunSwitchOperation(requestKey, "running")});
   });
-  await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
-  await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
+  await page.route("**/api/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
+  await page.route("**/api/recipes/operations/operation-load/retry", route => {
     libraryState.retryCount += 1;
     return route.fulfill({json: libraryOperation("queued")});
   });
-  await page.route("**/api/v1/jobs/job-load*", route => route.fulfill({json: {
+  await page.route("**/api/jobs/job-load*", route => route.fulfill({json: {
     id: "job-load", kind: "run", state: "failed", authority_revision: commit, current_attempt: 1,
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }}));
-  await page.route("**/api/v1/nodes/*/telemetry/current", route => {
+  await page.route("**/api/nodes/*/telemetry/current", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", sample: richTelemetry(observedAt, 5, requestedNodeId)}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry/capabilities", route => {
+  await page.route("**/api/nodes/*/telemetry/capabilities", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", capabilities: richTelemetryMetrics(observedAt, requestedNodeId).capabilities}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry/workloads", route => {
+  await page.route("**/api/nodes/*/telemetry/workloads", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     const metrics = richTelemetryMetrics(observedAt, requestedNodeId);
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", run_id: null, state: null, runtimes: metrics.runtimes, workloads: metrics.workloads}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry?*", route => {
+  await page.route("**/api/nodes/*/telemetry?*", route => {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
     const end = url.searchParams.get("end") ?? snapshot.generated_at;
@@ -840,17 +840,17 @@ test("Fleet resilient-state headings remain plain and scannable", async ({page},
   const filtered = await page.locator(".fleet-filter-empty").evaluate(element => element.outerHTML);
 
   const empty = {...localSnapshot(), nodes: []};
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({
+  await page.route("**/api/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
     body: `id: ${empty.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot: empty})}\n\n`,
   }));
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: empty}));
+  await page.route("**/api/fleet", route => route.fulfill({json: empty}));
   await page.reload();
   const emptyState = await page.locator(".fleet-empty").evaluate(element => element.outerHTML);
 
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({status: 503, body: "stream unavailable"}));
-  await page.route("**/api/v1/fleet", route => route.fulfill({status: 503, json: {detail: "projection unavailable"}}));
+  await page.route("**/api/fleet/stream", route => route.fulfill({status: 503, body: "stream unavailable"}));
+  await page.route("**/api/fleet", route => route.fulfill({status: 503, json: {detail: "projection unavailable"}}));
   await page.reload();
   const errorState = await page.locator(".fleet-error").evaluate(element => element.outerHTML);
   browserProblems.set(page, []);
@@ -870,7 +870,7 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   let releaseGrant!: () => void;
   const grantGate = new Promise<void>(resolve => { releaseGrant = resolve; });
   let grantRequests = 0;
-  await page.route("**/api/v1/agents/enrollments/grants", async route => {
+  await page.route("**/api/agents/enrollments/grants", async route => {
     grantRequests += 1;
     await grantGate;
     await route.fulfill({status: 201, json: {
@@ -923,9 +923,9 @@ test("Library separates installation capacity from load memory admission", async
   ];
   blocked.placement[0].rejected_groups = [];
   blocked.placement[0].rejected_nodes = [];
-  await page.unroute(`**/api/v1/library/recipes/${pairedRecipeId}`);
-  await page.unroute("**/api/v1/library/recipes/*");
-  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => route.fulfill({json: blocked}));
+  await page.unroute(`**/api/library/recipes/${pairedRecipeId}`);
+  await page.unroute("**/api/library/recipes/*");
+  await page.route(`**/api/library/recipes/${pairedRecipeId}`, route => route.fulfill({json: blocked}));
   await page.setViewportSize({width: 1280, height: 900});
 
   await page.goto(`/library/recipes/${pairedRecipeId}`);
@@ -973,12 +973,12 @@ test("Library retries a transient Run through the durable retry route", async ({
   const complete = {...replacement, state: "succeeded", result: {retryable: false}, progress: {...replacement.progress, state: "succeeded", phase: "final_verify", phase_index: 2, completed_bytes: 100, total_bytes: 100, total_bytes_known: true, members: replacement.progress.members.map(member => ({...member, phase: "final_verify", state: "succeeded", completed_bytes: 100, total_bytes: 100}))}};
   let applyCalls = 0;
   let retryBody: Record<string, unknown> | undefined;
-  await page.unroute("**/api/v1/recipes/run-switches");
-  await page.unroute("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707");
-  await page.route("**/api/v1/recipes/run-switches", async route => { applyCalls += 1; return route.fulfill({status: 202, json: failedOperation}); });
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", route => route.fulfill({json: failedOperation}));
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707/retry", async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
-  await page.route(`**/api/v1/recipes/run-switches/${replacementId}`, route => route.fulfill({json: complete}));
+  await page.unroute("**/api/recipes/run-switches");
+  await page.unroute("**/api/recipes/run-switches/00000000-0000-4000-8000-000000000707");
+  await page.route("**/api/recipes/run-switches", async route => { applyCalls += 1; return route.fulfill({status: 202, json: failedOperation}); });
+  await page.route("**/api/recipes/run-switches/00000000-0000-4000-8000-000000000707", route => route.fulfill({json: failedOperation}));
+  await page.route("**/api/recipes/run-switches/00000000-0000-4000-8000-000000000707/retry", async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
+  await page.route(`**/api/recipes/run-switches/${replacementId}`, route => route.fulfill({json: complete}));
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto(`/library/recipes/${pairedRecipeId}`);
 
@@ -1012,7 +1012,7 @@ test("Library keeps partial Run progress visible for each Spark", async ({page})
 });
 
 test("Profiles keep the saved view primary and show durable per-Spark switch progress", async ({page}, testInfo) => {
-  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
+  await page.route("**/api/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
 
   for (const [width, height] of [[1280, 900], [360, 800]] as const) {
     await page.setViewportSize({width, height});
@@ -1087,16 +1087,16 @@ test("Recipe Make available uses durable aggregate progress, access resume, and 
     ],
     failure: null, result: null, actions: [], created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z",
   });
-  await page.route("**/api/v1/library/recipe-image-availability?*", async route => route.fulfill({json: {schema_version: 2, total: stage === "empty" ? 0 : 1, operations: stage === "empty" ? [] : [operation(stage)], next_cursor: null}}));
-  await page.route("**/api/v1/library/recipe-image-availability", async route => {
+  await page.route("**/api/library/recipe-image-availability?*", async route => route.fulfill({json: {schema_version: 2, total: stage === "empty" ? 0 : 1, operations: stage === "empty" ? [] : [operation(stage)], next_cursor: null}}));
+  await page.route("**/api/library/recipe-image-availability", async route => {
     if (route.request().method() !== "POST") return route.fallback();
     const body = await route.request().postDataJSON() as Record<string, unknown>;
     starts.push(body);
     stage = body.force === true ? "forced" : "running";
     return route.fulfill({status: 202, json: operation(stage)});
   });
-  await page.route("**/api/v1/library/recipe-image-availability/recipe-availability-operation", route => route.fulfill({json: operation(stage)}));
-  await page.route("**/api/v1/model-cache/operations/model-child-1/check-access-and-resume", async route => {
+  await page.route("**/api/library/recipe-image-availability/recipe-availability-operation", route => route.fulfill({json: operation(stage)}));
+  await page.route("**/api/model-cache/operations/model-child-1/check-access-and-resume", async route => {
     stage = "resumed";
     return route.fulfill({status: 202, json: {schema_version: 2, id: "model-child-1", kind: "download", state: "queued", attempt: 2, request_key: "request-resume", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: {schema_version: 2, phase: "queued", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 40, expected_bytes: 100, total_bytes_known: true, current_artifact_key: "weights", bytes_per_second: null, eta_seconds: null, members: []}, failure: null, result: null, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:02:00Z", completed_at: null}});
   });
@@ -1137,8 +1137,8 @@ test("Recipe progress keeps updating after image failure and recovers from a pol
     ],
   });
   let polls = 0;
-  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 1, operations: [operation(40)]}}));
-  await page.route("**/api/v1/library/recipe-image-availability/continuing-download", route => {
+  await page.route("**/api/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 1, operations: [operation(40)]}}));
+  await page.route("**/api/library/recipe-image-availability/continuing-download", route => {
     polls++;
     return polls === 1 ? route.fulfill({status: 503, json: {detail: "Temporarily unavailable"}}) : route.fulfill({json: operation(polls === 2 ? 75 : 100)});
   });
@@ -1167,9 +1167,9 @@ test("Library pairs exact model selection with matching recipes and downloads an
     schema_version: 2, id: "model-download-operation", attempt: 1, request_key: "00000000-0000-4000-8000-000000000801", kind: "download", state: "running", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
     progress: {schema_version: 2, phase: "downloading", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, result: null, last_error: null, created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: null,
   };
-  await page.route("**/api/v1/model-cache/download-preview", async route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 0, new_bytes: 200, blockers: [], warnings: []}}));
-  await page.route("**/api/v1/model-cache/download", route => route.fulfill({status: 202, json: cacheOperation}));
-  await page.route("**/api/v1/model-cache/operations/*", route => route.fulfill({json: cacheOperation}));
+  await page.route("**/api/model-cache/download-preview", async route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 0, new_bytes: 200, blockers: [], warnings: []}}));
+  await page.route("**/api/model-cache/download", route => route.fulfill({status: 202, json: cacheOperation}));
+  await page.route("**/api/model-cache/operations/*", route => route.fulfill({json: cacheOperation}));
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto(`/library?model=${encodeURIComponent(modelKey(linked))}`);
   const paired = page.getByLabel("Model and recipe list");
@@ -1205,7 +1205,7 @@ test("Library pairs exact model selection with matching recipes and downloads an
   const modelInventory = page.getByLabel("Exact model inventory");
   const orphanRow = modelInventory.locator(".library-model-row").filter({hasText: unlinked.model_document.identity.model.title}).first();
   await expect(orphanRow).toContainText("No Recipe");
-  const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/v1/model-cache/download-preview"));
+  const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/model-cache/download-preview"));
   await orphanRow.getByRole("button", {name: "Make available"}).click();
   expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_content_sha256: unlinked.model.content_sha256});
   await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
@@ -1223,13 +1223,13 @@ test("Library retries a transient Model cache operation without restarting its t
   const replacement = {...failed, id: replacementId, state: "succeeded", request_key: "00000000-0000-4000-8000-000000000812", failure: null, result: null, last_error: null, progress: {...failed.progress, phase: "completed", completed_artifacts: 2, downloaded_bytes: 200}, updated_at: "2026-09-06T00:00:02Z", completed_at: "2026-09-06T00:00:02Z"};
   let downloadCalls = 0;
   let retryBody: Record<string, unknown> | undefined;
-  await page.unroute("**/api/v1/model-cache/download");
-  await page.unroute("**/api/v1/model-cache/operations/*");
-  await page.route("**/api/v1/model-cache/download-preview", route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 100, new_bytes: 100, blockers: [], warnings: []}}));
-  await page.route("**/api/v1/model-cache/download", async route => { downloadCalls += 1; return route.fulfill({status: 202, json: failed}); });
-  await page.route(`**/api/v1/model-cache/operations/${failedId}/retry`, async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
-  await page.route(`**/api/v1/model-cache/operations/${failedId}`, route => route.fulfill({json: failed}));
-  await page.route(`**/api/v1/model-cache/operations/${replacementId}`, route => route.fulfill({json: replacement}));
+  await page.unroute("**/api/model-cache/download");
+  await page.unroute("**/api/model-cache/operations/*");
+  await page.route("**/api/model-cache/download-preview", route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 100, new_bytes: 100, blockers: [], warnings: []}}));
+  await page.route("**/api/model-cache/download", async route => { downloadCalls += 1; return route.fulfill({status: 202, json: failed}); });
+  await page.route(`**/api/model-cache/operations/${failedId}/retry`, async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
+  await page.route(`**/api/model-cache/operations/${failedId}`, route => route.fulfill({json: failed}));
+  await page.route(`**/api/model-cache/operations/${replacementId}`, route => route.fulfill({json: replacement}));
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto(`/library?view=models&model=${encodeURIComponent(modelKey)}`);
 
@@ -1245,7 +1245,7 @@ test("Library retries a transient Model cache operation without restarting its t
 for (const width of [1280, 360]) {
   test(`Profiles validate scope and ranks and save idle intent at ${width}px`, async ({page}, testInfo) => {
     const writes: Record<string, unknown>[] = [];
-    await page.route("**/api/v1/fleet-profiles/00000000-0000-4000-8000-000000000101", async route => {
+    await page.route("**/api/fleet-profiles/00000000-0000-4000-8000-000000000101", async route => {
       const input = route.request().postDataJSON() as Record<string, unknown>;
       writes.push(input);
       await route.fulfill({json: {...input, schema_version: 2, id: "00000000-0000-4000-8000-000000000101", profile_digest: "d".repeat(64), created_by: "admin", created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z"}});
@@ -1297,15 +1297,15 @@ for (const width of [1280, 360]) {
     let retryBody: Record<string, unknown> | undefined;
     let readId: string | undefined;
     let applyCount = 0;
-    await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+    await page.route("**/api/fleet-profiles/*/status", route => route.fulfill({json: {
       schema_version: 2, profile_id: base.profile_id, profile_digest: base.profile_digest,
       state: readId ? "matched" : "drifted", matched: Boolean(readId), drifted: !readId,
       scope: {node_ids: [nodeId, borealisId], idle_node_ids: []}, reasons: [], generated_at: base.updated_at,
     }}));
-    await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
-    await page.route("**/api/v1/fleet-profiles/*/apply", route => { applyCount += 1; return route.fulfill({status: 202, json: base}); });
-    await page.route(`**/api/v1/fleet-profile-applications/${failedId}/retry`, route => { retryBody = route.request().postDataJSON(); return route.fulfill({status: 202, json: linked}); });
-    await page.route(`**/api/v1/fleet-profile-applications/${nextId}`, route => { readId = nextId; return route.fulfill({json: completed}); });
+    await page.route("**/api/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
+    await page.route("**/api/fleet-profiles/*/apply", route => { applyCount += 1; return route.fulfill({status: 202, json: base}); });
+    await page.route(`**/api/fleet-profile-applications/${failedId}/retry`, route => { retryBody = route.request().postDataJSON(); return route.fulfill({status: 202, json: linked}); });
+    await page.route(`**/api/fleet-profile-applications/${nextId}`, route => { readId = nextId; return route.fulfill({json: completed}); });
     await page.setViewportSize({width, height: 900});
     await page.goto("/library/profiles");
     await page.getByRole("button", {name: "Switch profile", exact: true}).click();

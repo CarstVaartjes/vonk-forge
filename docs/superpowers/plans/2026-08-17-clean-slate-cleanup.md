@@ -232,7 +232,7 @@ git commit -m "refactor: make PostgreSQL authoritative for Fleet"
 - Delete: any tracked files under `config/package-families/` and `config/workload-deployments/`; the cleanup must leave both artifact directories absent or empty
 
 **Interfaces:**
-- Produces: No `/api/v1/packages/*`, `/api/v1/deployments/*`, or package/deployment operation IDs.
+- Produces: No `/api/packages/*`, `/api/deployments/*`, or package/deployment operation IDs.
 - Preserves: agent-side signed artifact transfer primitives only when a retained Fleet/Library consumer proves they are needed; names and contracts are rewritten rather than compatibility-wrapped.
 
 - [ ] **Step 1: Add a failing negative route contract**
@@ -244,14 +244,14 @@ client, _, _, _ = _client("administrator")
 legacy_paths = {
     route.path
     for route in client.app.routes
-    if route.path.startswith("/api/v1/packages/") or route.path.startswith("/api/v1/deployments")
+    if route.path.startswith("/api/packages/") or route.path.startswith("/api/deployments")
 }
 assert legacy_paths == set()
 ```
 
 - [ ] **Step 2: Run the negative contract and dependency search**
 
-Run: `pytest -q control/tests/test_api.py -k legacy` and `rg -n "package_api|package_services|package_rollout|PackageCandidate|PackageRollout|/api/v1/packages|/api/v1/deployments" control/src control/tests control/web/src`
+Run: `pytest -q control/tests/test_api.py -k legacy` and `rg -n "package_api|package_services|package_rollout|PackageCandidate|PackageRollout|/api/packages|/api/deployments" control/src control/tests control/web/src`
 
 Expected: the new test fails and the search identifies every remaining consumer before deletion.
 
@@ -268,7 +268,7 @@ Delete package candidates, resolutions, validations, rollouts, rollout nodes, ob
 Run: `pytest -q control/tests` and:
 
 ```bash
-if rg -n "PackageCandidate|PackageRollout|/api/v1/packages|/api/v1/deployments|config/package-families|config/workload-deployments" control/src control/tests control/web/src; then exit 1; fi
+if rg -n "PackageCandidate|PackageRollout|/api/packages|/api/deployments|config/package-families|config/workload-deployments" control/src control/tests control/web/src; then exit 1; fi
 ```
 
 Expected: PASS with no supported-source references to the deleted pipeline.
@@ -330,7 +330,7 @@ Run: `cd control/web && npm test -- --run && npm run build`
 Run: `pytest -q control/tests tests` and:
 
 ```bash
-if rg -n "AgentsPage|CatalogPage|PackagesPage|DeploymentsPage|UpdatesPage|JobsPage|AuditPage|inventory/fleet\.toml|/api/v1/packages|/api/v1/deployments|PackageCandidate|PackageRollout" control/src control/web/src control/tests tests docs; then exit 1; fi
+if rg -n "AgentsPage|CatalogPage|PackagesPage|DeploymentsPage|UpdatesPage|JobsPage|AuditPage|inventory/fleet\.toml|/api/packages|/api/deployments|PackageCandidate|PackageRollout" control/src control/web/src control/tests tests docs; then exit 1; fi
 ```
 
 - [ ] **Step 3: Verify the clean working tree and fresh-schema contract**

@@ -1511,7 +1511,7 @@ def _load_library_snapshot(
     for _page_number in range(_MAX_PAGES):
         page = client.request(
             "GET",
-            "/api/v1/library",
+            "/api/library",
             query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
         )
         pages.append(page)
@@ -1572,7 +1572,7 @@ def _load_recipe_list(
     for _page_number in range(_MAX_PAGES):
         page = client.request(
             "GET",
-            "/api/v1/library/recipes",
+            "/api/library/recipes",
             query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
         )
         pages.append(page)
@@ -1604,7 +1604,7 @@ def _load_recipe_list(
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
     if command == "provenance":
-        return client.request("GET", "/api/v1/deployment-provenance")
+        return client.request("GET", "/api/deployment-provenance")
     def fleet_snapshot() -> dict[str, object]:
         payload = client.fleet().to_dict()
         if not isinstance(payload, dict):
@@ -1657,11 +1657,11 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             args,
             client,
             "PATCH",
-            f"/api/v1/nodes/{_quoted(args.node_id)}/profile",
+            f"/api/nodes/{_quoted(args.node_id)}/profile",
             {"display_name": display_name},
         )
     if command == "agents":
-        return client.request("GET", "/api/v1/agents")
+        return client.request("GET", "/api/agents")
     if command == "enrollments":
         return _load_enrollments(client, args)
     if command in {"enroll", "re-enroll"}:
@@ -1683,12 +1683,12 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             args,
             client,
             "POST",
-            "/api/v1/agents/enrollments/grants",
+            "/api/agents/enrollments/grants",
             payload,
         )
     if command == "upgrade":
         if args.upgrade_command == "candidate":
-            return client.request("GET", "/api/v1/agents/upgrades/candidate")
+            return client.request("GET", "/api/agents/upgrades/candidate")
         for node_id in args.node_id:
             if not re.fullmatch(r"spk_[0-9a-f]{32}", node_id):
                 raise ValueError("upgrade node ID must match spk_<32 lowercase hex>")
@@ -1696,17 +1696,17 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
         if args.node_id:
             payload["node_ids"] = args.node_id
         if args.upgrade_command == "preview":
-            return client.request("POST", "/api/v1/agents/upgrades/preview", payload)
+            return client.request("POST", "/api/agents/upgrades/preview", payload)
         payload["plan_digest"] = args.plan_digest
         return _plan_or_request(
             args,
             client,
             "POST",
-            "/api/v1/agents/upgrades",
+            "/api/agents/upgrades",
             payload,
         )
     return _plan_or_request(
-        args, client, "POST", f"/api/v1/agents/nodes/{_quoted(args.node_id)}/revoke"
+        args, client, "POST", f"/api/agents/nodes/{_quoted(args.node_id)}/revoke"
     )
 
 
@@ -1716,7 +1716,7 @@ def _run_metric_command(
     metric_command: str,
 ) -> dict[str, object]:
     """Forward the Controller's schema-2 telemetry projection unchanged."""
-    node_path = f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry"
+    node_path = f"/api/nodes/{_quoted(args.node_id)}/telemetry"
     if metric_command == "current":
         return client.request("GET", f"{node_path}/current")
     if metric_command == "capabilities":
@@ -1853,12 +1853,12 @@ def _run_artifact_job(
     command = args.artifact_job_command
     if command == "capabilities":
         return _artifact_capabilities(
-            client.request("GET", "/api/v1/artifact-jobs/capabilities")
+            client.request("GET", "/api/artifact-jobs/capabilities")
         )
     if command == "list":
         return client.request(
             "GET",
-            f"/api/v1/recipes/runs/{_quoted(args.run_id)}/artifact-jobs",
+            f"/api/recipes/runs/{_quoted(args.run_id)}/artifact-jobs",
         )
     if command == "activate":
         apply = args.activate_command == "apply"
@@ -1867,13 +1867,13 @@ def _run_artifact_job(
             "alias": args.alias,
         }
         if not apply:
-            return client.request("POST", "/api/v1/recipes/run-plans/preview", payload)
+            return client.request("POST", "/api/recipes/run-plans/preview", payload)
         payload.update(
             plan_digest=args.plan_digest,
             request_key=_request_key_value(args, request_id_factory),
         )
         return _plan_or_request(
-            args, client, "POST", "/api/v1/recipes/job-runs", payload
+            args, client, "POST", "/api/recipes/job-runs", payload
         )
     if command in {"create", "launch"}:
         inputs = _artifact_inputs(args.input)
@@ -1888,7 +1888,7 @@ def _run_artifact_job(
             is None
         ):
             raise ValueError("--request-key must be a lowercase UUID")
-        create_path = f"/api/v1/recipes/runs/{_quoted(args.run_id)}/artifact-jobs"
+        create_path = f"/api/recipes/runs/{_quoted(args.run_id)}/artifact-jobs"
         if not args.apply:
             steps: list[dict[str, object]] = [
                 {
@@ -1902,7 +1902,7 @@ def _run_artifact_job(
                 steps.extend(
                     {
                         "method": "PUT",
-                        "path": f"/api/v1/artifact-jobs/<created-job-id>/inputs/{_quoted(str(declaration['name']))}",
+                        "path": f"/api/artifact-jobs/<created-job-id>/inputs/{_quoted(str(declaration['name']))}",
                         "source": str(source),
                         "sha256": declaration["sha256"],
                         "size_bytes": declaration["size_bytes"],
@@ -1913,17 +1913,17 @@ def _run_artifact_job(
                     [
                         {
                             "method": "POST",
-                            "path": "/api/v1/artifact-jobs/<created-job-id>/finalize",
+                            "path": "/api/artifact-jobs/<created-job-id>/finalize",
                         },
                         {
                             "method": "POST",
-                            "path": "/api/v1/artifact-jobs/<created-job-id>/submit",
+                            "path": "/api/artifact-jobs/<created-job-id>/submit",
                         },
                     ]
                 )
             return {"mode": "plan", "steps": steps}
         capabilities = _artifact_capabilities(
-            client.request("GET", "/api/v1/artifact-jobs/capabilities")
+            client.request("GET", "/api/artifact-jobs/capabilities")
         )
         storage_preflight = _artifact_storage_preflight(capabilities, inputs)
         created = client.request(
@@ -1938,7 +1938,7 @@ def _run_artifact_job(
         uploaded: list[dict[str, object]] = []
         for declaration, source in inputs:
             client.upload_file(
-                f"/api/v1/artifact-jobs/{_quoted(job_id)}/inputs/{_quoted(str(declaration['name']))}",
+                f"/api/artifact-jobs/{_quoted(job_id)}/inputs/{_quoted(str(declaration['name']))}",
                 source,
                 media_type=str(declaration["media_type"]),
                 expected_sha256=str(declaration["sha256"]),
@@ -1947,11 +1947,11 @@ def _run_artifact_job(
             uploaded.append(declaration)
         client.request(
             "POST",
-            f"/api/v1/artifact-jobs/{_quoted(job_id)}/finalize",
+            f"/api/artifact-jobs/{_quoted(job_id)}/finalize",
         )
         submitted = client.request(
             "POST",
-            f"/api/v1/artifact-jobs/{_quoted(job_id)}/submit",
+            f"/api/artifact-jobs/{_quoted(job_id)}/submit",
         )
         return {
             "job": submitted,
@@ -1960,7 +1960,7 @@ def _run_artifact_job(
             "steps_completed": 3 + len(uploaded),
         }
     job_id = _quoted(args.job_id)
-    base = f"/api/v1/artifact-jobs/{job_id}"
+    base = f"/api/artifact-jobs/{job_id}"
     if command == "upload":
         inputs = _artifact_inputs(args.input)
         if not args.apply:
@@ -2064,19 +2064,19 @@ def _run_library(
         return _filter_library(result, args.search)
     if command == "show":
         return client.request(
-            "GET", f"/api/v1/library/recipes/{_quoted(args.recipe_id)}"
+            "GET", f"/api/library/recipes/{_quoted(args.recipe_id)}"
         )
     if command == "compare":
         recipe_ids = _compare_values(args.recipe_id, "recipe")
         return {
             "recipes": [
-                client.request("GET", f"/api/v1/library/recipes/{_quoted(recipe_id)}")
+                client.request("GET", f"/api/library/recipes/{_quoted(recipe_id)}")
                 for recipe_id in recipe_ids
             ],
             "compared_count": len(recipe_ids),
         }
     if command == "placement":
-        base = "/api/v1/library/placements"
+        base = "/api/library/placements"
         if args.placement_command == "get":
             return client.request("GET", f"{base}/{_quoted(args.placement_id)}")
         if args.placement_command == "retry":
@@ -2104,15 +2104,15 @@ def _run_library(
                 "artifact_set_sha256": _artifact_set_sha256(args.artifact_set_sha256),
                 "plan_digest": args.plan_digest,
             }
-            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}/check-access-and-resume"
+            path = f"/api/model-cache/operations/{_quoted(args.operation_id)}/check-access-and-resume"
             return _plan_or_request(args, client, "POST", path, payload)
         family = getattr(args, "family", "recipe")
         if family == "model-cache":
-            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+            path = f"/api/model-cache/operations/{_quoted(args.operation_id)}"
         elif family == "run-switch":
-            path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}"
+            path = f"/api/recipes/run-switches/{_quoted(args.operation_id)}"
         else:
-            path = f"/api/v1/recipes/operations/{_quoted(args.operation_id)}"
+            path = f"/api/recipes/operations/{_quoted(args.operation_id)}"
         if args.operation_command == "show":
             return client.request("GET", path)
         return _plan_or_request(
@@ -2124,7 +2124,7 @@ def _run_library(
         )
     if command == "job":
         return _run_artifact_job(args, client, request_id_factory)
-    return client.request("GET", f"/api/v1/recipes/runs/{_quoted(args.run_id)}")
+    return client.request("GET", f"/api/recipes/runs/{_quoted(args.run_id)}")
 
 
 def _activity_title_case(value: str) -> str:
@@ -2188,7 +2188,7 @@ def _load_jobs(
     for _page_number in range(_MAX_PAGES):
         last = client.request(
             "GET",
-            "/api/v1/jobs",
+            "/api/jobs",
             query=_query(cursor=cursor, limit=limit, status=status, target=target),
         )
         raw_jobs = last.get("jobs")
@@ -2226,7 +2226,7 @@ def _load_enrollments(
     for _page_number in range(_MAX_PAGES):
         last = client.request(
             "GET",
-            "/api/v1/agents/enrollments",
+            "/api/agents/enrollments",
             query=_query(cursor=cursor, limit=args.limit, state=args.state),
         )
         raw = last.get("enrollments")
@@ -2310,7 +2310,7 @@ def _combined_activity(
     audit: dict[str, object] | None = None
     jobs: dict[str, object] | None = None
     try:
-        audit = client.request("GET", "/api/v1/audit")
+        audit = client.request("GET", "/api/audit")
     except (ControlClientError, OSError, TypeError, ValueError) as error:
         source_errors["audit"] = str(error)
     try:
@@ -2332,11 +2332,11 @@ def _combined_activity(
     fleet: dict[str, object] | None = None
     library: dict[str, object] | None = None
     try:
-        fleet = client.request("GET", "/api/v1/fleet")
+        fleet = client.request("GET", "/api/fleet")
     except (ControlClientError, OSError, TypeError, ValueError) as error:
         source_errors["fleet_names"] = str(error)
     try:
-        library = client.request("GET", "/api/v1/library", query={"limit": 100})
+        library = client.request("GET", "/api/library", query={"limit": 100})
     except (ControlClientError, OSError, TypeError, ValueError) as error:
         source_errors["library_names"] = str(error)
     names = _target_name_lookup(fleet, library)
@@ -2457,7 +2457,7 @@ def _run_activity(
             target=args.target,
             load_all=args.all,
         )
-    path = f"/api/v1/jobs/{_quoted(args.job_id)}"
+    path = f"/api/jobs/{_quoted(args.job_id)}"
     if command == "job":
         return client.request(
             "GET",
@@ -2556,7 +2556,7 @@ def _run_recipe_availability(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = args.recipe_availability_command
-    base = "/api/v1/library/recipe-image-availability"
+    base = "/api/library/recipe-image-availability"
     if command == "status":
         return client.request("GET", f"{base}/{_quoted(args.operation_id)}")
     if command == "retry":
@@ -2621,7 +2621,7 @@ def _run_recipes(
         }
     if args.recipes_command == "show":
         return client.request(
-            "GET", f"/api/v1/library/recipes/{_quoted(args.recipe_id)}"
+            "GET", f"/api/library/recipes/{_quoted(args.recipe_id)}"
         )
     if args.recipes_command in {"available", "availability"}:
         return _run_recipe_availability(args, client, request_id_factory)
@@ -2637,7 +2637,7 @@ def _run_model_run(
     if command is None:
         payload = _read_structured(args, prefix="run")
         preview = client.request(
-            "POST", "/api/v1/recipes/run-switch-plans/preview", payload
+            "POST", "/api/recipes/run-switch-plans/preview", payload
         )
         if args.dry_run:
             return preview
@@ -2649,7 +2649,7 @@ def _run_model_run(
         apply_payload = dict(payload)
         apply_payload.update(plan_digest=plan_digest, request_key=args.request_key)
         result = client.request(
-            "POST", "/api/v1/recipes/run-switches", apply_payload
+            "POST", "/api/recipes/run-switches", apply_payload
         )
         result = _follow_submitted_operation(args, client, result)
         return {
@@ -2661,17 +2661,17 @@ def _run_model_run(
     if command in {"preview", "apply"}:
         payload = _read_structured(args)
         if command == "preview":
-            return client.request("POST", "/api/v1/recipes/run-switch-plans/preview", payload)
+            return client.request("POST", "/api/recipes/run-switch-plans/preview", payload)
         payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
         if not args.apply:
             return {
                 "mode": "plan",
                 "apply": False,
                 "method": "POST",
-                "path": "/api/v1/recipes/run-switches",
+                "path": "/api/recipes/run-switches",
                 "body": payload,
             }
-        return client.request("POST", "/api/v1/recipes/run-switches", payload)
+        return client.request("POST", "/api/recipes/run-switches", payload)
     if command == "cancel":
         from .generated_control.models.run_switch_cancel_request import RunSwitchCancelRequest
 
@@ -2680,24 +2680,24 @@ def _run_model_run(
             "request_key": _explicit_request_key(args.request_key or request_id_factory()),
             "reason": args.reason,
         }).to_dict()
-        path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}/cancel"
+        path = f"/api/recipes/run-switches/{_quoted(args.operation_id)}/cancel"
         if not args.apply:
             return {"mode": "plan", "apply": False, "method": "POST", "path": path, "body": payload}
         return client.request("POST", path, payload)
     variant = args.model_run_stop_command
     payload: dict[str, object] = {"run_id": args.run_id}
     if variant == "preview":
-        return client.request("POST", "/api/v1/recipes/run-switch-stops/preview", payload)
+        return client.request("POST", "/api/recipes/run-switch-stops/preview", payload)
     payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
     if not args.apply:
         return {
             "mode": "plan",
             "apply": False,
             "method": "POST",
-            "path": "/api/v1/recipes/run-switch-stops",
+            "path": "/api/recipes/run-switch-stops",
             "body": payload,
         }
-    return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
+    return client.request("POST", "/api/recipes/run-switch-stops", payload)
 
 
 _TERMINAL_OPERATION_STATES = frozenset(
@@ -2779,7 +2779,7 @@ def _follow_submitted_operation(
     client: ControllerClient,
     submission: dict[str, object],
     *,
-    status_path: str = "/api/v1/operations/{operation_id}",
+    status_path: str = "/api/operations/{operation_id}",
 ) -> dict[str, object]:
     operation_id = submission.get("operation_id", submission.get("id"))
     if not isinstance(operation_id, str) or not operation_id or args.detach:
@@ -2857,7 +2857,7 @@ def _run_cache_download_flow(
     payload: dict[str, object],
 ) -> dict[str, object]:
     preview = client.request(
-        "POST", "/api/v1/model-cache/download-preview", dict(payload)
+        "POST", "/api/model-cache/download-preview", dict(payload)
     )
     if args.dry_run and not getattr(args, "force", False):
         return preview
@@ -2870,7 +2870,7 @@ def _run_cache_download_flow(
             raise ValueError("forced cache download preview did not return artifact_set_sha256")
         repair_preview = client.request(
             "POST",
-            "/api/v1/model-cache/repair-preview",
+            "/api/model-cache/repair-preview",
             {"artifact_set_sha256": _artifact_set_sha256(artifact_set_sha256)},
         )
         if args.dry_run:
@@ -2885,7 +2885,7 @@ def _run_cache_download_flow(
             client,
             client.request(
                 "POST",
-                "/api/v1/model-cache/repair",
+                "/api/model-cache/repair",
                 {"artifact_set_sha256": artifact_set_sha256, "plan_digest": repair_digest, "request_key": request_key},
             ),
         )
@@ -2897,7 +2897,7 @@ def _run_cache_download_flow(
     result = _follow_submitted_operation(
         args,
         client,
-        client.request("POST", "/api/v1/model-cache/download", apply_payload),
+        client.request("POST", "/api/model-cache/download", apply_payload),
     )
     return {
         "plan": preview,
@@ -2916,7 +2916,7 @@ def _run_cache(
     if command == "list":
         return _load_pages(
             client,
-            "/api/v1/model-cache",
+            "/api/model-cache",
             args,
             query=_query(search=args.search, state=args.state),
             collection="entries",
@@ -2924,7 +2924,7 @@ def _run_cache(
     if command == "show":
         artifact_set_sha256 = _artifact_set_sha256(args.artifact_id)
         return client.request(
-            "GET", f"/api/v1/model-cache/entries/{_quoted(artifact_set_sha256)}"
+            "GET", f"/api/model-cache/entries/{_quoted(artifact_set_sha256)}"
         )
     if command == "update":
         artifact_set_sha256 = (
@@ -2932,18 +2932,18 @@ def _run_cache(
         )
         return client.request(
             "GET",
-            "/api/v1/model-cache/updates",
+            "/api/model-cache/updates",
             query=_query(artifact_set_sha256=artifact_set_sha256, check_upstream=True),
         )
     if command == "operations":
         if args.cache_operations_command == "list":
-            return _load_pages(client, "/api/v1/model-cache/operations", args, collection="operations")
+            return _load_pages(client, "/api/model-cache/operations", args, collection="operations")
         return client.request(
-            "GET", f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+            "GET", f"/api/model-cache/operations/{_quoted(args.operation_id)}"
         )
     if command == "eviction":
         variant = args.eviction_command
-        path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
+        path = "/api/model-cache/eviction-preview" if variant == "preview" else "/api/model-cache/evict"
         payload = _cache_payload(args)
         if args.target_bytes is not None:
             if args.target_bytes < 0:
@@ -2970,25 +2970,25 @@ def _run_cache(
         if variant == "preview":
             if args.apply:
                 raise ValueError("cache download preview cannot be combined with --apply")
-            return client.request("POST", "/api/v1/model-cache/download-preview", payload)
+            return client.request("POST", "/api/model-cache/download-preview", payload)
         if not args.apply or not args.plan_digest or not args.request_key:
             raise ValueError("cache download apply requires --apply, --plan-digest, and --request-key")
         payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
-        return client.request("POST", "/api/v1/model-cache/download", payload)
+        return client.request("POST", "/api/model-cache/download", payload)
     payload = _cache_payload(args)
     payload.setdefault("artifact_set_sha256", _artifact_set_sha256(args.artifact_id))
     variant = args.repair_mode or ("apply" if args.apply else "preview")
     if variant == "preview":
         if args.apply:
             raise ValueError("cache repair preview cannot be combined with --apply")
-        return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
+        return client.request("POST", "/api/model-cache/repair-preview", payload)
     if not args.apply or not args.plan_digest or not args.request_key:
         raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
     payload.update(
         plan_digest=args.plan_digest,
         request_key=_explicit_request_key(args.request_key),
     )
-    return client.request("POST", "/api/v1/model-cache/repair", payload)
+    return client.request("POST", "/api/model-cache/repair", payload)
 
 
 def _profile_body(args: argparse.Namespace) -> dict[str, object]:
@@ -3004,7 +3004,7 @@ def _run_profiles(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = args.profiles_command
-    base = "/api/v1/fleet-profiles"
+    base = "/api/fleet-profiles"
     if command == "list":
         result = client.request("GET", base)
         search = args.search.strip().casefold()
@@ -3047,13 +3047,13 @@ def _run_profiles(
         return client.request("GET", f"{base}/{_quoted(args.profile_id)}/status")
     if command == "application":
         return client.request(
-            "GET", f"/api/v1/fleet-profile-applications/{_quoted(args.application_id)}"
+            "GET", f"/api/fleet-profile-applications/{_quoted(args.application_id)}"
         )
     if command == "retry":
         args.request_key = _explicit_request_key(_request_key_value(args, request_id_factory))
         return _plan_or_request(
             args, client, "POST",
-            f"/api/v1/fleet-profile-applications/{_quoted(args.application_id)}/retry",
+            f"/api/fleet-profile-applications/{_quoted(args.application_id)}/retry",
             {"request_key": args.request_key},
         )
     profile_id = _quoted(args.profile_id)
@@ -3104,7 +3104,7 @@ def _run_operations(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = args.operations_command
-    base = "/api/v1/operations"
+    base = "/api/operations"
     if command == "list":
         return _load_pages(client, base, args, query=_query(state=args.status), collection="operations")
     operation_id = _quoted(args.operation_id)

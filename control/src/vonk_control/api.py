@@ -139,18 +139,18 @@ from .telemetry import TelemetryResolution
 _LOGGER = logging.getLogger(__name__)
 
 _RECIPE_IMAGE_UPLOAD = re.compile(
-    r"/agent/v1/recipe-builds/"
+    r"/agent/recipe-builds/"
     r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/image\Z"
 )
-_LOGIN_PATH = "/api/v1/auth/login"
-_TELEMETRY_PATH = "/agent/v1/telemetry"
+_LOGIN_PATH = "/api/auth/login"
+_TELEMETRY_PATH = "/agent/telemetry"
 _MAX_TELEMETRY_BODY_BYTES = MAX_TELEMETRY_REPORT_BYTES
 _ARTIFACT_INPUT_UPLOAD = re.compile(
-    r"/api/v1/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
+    r"/api/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
 )
 _ARTIFACT_OUTPUT_UPLOAD = re.compile(
-    r"/agent/v1/recipe-jobs/[0-9a-f-]{36}/outputs/[0-9a-f]{64}\Z"
+    r"/agent/recipe-jobs/[0-9a-f-]{36}/outputs/[0-9a-f]{64}\Z"
 )
 
 
@@ -570,15 +570,15 @@ def create_app(
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
-        if request.url.path.startswith("/api/v1/catalog/"):
+        if request.url.path.startswith("/api/catalog/"):
             return Response(
                 content=_catalog_error_content(request, error),
                 status_code=error.status_code,
                 headers=error.headers,
                 media_type="application/json",
             )
-        if not request.url.path.startswith("/agent/v1/"):
-            if request.url.path.startswith("/api/v1/"):
+        if not request.url.path.startswith("/agent/"):
+            if request.url.path.startswith("/api/"):
                 return Response(
                     content=_bounded_error_content(
                         error.detail, validation=error.status_code == 422
@@ -607,7 +607,7 @@ def create_app(
                 status_code=422,
                 media_type="application/json",
             )
-        if request.url.path.startswith("/api/v1/catalog/"):
+        if request.url.path.startswith("/api/catalog/"):
             response = CatalogProblem(
                 code="catalog.invalid_request",
                 detail="catalog request is invalid",
@@ -618,7 +618,7 @@ def create_app(
                 status_code=422,
                 media_type="application/json",
             )
-        if not request.url.path.startswith(("/agent/v1/", "/api/v1/")):
+        if not request.url.path.startswith(("/agent/", "/api/")):
             return await request_validation_exception_handler(request, error)
         from .logging import redact_text
 
@@ -713,7 +713,7 @@ def create_app(
             if telemetry_ingest:
                 response = await call_next(request)
             elif (
-                length and int(length) > maximum and request.url.path != "/agent/v1/enroll"
+                length and int(length) > maximum and request.url.path != "/agent/enroll"
             ):
                 response = Response(status_code=413)
             else:
@@ -773,7 +773,7 @@ def create_app(
         response.headers["x-content-type-options"] = "nosniff"
         if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:
             response.headers["x-vonk-error-code"] = _http_error_code(response.status_code)
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith("/api/auth/"):
             response.headers["cache-control"] = "no-store"
         if metrics is not None:
             metrics.observe_api(
@@ -923,11 +923,11 @@ def create_app(
         cursor_codec=cursor_codec,
     )
 
-    @app.get("/api/v1/healthz", response_model=HealthzResponse)
+    @app.get("/api/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:
         return HealthzResponse(status="ok")
 
-    @app.get("/api/v1/readyz", response_model=ReadyzResponse)
+    @app.get("/api/readyz", response_model=ReadyzResponse)
     def readyz() -> ReadyzResponse:
         return ReadyzResponse(status="ready")
 
@@ -951,7 +951,7 @@ def create_app(
         )
 
     @app.get(
-        "/api/v1/fleet",
+        "/api/fleet",
         response_model=FleetSnapshot,
         responses=bounded_error_responses(401, 503),
         operation_id="getFleetStatus",
@@ -967,7 +967,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/fleet/stream",
+        "/api/fleet/stream",
         response_class=_FleetEventStreamResponse,
         responses={
             200: {
@@ -1013,7 +1013,7 @@ def create_app(
         )
 
     @app.patch(
-        "/api/v1/nodes/{node_id}/profile",
+        "/api/nodes/{node_id}/profile",
         response_model=FleetNodeIdentity,
         responses=bounded_error_responses(401, 403, 404, 422, 503),
         operation_id="updateNodeProfile",
@@ -1024,7 +1024,7 @@ def create_app(
         request: Request,
         authenticated: Actor = authenticated_actor,
     ) -> FleetNodeIdentity:
-        route = "/api/v1/nodes/{node_id}/profile"
+        route = "/api/nodes/{node_id}/profile"
         require_mutation_role(authenticated, route, "PATCH")
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="Fleet projection unavailable")
@@ -1050,7 +1050,7 @@ def create_app(
         return identity
 
     @app.get(
-        "/api/v1/nodes/{node_id}/telemetry",
+        "/api/nodes/{node_id}/telemetry",
         response_model=TelemetryHistoryResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getNodeTelemetryHistory",
@@ -1102,7 +1102,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/nodes/{node_id}/telemetry/current",
+        "/api/nodes/{node_id}/telemetry/current",
         response_model=TelemetryCurrentResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getNodeTelemetryCurrent",
@@ -1141,7 +1141,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/nodes/{node_id}/telemetry/capabilities",
+        "/api/nodes/{node_id}/telemetry/capabilities",
         response_model=TelemetryCapabilitiesResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getNodeTelemetryCapabilities",
@@ -1180,7 +1180,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/nodes/{node_id}/telemetry/workloads",
+        "/api/nodes/{node_id}/telemetry/workloads",
         response_model=TelemetryWorkloadsResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="listNodeTelemetryWorkloads",
@@ -1211,7 +1211,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/endpoints/{alias}",
+        "/api/endpoints/{alias}",
         response_model=EndpointResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getPublishedEndpoint",
@@ -1234,7 +1234,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/agents",
+        "/api/agents",
         response_model=AgentsResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="listAgents",
@@ -1250,7 +1250,7 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/v1/authority",
+        "/api/authority",
         response_model=AuthorityResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="getAuthority",
@@ -1272,7 +1272,7 @@ def create_app(
         )
 
     @app.post(
-        "/api/v1/proposals",
+        "/api/proposals",
         response_model=ProposalPreviewResponse,
         responses=bounded_error_responses(401, 403, 422, 503),
         operation_id="previewProposal",
@@ -1280,7 +1280,7 @@ def create_app(
     def proposal_preview(
         body: ProposalRequest, authenticated: Actor = authenticated_actor
     ) -> ProposalPreviewResponse:
-        require_mutation_role(authenticated, "/api/v1/proposals")
+        require_mutation_role(authenticated, "/api/proposals")
         if admin is None:
             raise HTTPException(status_code=503, detail="authority unavailable")
         preview = admin.proposals.preview(
@@ -1297,7 +1297,7 @@ def create_app(
         )
 
     @app.post(
-        "/api/v1/changes",
+        "/api/changes",
         response_model=ChangeResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -1308,7 +1308,7 @@ def create_app(
         request: Request,
         authenticated: Actor = authenticated_actor,
     ) -> ChangeResponse:
-        require_mutation_role(authenticated, "/api/v1/changes")
+        require_mutation_role(authenticated, "/api/changes")
         if admin is None or admin.changes is None:
             raise HTTPException(status_code=503, detail="change submission unavailable")
         result = admin.changes.submit(
@@ -1326,7 +1326,7 @@ def create_app(
         return ChangeResponse.model_validate(result)
 
     @app.get(
-        "/api/v1/jobs",
+        "/api/jobs",
         response_model=JobsResponse,
         responses=bounded_error_responses(401, 422),
         operation_id="listJobs",
@@ -1383,7 +1383,7 @@ def create_app(
         )
 
     @app.get(
-        "/api/v1/operations",
+        "/api/operations",
         response_model=OperationsResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listOperations",
@@ -1422,7 +1422,7 @@ def create_app(
         )
 
     @app.get(
-        "/api/v1/operations/{operation_id}",
+        "/api/operations/{operation_id}",
         response_model=OperationDetailResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getOperation",
@@ -1446,7 +1446,7 @@ def create_app(
         return activity_detail(item)
 
     @app.get(
-        "/api/v1/audit",
+        "/api/audit",
         response_model=AuditResponse,
         responses=bounded_error_responses(401),
         operation_id="listAuditEvents",
@@ -1471,7 +1471,7 @@ def create_app(
         )
 
     @app.get(
-        "/api/v1/identity-history",
+        "/api/identity-history",
         response_model=IdentityHistoryResponse,
         responses=bounded_error_responses(401),
         operation_id="listIdentityHistory",
@@ -1495,7 +1495,7 @@ def create_app(
         )
 
     @app.get(
-        "/api/v1/jobs/{job_id}",
+        "/api/jobs/{job_id}",
         response_model=JobDetailResponse,
         responses=bounded_error_responses(401, 404, 422),
         operation_id="getJob",
@@ -1539,7 +1539,7 @@ def create_app(
             ) from None
 
     @app.post(
-        "/api/v1/jobs/{job_id}/resume",
+        "/api/jobs/{job_id}/resume",
         response_model=JobResumeResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -1552,7 +1552,7 @@ def create_app(
         authenticated: Actor = authenticated_actor,
     ) -> JobResumeResponse:
         del body
-        route = "/api/v1/jobs/{job_id}/resume"
+        route = "/api/jobs/{job_id}/resume"
         require_mutation_role(authenticated, route)
         if operations is None:
             raise HTTPException(status_code=503, detail="job resume unavailable")
@@ -1576,7 +1576,7 @@ def create_app(
         return JobResumeResponse(id=job_id, state="queued")
 
     @app.get(
-        "/api/v1/jobs/{job_id}/logs",
+        "/api/jobs/{job_id}/logs",
         response_model=JobLogsResponse,
         responses=bounded_error_responses(401, 403, 404, 503),
         operation_id="listJobLogs",
@@ -1595,7 +1595,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="job not found") from None
 
     @app.get(
-        "/api/v1/jobs/{job_id}/logs/{digest}",
+        "/api/jobs/{job_id}/logs/{digest}",
         response_class=Response,
         responses={
             **bounded_error_responses(401, 403, 404, 503),
