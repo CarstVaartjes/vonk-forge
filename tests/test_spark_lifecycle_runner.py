@@ -566,10 +566,10 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         def request(method, path, body):
             assert (method, path, body) == (
                 "POST",
-                "/api/agents/enrollments/grants",
-                {"ttl_seconds": 600},
+                "/api/fleet/enroll",
+                {"name": "Acceptance Spark", "ttl_seconds": 600},
             )
-            return 201, dict(grant)
+            return 201, {"grant": dict(grant)}
 
     run.control = Control()
 
@@ -581,7 +581,7 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     )
 
     invalid = dict(grant, installer_url="https://install.vonkforge.ai/spark")
-    Control.request = staticmethod(lambda method, path, body: (201, invalid))
+    Control.request = staticmethod(lambda method, path, body: (201, {"grant": invalid}))
     with pytest.raises(lifecycle.LifecycleError, match="grant is invalid"):
         run._create_grant()
 

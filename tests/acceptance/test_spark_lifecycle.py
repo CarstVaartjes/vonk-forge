@@ -1828,36 +1828,28 @@ class SparkLifecycle:
         )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
+        from cluster_profiles.generated_control.models.enrollment_grant_response import EnrollmentGrantResponse
+
         assert self.control is not None
         try:
             _, response = self.control.request(
-                "POST", "/api/agents/enrollments/grants", {"ttl_seconds": 600}
+                "POST", "/api/fleet/enroll",
+                {"name": "Acceptance Spark", "ttl_seconds": 600},
             )
-            grant = require_object(response, "enrollment grant")
-        except SliceError as error:
+            envelope = require_object(response, "Fleet enrollment")
+            grant = require_object(envelope.get("grant"), "enrollment grant")
+            EnrollmentGrantResponse.from_dict(grant)
+        except (SliceError, KeyError, TypeError, ValueError) as error:
             raise LifecycleError(
                 "single-use enrollment grant creation failed"
             ) from error
-        expected = {
-            "ca_fingerprint",
-            "controller_address",
-            "controller_endpoint",
-            "enrollment_endpoint",
-            "expires_at",
-            "id",
-            "installer_url",
-            "purpose",
-            "service_hostnames",
-            "token",
-        }
         grant_id = grant.get("id")
         enrollment = grant.get("enrollment_endpoint")
         controller = grant.get("controller_endpoint")
         ca_sha256 = grant.get("ca_fingerprint")
         token = grant.pop("token", None)
         if (
-            set(grant) | {"token"} != expected
-            or not isinstance(grant_id, str)
+            not isinstance(grant_id, str)
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
