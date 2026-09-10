@@ -775,7 +775,7 @@ class LocalBrowserController:
         ).encode("utf-8")
         status_code, headers, response = self.raw_request(
             "POST",
-            "/api/v1/auth/login",
+            "/api/auth/login",
             body,
             {
                 "Accept": "application/json",
@@ -1828,36 +1828,28 @@ class SparkLifecycle:
         )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
+        from cluster_profiles.generated_control.models.enrollment_grant_response import EnrollmentGrantResponse
+
         assert self.control is not None
         try:
             _, response = self.control.request(
-                "POST", "/api/v1/agents/enrollments/grants", {"ttl_seconds": 600}
+                "POST", "/api/fleet/enroll",
+                {"name": "Acceptance Spark", "ttl_seconds": 600},
             )
-            grant = require_object(response, "enrollment grant")
-        except SliceError as error:
+            envelope = require_object(response, "Fleet enrollment")
+            grant = require_object(envelope.get("grant"), "enrollment grant")
+            EnrollmentGrantResponse.from_dict(grant)
+        except (SliceError, KeyError, TypeError, ValueError) as error:
             raise LifecycleError(
                 "single-use enrollment grant creation failed"
             ) from error
-        expected = {
-            "ca_fingerprint",
-            "controller_address",
-            "controller_endpoint",
-            "enrollment_endpoint",
-            "expires_at",
-            "id",
-            "installer_url",
-            "purpose",
-            "service_hostnames",
-            "token",
-        }
         grant_id = grant.get("id")
         enrollment = grant.get("enrollment_endpoint")
         controller = grant.get("controller_endpoint")
         ca_sha256 = grant.get("ca_fingerprint")
         token = grant.pop("token", None)
         if (
-            set(grant) | {"token"} != expected
-            or not isinstance(grant_id, str)
+            not isinstance(grant_id, str)
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
@@ -1942,10 +1934,11 @@ class SparkLifecycle:
             raise LifecycleError("synthetic canary node identity is invalid")
         fixture = self.synthetic_canary_fixture
         completed = ["inventory-ready"]
+        response_digest: str | None = None
         try:
             _, sync_payload = self.control.request(
                 "POST",
-                "/api/v1/catalog/managed-recipes/sync",
+                "/api/catalog/managed-recipes/sync",
                 {
                     "request_key": self._canary_request_key(
                         fixture, node_id, "catalog-sync"
@@ -1965,7 +1958,7 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary catalog sync is incomplete")
             _, listed_payload = self.control.request(
-                "GET", "/api/v1/library/recipes"
+                "GET", "/api/recipe/library"
             )
             listed = require_object(listed_payload, "synthetic canary Library")
             recipes = listed.get("recipes")
@@ -1975,15 +1968,18 @@ class SparkLifecycle:
                 value
                 for value in recipes
                 if isinstance(value, dict)
-                and value.get("publisher") == fixture.publisher
-                and value.get("slug") == fixture.slug
-                and value.get("content_sha256") == fixture.recipe_content_sha256
+                and isinstance(value.get("identity"), dict)
+                and value["identity"].get("publisher") == fixture.publisher
+                and value["identity"].get("slug") == fixture.slug
+                and value["identity"].get("content_sha256")
+                == fixture.recipe_content_sha256
             ]
             if len(matches) != 1:
                 raise LifecycleError("exact synthetic canary Recipe is unavailable")
             summary = matches[0]
-            recipe_id = summary.get("recipe_id")
-            revision_id = summary.get("recipe_revision_id")
+            identity = summary["identity"]
+            recipe_id = identity.get("recipe_id")
+            revision_id = identity.get("recipe_revision_id")
             if (
                 not isinstance(recipe_id, str)
                 or UUID.fullmatch(recipe_id) is None
@@ -1992,148 +1988,175 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary Recipe identity is invalid")
             _, detail_payload = self.control.request(
-                "GET", f"/api/v1/library/recipes/{recipe_id}"
+                "GET", f"/api/recipe/{recipe_id}"
             )
             detail = require_object(detail_payload, "synthetic canary Recipe detail")
-            model_documents = detail.get("model_documents")
-            model_item = (
-                model_documents[0]
-                if isinstance(model_documents, list)
-                and len(model_documents) == 1
-                and isinstance(model_documents[0], dict)
-                else None
-            )
-            selection = model_item.get("selection") if model_item is not None else None
-            selected_model = (
-                selection.get("model") if isinstance(selection, dict) else None
-            )
+            detail_identity = detail.get("identity")
+            model_selectors = detail.get("model_selectors")
             if (
-                not _canonical_recipe_matches(detail.get("definition"), fixture.recipe)
-                or not isinstance(selected_model, dict)
-                or selected_model.get("content_sha256")
-                != fixture.model_content_sha256
+                detail_identity != identity
+                or not _canonical_recipe_matches(detail.get("document"), fixture.recipe)
+                or not isinstance(model_selectors, list)
+                or len(model_selectors) != 1
+                or not isinstance(model_selectors[0], str)
             ):
                 raise LifecycleError("synthetic canary canonical closure differs")
             completed.append("recipe-resolved")
-            run_request = {
-                "schema_version": 2,
-                "model_content_sha256": fixture.model_content_sha256,
-                "recipe_revision_id": revision_id,
-                "spark_group": {
-                    "nodes": [
-                        {
-                            "node_id": node_id,
-                            "rank": 0,
-                            "role": fixture.role,
-                            "endpoint_owner": True,
-                        }
-                    ]
+            fleet_before = self._fleet_snapshot()
+            fleet_nodes = fleet_before.get("nodes")
+            fleet_node_ids = {
+                node.get("id")
+                for node in fleet_nodes
+                if isinstance(node, dict) and isinstance(node.get("id"), str)
+            } if isinstance(fleet_nodes, list) else set()
+            if fleet_node_ids != {node_id}:
+                raise LifecycleError(
+                    "synthetic canary requires a disposable fleet with exactly one enrolled Spark"
+                )
+            _, download_payload = self.control.request(
+                "POST",
+                f"/api/recipe/{recipe_id}/download",
+                {
+                    "schema_version": 2,
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, "recipe-download"
+                    ),
+                    "force": False,
+                    "with_model": True,
                 },
-                "alias": fixture.slug,
-                "action": "run",
-                "retention": "retain-cached",
-                "invocation": {
-                    "origin": "spark-lifecycle-acceptance",
-                    "reason": "fresh canonical synthetic serving canary",
-                },
-            }
-            _, preview_payload = self.control.request(
-                "POST", "/api/v1/recipes/run-switch-plans/preview", run_request
+                allowed=(200, 201, 202),
             )
-            preview = require_object(preview_payload, "synthetic canary run preview")
-            plan_digest = preview.get("plan_digest")
-            phases = preview.get("phases")
-            planned = [
-                (phase.get("kind"), phase.get("subphase"))
-                for phase in phases
-                if isinstance(phase, dict)
-            ] if isinstance(phases, list) else []
-            required_phases = {
-                ("prepare", "container-build"),
-                ("transfer", "model-download"),
-                ("prepare", "runtime-image"),
-                ("prepare", "runtime-plan"),
-                ("transfer", "target-copy"),
-                ("verify", "target-copy"),
-                ("prepare", "runtime-install"),
-                ("start", None),
-                ("final_verify", None),
+            download = self._await_recipe_download(
+                require_object(download_payload, "synthetic canary recipe download"),
+                fixture=fixture,
+                recipe_revision_id=revision_id,
+            )
+            download_result = require_object(download.get("result"), "recipe download result")
+            if (
+                download_result.get("recipe_content_sha256")
+                != fixture.recipe_content_sha256
+                or fixture.model_content_sha256
+                not in download_result.get("model_content_digests", [])
+                or not isinstance(download_result.get("source"), str)
+                or not download_result["source"]
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))) is None
+                or SHA256.fullmatch(str(download_result.get("oci_archive_sha256"))) is None
+                or type(download_result.get("image_bytes")) is not int
+                or download_result["image_bytes"] <= 0
+            ):
+                raise LifecycleError("synthetic canary recipe download receipts are incomplete")
+            completed.append("source-verified")
+
+            profile_payload = {
+                "name": "Acceptance synthetic canary",
+                "description": "Disposable whole-fleet lifecycle canary",
+                "installation_policy": "keep-cached",
+                "labels": {"purpose": "acceptance"},
+                "favorite": False,
+                "assignments": [
+                    {
+                        "recipe_selector": recipe_id,
+                        "spark_ids": [node_id],
+                        "assignment_name": fixture.slug,
+                        "desired_state": "running",
+                    }
+                ],
             }
-            build = preview.get("build")
-            source = build.get("source") if isinstance(build, dict) else None
+            _, saved_payload = self.control.request(
+                "PUT", "/api/profile/1", profile_payload
+            )
+            saved = require_object(saved_payload, "synthetic canary profile save")
+            profile_revision = saved.get("revision")
+            if type(profile_revision) is not int or profile_revision < 1:
+                raise LifecycleError("synthetic canary profile revision is invalid")
+            _, preview_payload = self.control.request(
+                "POST", "/api/profile/1/preview"
+            )
+            preview = require_object(preview_payload, "synthetic canary profile preview")
             if (
                 preview.get("allowed") is not True
-                or not isinstance(plan_digest, str)
-                or SHA256.fullmatch(plan_digest) is None
-                or not required_phases.issubset(planned)
-                or not isinstance(source, dict)
-                or source.get("state") != "available"
+                or not isinstance(preview.get("plan_digest"), str)
+                or SHA256.fullmatch(preview["plan_digest"]) is None
+                or not isinstance(preview.get("scope"), dict)
+                or set(preview["scope"].get("node_ids", [])) != fleet_node_ids
+                or set(preview["scope"].get("idle_node_ids", [])) != set()
+                or not isinstance(preview.get("preparations"), list)
+                or len(preview["preparations"]) != 1
             ):
-                details = {
-                    "allowed": preview.get("allowed"),
-                    "blockers": preview.get("blockers"),
-                    "phases": planned,
-                    "source_state": source.get("state") if isinstance(source, dict) else None,
-                }
-                raise LifecycleError(
-                    "canonical synthetic canary run is not admitted: "
-                    + self._redact_diagnostics(json.dumps(details))
-                )
-            completed.append("source-verified")
-            _, operation_payload = self.control.request(
+                raise LifecycleError("synthetic canary profile preview is not admitted")
+            preparation = require_object(
+                preview["preparations"][0], "synthetic canary preparation"
+            ).get("preparation")
+            preparation = require_object(preparation, "synthetic canary preparation")
+            model_preparation = require_object(preparation.get("model"), "model preparation")
+            runtime_preparation = require_object(
+                preparation.get("runtime_image"), "runtime image preparation"
+            )
+            if (
+                model_preparation.get("model_content_sha256") != fixture.model_content_sha256
+                or SHA256.fullmatch(str(model_preparation.get("artifact_set_sha256"))) is None
+                or type(model_preparation.get("artifact_set_bytes")) is not int
+                or model_preparation["artifact_set_bytes"] <= 0
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", str(runtime_preparation.get("image_digest"))) is None
+                or SHA256.fullmatch(str(runtime_preparation.get("oci_layout_sha256"))) is None
+                or type(runtime_preparation.get("image_bytes")) is not int
+                or runtime_preparation["image_bytes"] <= 0
+            ):
+                raise LifecycleError("synthetic canary preparation receipts are incomplete")
+
+            _, application_payload = self.control.request(
                 "POST",
-                "/api/v1/recipes/run-switches",
+                "/api/profile/1/load",
                 {
-                    **run_request,
-                    "plan_digest": plan_digest,
                     "request_key": self._canary_request_key(
-                        fixture, node_id, "run-switch"
-                    ),
+                        fixture, node_id, "profile-load"
+                    )
                 },
+                allowed=(202,),
             )
-            operation = self._await_canary_run_switch(
-                require_object(operation_payload, "synthetic canary run operation"),
-                expected_phases=[kind for kind, _subphase in planned],
-                label="synthetic canary run",
+            application = self._await_profile_application(
+                require_object(application_payload, "synthetic canary profile application"),
+                label="synthetic canary profile load",
             )
-            result = require_object(operation.get("result"), "synthetic canary run result")
-            phase_results = result.get("phase_results")
+            profile_progress = require_object(application.get("progress"), "profile progress")
+            step_results = profile_progress.get("step_results")
+            if not isinstance(step_results, dict) or not step_results:
+                raise LifecycleError("synthetic canary profile child receipts are missing")
+            run_result = self._profile_run_switch_result(step_results)
+            phase_results = run_result.get("phase_results")
             if not isinstance(phase_results, list):
-                raise LifecycleError("synthetic canary run evidence is invalid")
+                raise LifecycleError("synthetic canary profile run receipt is invalid")
+            installation_id = self._canary_phase_identity(phase_results, "installation_id")
+            run_id = self._canary_phase_identity(phase_results, "run_id")
             image = next(
                 (
-                    value
-                    for value in phase_results
+                    value for value in phase_results
                     if isinstance(value, dict)
-                    and isinstance(value.get("image_digest"), str)
-                    and re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_digest"])
-                    is not None
-                    and isinstance(value.get("oci_layout_sha256"), str)
-                    and SHA256.fullmatch(value["oci_layout_sha256"]) is not None
+                    and re.fullmatch(r"sha256:[0-9a-f]{64}", str(value.get("image_digest")))
+                    and SHA256.fullmatch(str(value.get("oci_layout_sha256")))
                     and type(value.get("image_bytes")) is int
                     and value["image_bytes"] > 0
                 ),
                 None,
             )
-            installation_id = self._canary_phase_identity(
-                phase_results, "installation_id"
-            )
-            run_id = self._canary_phase_identity(phase_results, "run_id")
-            verified_image = next(
-                (
-                    value
-                    for value in phase_results
-                    if isinstance(value, dict)
-                    and image is not None
-                    and value.get("verified_image_digest")
-                    == image.get("image_digest")
-                    and value.get("verified_oci_layout_sha256")
-                    == image.get("oci_layout_sha256")
-                ),
+            final_verify = next(
+                (value for value in phase_results if isinstance(value, dict) and value.get("phase") == "final_verify"),
                 None,
             )
-            if image is None or verified_image is None:
-                raise LifecycleError("synthetic canary build evidence is incomplete")
+            install_phase = next(
+                (value for value in phase_results if isinstance(value, dict) and value.get("phase") == "prepare" and value.get("subphase") == "runtime-install"),
+                None,
+            )
+            if (
+                image is None
+                or not isinstance(install_phase, dict)
+                or install_phase.get("installation_id") != installation_id
+                or not isinstance(final_verify, dict)
+                or final_verify.get("run_id") != run_id
+                or final_verify.get("healthy") is not True
+                or final_verify.get("route_state") != "published"
+            ):
+                raise LifecycleError("synthetic canary profile execution receipts are incomplete")
             completed.extend(("image-built", "image-distributed", "installed", "running"))
             self._await_canary_endpoint(fixture.slug, published=True)
             completed.append("route-published")
@@ -2144,90 +2167,55 @@ class SparkLifecycle:
                 inference, fixture.serving_check, fixture.slug
             )
             completed.append("inference-ok")
-            stop_request = {
-                "schema_version": 2,
-                "run_id": run_id,
-                "invocation": {
-                    "origin": "spark-lifecycle-acceptance",
-                    "reason": "complete fresh canonical synthetic serving canary",
-                },
+            cleanup_payload = {
+                "name": "Acceptance synthetic canary",
+                "description": "Disposable whole-fleet lifecycle canary cleanup",
+                "installation_policy": "exact",
+                "labels": {"purpose": "acceptance"},
+                "favorite": False,
+                "expected_revision": profile_revision,
+                "assignments": [],
             }
-            _, stop_preview_payload = self.control.request(
-                "POST", "/api/v1/recipes/run-switch-stops/preview", stop_request
+            _, cleanup_saved_payload = self.control.request(
+                "PUT", "/api/profile/1", cleanup_payload
             )
-            stop_preview = require_object(
-                stop_preview_payload, "synthetic canary stop preview"
+            cleanup_saved = require_object(cleanup_saved_payload, "synthetic canary cleanup save")
+            profile_revision = cleanup_saved.get("revision")
+            _, cleanup_preview_payload = self.control.request(
+                "POST", "/api/profile/1/preview"
             )
-            stop_digest = stop_preview.get("plan_digest")
-            stop_phases = stop_preview.get("phases")
-            stop_kinds = [
-                phase.get("kind")
-                for phase in stop_phases
-                if isinstance(phase, dict)
-            ] if isinstance(stop_phases, list) else []
-            if (
-                stop_preview.get("allowed") is not True
-                or not isinstance(stop_digest, str)
-                or SHA256.fullmatch(stop_digest) is None
-                or stop_kinds != ["stop", "final_verify"]
-            ):
-                raise LifecycleError("synthetic canary stop is not admitted")
-            _, stop_payload = self.control.request(
+            cleanup_preview = require_object(cleanup_preview_payload, "synthetic canary cleanup preview")
+            summary = require_object(cleanup_preview.get("summary"), "synthetic canary cleanup summary")
+            if cleanup_preview.get("allowed") is not True or summary.get("stops", 0) < 1 or summary.get("uninstalls", 0) < 1:
+                raise LifecycleError("synthetic canary cleanup preview is not admitted")
+            _, cleanup_application_payload = self.control.request(
                 "POST",
-                "/api/v1/recipes/run-switch-stops",
-                {
-                    **stop_request,
-                    "plan_digest": stop_digest,
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, f"stop:{run_id}"
-                    ),
-                },
+                "/api/profile/1/load",
+                {"request_key": self._canary_request_key(fixture, node_id, "profile-cleanup")},
+                allowed=(202,),
             )
-            self._await_canary_run_switch(
-                require_object(stop_payload, "synthetic canary stop operation"),
-                expected_phases=stop_kinds,
-                label="synthetic canary stop",
+            cleanup_application = self._await_profile_application(
+                require_object(cleanup_application_payload, "synthetic canary cleanup application"),
+                label="synthetic canary profile cleanup",
             )
+            cleanup_steps = require_object(cleanup_application.get("progress"), "cleanup progress").get("step_results")
+            if not isinstance(cleanup_steps, dict) or not {step.get("kind") for step in cleanup_steps.values() if isinstance(step, dict)} >= {"stop", "uninstall"}:
+                raise LifecycleError("synthetic canary cleanup receipts are incomplete")
             completed.append("stopped")
             self._await_canary_endpoint(fixture.slug, published=False)
             completed.append("route-withdrawn")
-            _, uninstall_preview_payload = self.control.request(
-                "POST",
-                "/api/v1/recipes/uninstall-plans/preview",
-                {"installation_id": installation_id},
-            )
-            uninstall_preview = require_object(
-                uninstall_preview_payload, "synthetic canary uninstall preview"
-            )
-            uninstall_digest = uninstall_preview.get("plan_digest")
-            if (
-                uninstall_preview.get("allowed") is not True
-                or uninstall_preview.get("installation_id") != installation_id
-                or uninstall_preview.get("recipe_content_sha256")
-                != fixture.recipe_content_sha256
-                or uninstall_preview.get("active_run_count") != 0
-                or not isinstance(uninstall_digest, str)
-                or SHA256.fullmatch(uninstall_digest) is None
+            fleet = self._fleet_snapshot()
+            if any(
+                isinstance(node, dict)
+                and any(
+                    isinstance(run, dict) and run.get("alias") == fixture.slug
+                    for run in node.get("loaded", [])
+                    if isinstance(node.get("loaded"), list)
+                )
+                for node in fleet.get("nodes", [])
+                if isinstance(fleet.get("nodes"), list)
             ):
-                raise LifecycleError("synthetic canary uninstall is not admitted")
-            _, uninstall_payload = self.control.request(
-                "POST",
-                f"/api/v1/recipes/installations/{installation_id}/uninstall",
-                {
-                    "plan_digest": uninstall_digest,
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, f"uninstall:{installation_id}"
-                    ),
-                },
-            )
-            self._await_canary_recipe_operation(
-                require_object(
-                    uninstall_payload, "synthetic canary uninstall operation"
-                ),
-                node_id=node_id,
-                owner_id=installation_id,
-                plan_digest=uninstall_digest,
-            )
+                raise LifecycleError("synthetic canary route cleanup left a loaded run")
             completed.append("uninstalled")
         except (SliceError, ServingExecutionError, LifecycleError) as error:
             # Keep the API response concise for the lifecycle client, but make
@@ -2304,103 +2292,117 @@ class SparkLifecycle:
         except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
             return [{"diagnostic": "preflight evidence unavailable"}]
 
-    def _await_canary_run_switch(
+    def _await_recipe_download(
         self,
         operation: dict[str, object],
         *,
-        expected_phases: list[object],
-        label: str,
+        fixture: CanonicalCanaryFixture,
+        recipe_revision_id: str,
     ) -> dict[str, object]:
+        """Follow the current Recipe download contract to terminal evidence."""
         assert self.control is not None
-        operation_id = operation.get("operation_id")
-        if not isinstance(operation_id, str) or UUID.fullmatch(operation_id) is None:
-            raise LifecycleError(f"{label} identity is invalid")
-        deadline = time.monotonic() + 300
-        while operation.get("state") in {"queued", "running"}:
+        control_src = REPOSITORY_ROOT / "control/src"
+        if os.fspath(control_src) not in sys.path:
+            sys.path.insert(0, os.fspath(control_src))
+        from vonk_control.recipe_image_availability_api import RecipeImageAvailabilityResponse
+
+        try:
+            typed = RecipeImageAvailabilityResponse.model_validate_json(_canonical(operation))
+        except (TypeError, ValueError) as error:
+            raise LifecycleError("synthetic canary recipe download response is invalid") from error
+        if typed.recipe_revision_id != recipe_revision_id or typed.recipe_content_sha256 != fixture.recipe_content_sha256:
+            raise LifecycleError("synthetic canary recipe download identity differs")
+        deadline = time.monotonic() + 900
+        while typed.state in {"queued", "running", "partial"}:
+            if time.monotonic() >= deadline:
+                raise LifecycleError("synthetic canary recipe download did not converge")
+            time.sleep(1)
+            _, payload = self.control.request("GET", f"/api/recipe/operations/{typed.id}")
+            try:
+                typed = RecipeImageAvailabilityResponse.model_validate_json(
+                    _canonical(require_object(payload, "synthetic canary recipe download"))
+                )
+            except (TypeError, ValueError) as error:
+                raise LifecycleError("synthetic canary recipe download response is invalid") from error
+        if typed.state != "succeeded" or typed.result is None:
+            failure = typed.failure.model_dump(mode="json") if typed.failure else None
+            raise LifecycleError(
+                "synthetic canary recipe download failed: "
+                + self._redact_diagnostics(json.dumps(failure))
+            )
+        return typed.model_dump(mode="json")
+
+    def _await_profile_application(
+        self, operation: dict[str, object], *, label: str
+    ) -> dict[str, object]:
+        """Consume the typed numbered-profile application until it is terminal."""
+        assert self.control is not None
+        control_src = REPOSITORY_ROOT / "control/src"
+        if os.fspath(control_src) not in sys.path:
+            sys.path.insert(0, os.fspath(control_src))
+        from vonk_control.fleet_profile_contract import FleetProfileApplicationView
+
+        try:
+            typed = FleetProfileApplicationView.model_validate_json(_canonical(operation))
+        except (TypeError, ValueError) as error:
+            raise LifecycleError(f"{label} response is invalid") from error
+        deadline = time.monotonic() + 1_800
+        while typed.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
                 raise LifecycleError(f"{label} did not converge")
             time.sleep(1)
-            _, payload = self.control.request(
-                "GET", f"/api/v1/recipes/run-switches/{operation_id}"
+            _, payload = self.control.request("GET", "/api/profile/1/progress")
+            try:
+                typed = FleetProfileApplicationView.model_validate_json(
+                    _canonical(require_object(payload, label))
+                )
+            except (TypeError, ValueError) as error:
+                raise LifecycleError(f"{label} response is invalid") from error
+        if typed.state != "succeeded":
+            preflight = (
+                self._preflight_failure_evidence(typed.id)
+                if isinstance(typed.status_reason, str)
+                and typed.status_reason.startswith("runtime_preflight.")
+                else None
             )
-            operation = require_object(payload, label)
-        if (
-            operation.get("state") != "succeeded"
-            or operation.get("completed_phases") != expected_phases
-        ):
-            reason = operation.get("status_reason")
-            progress = operation.get("progress")
-            result = operation.get("result")
-            phase_results = result.get("phase_results") if isinstance(result, dict) else None
-            # Artifact receipts and byte-progress members can occupy tens of
-            # kilobytes. Keep the failed phase and actual failure instead of
-            # allowing successful transfer history to erase that information.
-            summary = {
-                key: operation.get(key)
-                for key in ("operation_id", "state", "failed_phase", "completed_phases")
-            }
-            summary["progress"] = {
-                key: progress.get(key)
-                for key in ("phase", "subphase", "failed_phase", "pending_job_id", "pending_node_id")
-            } if isinstance(progress, dict) else None
-            summary["result"] = {
-                key: result.get(key)
-                for key in ("failure", "error", "reason", "failed_phase")
-                if result.get(key) is not None
-            } if isinstance(result, dict) else None
-            summary["recent_phases"] = [
-                {key: phase.get(key) for key in (
-                    "phase", "subphase", "run_id", "installation_id", "state", "error", "reason"
-                ) if phase.get(key) is not None}
-                for phase in phase_results[-3:] if isinstance(phase, dict)
-            ] if isinstance(phase_results, list) else []
-            if isinstance(reason, str) and reason.startswith("runtime_preflight."):
-                summary["preflight"] = self._preflight_failure_evidence(operation_id)
-            details = self._redact_diagnostics(json.dumps({
-                **summary,
-                "status_reason": reason,
-            }))
-            raise LifecycleError(
-                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}; "
-                f"operation evidence: {details}"
+            details = self._redact_diagnostics(
+                json.dumps({
+                    "id": typed.id,
+                    "state": typed.state,
+                    "status_reason": typed.status_reason,
+                    "current_step": typed.current_step,
+                    "total_steps": typed.total_steps,
+                    "current_label": typed.progress.current_label,
+                    "preflight": preflight,
+                })
             )
-        return operation
+            raise LifecycleError(f"{label} failed: {details}")
+        return typed.model_dump(mode="json")
 
-    def _await_canary_recipe_operation(
-        self,
-        operation: dict[str, object],
-        *,
-        node_id: str,
-        owner_id: str,
-        plan_digest: str,
-    ) -> dict[str, object]:
+    @staticmethod
+    def _profile_run_switch_result(step_results: dict[str, object]) -> dict[str, object]:
+        for value in step_results.values():
+            if not isinstance(value, dict):
+                continue
+            result = value.get("result")
+            if isinstance(result, dict) and isinstance(result.get("run_switch"), dict):
+                return result["run_switch"]
+        raise LifecycleError("synthetic canary profile run child receipt is missing")
+
+    def _fleet_snapshot(self) -> dict[str, object]:
         assert self.control is not None
-        operation_id = operation.get("id")
-        if not isinstance(operation_id, str) or UUID.fullmatch(operation_id) is None:
-            raise LifecycleError("synthetic canary uninstall identity is invalid")
-        deadline = time.monotonic() + 300
-        while operation.get("state") in {"queued", "running"}:
-            if time.monotonic() >= deadline:
-                raise LifecycleError("synthetic canary uninstall did not converge")
-            time.sleep(1)
-            _, payload = self.control.request(
-                "GET", f"/api/v1/recipes/operations/{operation_id}"
-            )
-            operation = require_object(payload, "synthetic canary uninstall")
-        if (
-            operation.get("state") != "succeeded"
-            or operation.get("owner_id") != owner_id
-            or operation.get("plan_digest") != plan_digest
-            or operation.get("nodes") != [node_id]
-        ):
-            details = self._redact_diagnostics(json.dumps({
-                key: operation.get(key)
-                for key in ("id", "kind", "state", "owner_id", "plan_digest", "nodes", "result")
-            }))
-            raise LifecycleError(
-                f"synthetic canary uninstall evidence is incomplete; operation evidence: {details}"
-            )
-        return operation
+        control_src = REPOSITORY_ROOT / "control/src"
+        if os.fspath(control_src) not in sys.path:
+            sys.path.insert(0, os.fspath(control_src))
+        from vonk_control.fleet_projection import FleetSnapshot
+
+        _, payload = self.control.request("GET", "/api/fleet")
+        try:
+            return FleetSnapshot.model_validate(
+                require_object(payload, "Fleet snapshot")
+            ).model_dump(mode="json")
+        except (TypeError, ValueError) as error:
+            raise LifecycleError("Fleet snapshot response is invalid") from error
 
     @staticmethod
     def _canary_phase_identity(results: list[object], field: str) -> str:
@@ -2416,21 +2418,29 @@ class SparkLifecycle:
         return identities.pop()
 
     def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
-        assert self.control is not None
         deadline = time.monotonic() + 300
         while True:
-            allowed = (200,) if published else (404, 503)
             try:
-                status, payload = self.control.request(
-                    "GET", f"/api/v1/endpoints/{alias}", allowed=allowed
-                )
-            except SliceError:
-                status, payload = 0, None
-            if published and status == 200:
-                endpoint = require_object(payload, "synthetic canary endpoint")
-                if endpoint.get("alias") == alias:
-                    return
-            if not published and status in {404, 503}:
+                fleet = self._fleet_snapshot()
+            except (SliceError, LifecycleError):
+                fleet = None
+            runs: list[dict[str, object]] = []
+            if isinstance(fleet, dict) and isinstance(fleet.get("nodes"), list):
+                for node in fleet["nodes"]:
+                    if not isinstance(node, dict) or not isinstance(node.get("loaded"), list):
+                        continue
+                    runs.extend(
+                        run for run in node["loaded"]
+                        if isinstance(run, dict) and run.get("alias") == alias
+                    )
+            if published and any(
+                run.get("route_state") == "published" and run.get("healthy") is True
+                for run in runs
+            ):
+                return
+            if not published and not any(
+                run.get("route_state") in {"published", "pending"} for run in runs
+            ):
                 return
             if time.monotonic() >= deadline:
                 raise LifecycleError("synthetic canary route state did not converge")
@@ -2585,7 +2595,7 @@ class SparkLifecycle:
                     os.fspath(bundle),
                     "--key",
                     os.fspath(key_v1),
-                    f"https://{AGENT_HOST}:8443/agent/v1/source-bundles/{'0' * 64}",
+                    f"https://{AGENT_HOST}:8443/agent/source-bundles/{'0' * 64}",
                 ],
                 cwd=Path("/"),
                 timeout=40,
@@ -2749,34 +2759,31 @@ class SparkLifecycle:
                         "installed package identity is unexpected: "
                         + ",".join(package_mismatches)
                     )
-                _, response = self.control.request("GET", "/api/v1/agents")
-                agents = require_object(response, "agents").get("agents")
+                _, response = self.control.request("GET", "/api/fleet")
+                nodes = require_object(response, "Fleet snapshot").get("nodes")
                 matching = [
-                    agent
-                    for agent in agents
-                    if isinstance(agent, dict)
-                    and agent.get("semantic_version") == expected_semantic
+                    node
+                    for node in nodes
+                    if isinstance(node, dict)
+                    and isinstance(node.get("connection"), dict)
+                    and node["connection"].get("agent_state") == "active"
+                    and node["connection"].get("online_state") == "online"
                 ]
                 if len(matching) != 1:
                     raise LifecycleError(
                         "controller has not observed the direct agent: "
-                        f"semantic_version_matches={len(matching)}"
+                        f"active_online_fleet_nodes={len(matching)}"
                     )
                 agent = matching[0]
-                node_id = agent.get("node_id")
+                node_id = agent.get("id")
                 agent_mismatches = []
                 if not isinstance(node_id, str) or NODE_ID.fullmatch(node_id) is None:
                     agent_mismatches.append("node_id")
-                if agent.get("state") != "active":
-                    agent_mismatches.append("state")
-                if agent.get("stale") is not False:
-                    agent_mismatches.append("stale")
-                if agent.get("build_digest") != self_test["build_digest"]:
-                    agent_mismatches.append("build_digest")
-                if agent.get("binary_digest") != self_test["binary_digest"]:
-                    agent_mismatches.append("binary_digest")
-                if "agent.runtime.rust.v1" not in agent.get("capabilities", []):
-                    agent_mismatches.append("capabilities")
+                if not isinstance(agent.get("display_name"), str) or not agent["display_name"]:
+                    agent_mismatches.append("display_name")
+                inventory = agent.get("inventory")
+                if not isinstance(inventory, dict) or inventory.get("freshness") not in {"fresh", "stale"}:
+                    agent_mismatches.append("inventory")
                 if agent_mismatches:
                     raise LifecycleError(
                         "controller direct-agent identity is invalid: "

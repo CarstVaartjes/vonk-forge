@@ -7,12 +7,12 @@ for (const width of [1440, 390]) {
     const now = new Date().toISOString();
     const node = (index: number) => `spk_${String(index).repeat(32)}`;
     const progress = {phase: "copying", completed_bytes: 42_000_000, total_bytes: 168_000_000, total_bytes_known: true, bytes_per_second: 10_000_000, smoothed_bytes_per_second: 9_000_000, eta_seconds: 14, elapsed_seconds: 62, last_progress_at: now, observed_at: now, activity: "active"};
-    await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
-    await page.route("**/api/v1/audit", route => route.fulfill({json: {events: []}}));
-    await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: now, authority_revision: "a".repeat(64), nodes: []}}));
-    await page.route("**/api/v1/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
-    await page.route("**/api/v1/jobs?*", route => route.fulfill({json: {jobs: [{id: "transfer-1", kind: "reconcile", state: "running", created_at: now}], total: 1, next_cursor: null}}));
-    await page.route("**/api/v1/jobs/transfer-1?*", route => route.fulfill({json: {
+    await page.route("**/api/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
+    await page.route("**/api/audit", route => route.fulfill({json: {events: []}}));
+    await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: now, authority_revision: "a".repeat(64), nodes: []}}));
+    await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
+    await page.route("**/api/jobs?*", route => route.fulfill({json: {jobs: [{id: "transfer-1", kind: "reconcile", state: "running", created_at: now}], total: 1, next_cursor: null}}));
+    await page.route("**/api/jobs/transfer-1?*", route => route.fulfill({json: {
       id: "transfer-1", kind: "reconcile", state: "running", authority_revision: "a".repeat(64), targets: [node(1), node(2)], target_total: 2, target_next_cursor: null,
       current_attempt: 1, status_reason: null, operation_total: 2, operation_next_cursor: null,
       progress: {completed: 0, failed: 0, running: 2, total: 2, operation: {...progress, phase: "prepare", total_bytes: null, total_bytes_known: false, eta_seconds: null}},

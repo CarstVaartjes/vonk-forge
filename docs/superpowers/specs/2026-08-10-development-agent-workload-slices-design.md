@@ -69,10 +69,10 @@ The final development stack publishes two host ports:
 Caddy serves two names on the same port:
 
 - `https://enroll.vonk-forge.lan:8443/`: permits only
-  `POST /agent/v1/enroll`, uses normal server TLS, and does not require a client
+  `POST /agent/enroll`, uses normal server TLS, and does not require a client
   certificate because an unpaired node has none.
 - `https://agents.vonk-forge.lan:8443/`: permits the authenticated
-  `/agent/v1/*` surface except enrollment and requires a certificate issued by
+  `/agent/*` surface except enrollment and requires a certificate issued by
   the development agent CA.
 
 Caddy removes all inbound identity and proxy-auth headers, reconstructs the

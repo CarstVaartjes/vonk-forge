@@ -101,7 +101,7 @@ acceptance and recovery. LiteLLM retains its loopback-only host mapping on port
 Development Caddy adds the same browser route shape already used by production:
 
 - `/healthz` is public to the private gateway;
-- `/agent/v1/*` and `/internal/*` return 404;
+- `/agent/*` and `/internal/*` return 404;
 - `/v1/*` routes to LiteLLM;
 - `/litellm/*` and `/grafana/*` remain available only when their corresponding
   service is present and retain their own authentication;
@@ -298,11 +298,11 @@ periodic cleanup.
 
 The unauthenticated surface is limited to:
 
-- `POST /api/v1/auth/login` with a bounded JSON subject/password document; and
-- `GET /api/v1/auth/session`, which returns an authenticated session summary or
+- `POST /api/auth/login` with a bounded JSON subject/password document; and
+- `GET /api/auth/session`, which returns an authenticated session summary or
   HTTP 401 without disclosing user records.
 
-`POST /api/v1/auth/logout` requires the current cookie session and CSRF token.
+`POST /api/auth/logout` requires the current cookie session and CSRF token.
 The login subject is bounded to 64 ASCII bytes and the UTF-8 password to 256
 bytes before any expensive verification. Login and session status return HTTP
 200 with only the subject, role, and expiry required by the interface. Login
@@ -320,7 +320,7 @@ caller-controlled URLs.
 
 The React application begins in an explicit authentication state:
 
-1. `GET /api/v1/auth/session` checks the current cookie.
+1. `GET /api/auth/session` checks the current cookie.
 2. HTTP 401 renders the login page and no administrative shell.
 3. A successful login refreshes session state and opens Fleet.
 4. A later API 401 clears client authentication state and returns to login.

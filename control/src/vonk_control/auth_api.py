@@ -68,10 +68,10 @@ def install_auth_routes(
 
     _ADMIN_OPERATION_IDS.update(
         {
-            ("post", "/api/v1/auth/login"): "loginBrowser",
-            ("get", "/api/v1/auth/session"): "getBrowserSession",
-            ("post", "/api/v1/auth/logout"): "logoutBrowser",
-            ("post", "/api/v1/auth/cli-token"): "downloadCliToken",
+            ("post", "/api/auth/login"): "loginBrowser",
+            ("get", "/api/auth/session"): "getBrowserSession",
+            ("post", "/api/auth/logout"): "logoutBrowser",
+            ("post", "/api/auth/cli-token"): "downloadCliToken",
         }
     )
     authenticated = actor_dependency
@@ -102,7 +102,7 @@ def install_auth_routes(
             raise HTTPException(status_code=403, detail="CSRF validation failed")
 
     @app.post(
-        "/api/v1/auth/login",
+        "/api/auth/login",
         response_model=AuthSession,
         responses={
             **bounded_error_responses(401, 403, 429),
@@ -143,7 +143,7 @@ def install_auth_routes(
         return summary(issued.identity)
 
     @app.get(
-        "/api/v1/auth/session",
+        "/api/auth/session",
         response_model=AuthSession,
         responses=bounded_error_responses(401),
         operation_id="getBrowserSession",
@@ -152,7 +152,7 @@ def install_auth_routes(
         return summary(cookie_identity(request))
 
     @app.post(
-        "/api/v1/auth/logout",
+        "/api/auth/logout",
         status_code=204,
         response_model=None,
         responses=bounded_error_responses(401, 403),
@@ -184,7 +184,7 @@ def install_auth_routes(
         audit(request, identity.actor.subject, "auth.logout")
 
     @app.post(
-        "/api/v1/auth/cli-token",
+        "/api/auth/cli-token",
         response_class=Response,
         response_model=None,
         responses={

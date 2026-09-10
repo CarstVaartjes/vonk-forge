@@ -2,60 +2,12 @@ import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
 import {mkdir} from "node:fs/promises";
 import {resolve} from "node:path";
-import {fullLibraryDetail, librarySnapshot} from "../src/test-fixtures/library";
+import {currentRecipeDetail, modelLibrary, recipeLibrary} from "../src/test-fixtures/library";
 
 const runId = "00000000-0000-4000-8000-000000000010";
 const reviewDirectory = resolve(import.meta.dirname, "../../../.impeccable/review");
 type FixtureMode = "normal" | "empty" | "failed";
 const fixtureStates = new WeakMap<Page, {mode: FixtureMode}>();
-
-function artifactDetail() {
-  const detail = structuredClone(fullLibraryDetail);
-  detail.recipe.title = "Aurora media workcell";
-  detail.recipe.description = "A bounded artifact workflow with durable controller evidence.";
-  detail.definition = {
-    ...detail.definition,
-    metadata: {title: detail.recipe.title, description: detail.recipe.description, tags: ["artifact", "media"]},
-    settings: {kind: "job", knobs: {seed: {value: 42, change_effect: "restart"}}},
-    interfaces: [{
-      adapter: "artifact-job", path: "/outputs", timeout_seconds: 3600,
-      input: {
-        path: "/inputs", required: true, media_types: ["text/plain", "image/png"], max_bytes: 64 * 1024 ** 2, min_files: 1, max_files: 2,
-        slots: [
-          {id: "prompt", label: "Prompt", description: "The production brief saved as UTF-8 text.", media_types: ["text/plain"], extensions: [".txt"], min_files: 1, max_files: 1, max_file_bytes: 16_384, max_total_bytes: 16_384},
-          {id: "reference", label: "Reference image", description: "Optional source composition or palette.", media_types: ["image/png"], extensions: [".png"], min_files: 0, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
-        ],
-      },
-      output: {
-        path: "/outputs", allowed_media_types: ["image/png", "audio/wav", "model/gltf-binary"], max_total_bytes: 256 * 1024 ** 2,
-        slots: [
-          {id: "images", label: "Images", description: "Generated stills.", media_types: ["image/png"], extensions: [".png"], min_files: 1, max_files: 2, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 128 * 1024 ** 2},
-          {id: "audio", label: "Audio", description: "Generated soundtrack.", media_types: ["audio/wav"], extensions: [".wav"], min_files: 0, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
-          {id: "mesh", label: "Mesh", description: "Generated scene geometry.", media_types: ["model/gltf-binary"], extensions: [".glb"], min_files: 0, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
-        ],
-      },
-    }, {
-      adapter: "video-job", path: "/outputs", timeout_seconds: 1800,
-      input: {
-        path: "/inputs", required: true, media_types: ["video/mp4"], max_bytes: 64 * 1024 ** 2, min_files: 1, max_files: 1,
-        slots: [
-          {id: "source", label: "Source clip", description: "A bounded source video.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 64 * 1024 ** 2, max_total_bytes: 64 * 1024 ** 2},
-        ],
-      },
-      output: {
-        path: "/outputs", allowed_media_types: ["video/mp4"], max_total_bytes: 128 * 1024 ** 2,
-        slots: [
-          {id: "video", label: "Generated video", description: "Rendered video result.", media_types: ["video/mp4"], extensions: [".mp4"], min_files: 1, max_files: 1, max_file_bytes: 128 * 1024 ** 2, max_total_bytes: 128 * 1024 ** 2},
-        ],
-      },
-    }],
-  } as typeof detail.definition;
-  detail.operational_state.runs = [{
-    installation_id: "installation-chat", mapping_id: "mapping-chat", node_ids: ["node-alpha", "node-beta"], recipe_revision_id: "revision-chat",
-    route_state: "published", run_id: runId, state: "running",
-  }];
-  return detail;
-}
 
 function artifactJob(id: string, state: "ready" | "running" | "succeeded" | "failed", createdAt: string) {
   const succeeded = state === "succeeded";
@@ -79,7 +31,6 @@ function artifactJob(id: string, state: "ready" | "running" | "succeeded" | "fai
 }
 
 async function installArtifactFixture(page: Page) {
-  const detail = artifactDetail();
   const state = {mode: "normal" as FixtureMode};
   fixtureStates.set(page, state);
   const normalJobs = [
@@ -88,18 +39,19 @@ async function installArtifactFixture(page: Page) {
     artifactJob("00000000-0000-4000-8000-000000000021", "succeeded", "2026-08-28T11:55:00Z"),
     artifactJob("00000000-0000-4000-8000-000000000020", "failed", "2026-08-28T11:42:00Z"),
   ];
-  await page.route("**/api/v1/**", route => {
+  await page.route("**/api/**", route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
-    if (path === "/api/v1/library") return route.fulfill({json: librarySnapshot});
-    if (path === "/api/v1/library/recipes/recipe-chat") return route.fulfill({json: detail});
-    if (path === "/api/v1/artifact-jobs/capabilities") return route.fulfill({json: {
+    if (path === "/api/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
+    if (path === "/api/model/library") return route.fulfill({json: modelLibrary});
+    if (path === "/api/recipe/library") return route.fulfill({json: recipeLibrary});
+    if (path === "/api/recipe/recipe-chat") return route.fulfill({json: currentRecipeDetail});
+    if (path === "/api/artifact-jobs/capabilities") return route.fulfill({json: {
       schema_version: 1,
       transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]},
       storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 768 * 1024 ** 2, remaining_bytes: 3.25 * 1024 ** 3},
     }});
-    if (path === `/api/v1/recipes/runs/${runId}/artifact-jobs`) {
+    if (path === `/api/recipe/runs/${runId}/artifact-jobs`) {
       const jobs = state.mode === "empty" ? [] : state.mode === "failed"
         ? [artifactJob("00000000-0000-4000-8000-000000000024", "failed", "2026-08-28T12:08:00Z")]
         : normalJobs;

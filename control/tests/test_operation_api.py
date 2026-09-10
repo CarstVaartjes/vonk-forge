@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -9,36 +8,26 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
 from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
-from vonk_control.api import AdminServices, create_app
+from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.fleet_projection import (
-    FleetNodeIdentity,
-    FleetSnapshot,
-    TelemetryHistoryResponse,
-)
+from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AgentPresence,
-    Base,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
-    RecipeRouteAuthority,
-    RoutePublication,
-    RoutePublicationOwner,
+        Base,
+        FleetProfile,
+        FleetProfileApplication,
+        Job,
 )
 from vonk_control.operation_api import (
-    AgentsResponse,
     JobProgress,
     OperationApiServices,
     OperationListPage,
@@ -121,16 +110,7 @@ class Jobs:
         return [self.job], None, 1
 
 
-class Repository:
-    def head(self):
-        return COMMIT
-
-
 class ProjectedFleet:
-    def __init__(self) -> None:
-        self.history_calls: list[tuple[object, ...]] = []
-        self.profile_calls: list[tuple[str, str]] = []
-
     def read(self) -> FleetSnapshot:
         return FleetSnapshot(
             event_cursor=11,
@@ -138,52 +118,6 @@ class ProjectedFleet:
             authority_revision=COMMIT,
             nodes=[],
         )
-
-    def telemetry_history(
-        self,
-        node_id: str,
-        *,
-        start: datetime,
-        end: datetime,
-        maximum_points: int,
-        resolution: str,
-    ) -> TelemetryHistoryResponse:
-        self.history_calls.append((node_id, start, end, maximum_points, resolution))
-        if node_id != NODE_ID:
-            raise KeyError(node_id)
-        return TelemetryHistoryResponse(
-            node_id=node_id,
-            start=start,
-            end=end,
-            resolution=resolution,
-            maximum_points=maximum_points,
-            points=[],
-            metadata={
-                "requested_start": start,
-                "requested_end": end,
-                "actual_start": None,
-                "actual_end": None,
-                "requested_resolution": resolution,
-                "actual_resolution": resolution,
-                "timezone": "UTC",
-                "point_count": 0,
-                "coverage_seconds": 0,
-                "gap_samples": 0,
-                "downsampled": resolution != "raw",
-            },
-        )
-
-    def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
-        self.profile_calls.append((node_id, display_name))
-        if node_id != NODE_ID:
-            raise KeyError(node_id)
-        return FleetNodeIdentity(
-            id=node_id,
-            display_name=display_name,
-            hostname="spark-3542.internal",
-            ip_address="192.168.1.211",
-        )
-
 
 def _client(*, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
@@ -194,11 +128,6 @@ def _client(*, fleet_projection=None, operations=None, role="operator"):
         audits=audits,
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
-        admin=AdminServices(
-            authority=Repository(),
-            proposals=None,
-            changes=None,
-        ),
         operations=operations,
     )
     token = codec.issue(Actor(role, role), ttl_seconds=100, now=0)
@@ -215,18 +144,18 @@ def test_openapi_exposes_only_current_document_contract() -> None:
 
     paths = client.app.openapi()["paths"]
 
-    assert not any(path.startswith("/api/v1/profiles/") for path in paths)
-    assert "/api/v1/reconciliations/plan" not in paths
-    assert "/api/v1/reconciliations" not in paths
-    assert not any(path.startswith("/api/v1/reconciliations/") for path in paths)
-    assert not any(path.startswith("/api/v1/updates") for path in paths)
-    assert "/api/v1/documents" not in paths
+    assert not any(path.startswith("/api/profiles/") for path in paths)
+    assert "/api/reconciliations/plan" not in paths
+    assert "/api/reconciliations" not in paths
+    assert not any(path.startswith("/api/reconciliations/") for path in paths)
+    assert not any(path.startswith("/api/updates") for path in paths)
+    assert "/api/documents" not in paths
 
 
 def test_job_activity_summaries_include_their_authoritative_creation_time() -> None:
     client, operator, *_ = _client()
 
-    response = client.get("/api/v1/jobs", headers=operator)
+    response = client.get("/api/jobs", headers=operator)
 
     assert response.status_code == 200
     assert response.json()["jobs"] == [
@@ -287,11 +216,11 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     client, operator, *_ = _client(operations=services)
 
     listed = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"state": "uncertain", "node_id": NODE_ID},
     )
-    detail = client.get(f"/api/v1/operations/{item['id']}", headers=operator)
+    detail = client.get(f"/api/operations/{item['id']}", headers=operator)
 
     assert listed.status_code == 200
     assert listed.json()["schema_version"] == 2
@@ -346,10 +275,10 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
-    assert client.get("/api/v1/operations", headers=operator).status_code == 503
+    assert client.get("/api/operations", headers=operator).status_code == 503
     assert (
         client.get(
-            "/api/v1/operations/33333333-3333-4333-8333-333333333333",
+            "/api/operations/33333333-3333-4333-8333-333333333333",
             headers=operator,
         ).status_code
         == 503
@@ -427,15 +356,15 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get("/api/v1/operations", headers=operator, params={"limit": "1"})
+    first = client.get("/api/operations", headers=operator, params={"limit": "1"})
     second = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"limit": "1", "cursor": first.json()["next_cursor"]},
     )
-    detail = client.get("/api/v1/operations/run-1", headers=operator)
+    detail = client.get("/api/operations/run-1", headers=operator)
     filtered = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"node_id": "spk_" + "2" * 32},
     )
@@ -472,14 +401,14 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     now = datetime(2026, 8, 15, 12, tzinfo=UTC)
     with sessions.begin() as session:
         session.add(
-            FleetProfile(
-                id=profile_id,
-                name="Studio",
+                FleetProfile(
+                    id=profile_id,
+                    number=1,
+                    name="Studio",
                 description="",
                 installation_policy="keep-cached",
                 assignments=[],
-                scope=[NODE_ID, second_node],
-                labels={},
+                    labels={},
                 favorite=False,
                 created_by="admin",
                 created_at=now,
@@ -545,15 +474,15 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     )
     client, operator, *_ = _client(operations=services)
 
-    first = client.get("/api/v1/operations", headers=operator, params={"limit": 1})
-    detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
+    first = client.get("/api/operations", headers=operator, params={"limit": 1})
+    detail = client.get(f"/api/operations/{newest_id}", headers=operator)
     second = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"limit": 1, "cursor": first.json()["next_cursor"]},
     )
     filtered = client.get(
-        "/api/v1/operations",
+        "/api/operations",
         headers=operator,
         params={"node_id": second_node},
     )
@@ -595,7 +524,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
 def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 
-    visual = client.get("/api/v1/fleet", headers=operator)
+    visual = client.get("/api/fleet", headers=operator)
 
     assert visual.status_code == 200
     assert visual.json() == {
@@ -608,170 +537,11 @@ def test_fleet_exposes_typed_visual_state() -> None:
     assert "evidence_digest" not in visual.json()
 
 
-def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
-    projection = ProjectedFleet()
-    client, operator, *_ = _client(fleet_projection=projection)
-    params = {
-        "start": "2026-08-15T11:00:00Z",
-        "end": "2026-08-15T12:00:00Z",
-        "maximum_points": "1500",
-        "resolution": "raw",
-    }
-
-    response = client.get(
-        f"/api/v1/nodes/{NODE_ID}/telemetry",
-        headers=operator,
-        params=params,
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "schema_version": 1,
-        "node_id": NODE_ID,
-        "start": "2026-08-15T11:00:00Z",
-        "end": "2026-08-15T12:00:00Z",
-        "resolution": "raw",
-        "maximum_points": 1500,
-        "points": [],
-        "metadata": {
-            "requested_start": "2026-08-15T11:00:00Z",
-            "requested_end": "2026-08-15T12:00:00Z",
-            "requested_resolution": "raw",
-            "actual_resolution": "raw",
-            "timezone": "UTC",
-            "point_count": 0,
-            "coverage_seconds": 0.0,
-            "gap_samples": 0,
-            "downsampled": False,
-        },
-    }
-    assert projection.history_calls == [
-        (
-            NODE_ID,
-            datetime(2026, 8, 15, 11, tzinfo=UTC),
-            datetime(2026, 8, 15, 12, tzinfo=UTC),
-            1500,
-            "raw",
-        )
-    ]
-    assert (
-        client.get(
-            f"/api/v1/nodes/{NODE_ID}/telemetry",
-            headers=operator,
-            params={key: value for key, value in params.items() if key != "resolution"},
-        ).status_code
-        == 422
-    )
-    assert (
-        client.get(
-            f"/api/v1/nodes/{NODE_ID}/telemetry",
-            headers=operator,
-            params={**params, "maximum_points": "3001"},
-        ).status_code
-        == 422
-    )
-    assert len(projection.history_calls) == 1
-    assert (
-        client.get(
-            f"/api/v1/nodes/{'spk_' + 'f' * 32}/telemetry",
-            headers=operator,
-            params=params,
-        ).status_code
-        == 404
-    )
-
-
-def test_operator_can_rename_node_without_mutating_technical_identity() -> None:
-    projection = ProjectedFleet()
-    client, operator, _, audits = _client(fleet_projection=projection)
-
-    response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
-        headers=operator,
-        json={"display_name": "  Studio Spark  "},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "id": NODE_ID,
-        "display_name": "Studio Spark",
-        "hostname": "spark-3542.internal",
-        "ip_address": "192.168.1.211",
-    }
-    assert projection.profile_calls == [(NODE_ID, "Studio Spark")]
-    assert audits.list()[0].action == "fleet.node.rename"
-    assert audits.list()[0].targets == (NODE_ID,)
-
-
-def test_node_rename_maps_database_failures_to_bounded_unavailability() -> None:
-    class UnavailableFleet(ProjectedFleet):
-        def update_display_name(
-            self, node_id: str, display_name: str
-        ) -> FleetNodeIdentity:
-            del node_id, display_name
-            raise SQLAlchemyError("database detail must not cross the API boundary")
-
-    client, operator, *_ = _client(fleet_projection=UnavailableFleet())
-
-    response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
-        headers=operator,
-        json={"display_name": "Studio Spark"},
-    )
-
-    assert response.status_code == 503
-    assert response.json() == {"detail": "Fleet profile update unavailable"}
-
-
-@pytest.mark.parametrize(
-    "display_name",
-    ["", "   ", "bad\nname", "x" * 81],
-)
-def test_node_rename_rejects_invalid_friendly_names(display_name: str) -> None:
-    projection = ProjectedFleet()
-    client, operator, *_ = _client(fleet_projection=projection)
-
-    response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
-        headers=operator,
-        json={"display_name": display_name},
-    )
-
-    assert response.status_code == 422
-    assert projection.profile_calls == []
-
-
-def test_viewer_cannot_rename_node() -> None:
-    projection = ProjectedFleet()
-    client, viewer, *_ = _client(fleet_projection=projection, role="viewer")
-
-    response = client.patch(
-        f"/api/v1/nodes/{NODE_ID}/profile",
-        headers=viewer,
-        json={"display_name": "Studio Spark"},
-    )
-
-    assert response.status_code == 403
-    assert projection.profile_calls == []
-
-
-def test_optional_operation_projections_fail_closed_when_unavailable() -> None:
-    client, operator, _reconciler, _audits = _client()
-
-    endpoint = client.get("/api/v1/endpoints/model-a", headers=operator)
-    agents = client.get("/api/v1/agents", headers=operator)
-
-    assert endpoint.status_code == 503
-    assert endpoint.json() == {"detail": "endpoint publication unavailable"}
-    assert agents.status_code == 503
-    assert agents.json() == {"detail": "agent projection unavailable"}
-
-
 def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     client, operator, _reconciler, _audits = _client()
 
     response = client.get(
-        "/api/v1/jobs/11111111-1111-4111-8111-111111111111",
+        "/api/jobs/11111111-1111-4111-8111-111111111111",
         headers=operator,
     )
 
@@ -793,198 +563,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     assert "result" not in encoded
 
 
-def test_durable_projection_reads_only_current_activation_and_hides_agent_secrets(
-    tmp_path,
-) -> None:
-    projection_factory = getattr(operation_api, "durable_operation_services", None)
-    assert callable(projection_factory)
-    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    authority_id = "22222222-2222-4222-8222-222222222222"
-    route_document = {
-        "generation": 7,
-        "routes": {
-            "model-a": {
-                "address": "10.0.0.42",
-                "evidence_digest": "e" * 64,
-                "node_id": NODE_ID,
-                "observed_at": now.isoformat(),
-                "operation_id": "recipe-run:22222222-2222-4222-8222-222222222222",
-                "path": "/v1",
-                "port": 8000,
-                "scheme": "http",
-                "verify_evidence_digest": "v" * 64,
-            }
-        },
-        "schema_version": 2,
-        "state": "published",
-    }
-    route_bytes = _encoded(route_document)
-    litellm_bytes = _encoded({"model_list": []})
-    issued_at = now.isoformat()
-    expires_at = (now + timedelta(minutes=5)).isoformat()
-    manifest_document = {
-        "schema_version": 2,
-        "generation": 7,
-        "state": "published",
-        "authority_id": authority_id,
-        "plan_digest": DIGEST,
-        "evidence_set_digest": "e" * 64,
-        "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
-        "litellm_sha256": hashlib.sha256(litellm_bytes).hexdigest(),
-        "issued_at": issued_at,
-        "expires_at": expires_at,
-    }
-    manifest_bytes = _encoded(manifest_document)
-    manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
-    marker = {
-        "schema_version": 2,
-        "generation": 7,
-        "state": "published",
-        "authority_id": authority_id,
-        "plan_digest": DIGEST,
-        "evidence_set_digest": "e" * 64,
-        "routes_sha256": hashlib.sha256(route_bytes).hexdigest(),
-        "litellm_sha256": hashlib.sha256(litellm_bytes).hexdigest(),
-        "issued_at": issued_at,
-        "expires_at": expires_at,
-        "directory": f"00000007-{manifest_digest}",
-        "manifest_sha256": manifest_digest,
-    }
-    marker_bytes = _encoded(marker)
-    route_root = tmp_path / "routes"
-    generation = route_root / "generations" / marker["directory"]
-    generation.mkdir(parents=True)
-    (route_root / "activation.json").write_bytes(marker_bytes)
-    (generation / "manifest.json").write_bytes(manifest_bytes)
-    (generation / "routes.json").write_bytes(route_bytes)
-    (generation / "litellm.json").write_bytes(litellm_bytes)
-
-    engine = create_engine(f"sqlite:///{tmp_path / 'operations.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        session.add(RecipeRouteAuthority(authority_id=authority_id, created_at=now))
-        session.add(
-            RoutePublication(
-                authority_id=authority_id,
-                state="completed",
-                generation=7,
-                plan_digest=DIGEST,
-                evidence_digest=marker["evidence_set_digest"],
-                activation_marker=marker,
-                activation_marker_digest=hashlib.sha256(marker_bytes).hexdigest(),
-                route_digest=marker["routes_sha256"],
-                litellm_digest=marker["litellm_sha256"],
-                bundle_digest=marker["manifest_sha256"],
-                lease_issued_at=now,
-                lease_expires_at=now + timedelta(minutes=5),
-            )
-        )
-        session.add(
-            RoutePublicationOwner(
-                singleton_id=1,
-                authority_id=authority_id,
-                owner_generation=7,
-                updated_at=now,
-            )
-        )
-        session.add(
-            AgentNode(
-                node_id=NODE_ID,
-                state="active",
-                protocol_version=3,
-                capabilities=["node.probe"],
-                last_seen_at=now,
-            )
-        )
-        session.add(
-            AgentCertificate(
-                serial="serial-secret",
-                node_id=NODE_ID,
-                not_before=now - timedelta(days=1),
-                not_after=now + timedelta(days=30),
-                fingerprint="fingerprint-secret",
-                certificate_pem="certificate-body-secret",
-                chain_pem="chain-body-secret",
-                state="active",
-                generation=1,
-            )
-        )
-        session.add(
-            AgentPresence(
-                node_id=NODE_ID,
-                certificate_serial="serial-secret",
-                certificate_fingerprint="fingerprint-secret",
-                management_address="10.0.0.42",
-                observed_at=now,
-            )
-        )
-
-        services = projection_factory(
-            sessions,
-            route_root,
-            clock=lambda: now,
-            cursors=TokenCodec(b"k" * 32).cursor_codec(),
-        )
-    endpoint = services.endpoint("model-a")
-    agents = list(services.agents())
-
-    assert endpoint == {
-        "alias": "model-a",
-        "api_base": "http://10.0.0.42:8000/v1",
-        "expires_at": (now + timedelta(minutes=5)).isoformat(),
-        "generation": 7,
-        "node_id": NODE_ID,
-        "observed_at": now.isoformat(),
-        "plan_digest": DIGEST,
-        "state": "published",
-    }
-    assert agents == [
-        {
-            "capabilities": ["node.probe"],
-            "certificate_expires_at": (now + timedelta(days=30)).isoformat(),
-            "last_seen_age_seconds": 0.0,
-            "last_seen_at": now.isoformat(),
-            "node_id": NODE_ID,
-            "protocol_version": 3,
-            "semantic_version": None,
-            "build_digest": None,
-            "binary_digest": None,
-            "stale": False,
-            "state": "active",
-        }
-    ]
-    serialized_agents = json.dumps(agents, sort_keys=True)
-    assert "10.0.0.42" not in serialized_agents
-    assert "fingerprint-secret" not in serialized_agents
-    assert "certificate-body-secret" not in serialized_agents
-
-    projection_client, projection_operator, *_ = _client(operations=services)
-    agent_response = projection_client.get(
-        "/api/v1/agents", headers=projection_operator
-    )
-    assert agent_response.status_code == 200
-    assert agent_response.json() == serialize_json_value(
-        AgentsResponse.model_validate({"agents": agents})
-    )
-
-    (generation / "litellm.json").unlink()
-    endpoint_client, operator, _reconciler, _audits = _client(operations=services)
-    unavailable = endpoint_client.get("/api/v1/endpoints/model-a", headers=operator)
-    assert unavailable.status_code == 503
-    assert unavailable.json() == {"detail": "endpoint publication unavailable"}
-    (generation / "litellm.json").write_bytes(litellm_bytes)
-
-    with sessions.begin() as session:
-        session.get(RoutePublication, authority_id).state = "publication-pending"
-    with pytest.raises(RuntimeError, match="active publication"):
-        services.endpoint("model-a")
-
-    with sessions.begin() as session:
-        session.get(RoutePublication, authority_id).state = "completed"
-    (route_root / "activation.json").write_text("{}")
-    with pytest.raises(RuntimeError, match="activation marker"):
-        services.endpoint("model-a")
 
 
 def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
@@ -1001,17 +579,17 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
 
     unexpected = client.post(
-        f"/api/v1/jobs/{job_id}/resume",
+        f"/api/jobs/{job_id}/resume",
         headers=operator,
         json={"force": True},
     )
     request_id = "33333333-3333-4333-8333-333333333333"
     response = client.post(
-        f"/api/v1/jobs/{job_id}/resume",
+        f"/api/jobs/{job_id}/resume",
         headers={**operator, "X-Request-ID": request_id},
     )
     viewer_client, viewer, *_ = _client(operations=services, role="viewer")
-    denied = viewer_client.post(f"/api/v1/jobs/{job_id}/resume", headers=viewer)
+    denied = viewer_client.post(f"/api/jobs/{job_id}/resume", headers=viewer)
 
     assert unexpected.status_code == 422
     assert denied.status_code == 403
@@ -1471,7 +1049,7 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
 
     for cursor in (other_job_cursor, operation_cursor):
         response = client.get(
-            f"/api/v1/jobs/{job_id}",
+            f"/api/jobs/{job_id}",
             headers=operator,
             params={"target_cursor": cursor, "limit": 1},
         )
@@ -1479,155 +1057,10 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
         assert response.json() == {"detail": "job cursor is invalid", "issues": []}
 
 
-def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
-    services = OperationApiServices(
-        endpoint=lambda _alias: {},
-        agents=lambda: (),
-        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
-            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
-        ),
-        resume_job=lambda _job_id: None,
-    )
-    client, _operator, _reconciler, _audits = _client(operations=services)
-    schema = operation_api.admin_openapi_schema(client.app)
-    operations = {
-        operation["operationId"]: operation
-        for path in schema["paths"].values()
-        for method, operation in path.items()
-        if method in {"delete", "get", "patch", "post", "put"}
-    }
-    expected = {
-        "createEnrollmentGrant": {"401", "403", "503"},
-        "getJobLog": {"401", "403", "404", "503"},
-        "getPublishedEndpoint": {"401", "404", "503"},
-        "resumeJob": {"401", "403", "404", "409", "503"},
-        "revokeAgentNode": {"401", "403", "404", "503"},
-    }
-    for operation_id, statuses in expected.items():
-        assert statuses <= set(operations[operation_id]["responses"])
-        for status_code in statuses:
-            response_schema = operations[operation_id]["responses"][status_code][
-                "content"
-            ]["application/json"]["schema"]
-            assert response_schema == {
-                "$ref": "#/components/schemas/BoundedErrorResponse"
-            }
-
-    error = schema["components"]["schemas"]["BoundedErrorResponse"]
-    assert error == {
-        "additionalProperties": False,
-        "properties": {
-            "detail": {
-                "maxLength": 256,
-                "minLength": 1,
-                "title": "Detail",
-                "type": "string",
-            },
-            "context": {
-                "anyOf": [
-                    {"$ref": "#/components/schemas/ErrorContextResponse"},
-                    {"type": "null"},
-                ]
-            },
-        },
-        "required": ["detail"],
-        "title": "BoundedErrorResponse",
-        "type": "object",
-    }
-
-    successes = {
-        "createEnrollmentGrant": "EnrollmentGrantResponse",
-        "listAgentEnrollments": "EnrollmentListResponse",
-    }
-    for operation_id, component in successes.items():
-        success = next(
-            response
-            for status_code, response in sorted(
-                operations[operation_id]["responses"].items()
-            )
-            if status_code.startswith("2")
-        )
-        assert success["content"]["application/json"]["schema"] == {
-            "$ref": f"#/components/schemas/{component}"
-        }
-        assert (
-            schema["components"]["schemas"][component]["additionalProperties"] is False
-        )
 
 
-def test_fleet_operation_registry_exposes_only_the_typed_visual_contract() -> None:
-    client, _operator, _reconciler, _audits = _client()
-
-    schema = operation_api.admin_openapi_schema(client.app)
-    paths = schema["paths"]
-
-    assert paths["/api/v1/fleet"]["get"]["operationId"] == "getFleetStatus"
-    assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert "/api/v1/nodes/status" not in paths
-    assert "NodeStatus" not in schema["components"]["schemas"]
-    assert "FleetStatusResponse" not in schema["components"]["schemas"]
-    assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
-        "getNodeTelemetryHistory"
-    )
-    assert paths["/api/v1/fleet/stream"]["get"]["operationId"] == ("streamFleetEvents")
-    assert paths["/api/v1/fleet/stream"]["get"]["parameters"] == [
-        {
-            "description": (
-                "Optional durable Fleet cursor; duplicate and numeric validity "
-                "are checked from the raw header list."
-            ),
-            "in": "header",
-            "name": "Last-Event-ID",
-            "required": False,
-            "schema": {
-                "anyOf": [{"type": "string"}, {"type": "null"}],
-                "description": (
-                    "Optional durable Fleet cursor; duplicate and numeric validity "
-                    "are checked from the raw header list."
-                ),
-                "title": "Last-Event-Id",
-            },
-        }
-    ]
-    assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
-    assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
 
 
-def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
-    client, _operator, _reconciler, _audits = _client()
-
-    schema = operation_api.admin_openapi_schema(client.app)
-    paths = schema["paths"]
-
-    assert paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"] == (
-        "previewRecipeStop"
-    )
-    assert (
-        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
-        == "previewRecipeUninstall"
-    )
-    assert paths["/api/v1/recipes/runs/{run_id}/stop"]["post"]["operationId"] == (
-        "stopRecipeRun"
-    )
-    assert (
-        paths["/api/v1/recipes/installations/{installation_id}/uninstall"]["post"][
-            "operationId"
-        ]
-        == "uninstallRecipe"
-    )
-    for component in (
-        "StopPreviewRequest",
-        "StopRequest",
-        "UninstallPreviewRequest",
-        "UninstallRequest",
-        "StopPlanResponse",
-        "UninstallPlanResponse",
-    ):
-        assert (
-            schema["components"]["schemas"][component]["additionalProperties"] is False
-        )
 
 
 def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) -> None:

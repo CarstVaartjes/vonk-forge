@@ -184,9 +184,6 @@
             },
             {
               "$ref": "#/$defs/RecipeUninstallPayload"
-            },
-            {
-              "$ref": "#/$defs/RecipeModelCleanupPayload"
             }
           ],
           "title": "Payload"
@@ -489,8 +486,7 @@
         "recipe.start",
         "recipe.job.run.v1",
         "recipe.stop",
-        "recipe.uninstall",
-        "recipe.model-uninstall.v1"
+        "recipe.uninstall"
       ],
       "title": "AgentOperation",
       "type": "string"
@@ -670,9 +666,6 @@
             },
             {
               "$ref": "#/$defs/RecipeUninstallResult"
-            },
-            {
-              "$ref": "#/$defs/RecipeModelCleanupResult"
             },
             {
               "$ref": "#/$defs/RecipeBuildEvidence"
@@ -6708,87 +6701,6 @@
       "title": "RecipeJobRunResult",
       "type": "object"
     },
-    "RecipeModelCleanupInstallation": {
-      "additionalProperties": false,
-      "properties": {
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "installation_id",
-        "recipe_content_sha256"
-      ],
-      "title": "RecipeModelCleanupInstallation",
-      "type": "object"
-    },
-    "RecipeModelCleanupPayload": {
-      "additionalProperties": false,
-      "properties": {
-        "installations": {
-          "items": {
-            "$ref": "#/$defs/RecipeModelCleanupInstallation"
-          },
-          "maxItems": 512,
-          "minItems": 1,
-          "title": "Installations",
-          "type": "array"
-        },
-        "model_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Model Content Sha256",
-          "type": "string"
-        },
-        "plan_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Plan Digest",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "schema_version",
-        "model_content_sha256",
-        "plan_digest",
-        "installations"
-      ],
-      "title": "RecipeModelCleanupPayload",
-      "type": "object"
-    },
-    "RecipeModelCleanupResult": {
-      "additionalProperties": false,
-      "properties": {
-        "removed_model_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Removed Model Bytes",
-          "type": "integer"
-        },
-        "uninstalled_installations": {
-          "maximum": 512,
-          "minimum": 1,
-          "title": "Uninstalled Installations",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "uninstalled_installations",
-        "removed_model_bytes"
-      ],
-      "title": "RecipeModelCleanupResult",
-      "type": "object"
-    },
     "RecipeOperationRequest": {
       "additionalProperties": false,
       "description": "Typed lifecycle request envelope with an operation-specific payload.",
@@ -6809,9 +6721,6 @@
             },
             {
               "$ref": "#/$defs/RecipeUninstallPayload"
-            },
-            {
-              "$ref": "#/$defs/RecipeModelCleanupPayload"
             }
           ],
           "title": "Payload"
@@ -11101,9 +11010,6 @@
     "RecipeJobOutputMapping": "vonk_agent_protocol.recipe_jobs.RecipeJobOutputMapping",
     "RecipeJobRunRequest": "vonk_agent_protocol.recipe_jobs.RecipeJobRunRequest",
     "RecipeJobRunResult": "vonk_agent_protocol.recipe_jobs.RecipeJobRunResult",
-    "RecipeModelCleanupInstallation": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupInstallation",
-    "RecipeModelCleanupPayload": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupPayload",
-    "RecipeModelCleanupResult": "vonk_agent_protocol.recipe_operations.RecipeModelCleanupResult",
     "RecipeOperationRequest": "vonk_agent_protocol.recipe_operations.RecipeOperationRequest",
     "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
     "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
@@ -11266,9 +11172,6 @@
     "RecipeJobOutputMapping": "#/$defs/RecipeJobOutputMapping",
     "RecipeJobRunRequest": "#/$defs/RecipeJobRunRequest",
     "RecipeJobRunResult": "#/$defs/RecipeJobRunResult",
-    "RecipeModelCleanupInstallation": "#/$defs/RecipeModelCleanupInstallation",
-    "RecipeModelCleanupPayload": "#/$defs/RecipeModelCleanupPayload",
-    "RecipeModelCleanupResult": "#/$defs/RecipeModelCleanupResult",
     "RecipeOperationRequest": "#/$defs/RecipeOperationRequest",
     "RecipeRunInspectionBinding": "#/$defs/RecipeRunInspectionBinding",
     "RecipeRunObservationGrantRequest": "#/$defs/RecipeRunObservationGrantRequest",

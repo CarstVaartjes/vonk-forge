@@ -139,7 +139,7 @@ class RecipeFixture:
             "output_limits": self.output_limits,
             "timeout_seconds": self.timeout_seconds,
             "assertions": list(self.assertions),
-            "capabilities_path": "/api/v1/artifact-jobs/capabilities",
+            "capabilities_path": "/api/artifact-jobs/capabilities",
         }
         if self.supplemental_cases:
             preview["cases"] = [
@@ -1821,7 +1821,7 @@ def validate_outputs(
         for index, item in enumerate(outputs):
             destination = Path(root) / f"{index:02d}-{item['name']}"
             client.download_file(
-                f"/api/v1/artifact-jobs/{result['id']}/results/{item['sha256']}",
+                f"/api/artifact-jobs/{result['id']}/results/{item['sha256']}",
                 destination,
                 media_type=str(item["media_type"]),
                 expected_sha256=str(item["sha256"]),

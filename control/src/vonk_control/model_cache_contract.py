@@ -99,10 +99,11 @@ class ModelCacheDownloadResult(StrictModel):
     coverage: Literal["complete"]
 
 
-class ModelCacheEvictionResult(StrictModel):
+class ModelCacheRemovalResult(StrictModel):
     schema_version: Literal[2]
     removed_entries: list[Digest]
     reclaimed_bytes: int = Field(ge=0)
+    cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
 
 
 class _ModelCacheOperationPayload(StrictModel):
@@ -113,6 +114,15 @@ class _ModelCacheOperationPayload(StrictModel):
     failure: AvailabilityOperationFailure | None = None
     retry_of: str | None = Field(default=None, pattern=UUID_PATTERN)
     resume_of: str | None = Field(default=None, pattern=UUID_PATTERN)
+    # A removal fence is durable operation state.  Workers must observe it
+    # before publishing a verified object, including after a Controller
+    # restart.  It is deliberately optional so current in-flight operations
+    # retain the same strict envelope until an operator removes them.
+    removal_fence: str | None = Field(default=None, pattern=UUID_PATTERN)
+    operator_action: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.:-]{0,63}$")
+    selector: str | None = Field(default=None, min_length=1, max_length=256)
+    with_model: bool | None = None
+    force_refresh: bool = False
 
 
 class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
@@ -128,22 +138,21 @@ class ModelCacheRepairPayload(ModelCacheDownloadPayload):
     repair_checkpoint: ModelCacheRepairCheckpoint
 
 
-class ModelCacheEvictionPayload(_ModelCacheOperationPayload):
-    target_bytes: int = Field(gt=0)
+class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
     selected: list[Digest]
     selected_objects: list[Digest]
-    before_unique_used_bytes: int = Field(ge=0)
-    result: ModelCacheEvictionResult | None = None
+    reclaimed_bytes: int = Field(ge=0)
+    result: ModelCacheRemovalResult
 
 
 ModelCacheOperationPayload = (
-    ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheEvictionPayload
+    ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheRemovalPayload
 )
 
 
 def parse_model_cache_payload(
     kind: str, value: object
-) -> ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheEvictionPayload:
+    ) -> ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheRemovalPayload:
     """Validate decoded database JSON against the operation-kind envelope."""
 
     try:
@@ -152,8 +161,8 @@ def parse_model_cache_payload(
             parsed = ModelCacheDownloadPayload.model_validate_json(raw)
         elif kind == "repair":
             parsed = ModelCacheRepairPayload.model_validate_json(raw)
-        elif kind == "evict":
-            parsed = ModelCacheEvictionPayload.model_validate_json(raw)
+        elif kind == "remove":
+            parsed = ModelCacheRemovalPayload.model_validate_json(raw)
         else:
             raise ValueError(f"unknown model cache operation kind: {kind}")
         return parsed
@@ -220,16 +229,35 @@ class ModelCacheAccessResumeRequest(StrictModel):
     plan_digest: Digest
 
 
-class ModelCacheEvictionPreviewRequest(StrictModel):
-    schema_version: Literal[2] = 2
-    target_bytes: int = Field(gt=0)
+class ModelCacheOperatorRequest(StrictModel):
+    """Body shared by the singular operator model actions."""
 
-
-class ModelCacheEvictRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
-    plan_digest: Digest
-    target_bytes: int = Field(gt=0)
+    with_model: bool = False
+
+
+class ModelCacheOperatorResponse(StrictModel):
+    """CLI-shaped result without exposing an internal plan/digest workflow."""
+
+    schema_version: Literal[2] = 2
+    action: Literal["download", "remove"]
+    selector: str = Field(min_length=1, max_length=256)
+    request_key: str = Field(pattern=UUID_PATTERN)
+    operation_id: str | None = Field(default=None, pattern=UUID_PATTERN)
+    state: Literal[
+        "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
+    ]
+    phase: str = Field(min_length=1, max_length=64)
+    progress: OperationProgress
+    transferred_bytes: int = Field(ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    eta_seconds: float | None = Field(default=None, ge=0)
+    preserved: list[str] = Field(default_factory=list, max_length=32)
+    next_actions: list[str] = Field(default_factory=list, max_length=32)
+    cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
+    result: ModelCacheDownloadResult | ModelCacheRemovalResult | None = None
+    failure: AvailabilityOperationFailure | None = None
 
 
 class CacheStorageResponse(StrictModel):
@@ -325,7 +353,7 @@ class ModelCacheOperationProgress(StrictModel):
         return self
 
 
-ModelCacheOperationResult = ModelCacheDownloadResult | ModelCacheEvictionResult
+ModelCacheOperationResult = ModelCacheDownloadResult | ModelCacheRemovalResult
 
 
 def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationResult:
@@ -333,8 +361,8 @@ def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationRes
     raw = canonical_message(value)
     if kind in {"download", "repair"}:
         return ModelCacheDownloadResult.model_validate_json(raw)
-    if kind == "evict":
-        return ModelCacheEvictionResult.model_validate_json(raw)
+    if kind == "remove":
+        return ModelCacheRemovalResult.model_validate_json(raw)
     raise ValueError(f"unknown model cache operation kind: {kind}")
 
 
@@ -342,7 +370,7 @@ class ModelCacheOperationResponse(StrictModel):
     schema_version: Literal[2] = 2
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
-    kind: Literal["download", "repair", "evict"]
+    kind: Literal["download", "repair", "remove"]
     state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
     attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
@@ -403,28 +431,6 @@ class ModelCacheDownloadPreviewResponse(StrictModel):
     warnings: list[str] = Field(max_length=32)
 
 
-class ModelCacheEvictionEntry(StrictModel):
-    schema_version: Literal[2] = 2
-    artifact_set_sha256: Digest
-    reclaimable_bytes: int = Field(ge=0)
-    protected: bool
-    protected_reasons: list[str] = Field(max_length=32)
-    last_accessed_at: str
-
-
-class ModelCacheEvictionPreviewResponse(StrictModel):
-    schema_version: Literal[2] = 2
-    plan_digest: Digest
-    target_bytes: int = Field(gt=0)
-    selected: list[ModelCacheEvictionEntry] = Field(max_length=100)
-    protected_entries: list[ModelCacheEvictionEntry] = Field(max_length=100)
-    reclaimable_bytes: int = Field(ge=0)
-    selected_bytes: int = Field(ge=0)
-    storage_before: CacheStorageResponse
-    storage_after: CacheStorageResponse
-    blockers: list[str] = Field(max_length=32)
-
-
 class ModelCacheUpstreamRevision(StrictModel):
     repository: str
     pinned_revision: str = Field(pattern=REVISION_PATTERN)
@@ -473,17 +479,15 @@ __all__ = [
     "ModelCacheDownloadPreviewResponse",
     "ModelCacheDownloadRequest",
     "ModelCacheDownloadResult",
-    "ModelCacheEvictRequest",
-    "ModelCacheEvictionEntry",
-    "ModelCacheEvictionPayload",
-    "ModelCacheEvictionPreviewRequest",
-    "ModelCacheEvictionPreviewResponse",
-    "ModelCacheEvictionResult",
+    "ModelCacheRemovalPayload",
+    "ModelCacheRemovalResult",
     "ModelCacheInventoryResponse",
     "ModelCacheOperationPayload",
     "ModelCacheOperationProgress",
     "ModelCacheOperationResponse",
     "ModelCacheOperationsResponse",
+    "ModelCacheOperatorRequest",
+    "ModelCacheOperatorResponse",
     "ModelCacheRepairPayload",
     "ModelCacheRepairPreviewRequest",
     "ModelCacheRepairPreviewResponse",

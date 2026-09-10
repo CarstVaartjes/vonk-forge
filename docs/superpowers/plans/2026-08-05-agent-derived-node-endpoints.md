@@ -58,7 +58,7 @@ Add `management_cidrs: str` and `direct_fabric_cidrs: str` to `Settings`. In pro
 
 - [ ] **Step 5: Record presence on every authenticated claim**
 
-Add `presence: AgentPresenceService` to `AgentApiServices`. After `_authenticated_identity()` succeeds in `/agent/v1/claim`, require exactly one `X-Vonk-Agent-Source` value, pass it to `presence.observe(identity.node_id, source, services.clock())`, and reject invalid/missing values with HTTP 422 without claiming work. Extend test fixtures and assert that forged agent identity headers still fail before any observation is written.
+Add `presence: AgentPresenceService` to `AgentApiServices`. After `_authenticated_identity()` succeeds in `/agent/claim`, require exactly one `X-Vonk-Agent-Source` value, pass it to `presence.observe(identity.node_id, source, services.clock())`, and reject invalid/missing values with HTTP 422 without claiming work. Extend test fixtures and assert that forged agent identity headers still fail before any observation is written.
 
 - [ ] **Step 6: Wire production configuration**
 

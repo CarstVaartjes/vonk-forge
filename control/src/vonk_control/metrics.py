@@ -45,7 +45,6 @@ _AGENT_OPERATIONS = frozenset({
     "recipe.job.run.v1",
     "recipe.stop",
     "recipe.uninstall",
-    "recipe.model-uninstall.v1",
 })
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
 _CONNECTION_STATES = ("online", "offline", "unregistered")

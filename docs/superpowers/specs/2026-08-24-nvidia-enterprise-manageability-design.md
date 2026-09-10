@@ -281,9 +281,9 @@ node_capability_events
   observed_at
 ```
 
-`GET /api/v1/nodes/{node_id}/capabilities` returns the latest normalized
+`GET /api/nodes/{node_id}/capabilities` returns the latest normalized
 records, following the existing human-facing API namespace. Agent writes
-continue through certificate-bound `/agent/v1` endpoints; browsers do not
+continue through certificate-bound `/agent` endpoints; browsers do not
 submit provider state.
 
 ## Fallback and Failure Semantics

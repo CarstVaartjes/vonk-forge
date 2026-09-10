@@ -3,7 +3,7 @@
 //! Parse heartbeat responses with the same strict Rust type used by the agent.
 //!
 //! The connected Controller bridge feeds this probe the response body emitted
-//! by ``POST /agent/v1/heartbeat``.  Keeping the probe small makes the wire
+//! by ``POST /agent/heartbeat``.  Keeping the probe small makes the wire
 //! boundary explicit while leaving mTLS and request transport in the client.
 
 use std::io::{self, BufRead, Write};

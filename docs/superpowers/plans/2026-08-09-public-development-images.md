@@ -276,7 +276,7 @@ failure print `compose ps -a` and bounded service logs before teardown.
 - [ ] **Step 3: Exercise real runtime behavior**
 
 Require `docker compose up --wait`, zero exits for `dev-init` and `migrate`,
-running PostgreSQL/worker/API, successful `/api/v1/readyz`, local repository
+running PostgreSQL/worker/API, successful `/api/readyz`, local repository
 branch `main` at the exact commit, API inability to see worker secrets, worker
 inability to see API secrets, and no project-root `/repository` mount.
 

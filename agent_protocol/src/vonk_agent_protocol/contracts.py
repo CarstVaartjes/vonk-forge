@@ -125,7 +125,6 @@ class AgentOperation(StrEnum):
     RECIPE_JOB_RUN = "recipe.job.run.v1"
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
-    RECIPE_MODEL_UNINSTALL = "recipe.model-uninstall.v1"
 
 
 class ArtifactDistributionPayload(WireModel):
@@ -853,8 +852,6 @@ from .build_import import (
 from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from .recipe_operations import (
     RecipeInstallPayload,
-    RecipeModelCleanupPayload,
-    RecipeModelCleanupResult,
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeStopResult,
@@ -875,7 +872,6 @@ AgentPayload = (
     | RecipeStartPayload
     | RecipeStopPayload
     | RecipeUninstallPayload
-    | RecipeModelCleanupPayload
 )
 AgentResultPayload = (
     RuntimePreflightResult
@@ -884,7 +880,6 @@ AgentResultPayload = (
     | RecipeStartResult
     | RecipeStopResult
     | RecipeUninstallResult
-    | RecipeModelCleanupResult
     | RecipeBuildEvidence
     | RecipeImageImportEvidence
     | RecipeJobRunResult
@@ -903,7 +898,6 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_START: RecipeStartPayload,
     AgentOperation.RECIPE_STOP: RecipeStopPayload,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallPayload,
-    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupPayload,
 }
 
 
@@ -931,7 +925,6 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_START: RecipeStartResult,
     AgentOperation.RECIPE_STOP: RecipeStopResult,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
-    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupResult,
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,

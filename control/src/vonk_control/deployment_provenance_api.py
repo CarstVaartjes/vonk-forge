@@ -14,7 +14,7 @@ def install_deployment_provenance_routes(
     app: FastAPI, *, actor_dependency: Any, provenance: Any | None
 ) -> None:
     @app.get(
-        "/api/v1/deployment-provenance",
+        "/api/deployment-provenance",
         response_model=DeploymentProvenance,
         operation_id="getDeploymentProvenance",
         responses=bounded_error_responses(401, 503),

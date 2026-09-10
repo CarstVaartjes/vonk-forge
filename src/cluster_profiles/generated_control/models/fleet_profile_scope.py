@@ -19,10 +19,11 @@ T = TypeVar("T", bound="FleetProfileScope")
 
 @_attrs_define
 class FleetProfileScope:
-    """ The complete set of Sparks reconciled by a profile.
+    """ Frozen complete fleet boundary for a single execution plan.
 
-    Scope is deliberately independent from assignments.  A member with no
-    assignment is an intentional idle outcome when the profile is applied.
+    User profiles do not author this field.  It is captured from the enrolled
+    roster when preview/load admits an operation and is retained so a running
+    operation cannot silently expand or shrink with fleet membership changes.
 
         Attributes:
             node_ids (list[str]):

@@ -49,7 +49,7 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     # Submit the production serializer's bytes unchanged, bypassing the
     # convenience client's automatic claim fixture completion.
     response = client.request(
-        "POST", "/agent/v1/claim", content=raw,
+        "POST", "/agent/claim", content=raw,
         headers={**agent_headers(NODE_A, "serial-a"), "content-type": "application/json"},
     )
     assert response.status_code == 204, response.text
@@ -118,7 +118,7 @@ def test_controller_bootstrap_uses_the_setup_parser(
             "bootstrap",
             replace(services.bootstrap, controller_address=None, service_hostnames=()),
         )
-    response = client.get("/agent/v1/bootstrap")
+    response = client.get("/agent/bootstrap")
     assert response.status_code == 200
     expected = EnrollmentBootstrapResponse.model_validate_json(response.content)
     returned = _roundtrip(bootstrap_wire_probe, response.content)
@@ -138,7 +138,7 @@ def test_controller_bootstrap_uses_the_setup_parser(
             check=False,
         )
         assert result.returncode != 0, field
-    operation = client.app.openapi()["paths"]["/agent/v1/bootstrap"]["get"]
+    operation = client.app.openapi()["paths"]["/agent/bootstrap"]["get"]
     assert not any(p["name"] == "setup_schema" for p in operation.get("parameters", []))
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/EnrollmentBootstrapResponse"
@@ -156,12 +156,12 @@ def test_rust_enrollment_request_and_controller_issued_response(
         enrollment_wire_probe, authored.model_dump_json().encode(), "--request"
     )
     assert EnrollmentSubmitRequest.model_validate_json(request) == authored
-    response = client.post("/agent/v1/enroll", json=json.loads(request))
+    response = client.post("/agent/enroll", json=json.loads(request))
     assert response.status_code == 200
     issued = IssuedCertificateResponse.model_validate_json(response.content)
     returned = _roundtrip(enrollment_wire_probe, response.content, "--issued", NODE_C)
     assert IssuedCertificateResponse.model_validate_json(returned) == issued
-    schema = client.app.openapi()["paths"]["/agent/v1/enroll"]["post"]
+    schema = client.app.openapi()["paths"]["/agent/enroll"]["post"]
     assert schema["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/IssuedCertificateResponse"
     }
@@ -172,7 +172,7 @@ def test_controller_renewal_uses_the_same_issued_response(
 ) -> None:
     client, _, _, _ = agent_system
     response = client.post(
-        "/agent/v1/renew",
+        "/agent/renew",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()},
     )
@@ -182,7 +182,7 @@ def test_controller_renewal_uses_the_same_issued_response(
     assert IssuedCertificateResponse.model_validate_json(returned) == issued
 
 
-@pytest.mark.parametrize("path", ["/agent/v1/renew", "/agent/v1/renew/activate"])
+@pytest.mark.parametrize("path", ["/agent/renew", "/agent/renew/activate"])
 @pytest.mark.parametrize("missing", [True, False])
 def test_certificate_rotation_requires_explicit_node_identity(
     agent_system, path: str, missing: bool,

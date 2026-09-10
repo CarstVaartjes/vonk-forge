@@ -1,6 +1,6 @@
-import type {LibraryRecipeDetail} from "../api/types";
+import type {LibraryViewRecipeDetail} from "../api/types";
 
-type Reason = LibraryRecipeDetail["reasons"][number];
+type Reason = LibraryViewRecipeDetail["reasons"][number];
 
 export function LibraryReasons({reasons}: {reasons: Reason[]}) {
   if (reasons.length === 0) return null;

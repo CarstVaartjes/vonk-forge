@@ -387,7 +387,7 @@ class FailureEvidenceService:
             media_type="application/json",
             size_bytes=len(content),
             sha256=digest,
-            href=f"/api/v1/operations/{quote(str(item['id']), safe='')}/evidence?attempt={item['attempt']}",
+            href=f"/api/operations/{quote(str(item['id']), safe='')}/evidence?attempt={item['attempt']}",
         ).model_dump(mode="json")
         result["provenance"] = OperationEvidenceProvenance(
             source=bundle.context.source,

@@ -279,7 +279,7 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
         app, actor_dependency=Depends(actor), service=service
     )
     client = TestClient(app)
-    url = f"/api/v1/operations/{value['id']}/evidence?attempt=1"
+    url = f"/api/operations/{value['id']}/evidence?attempt=1"
     assert client.get(url).status_code == 401
     response = client.get(url, headers={"Authorization": "Bearer test"})
     assert response.status_code == 200
@@ -339,11 +339,11 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     client = TestClient(app)
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     headers = {"Authorization": f"Bearer {token}"}
-    response = client.get(f"/api/v1/operations/{value['id']}", headers=headers)
+    response = client.get(f"/api/operations/{value['id']}", headers=headers)
     assert response.status_code == 200
     download = response.json()["evidence_download"]
     assert download["href"].endswith("/evidence?attempt=1")
-    listing = client.get("/api/v1/operations", headers=headers)
+    listing = client.get("/api/operations", headers=headers)
     assert listing.json()["operations"][0]["evidence_download"] == download
     assert client.get(download["href"]).status_code == 401
     content = client.get(download["href"], headers=headers)
@@ -399,28 +399,6 @@ def test_collection_time_budget_yields_and_leaves_cursor_for_next_tick(
             session.scalar(select(func.count()).select_from(FailureEvidenceRecord)) == 1
         )
     assert service.last_collection_error is None
-
-
-def test_migration_creates_evidence_tables_on_fresh_database(tmp_path):
-    import importlib.util
-    from pathlib import Path
-
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import inspect
-
-    path = Path(__file__).parents[1] / "migrations/versions/0024_failure_evidence.py"
-    spec = importlib.util.spec_from_file_location("failure_evidence_migration", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    engine = create_engine(f"sqlite:///{tmp_path / 'fresh.sqlite'}")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            module.upgrade()
-        assert set(inspect(connection).get_table_names()) == {
-            "failure_evidence_records",
-            "failure_evidence_cursors",
-        }
 
 
 def test_secret_control_characters_cannot_evade_redaction(service):

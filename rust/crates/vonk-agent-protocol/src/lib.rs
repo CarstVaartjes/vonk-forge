@@ -16,8 +16,7 @@ pub use generated::{
     RecipeImageImportEvidence, RecipeImageImportRequest,
     RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
     RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunRequest, RecipeJobRunResult, RecipeModelCleanupInstallation,
-    RecipeModelCleanupPayload as RecipeModelCleanupRequest, RecipeModelCleanupResult,
+    RecipeJobRunRequest, RecipeJobRunResult,
     RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
     RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
     RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
@@ -394,7 +393,6 @@ impl AgentClaim {
                 | "recipe.start"
                 | "recipe.stop"
                 | "recipe.uninstall"
-                | "recipe.model-uninstall.v1"
         ) {
             return Err(ProtocolError::Identity("claim operation"));
         }
@@ -698,13 +696,6 @@ impl AgentResult {
                     result.validate()?;
                     true
                 }
-                AgentOperation::RecipeModelUninstallV1 => {
-                    let AgentResultResult::RecipeModelCleanupResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    true
-                }
             },
             AgentResultState::Failed => match (&self.result, operation) {
                 (AgentResultResult::AgentFailureResult(result), _) => {
@@ -865,7 +856,6 @@ pub enum RecipeOperationRequest {
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
-    ModelCleanup(RecipeModelCleanupRequest),
 }
 
 impl RecipeJobRunResult {
@@ -946,18 +936,6 @@ impl RecipeUninstallResult {
     }
 }
 
-impl RecipeModelCleanupResult {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if (1..=512).contains(&self.uninstalled_installations)
-            && self.removed_model_bytes <= 16 * 1024_u64.pow(4)
-        {
-            Ok(())
-        } else {
-            Err(ProtocolError::Identity("recipe model cleanup result"))
-        }
-    }
-}
-
 impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
@@ -988,10 +966,6 @@ impl RecipeOperationRequest {
             ("recipe.uninstall", generated::AgentClaimPayload::RecipeUninstallPayload(value)) => {
                 Self::Uninstall(value.clone())
             }
-            (
-                "recipe.model-uninstall.v1",
-                generated::AgentClaimPayload::RecipeModelCleanupPayload(value),
-            ) => Self::ModelCleanup(value.clone()),
             _ => return Err(ProtocolError::Identity("recipe operation payload")),
         };
         request.validate()?;
@@ -1089,23 +1063,6 @@ impl RecipeOperationRequest {
                         .as_ref()
                         .is_none_or(|digest| lower_hex(digest, 64))
             }
-            Self::ModelCleanup(value) => {
-                valid_common(value.schema_version, &value.plan_digest)
-                    && lower_hex(&value.model_content_sha256, 64)
-                    && !value.installations.is_empty()
-                    && value.installations.len() <= 512
-                    && value
-                        .installations
-                        .iter()
-                        .map(|installation| installation.installation_id)
-                        .collect::<BTreeSet<_>>()
-                        .len()
-                        == value.installations.len()
-                    && value
-                        .installations
-                        .iter()
-                        .all(|installation| lower_hex(&installation.recipe_content_sha256, 64))
-            }
         };
         if valid {
             Ok(())
@@ -1156,111 +1113,6 @@ mod inventory_tests {
         let mut invalid = value;
         invalid.nvidia_driver_version = "é".to_owned();
         assert!(invalid.validate().is_err());
-    }
-}
-
-#[cfg(test)]
-mod recipe_model_cleanup_tests {
-    use super::*;
-
-    fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
-        let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
-        Ok(AgentClaim {
-            attempt: 1,
-            authority_revision: "a".repeat(64),
-            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
-            fence: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-            job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.model-uninstall.v1".parse().unwrap(),
-            operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload,
-            schema_version: 1,
-        })
-    }
-
-    #[test]
-    fn controller_model_cleanup_payload_uses_content_digest_and_rejects_retired_name() {
-        let payload = serde_json::json!({
-            "schema_version": 1,
-            "model_content_sha256": "f".repeat(64),
-            "plan_digest": "b".repeat(64),
-            "installations": [{
-                "installation_id": "00000000-0000-4000-8000-000000000004",
-                "recipe_content_sha256": "c".repeat(64)
-            }]
-        });
-        let parsed = RecipeOperationRequest::parse(&claim(payload.clone()).unwrap()).unwrap();
-        let RecipeOperationRequest::ModelCleanup(request) = parsed else {
-            panic!("model cleanup payload parsed as the wrong operation");
-        };
-        assert_eq!(request.model_content_sha256, "f".repeat(64));
-
-        let mut retired = payload;
-        retired["model_version_sha256"] = retired["model_content_sha256"].take();
-        assert!(claim(retired).is_err());
-    }
-
-    #[test]
-    fn uninstall_payload_requires_explicit_nullable_cleanup_field() {
-        let mut payload = serde_json::json!({
-            "schema_version": 1,
-            "installation_id": "00000000-0000-4000-8000-000000000004",
-            "plan_digest": "b".repeat(64),
-            "recipe_content_sha256": "c".repeat(64),
-            "cleanup_model_content_sha256": null,
-        });
-        let mut uninstall_claim = claim(serde_json::json!({
-            "schema_version": 1,
-            "installation_id": "00000000-0000-4000-8000-000000000004",
-            "plan_digest": "b".repeat(64),
-            "recipe_content_sha256": "c".repeat(64),
-            "cleanup_model_content_sha256": null,
-        }))
-        .unwrap();
-        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
-        assert!(RecipeOperationRequest::parse(&uninstall_claim).is_ok());
-        payload
-            .as_object_mut()
-            .unwrap()
-            .remove("cleanup_model_content_sha256");
-        assert!(serde_json::from_value::<generated::RecipeUninstallPayload>(payload).is_err());
-    }
-
-    #[test]
-    fn lifecycle_success_bodies_are_strict_and_bounded() {
-        let stop: RecipeStopResult =
-            serde_json::from_value(serde_json::json!({"stopped": true})).unwrap();
-        assert!(stop.validate().is_ok());
-        assert!(
-            serde_json::from_value::<RecipeStopResult>(
-                serde_json::json!({"stopped": true, "extra": 1})
-            )
-            .is_err()
-        );
-        let uninstall: RecipeUninstallResult = serde_json::from_value(
-            serde_json::json!({"uninstalled": true, "removed_model_bytes": 0}),
-        )
-        .unwrap();
-        assert!(uninstall.validate().is_ok());
-        assert!(
-            serde_json::from_value::<RecipeUninstallResult>(
-                serde_json::json!({"uninstalled": true, "removed_model_bytes": 17592186044417_u64})
-            )
-            .is_err()
-        );
-        let cleanup: RecipeModelCleanupResult = serde_json::from_value(
-            serde_json::json!({"uninstalled_installations": 1, "removed_model_bytes": 0}),
-        )
-        .unwrap();
-        assert!(cleanup.validate().is_ok());
-        assert!(
-            serde_json::from_value::<RecipeModelCleanupResult>(
-                serde_json::json!({"uninstalled_installations": 0, "removed_model_bytes": 0})
-            )
-            .is_err()
-        );
     }
 }
 

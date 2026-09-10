@@ -319,6 +319,22 @@ def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:
     assert result.node_id == NODE_ID
 
 
+def test_named_grant_persists_approved_spark_name_on_submit(service) -> None:
+    enrollment, sessions, _, _ = service
+    request = csr(NODE_ID)
+    grant = enrollment.create_named("Living Spark", "admin", 600)
+
+    enrollment.submit(grant.token, request, evidence(request))
+
+    with sessions() as session:
+        stored_grant = session.get(AgentEnrollmentGrant, grant.id)
+        profile = session.get(AgentNodeProfile, NODE_ID)
+        assert stored_grant is not None
+        assert stored_grant.requested_display_name == "Living Spark"
+        assert profile is not None
+        assert profile.display_name == "Living Spark"
+
+
 def test_enrollment_pins_and_explicit_reenrollment_rotates_receipt_key(service) -> None:
     enrollment, sessions, _, _ = service
     request = csr()

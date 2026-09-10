@@ -1,49 +1,25 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page, type Route} from "@playwright/test";
-import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import {currentRecipeDetail, libraryViewSnapshot, modelLibrary, recipeLibrary} from "../src/test-fixtures/library";
 import type {components} from "../src/api/generated";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
-const pairedRecipe = fullLibraryDetail.recipe;
-const pairedModel = librarySnapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === pairedRecipe.recipe_id))!;
-const pairedRecipeId = pairedRecipe.recipe_id;
-const pairedRecipeTitle = pairedRecipe.title;
+const pairedRecipe = recipeLibrary.recipes[0]!;
+const pairedModel = libraryViewSnapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === pairedRecipe.identity.recipe_id))!;
+const pairedRecipeId = pairedRecipe.identity.recipe_id;
+const pairedRecipeTitle = pairedRecipe.identity.title;
 const pairedModelKey = `${pairedModel.model.publisher}/${pairedModel.model.slug}@${pairedModel.model.content_sha256}`;
 
 function canonicalRecipeDetail() {
-  const detail = structuredClone(fullLibraryDetail);
-  const placementNode = {
-    artifact_reuse_bytes: 0, disk_free_after_bytes: 240 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_reserved_bytes: 0,
-    endpoint_owner: true, fabric_address: "fabric://node-alpha", fabric_bandwidth_mbps: 25_000, inventory_age_seconds: 1, inventory_observed_at: "2026-09-06T12:00:00Z",
-    memory_available_bytes: 100 * GIB, memory_free_after_bytes: 36 * GIB, memory_kind: "unified" as const, memory_required_bytes: 60 * GIB, memory_reserved_bytes: 4 * GIB,
-    node_id: "node-alpha", rank: 0, role: "leader", telemetry_age_seconds: 1, telemetry_observed_at: "2026-09-06T12:00:00Z",
-  };
-  detail.placement = [{
-    topology_name: detail.topology.name, node_count: 1, candidate_node_ids: ["node-alpha"],
-    recommendations: [{
-      eligible: true, group_complete: true, topology_name: detail.topology.name, node_ids: ["node-alpha"], nodes: [placementNode],
-      preview_targets: [{kind: "run", input: {installation_id: "installation-chat"}}], load_state: "not_loaded", install_state: "complete", reasons: [],
-      installation_ids: ["installation-chat"], mapping_id: null, ranking_scope: "bounded-advisory", recipe_build_id: null,
-      recipe_revision_id: detail.recipe.recipe_revision_id, run_ids: [],
-      score: {active_run_count: 0, artifact_reuse_bytes: 0, exact_install_complete: true, exact_install_partial: false, maximum_telemetry_age_seconds: 1, minimum_disk_headroom_bytes: 240 * GIB, minimum_memory_headroom_bytes: 36 * GIB},
-    }],
-    rejected_groups: [], rejected_nodes: [], evaluated_group_count: 1,
-    evidence_counts: {builds: 0, mappings: 0, mapping_members: 0, installations: 1, installation_members: 1, runs: 0, run_members: 0, truncated_collections: []},
-    limits: {}, reasons: [], rejected_evidence_truncated: false, search_complete: true,
-  }];
-  return detail;
+  return structuredClone(currentRecipeDetail);
 }
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
   empty: boolean;
-  lastApplyBody?: Record<string, unknown>;
-  lastRunSwitchApplyBody?: Record<string, unknown>;
-  lastRunSwitchPreviewBody?: Record<string, unknown>;
-  retryCount: number;
   snapshotFailuresRemaining: number;
 };
 const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
@@ -56,130 +32,6 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
 async function openFleetControls(page: Page) {
   const controls = page.locator(".fleet-controls-menu");
   if (!(await controls.getAttribute("open"))) await controls.locator("summary").click();
-}
-
-function libraryLoadPlan() {
-  return {
-    alias: "qwen-chat", allowed: true, installation_id: "installation-chat", mapping_generation: 4, mapping_id: "mapping-chat",
-    nodes: [
-      {active_reserved_bytes: 4 * GIB, allowed: true, available_memory_bytes: 100 * GIB, blockers: [], endpoint_owner: true, fabric_address: "fabric://node-alpha", fabric_bandwidth_mbps: 25_000, free_after_bytes: 36 * GIB, inventory_observed_at: "2026-08-15T11:59:50Z", memory_floor_bytes: 8 * GIB, memory_kind: "unified", node_id: "node-alpha", port: 8000, rank: 0, rendezvous_port: 29500, required_memory_bytes: 60 * GIB, role: "leader", warnings: [{code: "run.coexistence_confirmed", detail: "Authoritative capacity evidence permits Qwen Code to coexist."}]},
-      {active_reserved_bytes: 4 * GIB, allowed: true, available_memory_bytes: 100 * GIB, blockers: [], endpoint_owner: false, fabric_address: "fabric://node-beta", fabric_bandwidth_mbps: 25_000, free_after_bytes: 36 * GIB, inventory_observed_at: "2026-08-15T11:59:45Z", memory_floor_bytes: 8 * GIB, memory_kind: "unified", node_id: "node-beta", port: 8000, rank: 1, rendezvous_port: null, required_memory_bytes: 60 * GIB, role: "worker", warnings: []},
-    ],
-    plan_digest: "load-plan-digest", recipe_revision_id: "revision-chat",
-  };
-}
-
-function libraryRunSwitchPlan(): components["schemas"]["RunSwitchPlan"] {
-  const imageDigest = `sha256:${"d".repeat(64)}`;
-  const fitNodes = [
-    {allowed: true, node_id: "node-alpha", rank: 0, role: "leader", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
-    {allowed: true, node_id: "node-beta", rank: 1, role: "worker", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
-  ];
-  return {
-    schema_version: 2,
-    generated_at: "2026-09-05T00:00:00Z",
-    action: "run",
-    model_content_sha256: "e".repeat(64),
-    recipe_revision_id: "revision-chat",
-    recipe_content_sha256: "a".repeat(64),
-    alias: "qwen-chat",
-    run_id: null,
-    spark_group: {nodes: [
-      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
-      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
-    ]},
-    mapping: {action: "reuse", mapping_id: "mapping-chat", mapping_generation: 4, nodes: [
-      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
-      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
-    ], parameters: {}, placement_digest: "p".repeat(64), topology_name: "pair"},
-    installation_id: "installation-chat",
-    installation_state: "installed",
-    recipe_build_id: "build-chat",
-    image_digest: imageDigest,
-    start_plan_digest: null,
-    model_capabilities: [{name: "chat", declared: null, evidence: "unknown", support: "unknown", evidence_digest: null, detail: "Model capability evidence is not declared."}],
-    recipe_capabilities: [{name: "chat", declared: true, evidence: "observed", support: "supported", evidence_digest: "c".repeat(64), detail: "The selected recipe exposes chat."}],
-    freshness: [],
-    fit_current: {allowed: true, nodes: fitNodes},
-    fit_after_stop: null,
-    fit: {allowed: true, nodes: fitNodes},
-    storage: {copied_bytes: 0, missing_nas_bytes: 80 * GIB, missing_spark_bytes: 80 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, reclaimed_bytes: 0, required_bytes: 80 * GIB, retention: "retain-cached", reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
-    runtime_storage: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
-    build: {build_id: "build-chat", build_input_sha256: "b".repeat(64), builder_node_id: "node-alpha", compatibility: {expected_architecture: "linux/arm64", observed_architecture: "linux/arm64", state: "compatible"}, image_bytes: 2 * GIB, image_digest: imageDigest, runtime: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"}, source: {source_bundle_sha256: "9".repeat(64), state: "available"}, state: "available"},
-    preparation: null,
-    conflicts: [],
-    stops: [],
-    reclaimed_bytes: 0,
-    phases: [{index: 0, kind: "transfer", state: "planned", node_ids: ["node-alpha", "node-beta"], detail: "Copy the model and container to the selected Sparks."}],
-    allowed: true,
-    blockers: [],
-    warnings: [],
-    invocation: {origin: "web.library"},
-    plan_digest: "f".repeat(64),
-    stop_before_prepare: false,
-    stop_before_transfer: false,
-  };
-}
-
-function libraryRunSwitchOperation(requestKey: string, state = "queued") {
-  return {
-    schema_version: 2,
-    operation_id: "00000000-0000-4000-8000-000000000707",
-    kind: "recipe.run-switch.v2",
-    action: "run",
-    state,
-    plan_digest: "f".repeat(64),
-    request_key: requestKey,
-    node_ids: ["node-alpha", "node-beta"],
-    current_phase: "transfer",
-    completed_phases: [],
-    progress: {
-      phase_index: 0,
-      phase_count: 3,
-      phase: "transfer",
-      subphase: "model-download",
-      state: state === "queued" ? "queued" : "running",
-      completed_bytes: 0,
-      total_bytes: null,
-      total_bytes_known: false,
-      members: [
-        {node_id: "node-alpha", phase: "transfer", state: "running", completed_bytes: 0, total_bytes: null},
-        {node_id: "node-beta", phase: "transfer", state: "pending", completed_bytes: 0, total_bytes: null},
-      ],
-    },
-    status_reason: null,
-    result: null,
-  };
-}
-
-function libraryOperation(state: string) {
-  return {id: "operation-load", kind: "run", owner_id: "installation-chat", state, plan_digest: "load-plan-digest", nodes: ["node-alpha", "node-beta"], result: {job_id: "job-load"}};
-}
-
-function switchableProfilePreview(): components["schemas"]["FleetProfilePreview"] {
-  return {
-    schema_version: 2,
-    profile_id: "00000000-0000-4000-8000-000000000101",
-    profile_name: "Studio service",
-    profile_digest: "d".repeat(64),
-    plan_digest: "e".repeat(64),
-    generated_at: "2026-09-05T00:00:00Z",
-    allowed: true,
-    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
-    assignments: [{
-      assignment_id: "00000000-0000-4000-8000-000000000102",
-      recipe_revision_id: "revision-chat",
-      recipe_title: "Qwen pair",
-      desired_state: "running",
-      current_state: "degraded",
-      node_ids: [nodeId, borealisId],
-      actions: ["stop", "switch", "start"],
-      reasons: [],
-    }],
-    reasons: [],
-    steps: [{index: 0, kind: "switch", label: "Switch the Qwen pair on the selected Sparks.", node_ids: [nodeId, borealisId], assignment_id: "00000000-0000-4000-8000-000000000102", owner_id: null, recipe_revision_id: "revision-chat"}],
-    summary: {already_correct: 0, blockers: 0, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 1, stops: 1, uninstalls: 0},
-  };
 }
 
 function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
@@ -410,59 +262,18 @@ function localSnapshot(): components["schemas"]["FleetSnapshot"] {
 
 async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
-  const profile = {
-    schema_version: 2, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
-    installation_policy: "keep-cached", labels: {purpose: "interactive"}, favorite: true, profile_digest: "d".repeat(64), created_by: "admin",
-    created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
-    scope: {node_ids: [nodeId, borealisId]},
-    assignments: [{id: "00000000-0000-4000-8000-000000000102", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", model_title: "Qwen 3", topology_name: "pair", desired_state: "running", alias: "chat", nodes: [
-      {node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true},
-      {node_id: borealisId, rank: 1, role: "worker", endpoint_owner: false},
-    ]}],
-  };
-  const profilePreview = {
-    schema_version: 2, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
-    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
-    summary: {already_correct: 0, blockers: 1, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
-    assignments: [{assignment_id: profile.assignments[0].id, recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", desired_state: "running", current_state: "degraded", node_ids: [nodeId, borealisId], actions: [], reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}]}],
-    reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}], steps: [],
-  };
-  const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
+  const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, snapshotFailuresRemaining: 0};
   libraryFixtures.set(page, libraryState);
-  await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
-  await page.route("**/api/v1/artifact-jobs/capabilities", route => route.fulfill({json: {schema_version: 1, transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]}, storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 0, remaining_bytes: 4 * 1024 ** 3}}}));
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({
+  await page.route("**/api/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
+  await page.route("**/api/artifact-jobs/capabilities", route => route.fulfill({json: {schema_version: 1, transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]}, storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 0, remaining_bytes: 4 * 1024 ** 3}}}));
+  await page.route("**/api/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
     headers: {"Cache-Control": "no-cache"},
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
-  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 2, generated_at: snapshot.generated_at, profiles: [profile]}}));
-  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
-  await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
-    schema_version: 2, profile_id: profile.id, profile_digest: profile.profile_digest, generated_at: snapshot.generated_at,
-    state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
-    reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}],
-  }}));
-  await page.route("**/api/v1/fleet-profiles/*/apply", async route => {
-    const body = await route.request().postDataJSON() as {request_key?: string; plan_digest?: string};
-    return route.fulfill({status: 202, json: {
-      schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
-      plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
-      state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
-      progress: {completed_steps: 0, total_steps: 3, child_progress: {phase: "target-copy", bytes: 32 * GIB, total_bytes: 80 * GIB, node_ids: [nodeId, borealisId]}},
-      status_reason: null, result: null,
-    }});
-  });
-  await page.route("**/api/v1/fleet-profile-applications/*", route => route.fulfill({json: {
-    schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
-    plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
-    current_operation_id: null, current_step: 1, total_steps: 4,
-      progress: {completed_steps: 0, total_steps: 3, child_progress: {phase: "target-copy", bytes: 32 * GIB, total_bytes: 80 * GIB, node_ids: [nodeId, borealisId]}},
-    status_reason: null, result: null,
-  }}));
-  await page.route("**/api/v1/nodes/*/profile", async route => {
+  await page.route("**/api/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/nodes/*/profile", async route => {
     const nodeId = route.request().url().split("/").at(-2) ?? "";
     const input = await route.request().postDataJSON() as {display_name: string};
     const node = snapshot.nodes.find(item => item.id === nodeId);
@@ -475,53 +286,40 @@ async function installLocalFleetFixture(page: Page) {
   });
   const cacheStorage = {schema_version: 2, total_bytes: 1_000, free_bytes: 700, reserve_bytes: 100, available_bytes: 600, unique_used_bytes: 300, in_flight_bytes: 0, protected_bytes: 100, reclaimable_bytes: 200};
   const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
-  const emptyRecipeAvailability: components["schemas"]["RecipeImageAvailabilityListResponse"] = {schema_version: 2, total: 0, operations: [], next_cursor: null};
-  await page.route("**/api/v1/model-cache", route => route.fulfill({json: emptyCacheInventory}));
-  await page.route("**/api/v1/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/model-cache", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
   const emptyModelUpdates = {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null};
-  await page.route("**/api/v1/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
-  await page.route("**/api/v1/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
-  await page.route("**/api/v1/library/recipe-image-availability", route => route.fulfill({json: emptyRecipeAvailability}));
-  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: emptyRecipeAvailability}));
-  const librarySnapshotRoute = (route: Route) => {
+  await page.route("**/api/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
+  await page.route("**/api/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
+  const modelLibraryRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
-    const body = libraryState.empty ? {...librarySnapshot, models: [], unlinked_recipes: []} : librarySnapshot;
-    return route.fulfill({json: body});
+    return route.fulfill({json: libraryState.empty ? {...modelLibrary, models: []} : modelLibrary});
   };
-  await page.route("**/api/v1/library", librarySnapshotRoute);
-  await page.route("**/api/v1/library?*", librarySnapshotRoute);
-  await page.route("**/api/v1/library/recipes/recipe-chat", route => {
+  const recipeLibraryRoute = (route: Route) => route.fulfill({json: libraryState.empty ? {...recipeLibrary, recipes: []} : recipeLibrary});
+  await page.route("**/api/model/library", modelLibraryRoute);
+  await page.route("**/api/model/library?*", modelLibraryRoute);
+  await page.route("**/api/recipe/library", recipeLibraryRoute);
+  await page.route("**/api/recipe/library?*", recipeLibraryRoute);
+  await page.route("**/api/recipe/recipe-chat", route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
-    return route.fulfill({json: fullLibraryDetail});
+    return route.fulfill({json: currentRecipeDetail});
   });
-  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => {
+  await page.route(`**/api/recipe/${pairedRecipeId}`, route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     return route.fulfill({json: canonicalRecipeDetail()});
   });
-  await page.route("**/api/v1/library/recipes/recipe-code", route => route.fulfill({json: {
-    ...fullLibraryDetail,
-    recipe: {...fullLibraryDetail.recipe, recipe_id: codeRecipe.recipe_id, slug: codeRecipe.slug, title: codeRecipe.title, description: codeRecipe.description},
-  }}));
-  await page.route("**/api/v1/library/recipes/recipe-unlinked", route => route.fulfill({json: {
-    ...minimalLibraryDetail,
-    recipe: {
-      recipe_id: unlinkedRecipe.recipe_id,
-      slug: unlinkedRecipe.slug,
-      title: unlinkedRecipe.title,
-      description: unlinkedRecipe.description,
-      source_kind: unlinkedRecipe.source_kind,
-    },
-  }}));
-  await page.route("**/api/v1/library/recipes/*", route => {
+  await page.route("**/api/recipe/recipe-code", route => route.fulfill({json: currentRecipeDetail}));
+  await page.route("**/api/recipe/recipe-unlinked", route => route.fulfill({json: currentRecipeDetail}));
+  await page.route("**/api/recipe/*", route => {
     const recipeId = new URL(route.request().url()).pathname.split("/").at(-1);
     if (recipeId !== pairedRecipeId) return route.fallback();
     if (libraryState.detailFailuresRemaining > 0) {
@@ -530,54 +328,31 @@ async function installLocalFleetFixture(page: Page) {
     }
     return route.fulfill({json: canonicalRecipeDetail()});
   });
-  await page.route("**/api/v1/recipes/run-plans/preview", route => route.fulfill({json: libraryLoadPlan()}));
-  await page.route("**/api/v1/recipes/runs", async route => {
-    libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
-    return route.fulfill({json: libraryOperation("queued")});
-  });
-  await page.route("**/api/v1/recipes/run-switch-plans/preview", async route => {
-    libraryState.lastRunSwitchPreviewBody = await route.request().postDataJSON() as Record<string, unknown>;
-    return route.fulfill({json: libraryRunSwitchPlan()});
-  });
-  await page.route("**/api/v1/recipes/run-switches", async route => {
-    libraryState.lastRunSwitchApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
-    const requestKey = String(libraryState.lastRunSwitchApplyBody.request_key ?? "");
-    return route.fulfill({status: 202, json: libraryRunSwitchOperation(requestKey)});
-  });
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
-    const requestKey = String(libraryFixtures.get(page)?.lastRunSwitchApplyBody?.request_key ?? "");
-    return route.fulfill({json: libraryRunSwitchOperation(requestKey, "running")});
-  });
-  await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
-  await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
-    libraryState.retryCount += 1;
-    return route.fulfill({json: libraryOperation("queued")});
-  });
-  await page.route("**/api/v1/jobs/job-load*", route => route.fulfill({json: {
+  await page.route("**/api/jobs/job-load*", route => route.fulfill({json: {
     id: "job-load", kind: "run", state: "failed", authority_revision: commit, current_attempt: 1,
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }}));
-  await page.route("**/api/v1/nodes/*/telemetry/current", route => {
+  await page.route("**/api/nodes/*/telemetry/current", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", sample: richTelemetry(observedAt, 5, requestedNodeId)}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry/capabilities", route => {
+  await page.route("**/api/nodes/*/telemetry/capabilities", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", capabilities: richTelemetryMetrics(observedAt, requestedNodeId).capabilities}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry/workloads", route => {
+  await page.route("**/api/nodes/*/telemetry/workloads", route => {
     const url = new URL(route.request().url());
     const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
     const observedAt = new Date().toISOString();
     const metrics = richTelemetryMetrics(observedAt, requestedNodeId);
     return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", run_id: null, state: null, runtimes: metrics.runtimes, workloads: metrics.workloads}});
   });
-  await page.route("**/api/v1/nodes/*/telemetry?*", route => {
+  await page.route("**/api/nodes/*/telemetry?*", route => {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
     const end = url.searchParams.get("end") ?? snapshot.generated_at;
@@ -840,17 +615,17 @@ test("Fleet resilient-state headings remain plain and scannable", async ({page},
   const filtered = await page.locator(".fleet-filter-empty").evaluate(element => element.outerHTML);
 
   const empty = {...localSnapshot(), nodes: []};
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({
+  await page.route("**/api/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
     body: `id: ${empty.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot: empty})}\n\n`,
   }));
-  await page.route("**/api/v1/fleet", route => route.fulfill({json: empty}));
+  await page.route("**/api/fleet", route => route.fulfill({json: empty}));
   await page.reload();
   const emptyState = await page.locator(".fleet-empty").evaluate(element => element.outerHTML);
 
-  await page.route("**/api/v1/fleet/stream", route => route.fulfill({status: 503, body: "stream unavailable"}));
-  await page.route("**/api/v1/fleet", route => route.fulfill({status: 503, json: {detail: "projection unavailable"}}));
+  await page.route("**/api/fleet/stream", route => route.fulfill({status: 503, body: "stream unavailable"}));
+  await page.route("**/api/fleet", route => route.fulfill({status: 503, json: {detail: "projection unavailable"}}));
   await page.reload();
   const errorState = await page.locator(".fleet-error").evaluate(element => element.outerHTML);
   browserProblems.set(page, []);
@@ -870,7 +645,7 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   let releaseGrant!: () => void;
   const grantGate = new Promise<void>(resolve => { releaseGrant = resolve; });
   let grantRequests = 0;
-  await page.route("**/api/v1/agents/enrollments/grants", async route => {
+  await page.route("**/api/agents/enrollments/grants", async route => {
     grantRequests += 1;
     await grantGate;
     await route.fulfill({status: 201, json: {
@@ -913,129 +688,6 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   await expect(page).toHaveURL(/\/library$/);
 });
 
-test("Library separates installation capacity from load memory admission", async ({page}, testInfo) => {
-  const blocked = canonicalRecipeDetail();
-  const group = blocked.placement[0].recommendations[0];
-  group.eligible = false;
-  group.reasons = [
-    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-alpha, below the 4000000000-byte floor.", severity: "error"},
-    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-beta, below the 4000000000-byte floor.", severity: "error"},
-  ];
-  blocked.placement[0].rejected_groups = [];
-  blocked.placement[0].rejected_nodes = [];
-  await page.unroute(`**/api/v1/library/recipes/${pairedRecipeId}`);
-  await page.unroute("**/api/v1/library/recipes/*");
-  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => route.fulfill({json: blocked}));
-  await page.setViewportSize({width: 1280, height: 900});
-
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-
-  const placement = page.getByRole("region", {name: "Complete placement groups"});
-  await expect(placement.getByText("1 Sparks · 1 installable")).toBeVisible();
-  const blocker = placement.locator(".placement-load-blocked-summary");
-  await expect(blocker).toContainText("Installable, but cannot be loaded");
-  await expect(blocker).toContainText("1.0 GiB");
-  await expect(blocker).not.toContainText("run.insufficient_memory");
-  await expect(placement.getByText("Unavailable placement evidence").locator("..")).not.toHaveAttribute("open");
-  const selector = placement.getByRole("button", {name: "Select complete group Spark node"});
-  await selector.click();
-  await expect(placement.getByRole("button", {name: "Review Load"})).toHaveCount(0);
-  await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
-  await expectNoSeriousAccessibilityViolations(page);
-  await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
-});
-
-test("Library uses the schema 2 one-click Run path when the Controller exposes run-switch", async ({page}) => {
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-
-  const authority = page.locator(".library-recipe-detail");
-  const run = authority.getByRole("button", {name: "Run", exact: true}).first();
-  await expect(run).toBeVisible();
-  await expect(authority.getByRole("button", {name: "Review Load"})).toHaveCount(0);
-  await run.click();
-
-  const state = libraryFixtures.get(page)!;
-  const canonical = canonicalRecipeDetail();
-  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_content_sha256: canonical.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: canonical.recipe.recipe_revision_id, action: "run", retention: "retain-cached"});
-  await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
-  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
-  await expect(progress).toContainText("Copying model to Spark node");
-  await expect(progress).toContainText("Total bytes unavailable");
-  await expect(progress.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
-});
-
-test("Library retries a transient Run through the durable retry route", async ({page}) => {
-  const failedOperation = {...libraryRunSwitchOperation("00000000-0000-4000-8000-000000000708", "failed"), status_reason: "temporary Spark transfer failure", result: {retryable: true}};
-  const replacementId = "00000000-0000-4000-8000-000000000808";
-  const replacementKey = "00000000-0000-4000-8000-000000000809";
-  const replacement = {...libraryRunSwitchOperation(replacementKey, "queued"), operation_id: replacementId};
-  const complete = {...replacement, state: "succeeded", result: {retryable: false}, progress: {...replacement.progress, state: "succeeded", phase: "final_verify", phase_index: 2, completed_bytes: 100, total_bytes: 100, total_bytes_known: true, members: replacement.progress.members.map(member => ({...member, phase: "final_verify", state: "succeeded", completed_bytes: 100, total_bytes: 100}))}};
-  let applyCalls = 0;
-  let retryBody: Record<string, unknown> | undefined;
-  await page.unroute("**/api/v1/recipes/run-switches");
-  await page.unroute("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707");
-  await page.route("**/api/v1/recipes/run-switches", async route => { applyCalls += 1; return route.fulfill({status: 202, json: failedOperation}); });
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", route => route.fulfill({json: failedOperation}));
-  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707/retry", async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
-  await page.route(`**/api/v1/recipes/run-switches/${replacementId}`, route => route.fulfill({json: complete}));
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-
-  const authority = page.locator(".library-recipe-detail");
-  await authority.getByRole("button", {name: "Run", exact: true}).first().click();
-  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
-  await expect(progress.getByRole("button", {name: "Retry run"})).toBeVisible();
-  await progress.getByRole("button", {name: "Retry run"}).click();
-  await expect.poll(() => retryBody).toMatchObject({schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
-  expect(applyCalls).toBe(1);
-  await expect(progress).toContainText("succeeded");
-  await expect(progress.getByRole("button", {name: "Retry run"})).toHaveCount(0);
-});
-
-test("Library keeps partial Run progress visible for each Spark", async ({page}) => {
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-  const authority = page.locator(".library-recipe-detail");
-  const run = authority.getByRole("button", {name: "Run", exact: true}).last();
-  await run.scrollIntoViewIfNeeded();
-  await run.click({force: true});
-
-  const state = libraryFixtures.get(page)!;
-  await expect.poll(() => state.lastRunSwitchPreviewBody).toBeTruthy();
-  await expect.poll(() => state.lastRunSwitchApplyBody).toBeTruthy();
-  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
-  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Spark node");
-  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("In progress");
-  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
-  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
-  await expect(progress.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
-});
-
-test("Profiles keep the saved view primary and show durable per-Spark switch progress", async ({page}, testInfo) => {
-  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
-
-  for (const [width, height] of [[1280, 900], [360, 800]] as const) {
-    await page.setViewportSize({width, height});
-    await page.goto("/library/profiles");
-
-    const saved = page.getByRole("region", {name: "Studio service saved profile"});
-    await expect(saved).toBeVisible();
-    await expect(saved.getByRole("button", {name: "Edit profile"})).toBeVisible();
-    await expect(saved.getByRole("button", {name: "Switch profile"})).toBeEnabled();
-    await page.screenshot({path: testInfo.outputPath(`profiles-saved-${width}.png`)});
-
-    await saved.getByRole("button", {name: "Switch profile"}).click();
-    const progress = page.getByRole("region", {name: "Profile switch progress"});
-    await expect(progress).toContainText("Copying to Aurora, Borealis");
-    await expect(progress).toContainText("32 GiB of 80 GiB");
-    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Aurora");
-    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Borealis");
-    await expect(progress.getByRole("progressbar", {name: "Profile switch progress"})).toHaveAttribute("aria-valuenow", "40");
-    await progress.scrollIntoViewIfNeeded();
-    await page.screenshot({path: testInfo.outputPath(`profiles-switch-progress-${width}.png`)});
-  }
-});
-
 test("Library retries a failed snapshot and recipe detail request", async ({page}) => {
   const state = libraryFixtures.get(page)!;
   state.snapshotFailuresRemaining = 1;
@@ -1071,105 +723,17 @@ test("Library route changes restore heading focus and browser back state", async
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
 });
 
-test("Recipe Make available uses durable aggregate progress, access resume, and image-only force", async ({page}) => {
-  const revisionId = fullLibraryDetail.recipe.recipe_revision_id;
-  const modelDigest = "b".repeat(64);
-  const imageDigest = "c".repeat(64);
-  let stage: "empty" | "running" | "failed" | "resumed" | "forced" = "empty";
-  const starts: Record<string, unknown>[] = [];
-  const progress = (phase: string, completedBytes: number, totalBytes: number, step?: string) => ({phase, completed_bytes: completedBytes, total_bytes: totalBytes, total_bytes_known: true, bytes_per_second: 10, eta_seconds: Math.max(0, Math.ceil((totalBytes - completedBytes) / 10)), checkpoint: null, ...(step ? {step} : {})});
-  const operation = (current: typeof stage) => ({
-    schema_version: 2, id: "recipe-availability-operation", request_id: "request-availability", kind: "recipe.image.availability.v2", state: current === "failed" ? "failed" : "running", attempt: current === "forced" ? 2 : 1,
-    recipe_revision_id: revisionId, recipe_content_sha256: "a".repeat(64), progress: progress(current === "forced" ? "build" : "prepare", 40, 100, current === "forced" ? "Rebuilding runtime image" : undefined),
-    children: [
-      {kind: "model-cache", id: "model-child-1", state: current === "failed" ? "failed" : current === "forced" ? "succeeded" : "running", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: progress("download", 40, 100), failure: current === "failed" ? {code: "access_required", detail: "Hugging Face access is required for the exact Model files.", recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retryable: false, retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null} : null},
-      {kind: "runtime-image", id: "image-child-1", state: "running", progress: progress("build", 20, 100, "Building runtime image"), failure: null},
-    ],
-    failure: null, result: null, actions: [], created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z",
-  });
-  await page.route("**/api/v1/library/recipe-image-availability?*", async route => route.fulfill({json: {schema_version: 2, total: stage === "empty" ? 0 : 1, operations: stage === "empty" ? [] : [operation(stage)], next_cursor: null}}));
-  await page.route("**/api/v1/library/recipe-image-availability", async route => {
-    if (route.request().method() !== "POST") return route.fallback();
-    const body = await route.request().postDataJSON() as Record<string, unknown>;
-    starts.push(body);
-    stage = body.force === true ? "forced" : "running";
-    return route.fulfill({status: 202, json: operation(stage)});
-  });
-  await page.route("**/api/v1/library/recipe-image-availability/recipe-availability-operation", route => route.fulfill({json: operation(stage)}));
-  await page.route("**/api/v1/model-cache/operations/model-child-1/check-access-and-resume", async route => {
-    stage = "resumed";
-    return route.fulfill({status: 202, json: {schema_version: 2, id: "model-child-1", kind: "download", state: "queued", attempt: 2, request_key: "request-resume", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: {schema_version: 2, phase: "queued", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 40, expected_bytes: 100, total_bytes_known: true, current_artifact_key: "weights", bytes_per_second: null, eta_seconds: null, members: []}, failure: null, result: null, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:02:00Z", completed_at: null}});
-  });
-
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-  const availability = page.getByRole("region", {name: "Make Recipe available"});
-  await expect(availability.getByRole("button", {name: "Make available"})).toBeVisible();
-  await availability.getByRole("button", {name: "Make available"}).click();
-  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Model files");
-  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Runtime image");
-  await expect(availability.getByText("40 B / 100 B").first()).toBeVisible();
-  expect(starts).toEqual([{request_key: expect.any(String), recipe_revision_id: revisionId, force: false}]);
-
-  await page.reload();
-  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
-  stage = "failed";
-  await page.reload();
-  await expect(availability.getByRole("button", {name: "Check access and resume"})).toBeVisible();
-  await availability.getByRole("button", {name: "Check access and resume"}).click();
-  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
-  await availability.locator("summary").filter({hasText: "More actions"}).click();
-  await availability.getByRole("button", {name: "Rebuild image"}).click();
-  await expect.poll(() => starts.at(-1)?.force).toBe(true);
-  expect(starts).toHaveLength(2);
-  await expect(availability.locator('[data-member-kind="model-cache"]')).toContainText("Succeeded");
-  await expect(availability.locator('[data-member-kind="runtime-image"]')).toContainText("Runtime image");
-});
-
-test("Recipe progress keeps updating after image failure and recovers from a polling error", async ({page}) => {
-  const progress = (bytes: number): components["schemas"]["OperationProgress"] => ({phase: "download", completed_bytes: bytes, total_bytes: 100, total_bytes_known: true});
-  const operation = (bytes: number): components["schemas"]["RecipeImageAvailabilityResponse"] => ({
-    schema_version: 2, id: "continuing-download", request_id: "prepare-request", kind: "recipe.image.availability.v2", state: "failed", attempt: 1,
-    recipe_revision_id: fullLibraryDetail.recipe.recipe_revision_id, recipe_content_sha256: "a".repeat(64),
-    progress: progress(bytes), created_at: "2026-09-09T08:00:00Z", updated_at: "2026-09-09T08:00:01Z",
-    children: [
-      {kind: "model-cache", id: "download-child", model_content_digests: [], state: bytes === 100 ? "succeeded" : "running", progress: progress(bytes)},
-      {kind: "runtime-image", id: "failed-image", model_content_digests: [], state: "failed", progress: {...progress(0), phase: "build"}},
-    ],
-  });
-  let polls = 0;
-  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 1, operations: [operation(40)]}}));
-  await page.route("**/api/v1/library/recipe-image-availability/continuing-download", route => {
-    polls++;
-    return polls === 1 ? route.fulfill({status: 503, json: {detail: "Temporarily unavailable"}}) : route.fulfill({json: operation(polls === 2 ? 75 : 100)});
-  });
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-  const availability = page.getByRole("region", {name: "Make Recipe available"});
-  const model = availability.locator('[data-member-kind="model-cache"]');
-  await expect(model).toContainText("40 B / 100 B");
-  await expect(availability.getByRole("status")).toContainText("progress updates automatically");
-  await expect(availability.getByText("Availability status could not be loaded.")).toBeVisible();
-  await expect(model).toContainText("75 B / 100 B");
-  await expect(availability.getByText("Availability status could not be loaded.")).not.toBeVisible();
-  await expect(model).toContainText("100 B / 100 B");
-  await expect(model).toContainText("Succeeded");
-  await expect(availability.getByRole("status")).not.toBeVisible();
-  await page.waitForTimeout(1_500);
-  expect(polls).toBe(3);
-  expect(browserProblems.get(page)).toEqual(["error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"]);
-  browserProblems.set(page, []);
-});
-
 test("Library pairs exact model selection with matching recipes and downloads an unlinked Model", async ({page}, testInfo) => {
-  const linked = librarySnapshot.models.find(model => model.recipes.length > 0)!;
-  const unlinked = librarySnapshot.models.find(model => model.recipes.length === 0)!;
+  const linked = libraryViewSnapshot.models.find(model => model.recipes.length > 0)!;
+  const unlinked = libraryViewSnapshot.models.find(model => model.recipes.length === 0)!;
   const modelKey = (model: typeof linked) => `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
   const cacheOperation = {
     schema_version: 2, id: "model-download-operation", attempt: 1, request_key: "00000000-0000-4000-8000-000000000801", kind: "download", state: "running", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
     progress: {schema_version: 2, phase: "downloading", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, result: null, last_error: null, created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: null,
   };
-  await page.route("**/api/v1/model-cache/download-preview", async route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 0, new_bytes: 200, blockers: [], warnings: []}}));
-  await page.route("**/api/v1/model-cache/download", route => route.fulfill({status: 202, json: cacheOperation}));
-  await page.route("**/api/v1/model-cache/operations/*", route => route.fulfill({json: cacheOperation}));
+  await page.route("**/api/model-cache/download-preview", async route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 0, new_bytes: 200, blockers: [], warnings: []}}));
+  await page.route("**/api/model-cache/download", route => route.fulfill({status: 202, json: cacheOperation}));
+  await page.route("**/api/model-cache/operations/*", route => route.fulfill({json: cacheOperation}));
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto(`/library?model=${encodeURIComponent(modelKey(linked))}`);
   const paired = page.getByLabel("Model and recipe list");
@@ -1205,14 +769,14 @@ test("Library pairs exact model selection with matching recipes and downloads an
   const modelInventory = page.getByLabel("Exact model inventory");
   const orphanRow = modelInventory.locator(".library-model-row").filter({hasText: unlinked.model_document.identity.model.title}).first();
   await expect(orphanRow).toContainText("No Recipe");
-  const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/v1/model-cache/download-preview"));
+  const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/model-cache/download-preview"));
   await orphanRow.getByRole("button", {name: "Make available"}).click();
   expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_content_sha256: unlinked.model.content_sha256});
   await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
 });
 
 test("Library retries a transient Model cache operation without restarting its transfer", async ({page}) => {
-  const model = librarySnapshot.models.find(item => item.recipes.length > 0)!;
+  const model = libraryViewSnapshot.models.find(item => item.recipes.length > 0)!;
   const modelKey = `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
   const failedId = "model-download-failed";
   const replacementId = "model-download-retry";
@@ -1223,13 +787,13 @@ test("Library retries a transient Model cache operation without restarting its t
   const replacement = {...failed, id: replacementId, state: "succeeded", request_key: "00000000-0000-4000-8000-000000000812", failure: null, result: null, last_error: null, progress: {...failed.progress, phase: "completed", completed_artifacts: 2, downloaded_bytes: 200}, updated_at: "2026-09-06T00:00:02Z", completed_at: "2026-09-06T00:00:02Z"};
   let downloadCalls = 0;
   let retryBody: Record<string, unknown> | undefined;
-  await page.unroute("**/api/v1/model-cache/download");
-  await page.unroute("**/api/v1/model-cache/operations/*");
-  await page.route("**/api/v1/model-cache/download-preview", route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 100, new_bytes: 100, blockers: [], warnings: []}}));
-  await page.route("**/api/v1/model-cache/download", async route => { downloadCalls += 1; return route.fulfill({status: 202, json: failed}); });
-  await page.route(`**/api/v1/model-cache/operations/${failedId}/retry`, async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
-  await page.route(`**/api/v1/model-cache/operations/${failedId}`, route => route.fulfill({json: failed}));
-  await page.route(`**/api/v1/model-cache/operations/${replacementId}`, route => route.fulfill({json: replacement}));
+  await page.unroute("**/api/model-cache/download");
+  await page.unroute("**/api/model-cache/operations/*");
+  await page.route("**/api/model-cache/download-preview", route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 100, new_bytes: 100, blockers: [], warnings: []}}));
+  await page.route("**/api/model-cache/download", async route => { downloadCalls += 1; return route.fulfill({status: 202, json: failed}); });
+  await page.route(`**/api/model-cache/operations/${failedId}/retry`, async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
+  await page.route(`**/api/model-cache/operations/${failedId}`, route => route.fulfill({json: failed}));
+  await page.route(`**/api/model-cache/operations/${replacementId}`, route => route.fulfill({json: replacement}));
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto(`/library?view=models&model=${encodeURIComponent(modelKey)}`);
 
@@ -1241,88 +805,3 @@ test("Library retries a transient Model cache operation without restarting its t
   expect(downloadCalls).toBe(1);
   await expect(row.getByRole("button", {name: "Available on NAS"})).toBeVisible();
 });
-
-for (const width of [1280, 360]) {
-  test(`Profiles validate scope and ranks and save idle intent at ${width}px`, async ({page}, testInfo) => {
-    const writes: Record<string, unknown>[] = [];
-    await page.route("**/api/v1/fleet-profiles/00000000-0000-4000-8000-000000000101", async route => {
-      const input = route.request().postDataJSON() as Record<string, unknown>;
-      writes.push(input);
-      await route.fulfill({json: {...input, schema_version: 2, id: "00000000-0000-4000-8000-000000000101", profile_digest: "d".repeat(64), created_by: "admin", created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z"}});
-    });
-    await page.setViewportSize({width, height: 900});
-    await page.goto("/library/profiles");
-    await page.getByRole("button", {name: "Edit profile"}).click();
-    const save = page.getByRole("button", {name: "Save profile", exact: true});
-    await page.getByRole("button", {name: "Clear scope"}).click();
-    const scope = page.getByRole("group", {name: "Fleet scope"});
-    await expect(scope).toHaveAttribute("aria-invalid", "true");
-    await expect(scope).toHaveAccessibleDescription(/Select at least one Spark/);
-    await expect(save).toBeDisabled();
-    await scope.scrollIntoViewIfNeeded();
-    await page.screenshot({path: testInfo.outputPath(`profile-empty-scope-${width}.png`)});
-    await page.getByRole("button", {name: "Select all Sparks"}).click();
-    const ranks = page.getByRole("group", {name: "Spark ranks"});
-    await ranks.getByRole("checkbox", {name: "Aurora", exact: true}).uncheck();
-    await ranks.getByRole("checkbox", {name: "Borealis", exact: true}).uncheck();
-    await expect(ranks).toHaveAttribute("aria-invalid", "true");
-    await expect(ranks).toHaveAccessibleDescription(/Select the Sparks for this placement/);
-    await expect(save).toBeDisabled();
-    await ranks.scrollIntoViewIfNeeded();
-    await page.screenshot({path: testInfo.outputPath(`profile-empty-ranks-${width}.png`)});
-    expect(writes).toHaveLength(0);
-    await ranks.getByRole("checkbox", {name: "Aurora", exact: true}).check();
-    await expect(save).toBeEnabled();
-    await page.getByRole("button", {name: "Remove placement"}).click();
-    await expect(page.getByText("All scoped Sparks are idle")).toBeVisible();
-    await save.click();
-    await expect.poll(() => writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({scope: {node_ids: [nodeId, borealisId]}, assignments: []});
-    await expect(page.getByText("Idle profile", {exact: true})).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({path: testInfo.outputPath(`profile-saved-idle-${width}.png`)});
-  });
-
-  test(`Profiles retry the linked application at ${width}px`, async ({page}, testInfo) => {
-    const failedId = "00000000-0000-4000-8000-000000000901";
-    const nextId = "00000000-0000-4000-8000-000000000902";
-    const base = {
-      schema_version: 2, id: failedId, profile_id: "00000000-0000-4000-8000-000000000101", profile_digest: "d".repeat(64), plan_digest: "e".repeat(64),
-      attempt: 1, retry_of_application_id: null, state: "failed", current_step: 1, total_steps: 2, current_operation_id: null,
-      status_reason: "Borealis disconnected after Aurora completed.", progress: {attempt: 1, retry_of_application_id: null, completed_steps: 1, total_steps: 2}, result: null,
-      created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
-    };
-    const linked = {...base, id: nextId, attempt: 2, retry_of_application_id: failedId, state: "running", current_step: 0, total_steps: 1, status_reason: null, progress: {attempt: 2, retry_of_application_id: failedId, completed_steps: 0, total_steps: 1}};
-    const completed = {...linked, state: "succeeded", current_step: 1, progress: {...linked.progress, completed_steps: 1}, result: {changed: true, completed_steps: 1}};
-    let retryBody: Record<string, unknown> | undefined;
-    let readId: string | undefined;
-    let applyCount = 0;
-    await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
-      schema_version: 2, profile_id: base.profile_id, profile_digest: base.profile_digest,
-      state: readId ? "matched" : "drifted", matched: Boolean(readId), drifted: !readId,
-      scope: {node_ids: [nodeId, borealisId], idle_node_ids: []}, reasons: [], generated_at: base.updated_at,
-    }}));
-    await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
-    await page.route("**/api/v1/fleet-profiles/*/apply", route => { applyCount += 1; return route.fulfill({status: 202, json: base}); });
-    await page.route(`**/api/v1/fleet-profile-applications/${failedId}/retry`, route => { retryBody = route.request().postDataJSON(); return route.fulfill({status: 202, json: linked}); });
-    await page.route(`**/api/v1/fleet-profile-applications/${nextId}`, route => { readId = nextId; return route.fulfill({json: completed}); });
-    await page.setViewportSize({width, height: 900});
-    await page.goto("/library/profiles");
-    await page.getByRole("button", {name: "Switch profile", exact: true}).click();
-    const progress = page.getByRole("region", {name: "Profile switch progress"});
-    await expect(progress).toContainText(base.status_reason);
-    await progress.scrollIntoViewIfNeeded();
-    await page.screenshot({path: testInfo.outputPath(`profile-failed-${width}.png`)});
-    await progress.getByRole("button", {name: "Retry remaining work"}).click();
-    await expect.poll(() => retryBody).toEqual({request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
-    await expect.poll(() => readId).toBe(nextId);
-    await expect(progress).toContainText("succeeded");
-    expect(applyCount).toBe(1);
-    await expect(page.getByText("Profile switch completed.", {exact: true})).toBeVisible();
-    await expect(page.getByText("Profile status: Up to date", {exact: true})).toBeVisible();
-    await expect(page.getByText("Remaining profile work is being rechecked against the current fleet.", {exact: true})).toHaveCount(0);
-    await expect(progress.getByRole("button", {name: "Retry remaining work"})).toHaveCount(0);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({path: testInfo.outputPath(`profile-retried-${width}.png`)});
-  });
-}

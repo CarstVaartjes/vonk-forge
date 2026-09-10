@@ -1,82 +1,103 @@
-"""Cancellation uses the same authenticated, typed cache operation boundary."""
-from datetime import UTC, datetime
-from unittest.mock import Mock
+"""Current singular model cache operator routes cancel before eviction."""
 
-import pytest
+from unittest.mock import Mock
+from datetime import UTC, datetime
+
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-from vonk_control.auth import Actor
-from vonk_control.model_cache import (
-    CacheOperationView,
-    ModelCacheConflict,
-    ModelCacheNotFound,
-)
-from vonk_control.model_cache_api import install_model_cache_routes
-from vonk_control.model_cache_contract import ModelCacheOperationResponse
+
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.model_cache import CacheOperationView
+from vonk_control.model_cache_api import install_model_operator_routes
+from vonk_control.model_cache_contract import ModelCacheOperatorResponse, ModelCacheRemovalResult
 from vonk_control.model_cache_progress import cache_progress
 
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"
-PATH = f"/api/v1/model-cache/operations/{OPERATION_ID}/cancel"
+REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
 
 
 def _client(service, role="administrator"):
     app = FastAPI()
+    MUTATION_ROLES.setdefault(
+        ("POST", "/api/model/{selector}/remove"), frozenset({"operator", "administrator"})
+    )
 
     @app.middleware("http")
     async def request_id(request: Request, call_next):
-        request.state.request_id = OPERATION_ID
+        request.state.request_id = REQUEST_KEY
         return await call_next(request)
 
-    audits = []
-    install_model_cache_routes(
-        app, actor_dependency=Depends(lambda: Actor("test", role)),
-        service=service, audits=audits,
+    install_model_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", role)),
+        service=service,
+        audits=[],
     )
-    return TestClient(app), audits
+    return TestClient(app)
 
 
-def test_cancel_returns_canonical_operation_and_audits_action():
-    operation = CacheOperationView(
-        id=OPERATION_ID, request_key=OPERATION_ID, kind="download", state="cancelled",
-        attempt=1, artifact_set_sha256=None, plan_digest=None, progress=cache_progress(
-            {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1,
-             "downloaded_bytes": 10, "expected_bytes": 100},
-            previous=None, now=datetime(2026, 9, 9, tzinfo=UTC),
-        ),
-        result=None, last_error=None, created_at="2026-09-09T00:00:00Z",
-        updated_at="2026-09-09T00:01:00Z", completed_at="2026-09-09T00:01:00Z",
+def test_remove_is_the_current_model_eviction_boundary():
+    operation = Mock(spec=CacheOperationView)
+    operation.id = OPERATION_ID
+    operation.request_key = REQUEST_KEY
+    operation.state = "succeeded"
+    operation.progress = cache_progress(
+        {"phase": "completed", "completed_artifacts": 1,
+         "total_artifacts": 1, "downloaded_bytes": 10, "expected_bytes": 10},
+        previous=None,
+        now=datetime(2026, 9, 10, tzinfo=UTC),
     )
+    operation.result = ModelCacheRemovalResult(
+        schema_version=2, removed_entries=[], reclaimed_bytes=10,
+        cancelled_operations=[],
+    )
+    operation.failure = None
+    operation.retryable = False
     service = Mock()
-    service.cancel_operation.return_value = operation
-    client, audits = _client(service)
-    response = client.post(PATH)
-    assert response.status_code == 200
-    parsed = ModelCacheOperationResponse.model_validate_json(response.content)
-    assert parsed.id == OPERATION_ID
-    assert parsed.state == "cancelled"
-    service.cancel_operation.assert_called_once_with(OPERATION_ID)
-    assert len(audits) == 1
-    schema = client.get("/openapi.json").json()
-    endpoint = schema["paths"]["/api/v1/model-cache/operations/{operation_id}/cancel"]["post"]
-    assert endpoint["operationId"] == "cancelModelCacheOperation"
+    service.remove_model_selector.return_value = operation
+    response = _client(service).post(
+        "/api/model/model/remove",
+        json={"request_key": REQUEST_KEY},
+    )
+    assert response.status_code == 202, response.text
+    parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
+    assert parsed.action == "remove"
+    service.remove_model_selector.assert_called_once_with(
+        "model", actor="test", request_key=REQUEST_KEY
+    )
 
 
-@pytest.mark.parametrize("role", ["viewer", "operator"])
-def test_cancel_requires_administrator(role):
+def test_model_operation_observation_is_readable_by_any_authenticated_actor():
+    operation = Mock(spec=CacheOperationView)
+    operation.id = OPERATION_ID
+    operation.request_key = REQUEST_KEY
+    operation.state = "succeeded"
+    operation.progress = cache_progress(
+        {"phase": "completed", "completed_artifacts": 1,
+         "total_artifacts": 1, "downloaded_bytes": 10, "expected_bytes": 10},
+        previous=None, now=datetime(2026, 9, 10, tzinfo=UTC),
+    )
+    operation.result = ModelCacheRemovalResult(
+        schema_version=2, removed_entries=[], reclaimed_bytes=10,
+        cancelled_operations=[],
+    )
+    operation.failure = None
+    operation.retryable = False
     service = Mock()
-    client, audits = _client(service, role)
-    assert client.post(PATH).status_code == 403
-    service.cancel_operation.assert_not_called()
-    assert not audits
+    service.get_operator_operation.return_value = (operation, "remove", "model")
+    response = _client(service, role="viewer").get(
+        f"/api/model/operations/{OPERATION_ID}"
+    )
+    assert response.status_code == 200, response.text
+    assert ModelCacheOperatorResponse.model_validate_json(response.content).action == "remove"
 
 
-@pytest.mark.parametrize("error,status", [
-    (ModelCacheNotFound("model_cache.missing", "missing"), 404),
-    (ModelCacheConflict("model_cache.conflict", "operation cannot be cancelled"), 409),
-])
-def test_cancel_preserves_service_error_semantics(error, status):
+def test_model_operator_routes_have_one_current_namespace():
     service = Mock()
-    service.cancel_operation.side_effect = error
-    client, audits = _client(service)
-    assert client.post(PATH).status_code == status
-    assert not audits
+    schema = _client(service).get("/openapi.json").json()
+    paths = schema["paths"]
+    assert "/api/model/{selector}/download" in paths
+    assert "/api/model/{selector}/remove" in paths
+    assert paths["/api/model/operations/{operation_id}"]["get"]["operationId"] == "getModelOperation"
+    assert all(path.startswith("/api/model/") for path in paths)
+    assert not any(path.startswith("/api/model-cache") for path in paths)

@@ -193,29 +193,6 @@ class ControlAuthorityHead(Base):
     )
 
 
-class ControlAuthorityProposal(Base):
-    """Persisted proposal preview, allowing submission after API restart."""
-
-    __tablename__ = "control_authority_proposals"
-    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
-    actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    base_revision: Mapped[str] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"),
-        nullable=False,
-        index=True,
-    )
-    changes: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    patch: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    affected_documents: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    validation_results: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    applied_revision: Mapped[str | None] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"), index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class Observation(Base):
     __tablename__ = "observations"
     __table_args__ = (
@@ -448,7 +425,13 @@ class AgentNodeProfile(Base):
 
 
 class FleetProfile(Base):
-    """Named complete desired recipe placements for a set of Sparks."""
+    """Numbered whole-fleet workspace of logical recipe choices.
+
+    ``assignments`` is authoring data only.  It deliberately contains recipe
+    selectors and Spark IDs, never resolved recipe revisions.  Preview/load
+    materializes the current enrolled roster and stores an immutable resolved
+    execution snapshot in :class:`FleetProfileApplication`.
+    """
 
     __tablename__ = "fleet_profiles"
     __table_args__ = (
@@ -465,12 +448,25 @@ class FleetProfile(Base):
             name="ck_fleet_profiles_installation_policy",
         ),
         CheckConstraint(
+            "number >= 1",
+            name="ck_fleet_profiles_number_positive",
+        ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_fleet_profiles_revision_positive",
+        ),
+        CheckConstraint(
             "length(CAST(assignments AS TEXT)) BETWEEN 2 AND 131072",
             name="ck_fleet_profiles_assignments_size",
         ),
+        UniqueConstraint("number", name="uq_fleet_profiles_number"),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     description: Mapped[str] = mapped_column(
@@ -481,11 +477,6 @@ class FleetProfile(Base):
     )
     assignments: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
-    )
-    # Explicit fleet membership, independent of desired assignments.  Nodes in
-    # this set without an assignment are intentionally reconciled to idle.
-    scope: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list, server_default="[]"
     )
     labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     favorite: Mapped[bool] = mapped_column(
@@ -692,6 +683,11 @@ class AgentEnrollmentGrant(Base):
             "purpose IN ('new-node', 're-enroll')",
             name="ck_agent_enrollment_grants_purpose",
         ),
+        CheckConstraint(
+            "requested_display_name IS NULL OR "
+            "length(requested_display_name) BETWEEN 1 AND 200",
+            name="ck_agent_enrollment_grants_requested_display_name",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -700,6 +696,7 @@ class AgentEnrollmentGrant(Base):
     purpose: Mapped[str] = mapped_column(
         String(24), nullable=False, default="new-node", server_default="new-node"
     )
+    requested_display_name: Mapped[str | None] = mapped_column(String(200))
     token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -1170,7 +1167,7 @@ class ModelCacheOperation(Base):
             "schema_version = 2", name="ck_model_cache_operations_schema_version"
         ),
         CheckConstraint(
-            "kind IN ('download','repair','evict')",
+            "kind IN ('download','repair','remove')",
             name="ck_model_cache_operations_kind",
         ),
         CheckConstraint(

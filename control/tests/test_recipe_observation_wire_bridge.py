@@ -336,7 +336,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
     }
     with TestClient(app) as client:
         grant_response = client.post(
-            "/agent/v1/recipe-runs/observation-grants", headers=headers, json=request
+            "/agent/recipe-runs/observation-grants", headers=headers, json=request
         )
         assert grant_response.status_code == 200, grant_response.text
         grant = SignedHostHelperGrant.parse(grant_response.json()["grant"])
@@ -392,7 +392,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         parsed = RecipeRunObservationsWire.parse(envelope)
         assert parsed.runs[0].world_size == nodes
         consumed = client.post(
-            "/agent/v1/recipe-runs/observations", headers=headers, json=envelope
+            "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
         assert consumed.status_code == 204, consumed.text
     with sessions() as session:
@@ -408,7 +408,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         assert pending is not None and pending.consumed is True
     with TestClient(app) as client:
         replay = client.post(
-            "/agent/v1/recipe-runs/observations", headers=headers, json=envelope
+            "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
         assert replay.status_code == 422
         assert "replayed" in replay.json()["detail"]
@@ -421,7 +421,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         node.state = "failed"
     with TestClient(app) as client:
-        client.post("/agent/v1/recipe-runs/observations", headers=headers, json=envelope)
+        client.post("/agent/recipe-runs/observations", headers=headers, json=envelope)
     with sessions() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.state == "failed"

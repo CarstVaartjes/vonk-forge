@@ -37,6 +37,6 @@ transaction. A later apply or publish failure therefore leaves the previous
 active generation visible; partial package candidates are recorded as failed
 sync runs and never become the active catalog. A single offline package import
 uses the normal exact-recipe import path and does not reconcile the rest of the
-managed library. The existing `/api/v1/catalog/managed-recipes/sync` and
-`/api/v1/catalog/managed-recipes/sync-status` routes remain the Controller's
+managed library. The existing `/api/catalog/managed-recipes/sync` and
+`/api/catalog/managed-recipes/sync-status` routes remain the Controller's
 authenticated sync API.

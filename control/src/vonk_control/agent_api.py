@@ -1,4 +1,4 @@
-"""Strict human-enrollment and mTLS-authenticated agent API routes."""
+"""mTLS-authenticated machine agent API routes."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -29,7 +29,7 @@ from pydantic import (
     ValidationError,
     model_validator,
 )
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
@@ -67,10 +67,8 @@ from vonk_agent_protocol.workload_packages import (
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
-from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .audit import AuditRecord
 from .auth import (
-    Actor,
     AgentIdentity,
     AgentSource,
     agent_identity_from_scope,
@@ -85,11 +83,9 @@ from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
 from .download_contract import download_responses, upload_request_body
 from .enrollment import (
-    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     EnrollmentService,
-    RemoteRevocationUncertain,
     RenewalInProgress,
 )
 from .enrollment_bootstrap import EnrollmentBootstrapConfig
@@ -101,7 +97,6 @@ from .host_helper_authority import (
 from .inventory_repository import InventoryRepository, InventorySnapshotInput
 from .models import (
     AgentCertificate,
-    AgentEnrollment,
     AgentNode,
     AgentOperation,
     CatalogDocumentRevision,
@@ -266,10 +261,6 @@ def _runtime_image_receipt_matches(
     return False
 
 
-class _ActorDependency(Protocol):
-    def __call__(self, request: Request) -> Actor: ...
-
-
 class _AuditSink(Protocol):
     def append(self, event: AuditRecord) -> None: ...
 
@@ -336,26 +327,6 @@ class EnrollmentRateLimiter:
             return True
 
 
-class GrantRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
-    purpose: Literal["new-node", "re-enroll"] = "new-node"
-    node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-
-    @model_validator(mode="after")
-    def validate_target(self) -> GrantRequest:
-        if self.purpose == "new-node" and self.node_id is not None:
-            raise ValueError("new-node grants cannot target an existing node")
-        return self
-
-
-_ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
-
-
-def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
-    return enrollment.state
-
-
 class EnrollmentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
@@ -371,77 +342,6 @@ class EnrollmentGrantResponse(StrictJSONModel):
         "https://install.vonkforge.ai/spark",
         "https://install.vonkforge.ai/dev/spark",
     ]
-
-
-class EnrollmentSummary(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    id: str = Field(min_length=1, max_length=128)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: str = Field(min_length=1, max_length=32)
-    csr_public_key_fingerprint: str = Field(min_length=1, max_length=512)
-    host_key_fingerprint: str = Field(min_length=1, max_length=512)
-    hardware_fingerprint: str = Field(min_length=1, max_length=512)
-    agent_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    boot_id: str = Field(min_length=1, max_length=512)
-    created_at: str = Field(min_length=1, max_length=64)
-    certificate_serial: str | None = Field(default=None, max_length=256)
-    certificate_fingerprint: str | None = Field(default=None, max_length=512)
-
-
-class EnrollmentListResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    enrollments: list[EnrollmentSummary] = Field(max_length=100)
-    next_cursor: str | None = Field(default=None, max_length=128)
-
-
-class AgentUpgradePackageRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    architecture: Literal["linux-arm64"]
-    package_bytes: int = Field(ge=1, le=1024**3, strict=True)
-    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
-    package_url: str = Field(min_length=1, max_length=2048)
-    package_version: str = Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
-    schema_version: Literal[1]
-    target_binary_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-
-
-class AgentRepairManifestRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[2]
-    kind: Literal["agent-upgrade-repair"]
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    package: AgentUpgradePackageRequest
-
-
-class AgentUpgradePreviewRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
-    package: AgentUpgradePackageRequest | None = None
-    repair_manifest: AgentRepairManifestRequest | None = None
-    strategy: Literal["one-at-a-time", "all-at-once"] = "one-at-a-time"
-
-
-class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class AgentUpgradePreviewResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    node_ids: list[str] = Field(max_length=64)
-    package: AgentUpgradePackageRequest
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    repair_manifest: AgentRepairManifestRequest | None = None
-    strategy: Literal["one-at-a-time", "all-at-once"]
-
-
-class AgentUpgradeApplyResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    id: str = Field(min_length=1, max_length=128)
-    state: str = Field(min_length=1, max_length=32)
 
 
 class AgentGrantRequest(StrictJSONModel):
@@ -550,39 +450,6 @@ def _package_receipts_response(
     return PackageHelperReceiptsResponse(receipts=list(receipts))
 
 
-def _agent_upgrade_request_material(
-    body: AgentUpgradePreviewRequest,
-    upgrades: AgentUpgradeService,
-) -> tuple[dict[str, object], dict[str, object] | None]:
-    repair_manifest = (
-        None
-        if body.repair_manifest is None
-        else body.repair_manifest.model_dump(mode="json")
-    )
-    if repair_manifest is not None:
-        manifest_package = repair_manifest["package"]
-        if (
-            body.package is not None
-            and body.package.model_dump(mode="json") != manifest_package
-        ):
-            raise AgentUpgradeConflict(
-                "agent repair manifest does not match its package descriptor"
-            )
-        assert isinstance(manifest_package, dict)
-        return manifest_package, repair_manifest
-    if body.package is None:
-        return upgrades.current_package(), None
-    package = body.package.model_dump(mode="json")
-    # Existing clients echo the controller-selected package from preview on
-    # apply. Preserve that ordinary path, while proving it is still the current
-    # published candidate rather than accepting an arbitrary custom package.
-    if package != upgrades.current_package():
-        raise AgentUpgradeConflict(
-            "a custom agent package requires its node-bound repair manifest"
-        )
-    return package, None
-
-
 def _wire(value: object) -> object:
     return json.loads(canonical_message(value))
 
@@ -616,11 +483,6 @@ def _require_services(services: AgentApiServices | None) -> AgentApiServices:
     if services is None:
         raise HTTPException(status_code=503, detail="agent API is unavailable")
     return services
-
-
-def _require_administrator(actor: Actor, path: str) -> None:
-    if actor.role != "administrator":
-        raise HTTPException(status_code=403, detail="insufficient role")
 
 
 def _scope_identity(request: Request) -> AgentIdentity:
@@ -834,22 +696,6 @@ async def _bounded_enrollment_body(
             )
         buffered.extend(chunk)
     return buffered
-
-
-def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
-    return {
-        "id": enrollment.id,
-        "node_id": enrollment.node_id,
-        "state": _enrollment_api_state(enrollment),
-        "csr_public_key_fingerprint": enrollment.csr_public_key_fingerprint,
-        "host_key_fingerprint": enrollment.host_key_fingerprint,
-        "hardware_fingerprint": enrollment.hardware_fingerprint,
-        "agent_digest": enrollment.agent_digest,
-        "boot_id": enrollment.boot_id,
-        "created_at": _now(enrollment.created_at).isoformat(),
-        "certificate_serial": enrollment.certificate_serial,
-        "certificate_fingerprint": enrollment.certificate_fingerprint,
-    }
 
 
 def _references_digest(value: object, digest: str) -> bool:
@@ -1226,244 +1072,12 @@ class _SnapshotResponse(StreamingResponse):
 def install_agent_routes(
     app: Any,
     *,
-    actor_dependency: _ActorDependency,
     audits: _AuditSink,
     services: AgentApiServices | None,
-    upgrades: AgentUpgradeService | None = None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
-    human = APIRouter(prefix="/api/v1/agents", route_class=ControllerAPIRoute)
-    agent = APIRouter(prefix="/agent/v1", route_class=ControllerAPIRoute)
+    agent = APIRouter(prefix="/agent", route_class=ControllerAPIRoute)
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
-    authenticated_actor = Depends(actor_dependency)
-
-    @human.post(
-        "/upgrades/preview",
-        response_model=AgentUpgradePreviewResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def preview_agent_upgrade(
-        body: AgentUpgradePreviewRequest,
-        authenticated: Actor = authenticated_actor,
-    ) -> AgentUpgradePreviewResponse:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
-        if upgrades is None:
-            raise HTTPException(
-                status_code=503, detail="agent upgrades are unavailable"
-            )
-        try:
-            package, repair_manifest = _agent_upgrade_request_material(body, upgrades)
-            plan = upgrades.preview(
-                body.node_ids,
-                package,
-                repair_manifest=repair_manifest,
-                strategy=body.strategy,
-            )
-        except AgentUpgradeConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        return AgentUpgradePreviewResponse(
-            authority_revision=plan.authority_revision,
-            node_ids=list(plan.node_ids),
-            package=plan.package,
-            plan_digest=plan.plan_digest,
-            repair_manifest=plan.repair_manifest,
-            strategy=plan.strategy,
-        )
-
-    @human.get(
-        "/upgrades/candidate",
-        response_model=AgentUpgradePackageRequest,
-        responses=bounded_error_responses(401, 403, 503),
-    )
-    def current_agent_upgrade(
-        authenticated: Actor = authenticated_actor,
-    ) -> AgentUpgradePackageRequest:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
-        if upgrades is None:
-            raise HTTPException(
-                status_code=503, detail="agent upgrades are unavailable"
-            )
-        try:
-            return AgentUpgradePackageRequest.model_validate(upgrades.current_package())
-        except AgentUpgradeConflict as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
-
-    @human.post(
-        "/upgrades",
-        status_code=status.HTTP_202_ACCEPTED,
-        response_model=AgentUpgradeApplyResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def apply_agent_upgrade(
-        body: AgentUpgradeApplyRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> AgentUpgradeApplyResponse:
-        _require_administrator(authenticated, "/api/v1/agents/upgrades")
-        if upgrades is None:
-            raise HTTPException(
-                status_code=503, detail="agent upgrades are unavailable"
-            )
-        try:
-            package, repair_manifest = _agent_upgrade_request_material(body, upgrades)
-            job = upgrades.apply(
-                body.node_ids,
-                package,
-                plan_digest=body.plan_digest,
-                actor=authenticated.subject,
-                request_id=request.state.request_id,
-                repair_manifest=repair_manifest,
-                strategy=body.strategy,
-            )
-        except AgentUpgradeConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.upgrade.apply",
-                job.authority_revision,
-                tuple(job.targets),
-            )
-        )
-        return AgentUpgradeApplyResponse(id=job.id, state=job.state)
-
-    @human.post(
-        "/enrollments/grants",
-        status_code=status.HTTP_201_CREATED,
-        response_model=EnrollmentGrantResponse,
-        responses=bounded_error_responses(401, 403, 503),
-    )
-    def create_grant(
-        body: GrantRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentGrantResponse:
-        _require_administrator(authenticated, "/api/v1/agents/enrollments/grants")
-        required = _require_services(services)
-        if required.bootstrap is None:
-            raise HTTPException(
-                status_code=503,
-                detail="agent enrollment bootstrap is unavailable",
-            )
-        try:
-            if body.purpose == "re-enroll":
-                grant = required.enrollment.create_reenrollment(
-                    body.node_id, authenticated.subject, body.ttl_seconds
-                )
-            else:
-                grant = required.enrollment.create(
-                    None, authenticated.subject, body.ttl_seconds
-                )
-        except (TypeError, ValueError) as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.enrollment.grant.create",
-                body.node_id,
-                (),
-            )
-        )
-        return EnrollmentGrantResponse(
-            id=grant.id,
-            expires_at=_now(grant.expires_at).isoformat(),
-            purpose=grant.purpose,
-            token=grant.token,
-            controller_endpoint=required.bootstrap.controller_endpoint,
-            enrollment_endpoint=required.bootstrap.enrollment_endpoint,
-            ca_fingerprint=required.bootstrap.ca_fingerprint,
-            controller_address=required.bootstrap.controller_address,
-            service_hostnames=list(required.bootstrap.service_hostnames),
-            installer_url=required.bootstrap.installer_url,
-        )
-
-    @human.get(
-        "/enrollments",
-        response_model=EnrollmentListResponse,
-        responses=bounded_error_responses(401, 403, 503),
-    )
-    def list_enrollments(
-        cursor: str | None = None,
-        state: str | None = None,
-        limit: int = 100,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentListResponse:
-        _require_administrator(authenticated, "/api/v1/agents/enrollments")
-        required = _require_services(services)
-        if not 1 <= limit <= 100:
-            raise HTTPException(
-                status_code=422, detail="limit must be between one and 100"
-            )
-        with required.sessions() as session:
-            statement = select(AgentEnrollment)
-            if state is not None:
-                if state not in _ENROLLMENT_API_STATES:
-                    raise HTTPException(status_code=422, detail="state is invalid")
-                statement = statement.where(AgentEnrollment.state == state)
-            if cursor is not None:
-                cursor_record = session.get(AgentEnrollment, cursor)
-                if cursor_record is None:
-                    raise HTTPException(status_code=422, detail="cursor is invalid")
-                statement = statement.where(
-                    or_(
-                        AgentEnrollment.created_at < cursor_record.created_at,
-                        and_(
-                            AgentEnrollment.created_at == cursor_record.created_at,
-                            AgentEnrollment.id < cursor_record.id,
-                        ),
-                    )
-                )
-            records = list(
-                session.scalars(
-                    statement.order_by(
-                        AgentEnrollment.created_at.desc(), AgentEnrollment.id.desc()
-                    ).limit(limit + 1)
-                )
-            )
-        # In particular, an uncertain `issuing` record remains visible here;
-        # this endpoint intentionally never retries or clears it.
-        page = records[:limit]
-        return EnrollmentListResponse(
-            enrollments=[
-                EnrollmentSummary.model_validate(_enrollment_view(record))
-                for record in page
-            ],
-            next_cursor=(page[-1].id if len(records) > limit and page else None),
-        )
-
-    @human.post(
-        "/nodes/{node_id}/revoke",
-        openapi_extra={"x-vonk-request-body": "none"},
-        status_code=status.HTTP_204_NO_CONTENT,
-        responses=bounded_error_responses(401, 403, 404, 503),
-    )
-    def revoke(
-        node_id: str,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> Response:
-        _require_administrator(authenticated, "/api/v1/agents/nodes/{node_id}/revoke")
-        required = _require_services(services)
-        try:
-            required.enrollment.revoke_node(node_id, authenticated.subject)
-        except RemoteRevocationUncertain as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        except EnrollmentDenied as error:
-            raise HTTPException(status_code=404, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.node.revoke",
-                None,
-                (node_id,),
-            )
-        )
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.get(
         "/bootstrap",
@@ -2851,7 +2465,6 @@ def install_agent_routes(
             headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
         )
 
-    app.include_router(human)
     app.include_router(agent)
 
     # Enrollment reads a bounded raw body before validation so an invalid
@@ -2868,7 +2481,7 @@ def install_agent_routes(
         components = document.setdefault("components", {}).setdefault("schemas", {})
         components.update(request_schema.pop("$defs", {}))
         components[EnrollmentSubmitRequest.__name__] = request_schema
-        document["paths"]["/agent/v1/enroll"]["post"]["requestBody"] = {
+        document["paths"]["/agent/enroll"]["post"]["requestBody"] = {
             "required": True,
             "content": {
                 "application/json": {

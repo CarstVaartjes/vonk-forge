@@ -51,7 +51,7 @@ an image, Git, or a GPU node.
 Viewer is read-only. Operator may preview proposals and plan or enqueue an
 eligible reconciliation. Administrator additionally applies PostgreSQL
 authority changes and performs release-policy transitions. The executable
-`MUTATION_ROLES` matrix is required to equal every mutating `/api/v1` route.
+`MUTATION_ROLES` matrix is required to equal every mutating `/api` route.
 
 Offline recovery is not an API role. It requires host access and explicit
 destructive confirmation for restore.

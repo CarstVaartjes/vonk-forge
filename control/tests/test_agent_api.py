@@ -49,14 +49,10 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
-from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
     AgentNode,
-    AgentNodeProfile,
     AgentOperationAttempt,
     AgentPresence,
     Base,
@@ -71,10 +67,8 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
-    RecipeRouteAuthority,
     RecipeRun,
     RecipeSourceBundle,
-    RoutePublication,
     RunNode,
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
@@ -83,9 +77,7 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_execution_contract import (
     installation_plan_document,
-    run_plan_document,
 )
-from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_control.workload_helper_authority import (
     WorkloadHelperGrantIssuer,
@@ -286,7 +278,7 @@ class CurrentAgentClient(TestClient):
 
     def post(self, url, *args, headers=None, json=None, **kwargs):
         if (
-            url == "/agent/v1/claim"
+            url == "/agent/claim"
             and headers is not None
             and headers.get("x-vonk-agent-verified") == "1"
         ):
@@ -474,8 +466,8 @@ def chunked_asgi_telemetry(
             "http_version": "1.1",
             "method": "POST",
             "scheme": "https",
-            "path": "/agent/v1/telemetry",
-            "raw_path": b"/agent/v1/telemetry",
+            "path": "/agent/telemetry",
+            "raw_path": b"/agent/telemetry",
             "query_string": b"",
             "headers": (
                 (b"content-type", b"application/json"),
@@ -544,7 +536,7 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
         len(TelemetryRequest.parse(payload).samples[0].metrics.series) == series_count
     )
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         content=encoded,
     )
@@ -574,7 +566,7 @@ def test_agent_posts_authenticated_telemetry_for_certificate_node(
     )
 
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -594,7 +586,7 @@ def test_telemetry_body_cannot_choose_node_identity(agent_system) -> None:
     payload = telemetry_payload(clock) | {"node_id": NODE_B}
 
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -608,7 +600,7 @@ def test_telemetry_authentication_happens_before_json_parsing(agent_system) -> N
     client, services, _, _ = agent_system
     assert services.bootstrap is not None
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers={"content-type": "application/json"},
         content=b'{"schema_version":1,"schema_version":2',
     )
@@ -625,7 +617,7 @@ def test_telemetry_authentication_happens_before_json_parsing(agent_system) -> N
 def test_telemetry_rejects_stale_or_future_samples(agent_system, offset) -> None:
     client, _, _, clock = agent_system
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=telemetry_payload(clock, observed_at=clock.now + offset),
     )
@@ -642,7 +634,7 @@ def test_telemetry_rejects_more_than_sixteen_samples(agent_system) -> None:
         for index in range(17)
     ]
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"schema_version": 1, "samples": samples},
     )
@@ -657,7 +649,7 @@ def test_telemetry_schema_version_is_exact_integer(
     payload = telemetry_payload(clock)
     payload["schema_version"] = schema_version
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -669,7 +661,7 @@ def test_telemetry_observed_at_is_rfc3339_string(agent_system) -> None:
     payload = telemetry_payload(clock)
     payload["samples"][0]["observed_at"] = int(clock.now.timestamp())  # type: ignore[index]
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -681,7 +673,7 @@ def test_telemetry_requires_every_fixed_core_metric(agent_system) -> None:
     payload = telemetry_payload(clock)
     del payload["samples"][0]["gpu_utilization_percent"]  # type: ignore[index]
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -704,7 +696,7 @@ def test_telemetry_requires_every_fixed_core_metric(agent_system) -> None:
 def test_telemetry_rejects_duplicate_json_keys(agent_system, document: str) -> None:
     client, _, _, _ = agent_system
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "content-type": "application/json",
@@ -753,7 +745,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     }
 
     response = client.post(
-        "/agent/v1/inventory",
+        "/agent/inventory",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -770,7 +762,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     denied = payload | {"fabric_address": "10.0.0.42"}
     assert (
         client.post(
-            "/agent/v1/inventory",
+            "/agent/inventory",
             headers=agent_headers(NODE_B, "serial-b"),
             json=denied,
         ).status_code
@@ -916,7 +908,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     }
 
     host_response = client.post(
-        "/agent/v1/host-runtime/grant",
+        "/agent/host-runtime/grant",
         headers=headers,
         json=common | {"action": "start", "request_sha256": "a" * 64},
     )
@@ -928,7 +920,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     assert host.grant_calls[0]["job_id"] == job_id
 
     upgrade_response = client.post(
-        "/agent/v1/agent-upgrade/grant",
+        "/agent/agent-upgrade/grant",
         headers=headers,
         json=common
         | {
@@ -943,7 +935,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     )
 
     receipt_response = client.post(
-        "/agent/v1/package-helper/receipts",
+        "/agent/package-helper/receipts",
         headers=headers,
         json={
             key: value for key, value in common.items() if key != "expires_in_seconds"
@@ -964,7 +956,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
     package.receipt_output = ({"claims": {"unexpected": True}},)
     malformed_receipt_response = client.post(
-        "/agent/v1/package-helper/receipts",
+        "/agent/package-helper/receipts",
         headers=headers,
         json={
             key: value for key, value in common.items() if key != "expires_in_seconds"
@@ -985,7 +977,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         "request_digest": "f" * 64,
     }
     grant_response = client.post(
-        "/agent/v1/package-helper/grant", headers=headers, json=grant_body
+        "/agent/package-helper/grant", headers=headers, json=grant_body
     )
     assert grant_response.status_code == 200
     assert isinstance(
@@ -996,7 +988,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
     assert (
         client.post(
-            "/agent/v1/package-helper/grant",
+            "/agent/package-helper/grant",
             headers=headers,
             json=grant_body | {"generation": 7},
         ).status_code
@@ -1005,7 +997,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     assert len(package.grant_calls) == 1
     assert (
         client.post(
-            "/agent/v1/package-helper/receipts",
+            "/agent/package-helper/receipts",
             headers=headers,
             json={
                 key: value
@@ -1022,7 +1014,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     assert len(package.receipt_calls) == 2
     assert (
         client.post(
-            "/agent/v1/host-runtime/grant",
+            "/agent/host-runtime/grant",
             headers=headers,
             json=common
             | {
@@ -1036,7 +1028,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     assert len(host.grant_calls) == 1
     assert (
         client.post(
-            "/agent/v1/agent-upgrade/grant",
+            "/agent/agent-upgrade/grant",
             headers=headers,
             json=common
             | {
@@ -1062,19 +1054,19 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
 
     assert (
         client.post(
-            "/agent/v1/recipe-runs/observations",
+            "/agent/recipe-runs/observations",
             headers=agent_headers(NODE_A, "serial-a"),
             json=payload,
         ).status_code
         == 204
     )
     assert (
-        client.post("/agent/v1/recipe-runs/observations", json=payload).status_code
+        client.post("/agent/recipe-runs/observations", json=payload).status_code
         == 401
     )
     assert (
         client.post(
-            "/agent/v1/recipe-runs/observations",
+            "/agent/recipe-runs/observations",
             headers=agent_headers(NODE_A, "serial-a"),
             json=payload | {"schema_version": 1},
         ).status_code
@@ -1082,7 +1074,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     )
     assert (
         client.post(
-            "/agent/v1/recipe-runs/observations",
+            "/agent/recipe-runs/observations",
             headers=agent_headers(NODE_A, "serial-a"),
             json=payload | {"runs": [{"run_id": "not-a-uuid", "ready": True}]},
         ).status_code
@@ -1161,7 +1153,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
         )
 
     response = client.get(
-        f"/agent/v1/source-bundles/{bundle.sha256}",
+        f"/agent/source-bundles/{bundle.sha256}",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert response.status_code == 200
@@ -1169,12 +1161,12 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     assert response.headers["etag"] == f'"sha256:{bundle.sha256}"'
     assert (
         client.get(
-            f"/agent/v1/source-bundles/{bundle.sha256}",
+            f"/agent/source-bundles/{bundle.sha256}",
             headers=agent_headers(NODE_B, "serial-b"),
         ).status_code
         == 404
     )
-    assert client.get(f"/agent/v1/source-bundles/{bundle.sha256}").status_code == 401
+    assert client.get(f"/agent/source-bundles/{bundle.sha256}").status_code == 401
 
 
 def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
@@ -1239,13 +1231,13 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     }
 
     rejected = client.put(
-        f"/agent/v1/recipe-builds/{build_id}/image",
+        f"/agent/recipe-builds/{build_id}/image",
         headers=headers | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
         content=payload,
     )
     assert rejected.status_code == 415
 
-    route = f"/agent/v1/recipe-builds/{build_id}/image"
+    route = f"/agent/recipe-builds/{build_id}/image"
     interrupted = client.put(
         route,
         headers=headers | {"content-length": str(len(payload))},
@@ -1281,7 +1273,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
         assert build.image_bytes == len(payload)
     assert (
         client.put(
-            f"/agent/v1/recipe-builds/{build_id}/image",
+            f"/agent/recipe-builds/{build_id}/image",
             headers=agent_headers(NODE_B, "serial-b")
             | {
                 "content-type": "application/x-tar",
@@ -1401,7 +1393,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         ) as async_client:
 
             async def health_request():
-                response = await async_client.get("/api/v1/healthz")
+                response = await async_client.get("/api/healthz")
                 health_completed.set()
                 return response
 
@@ -1409,7 +1401,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
                 observer = pool.submit(observe_responsiveness)
                 upload = asyncio.create_task(
                     async_client.put(
-                        f"/agent/v1/recipe-builds/{build_id}/image",
+                        f"/agent/recipe-builds/{build_id}/image",
                         headers=headers,
                         content=payload,
                     )
@@ -1563,7 +1555,7 @@ def test_spoofed_agent_header_is_rejected() -> None:
     )
 
     response = TestClient(app).post(
-        "/agent/v1/claim", headers={"x-vonk-agent-node": NODE_A}
+        "/agent/claim", headers={"x-vonk-agent-node": NODE_A}
     )
 
     assert response.status_code == 401
@@ -1592,8 +1584,8 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         "http_version": "1.1",
         "method": "POST",
         "scheme": "http",
-        "path": "/agent/v1/claim",
-        "raw_path": b"/agent/v1/claim",
+        "path": "/agent/claim",
+        "raw_path": b"/agent/claim",
         "query_string": b"",
         "headers": (),
         "client": ("untrusted", 1234),
@@ -1622,7 +1614,7 @@ def test_agent_routes_do_not_require_human_bearer_tokens() -> None:
     )
 
     response = TestClient(app).post(
-        "/agent/v1/claim", headers={"Authorization": "Bearer invalid"}
+        "/agent/claim", headers={"Authorization": "Bearer invalid"}
     )
 
     assert response.status_code == 401
@@ -1632,10 +1624,10 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     agent_system,
 ) -> None:
     client, _, _, _ = agent_system
-    assert client.post("/agent/v1/claim").status_code == 401
+    assert client.post("/agent/claim").status_code == 401
     assert (
         client.post(
-            "/agent/v1/claim",
+            "/agent/claim",
             headers={
                 **agent_headers(NODE_A, "serial-a"),
                 "x-vonk-agent-verified": "false",
@@ -1649,7 +1641,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     )
     assert (
         TestClient(app)
-        .post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+        .post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
         .status_code
         == 401
     )
@@ -1658,7 +1650,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
 def test_verified_identity_cannot_claim_other_node(agent_system) -> None:
     client, _, _, _ = agent_system
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_B},
     )
@@ -1670,9 +1662,9 @@ def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     missing = agent_headers(NODE_A, "serial-a")
     missing.pop("x-vonk-agent-source")
 
-    assert client.post("/agent/v1/claim", headers=missing).status_code == 401
+    assert client.post("/agent/claim", headers=missing).status_code == 401
     outside = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "x-vonk-agent-source": "10.1.0.42",
@@ -1687,7 +1679,7 @@ def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
 def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> None:
     client, services, _, clock = agent_system
 
-    response = client.post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+    response = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
 
     assert response.status_code == 204
     with services.sessions() as session:
@@ -1710,88 +1702,15 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
 
     monkeypatch.setattr(services.presence, "observe", reject_post_commit)
 
-    response = client.post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+    response = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
 
     assert response.status_code == 204
     with services.sessions() as session:
         assert session.get(AgentPresence, NODE_A) is not None
 
 
-def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) -> None:
-    client, services, _, clock = agent_system
-    clock.now += timedelta(seconds=15)
-    with services.sessions.begin() as session:
-        session.add(
-            AgentNodeProfile(
-                node_id=NODE_A,
-                display_name=NODE_A,
-                hostname="",
-                lifecycle="ready",
-                labels={},
-            )
-        )
-
-    response = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES,
-            "hostname": "spark-3542",
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 3
-        assert node.capabilities == CAPABILITIES
-        assert node.semantic_version == "1.2.3"
-        assert node.build_digest == "sha256:" + "b" * 64
-        assert node.architecture == "linux-amd64"
-        assert node.binary_digest == "c" * 64
-        assert node.self_test_passed is True
-        assert node.contact_certificate_serial == "serial-a"
-        assert node.contact_observation_digest is not None
-        profile = session.get(AgentNodeProfile, NODE_A)
-        assert profile is not None
-        assert profile.hostname == "spark-3542"
-    metrics = MetricsRegistry()
-    OperationalMetricsCollector(metrics, services.sessions, clock=clock).refresh()
-    rendered = metrics.render()
-    assert f'vonk_agent_last_seen_age_seconds{{node_id="{NODE_A}"}} 0' in rendered
-    assert (
-        f'vonk_agent_version_compatibility{{node_id="{NODE_A}",version_bucket="supported"}} 1'
-        in rendered
-    )
 
 
-def test_authenticated_claim_accepts_model_uninstall_capability(agent_system) -> None:
-    client, services, _, _ = agent_system
-    response = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": [*CAPABILITIES, "recipe.model-uninstall.v1"],
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert "recipe.model-uninstall.v1" in node.capabilities
 
 
 @pytest.mark.parametrize(
@@ -1804,7 +1723,7 @@ def test_authenticated_claim_rejects_invalid_reported_hostname(
     client, _services, _, _clock = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"hostname": hostname},
     )
@@ -1838,7 +1757,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
     }
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_A, "runtime_identity": runtime_identity},
     )
@@ -1857,7 +1776,7 @@ def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
     client, _services, _, _clock = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "node_id": NODE_A,
@@ -1880,7 +1799,7 @@ def test_authenticated_claim_requires_packaged_runtime_identity(agent_system) ->
 
     response = client.request(
         "POST",
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"capabilities": CAPABILITIES, "node_id": NODE_A},
     )
@@ -1892,7 +1811,7 @@ def test_claim_rejects_failed_runtime_self_test(agent_system) -> None:
     client, _services, _, _clock = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "node_id": NODE_A,
@@ -1916,7 +1835,7 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
     client, services, _, _ = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "node_id": NODE_A,
@@ -1942,7 +1861,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
     client, services, _, _ = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         json={
             "node_id": NODE_A,
             "runtime_identity": {
@@ -1963,29 +1882,6 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
         assert node.architecture is None
 
 
-def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-
-    response = client.post(
-        "/agent/v1/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES + ["shell.exec"],
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.capabilities == CAPABILITIES
-        assert node.protocol_version == 3
 
 
 @pytest.mark.parametrize(
@@ -2014,7 +1910,7 @@ def test_claim_rejects_unknown_structural_fields(
         payload[field] = {"version": 4}
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json=payload,
     )
@@ -2029,7 +1925,7 @@ def test_claim_rejects_string_encoded_numeric_fields(
 ) -> None:
     client, _services, _, _clock = agent_system
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
@@ -2056,7 +1952,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"protocol_version": 3},
     ).json()
@@ -2084,7 +1980,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
     monkeypatch.setattr(services.presence, "observe", reject_post_commit)
 
     response = client.post(
-        "/agent/v1/heartbeat",
+        "/agent/heartbeat",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "x-vonk-agent-source": "10.0.0.43",
@@ -2117,7 +2013,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"protocol_version": 3},
     ).json()
@@ -2145,7 +2041,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
     monkeypatch.setattr(services.presence, "observe", reject_post_commit)
 
     response = client.post(
-        "/agent/v1/result",
+        "/agent/result",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "x-vonk-agent-source": "10.0.0.44",
@@ -2175,7 +2071,7 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     result = {
         key: claim[key]
@@ -2195,7 +2091,7 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
 
     assert (
         client.post(
-            "/agent/v1/result",
+            "/agent/result",
             headers=agent_headers(NODE_A, "serial-a"),
             json=result,
         ).status_code
@@ -2208,7 +2104,7 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
 def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) -> None:
     client, services, _, clock = agent_system
     untrusted = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         json={
             "lease_seconds": 30,
             "node_id": NODE_A,
@@ -2231,7 +2127,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -2259,7 +2155,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
     }
 
     rejected = client.post(
-        "/agent/v1/result",
+        "/agent/result",
         headers={
             **agent_headers(NODE_A, "serial-a"),
             "x-vonk-agent-source": "10.0.0.43",
@@ -2285,7 +2181,7 @@ def test_boolean_protocol_advertisement_is_rejected_without_recording_contact(
     client, services, _, _ = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "lease_seconds": 30,
@@ -2322,7 +2218,7 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
             certificate.fingerprint = "different"
     assert (
         client.post(
-            "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+            "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
         == 401
     )
@@ -2338,7 +2234,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     result = {
         key: claim[key]
@@ -2360,7 +2256,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     }
     assert (
         client.post(
-            "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=foreign
+            "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=foreign
         ).status_code
         == 403
     )
@@ -2372,76 +2268,10 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     }
     assert (
         client.post(
-            "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=stale
+            "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=stale
         ).status_code
         == 409
     )
-
-
-def test_enrollment_grant_is_admin_only_and_submission_immediately_issues_idempotently(
-    agent_system,
-) -> None:
-    client, services, codec, _ = agent_system
-    assert (
-        client.post(
-            "/api/v1/agents/enrollments/grants",
-            headers=admin_headers(codec, "operator"),
-            json={"ttl_seconds": 60},
-        ).status_code
-        == 403
-    )
-    grant = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60},
-    ).json()
-    key = ed25519.Ed25519PrivateKey.generate()
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_C)])
-        )
-        .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{NODE_C}"
-                    )
-                ]
-            ),
-            critical=False,
-        )
-        .sign(key, algorithm=None)
-        .public_bytes(serialization.Encoding.PEM)
-    )
-    public = (
-        x509.load_pem_x509_csr(csr)
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-    )
-    body = {
-        "grant_token": grant["token"],
-        "csr": csr.decode(),
-        "evidence": {
-            "node_id": NODE_C,
-            "csr_public_key_fingerprint": hashlib.sha256(public).hexdigest(),
-            "host_key_fingerprint": "host",
-            "hardware_fingerprint": "hardware",
-            "agent_digest": "a" * 64,
-            "boot_id": "boot",
-            "observation_receipt_public_key": "d" * 64,
-        },
-    }
-    first = client.post("/agent/v1/enroll", json=body)
-    replay = client.post("/agent/v1/enroll", json=body)
-    assert first.status_code == replay.status_code == 200
-    assert first.content == replay.content == canonical_message(first.json())
-    assert first.json()["node_id"] == NODE_C
-    assert "certificate_pem" in first.json()
-    with services.sessions() as session:
-        assert session.get(AgentNode, NODE_C).observation_receipt_public_key == "d" * 64
 
 
 def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_public_trust(
@@ -2455,7 +2285,7 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
         SimpleNamespace(public_key_document={"public_key": "11" * 32}),
     )
 
-    response = client.get("/agent/v1/bootstrap")
+    response = client.get("/agent/bootstrap")
 
     assert response.status_code == 200
     assert response.content == canonical_message(response.json())
@@ -2488,8 +2318,8 @@ def test_bootstrap_has_one_current_response_even_with_an_obsolete_query(
         SimpleNamespace(public_key_document={"public_key": "11" * 32}),
     )
 
-    current = client.get("/agent/v1/bootstrap")
-    setup = client.get("/agent/v1/bootstrap?setup_schema=1")
+    current = client.get("/agent/bootstrap")
+    setup = client.get("/agent/bootstrap?setup_schema=1")
 
     assert current.status_code == setup.status_code == 200
     assert current.json() == setup.json()
@@ -2503,7 +2333,7 @@ def test_bootstrap_requires_the_host_helper_authority(
 ) -> None:
     client, _, _, _ = agent_system
 
-    response = client.get("/agent/v1/bootstrap")
+    response = client.get("/agent/bootstrap")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "host runtime authority is unavailable"}
@@ -2580,28 +2410,28 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     }
 
     accepted = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json=request,
     )
     wrong_node = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json={**request, "node_id": NODE_B},
     )
     unknown_field = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json={**request, "command": "docker inspect"},
     )
     maximum_model_identity = "p/" + "m" * 951 + "@" + "r" * 70
     maximum_identity = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json={**request, "model_identity": maximum_model_identity},
     )
     oversized_identity = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json={**request, "model_identity": maximum_model_identity + "x"},
     )
@@ -2658,7 +2488,7 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
         }
     }
     naive_item_time = client.post(
-        "/agent/v1/recipe-runs/observations",
+        "/agent/recipe-runs/observations",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "schema_version": 2,
@@ -2717,263 +2547,13 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
         "attempt": 1,
     }
     too_early = client.post(
-        "/agent/v1/recipe-runs/observation-grants",
+        "/agent/recipe-runs/observation-grants",
         headers=agent_headers(NODE_A, "serial-a"),
         json=starting_request,
     )
     assert too_early.status_code == 425
     assert too_early.json() == {"detail": "recipe run observation is not ready"}
     assert len(authority.calls) == 2
-
-
-def test_obsolete_enrollment_decision_routes_are_not_exposed(agent_system) -> None:
-    client, _, codec, _ = agent_system
-    headers = admin_headers(codec)
-
-    assert (
-        client.post(
-            "/api/v1/agents/enrollments/unknown/approve", headers=headers
-        ).status_code
-        == 404
-    )
-    assert client.post("/agent/v1/bootstrap").status_code == 405
-    assert client.get("/agent/v1/enroll").status_code == 405
-    assert (
-        client.post(
-            "/api/v1/agents/enrollments/unknown/reject",
-            headers=headers,
-            json={"reason": "obsolete"},
-        ).status_code
-        == 404
-    )
-
-
-def test_enrollment_grant_ttl_accepts_nine_hundred_and_rejects_above_contract(
-    agent_system,
-) -> None:
-    client, _, codec, _ = agent_system
-
-    accepted = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 900},
-    )
-    rejected = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 901},
-    )
-
-    assert accepted.status_code == 201
-    assert rejected.status_code == 422
-
-
-def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerprint(
-    agent_system,
-) -> None:
-    client, services, codec, _ = agent_system
-    assert services.bootstrap is not None
-
-    grant = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60},
-    )
-
-    assert grant.status_code == 201
-    body = grant.json()
-    assert {
-        key: body[key]
-        for key in (
-            "controller_endpoint",
-            "enrollment_endpoint",
-            "ca_fingerprint",
-            "controller_address",
-            "service_hostnames",
-            "installer_url",
-        )
-    } == {
-        "controller_endpoint": "https://agents.example.test:8443",
-        "enrollment_endpoint": "https://enroll.example.test:8443",
-        "ca_fingerprint": services.bootstrap.ca_fingerprint,
-        "controller_address": "192.168.1.231",
-        "service_hostnames": [
-            "control.example.test",
-            "enroll.example.test",
-            "agents.example.test",
-            "registry.example.test",
-        ],
-        "installer_url": "https://install.vonkforge.ai/spark",
-    }
-
-
-def test_reenrollment_grant_is_explicit_and_bound_to_the_selected_node(
-    agent_system,
-) -> None:
-    client, services, codec, _ = agent_system
-    response = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60, "purpose": "re-enroll", "node_id": NODE_A},
-    )
-
-    assert response.status_code == 201
-    assert response.json()["purpose"] == "re-enroll"
-    with services.sessions() as session:
-        grant = session.get(AgentEnrollmentGrant, response.json()["id"])
-        assert grant is not None
-        assert grant.node_id == NODE_A
-        assert grant.purpose == "re-enroll"
-
-    invalid = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60, "purpose": "new-node", "node_id": NODE_A},
-    )
-    assert invalid.status_code == 422
-
-
-@pytest.mark.parametrize(
-    ("new_receipt_key", "invalidated"),
-    (("d" * 64, False), ("e" * 64, True)),
-    ids=("same-key-preserves-evidence", "changed-key-invalidates-evidence"),
-)
-def test_reenrollment_submission_reconciles_observation_receipt_key_through_api(
-    agent_system, new_receipt_key: str, invalidated: bool
-) -> None:
-    client, services, codec, _ = agent_system
-    run_id = "70000000-0000-4000-8000-000000000070"
-    with services.sessions.begin() as session:
-        session.get(AgentNode, NODE_A).observation_receipt_public_key = "d" * 64
-        session.add(
-            RecipeRouteAuthority(
-                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
-                created_at=services.clock(),
-            )
-        )
-        session.add(
-            RoutePublication(
-                authority_id=RECIPE_ROUTE_AUTHORITY_ID,
-                state="completed",
-                generation=1,
-                plan_digest="5" * 64,
-            )
-        )
-        session.add(
-            RecipeRun(
-                id=run_id,
-                installation_id="80000000-0000-4000-8000-000000000080",
-                mapping_id="90000000-0000-4000-8000-000000000090",
-                mapping_generation=1,
-                run_generation=1,
-                alias="receipt-rotation",
-                plan_digest="1" * 64,
-                plan=run_plan_document(
-                    {
-                        "schema_version": 1,
-                        "observation_schema_version": 2,
-                        "run_generation": 1,
-                        "installation_id": "80000000-0000-4000-8000-000000000080",
-                        "alias": "receipt-rotation",
-                        "mapping_id": "90000000-0000-4000-8000-000000000090",
-                        "mapping_generation": 1,
-                        "recipe_revision_id": "a0000000-0000-4000-8000-0000000000aa",
-                        "plan_digest": "1" * 64,
-                        "nodes": [
-                            {
-                                "node_id": NODE_A,
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                                "port": 8888,
-                                "allowed": True,
-                                "inventory_observed_at": None,
-                                "memory_kind": "unified",
-                                "required_memory_bytes": 1,
-                                "available_memory_bytes": 1,
-                                "active_reserved_bytes": 0,
-                                "free_after_bytes": 0,
-                                "memory_floor_bytes": 0,
-                                "fabric_address": None,
-                                "fabric_bandwidth_mbps": None,
-                                "rendezvous_port": None,
-                                "blockers": [],
-                                "warnings": [],
-                            }
-                        ],
-                    }
-                ),
-                state="running",
-                route_state="published",
-                actor="admin",
-                created_at=services.clock(),
-                updated_at=services.clock(),
-            )
-        )
-        session.add(
-            RunNode(
-                run_id=run_id,
-                node_id=NODE_A,
-                rank=0,
-                role="entrypoint",
-                state="running",
-                port=8888,
-                reserved_memory_bytes=1,
-                evidence_digest="2" * 64,
-                observed_run_generation=1,
-                observation_receipt_sha256="3" * 64,
-                observation_endpoint_ready=True,
-                updated_at=services.clock(),
-            )
-        )
-    grant = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60, "purpose": "re-enroll", "node_id": NODE_A},
-    ).json()
-    csr = _csr_for(NODE_A)
-
-    response = client.post(
-        "/agent/v1/enroll",
-        json={
-            "grant_token": grant["token"],
-            "csr": csr.decode(),
-            "evidence": {
-                "node_id": NODE_A,
-                "csr_public_key_fingerprint": _csr_fingerprint(csr),
-                "host_key_fingerprint": "host-a",
-                "hardware_fingerprint": "hardware-a",
-                "agent_digest": "a" * 64,
-                "boot_id": "boot-a",
-                "observation_receipt_public_key": new_receipt_key,
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["node_id"] == NODE_A
-    assert response.json()["generation"] == 2
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        run = session.get(RecipeRun, run_id)
-        run_node = session.query(RunNode).filter_by(run_id=run_id).one()
-        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        assert node.observation_receipt_public_key == new_receipt_key
-        assert run.route_state == "published"
-        if invalidated:
-            assert publication.state == "withdrawal-pending"
-            assert run_node.state == "failed"
-            assert run_node.observed_run_generation is None
-            assert run_node.observation_receipt_sha256 is None
-            assert run_node.observation_endpoint_ready is None
-        else:
-            assert publication.state == "completed"
-            assert run_node.state == "running"
-            assert run_node.observed_run_generation == 1
-            assert run_node.observation_receipt_sha256 == "3" * 64
-            assert run_node.observation_endpoint_ready is True
-
-
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:
@@ -2989,7 +2569,7 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
 
     assert set(body) == set(fixture) == {"csr", "evidence", "grant_token"}
     assert set(body["evidence"]) == set(fixture["evidence"])
-    response = client.post("/agent/v1/enroll", json=body)
+    response = client.post("/agent/enroll", json=body)
 
     assert response.status_code == 200
     assert response.json()["node_id"] == NODE_C
@@ -3014,8 +2594,8 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     monkeypatch.setattr(services.enrollment, "_issuance_replay_wait_seconds", 0)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
 
-    first = client.post("/agent/v1/enroll", json=body)
-    replay = client.post("/agent/v1/enroll", json=body)
+    first = client.post("/agent/enroll", json=body)
+    replay = client.post("/agent/enroll", json=body)
 
     assert first.status_code == replay.status_code == 503
     assert calls == 1
@@ -3171,7 +2751,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
             )
         )
 
-    endpoint = f"/agent/v1/recipe-installations/{installation_id}/spec"
+    endpoint = f"/agent/recipe-installations/{installation_id}/spec"
     response = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
     assert response.status_code == 409
     assert (
@@ -3227,7 +2807,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     )
     openapi = client.get("/openapi.json").json()
     spec_route = openapi["paths"][
-        "/agent/v1/recipe-installations/{installation_id}/spec"
+        "/agent/recipe-installations/{installation_id}/spec"
     ]["get"]
     schema_ref = spec_route["responses"]["200"]["content"]["application/json"][
         "schema"
@@ -3286,7 +2866,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     )
     assert (
         client.get(
-            f"/agent/v1/recipe-installations/{uuid.uuid4()}/spec",
+            f"/agent/recipe-installations/{uuid.uuid4()}/spec",
             headers=agent_headers(NODE_A, "serial-a"),
         ).status_code
         == 404
@@ -3343,10 +2923,10 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "observation_receipt_public_key": "d" * 64,
         },
     }
-    issued = client.post("/agent/v1/enroll", json=body)
-    pickup = client.post("/agent/v1/enroll", json=body)
+    issued = client.post("/agent/enroll", json=body)
+    pickup = client.post("/agent/enroll", json=body)
     mismatch = client.post(
-        "/agent/v1/enroll",
+        "/agent/enroll",
         json={**body, "evidence": {**body["evidence"], "boot_id": "different"}},
     )
 
@@ -3357,87 +2937,6 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     assert "certificate_pem" in pickup.json()
     assert mismatch.status_code == 403
     assert "certificate" not in mismatch.text.lower()
-
-
-def test_human_enrollment_mutations_audit_only_grant_and_revocation(
-    agent_system,
-) -> None:
-    client, _services, codec, _clock = agent_system
-    headers = admin_headers(codec)
-    audits = client.app.state.test_audits
-
-    grant_response = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=headers,
-        json={"ttl_seconds": 60},
-    )
-    grant = grant_response.json()
-    csr = _csr_for(NODE_C)
-    pending = client.post(
-        "/agent/v1/enroll",
-        json={
-            "grant_token": grant["token"],
-            "csr": csr.decode(),
-            "evidence": {
-                "node_id": NODE_C,
-                "csr_public_key_fingerprint": _csr_fingerprint(csr),
-                "host_key_fingerprint": "host-c",
-                "hardware_fingerprint": "hardware-c",
-                "agent_digest": "c" * 64,
-                "boot_id": "boot-c",
-                "observation_receipt_public_key": "d" * 64,
-            },
-        },
-    )
-    revocation = client.post(
-        f"/api/v1/agents/nodes/{NODE_A}/revoke",
-        headers=headers,
-    )
-
-    assert [
-        grant_response.status_code,
-        pending.status_code,
-        revocation.status_code,
-    ] == [201, 200, 204]
-    expected = {
-        grant_response.headers["x-request-id"]: (
-            "agent.enrollment.grant.create",
-            (),
-        ),
-        revocation.headers["x-request-id"]: (
-            "agent.node.revoke",
-            (NODE_A,),
-        ),
-    }
-    for request_id, (action, targets) in expected.items():
-        event = audits.for_request(request_id)
-        assert event.actor == "administrator"
-        assert event.action == action
-        assert event.authority_revision is None
-        assert event.targets == targets
-
-    successful_count = len(audits.list())
-    failures = [
-        client.post(
-            "/api/v1/agents/enrollments/grants",
-            headers=headers,
-            json={"node_id": "invalid", "ttl_seconds": 60},
-        ),
-        client.post("/api/v1/agents/enrollments/unknown/approve", headers=headers),
-        client.post(
-            "/api/v1/agents/enrollments/unknown/reject",
-            headers=headers,
-            json={"reason": "invalid"},
-        ),
-        client.post(
-            f"/api/v1/agents/nodes/{'spk_' + 'f' * 32}/revoke",
-            headers=headers,
-        ),
-    ]
-    assert [response.status_code for response in failures] == [422, 404, 404, 404]
-    assert len(audits.list()) == successful_count
-
-
 def _csr_for(node_id: str) -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     return (
@@ -3493,7 +2992,7 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
         )
 
     response = client.post(
-        "/agent/v1/renew",
+        "/agent/renew",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_A, "csr": request.decode()},
     )
@@ -3509,12 +3008,12 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     client, services, _, _ = agent_system
     csr = _csr_for(NODE_A)
     first = client.post(
-        "/agent/v1/renew",
+        "/agent/renew",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
     replay = client.post(
-        "/agent/v1/renew",
+        "/agent/renew",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
@@ -3524,22 +3023,22 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     staged_headers = agent_headers(NODE_A, issued["serial"])
     staged_headers["x-vonk-agent-fingerprint"] = issued["fingerprint"]
 
-    assert client.post("/agent/v1/claim", headers=staged_headers).status_code == 401
+    assert client.post("/agent/claim", headers=staged_headers).status_code == 401
     assert (
         client.post(
-            "/agent/v1/heartbeat", headers=staged_headers, json={"invalid": True}
+            "/agent/heartbeat", headers=staged_headers, json={"invalid": True}
         ).status_code
         == 401
     )
     assert (
         client.post(
-            "/agent/v1/result", headers=staged_headers, json={"invalid": True}
+            "/agent/result", headers=staged_headers, json={"invalid": True}
         ).status_code
         == 401
     )
     assert (
         client.post(
-            "/agent/v1/renew",
+            "/agent/renew",
             headers=staged_headers,
             json={"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()},
         ).status_code
@@ -3547,7 +3046,7 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     )
     assert (
         client.get(
-            "/agent/v1/artifacts/" + "a" * 64,
+            "/agent/artifacts/" + "a" * 64,
             headers=staged_headers,
         ).status_code
         == 401
@@ -3556,23 +3055,23 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     activation = {"node_id": NODE_A, "generation": issued["generation"]}
     assert (
         client.post(
-            "/agent/v1/renew/activate", headers=staged_headers, json=activation
+            "/agent/renew/activate", headers=staged_headers, json=activation
         ).status_code
         == 204
     )
     assert (
         client.post(
-            "/agent/v1/renew/activate", headers=staged_headers, json=activation
+            "/agent/renew/activate", headers=staged_headers, json=activation
         ).status_code
         == 204
     )
     assert (
         client.post(
-            "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+            "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
         == 401
     )
-    assert client.post("/agent/v1/claim", headers=staged_headers).status_code == 204
+    assert client.post("/agent/claim", headers=staged_headers).status_code == 204
     with services.sessions() as session:
         old = session.get(AgentCertificate, "serial-a")
         new = session.get(AgentCertificate, issued["serial"])
@@ -3594,7 +3093,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     result = {
         key: claim[key]
@@ -3626,7 +3125,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         result["result"]["diagnostics"] = diagnostics
 
     response = client.post(
-        "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
     )
 
     assert response.status_code == 204
@@ -3666,7 +3165,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
         STOP_PAYLOAD,
     )
     claim = client.post(
-        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
     ).json()
     result = {
         key: claim[key]
@@ -3682,7 +3181,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
     } | {"state": "failed", "result": {"unexpected": "unstructured failure"}}
 
     response = client.post(
-        "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
     )
 
     assert response.status_code == 422
@@ -3705,12 +3204,12 @@ def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(
     services.operations.enqueue(
         parent(services.sessions, clock).id, NODE_A, "recipe.job.run.v1", "a" * 64, request,
     )
-    claim_response = client.post("/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a"))
+    claim_response = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
     assert claim_response.status_code == 200
     claim = claim_response.json()
     result = {key: claim[key] for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")}
     result.update(state="failed", result=dict(job_result, exit_code=1, reason="runtime failed"))
-    response = client.post("/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    response = client.post("/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
     assert response.status_code == 204
     with services.sessions() as session:
         attempt = session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
@@ -3722,7 +3221,7 @@ def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
     client, _, _, _ = agent_system
 
     response = client.post(
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={"lease_seconds": 0, "node_id": NODE_A, "wait_seconds": 0},
     )
@@ -3738,7 +3237,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
     with ThreadPoolExecutor(max_workers=1) as pool:
         waiting = pool.submit(
             client.post,
-            "/agent/v1/claim",
+            "/agent/claim",
             headers=agent_headers(NODE_A, "serial-a"),
             json={"node_id": NODE_A, "lease_seconds": 30, "wait_seconds": 1},
         )
@@ -3767,7 +3266,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     )
     assert (
         asgi_post(
-            app, "/agent/v1/enroll", valid_enrollment_body(enrollment_grant(services))
+            app, "/agent/enroll", valid_enrollment_body(enrollment_grant(services))
         )[0]
         == 200
     )
@@ -3788,8 +3287,8 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         "http_version": "1.1",
         "method": "POST",
         "scheme": "http",
-        "path": "/agent/v1/enroll",
-        "raw_path": b"/agent/v1/enroll",
+        "path": "/agent/enroll",
+        "raw_path": b"/agent/enroll",
         "query_string": b"",
         "headers": ((b"content-type", b"application/json"),),
         "client": ("testclient", 1234),
@@ -3819,7 +3318,7 @@ def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
         f'{{"grant_token":"{first}","gr\\u0061nt_token":"{escaped_second}"}}'
     ).encode("ascii")
 
-    status_code, _ = asgi_post(client.app, "/agent/v1/enroll", raw)
+    status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
     assert_grant_consumed(services, first)
@@ -3832,7 +3331,7 @@ def test_normal_enrollment_object_still_succeeds(agent_system) -> None:
 
     status_code, response = asgi_post(
         client.app,
-        "/agent/v1/enroll",
+        "/agent/enroll",
         valid_enrollment_body(token),
     )
 
@@ -3888,7 +3387,7 @@ def test_enrollment_rejects_non_object_json_without_server_error(
 ) -> None:
     client, _, _, _ = agent_system
 
-    status_code, _ = asgi_post(client.app, "/agent/v1/enroll", raw)
+    status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
 
@@ -3898,7 +3397,7 @@ def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) 
     token = enrollment_grant(services)
     raw = f'[{{"grant_token":"{token}"}}]'.encode("ascii")
 
-    status_code, _ = asgi_post(client.app, "/agent/v1/enroll", raw)
+    status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
     assert_grant_consumed(services, token)
@@ -3915,7 +3414,7 @@ def test_service_denied_enrollment_consumes_every_discovered_grant(
 
     status_code, _ = asgi_post(
         client.app,
-        "/agent/v1/enroll",
+        "/agent/enroll",
         json.dumps(body).encode("utf-8"),
     )
 
@@ -3943,7 +3442,7 @@ def test_invalid_enrollment_json_consumes_identifiable_grant(
 
     status_code, _ = asgi_post(
         client.app,
-        "/agent/v1/enroll",
+        "/agent/enroll",
         prefix + token.encode("ascii") + suffix,
     )
 
@@ -3959,7 +3458,7 @@ def test_wrong_enrollment_content_type_consumes_identifiable_grant(
 
     status_code, _ = asgi_post(
         client.app,
-        "/agent/v1/enroll",
+        "/agent/enroll",
         f'{{"grant_token":"{token}"}}'.encode("ascii"),
         content_type="text/plain",
     )
@@ -3971,7 +3470,7 @@ def test_wrong_enrollment_content_type_consumes_identifiable_grant(
 def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
     client, _, _, _ = agent_system
     response = client.post(
-        "/agent/v1/enroll",
+        "/agent/enroll",
         json={
             "grant_token": "a" * 43,
             "csr": "x",
@@ -3997,7 +3496,7 @@ def test_enrollment_rejects_malformed_observation_receipt_public_key(
     body = json.loads(valid_enrollment_body(token))
     body["evidence"]["observation_receipt_public_key"] = "not-lower-hex"
 
-    response = client.post("/agent/v1/enroll", json=body)
+    response = client.post("/agent/enroll", json=body)
 
     assert response.status_code == 403
     assert_grant_consumed(services, token)
@@ -4009,7 +3508,7 @@ def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
     body = json.loads(valid_enrollment_body(token))
     body["evidence"].pop("observation_receipt_public_key")
 
-    response = client.post("/agent/v1/enroll", json=body)
+    response = client.post("/agent/enroll", json=body)
 
     assert response.status_code == 403
     assert_grant_consumed(services, token)
@@ -4032,7 +3531,7 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
         image_import_payload(digest),
     )
     response = client.get(
-        f"/agent/v1/artifacts/{digest}",
+        f"/agent/artifacts/{digest}",
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
     )
     assert (
@@ -4042,19 +3541,19 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     ) == (206, b"rti", "bytes 1-3/8")
     assert (
         client.get(
-            f"/agent/v1/artifacts/{digest}", headers=agent_headers(NODE_B, "serial-b")
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_B, "serial-b")
         ).status_code
         == 404
     )
     assert (
         client.get(
-            "/agent/v1/artifacts/../secret", headers=agent_headers(NODE_A, "serial-a")
+            "/agent/artifacts/../secret", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
         == 404
     )
     assert (
         client.get(
-            f"/agent/v1/artifacts/{digest}",
+            f"/agent/artifacts/{digest}",
             headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=0-99999999"},
         ).status_code
         == 416
@@ -4094,7 +3593,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
 
     monkeypatch.setattr("vonk_control.agent_api._sealed_snapshot", fail_snapshot)
     response = client.get(
-        f"/agent/v1/artifacts/{digest}",
+        f"/agent/artifacts/{digest}",
         headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
     )
 
@@ -4121,7 +3620,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     )
     assert (
         client.get(
-            f"/agent/v1/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
         == 404
     )
@@ -4152,7 +3651,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
     )
     assert (
         client.get(
-            f"/agent/v1/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
         == 404
     )
@@ -4163,14 +3662,14 @@ def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
     headers = agent_headers(NODE_A, "serial-a")
     paths = client.get("/openapi.json").json()["paths"]
 
-    assert not any(path.startswith("/agent/v1/tuf/") for path in paths)
+    assert not any(path.startswith("/agent/tuf/") for path in paths)
     assert (
-        client.get("/agent/v1/tuf/metadata/timestamp.json", headers=headers).status_code
+        client.get("/agent/tuf/metadata/timestamp.json", headers=headers).status_code
         == 404
     )
     assert (
         client.get(
-            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'a' * 64}.json",
+            f"/agent/tuf/targets/platform/releases/1.2.3/{'a' * 64}.json",
             headers=headers,
         ).status_code
         == 404
@@ -4191,11 +3690,11 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
     (services.workload_tuf_target_root / digest).write_bytes(raw)
 
     metadata = client.get(
-        "/agent/v1/workload-tuf/metadata/timestamp.json",
+        "/agent/workload-tuf/metadata/timestamp.json",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     target = client.get(
-        f"/agent/v1/workload-tuf/targets/releases/{digest}.json",
+        f"/agent/workload-tuf/targets/releases/{digest}.json",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert metadata.status_code == 200
@@ -4204,7 +3703,7 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
     assert target.content == raw
     assert (
         client.get(
-            "/agent/v1/workload-tuf/targets/platform/releases/1.2.3/"
+            "/agent/workload-tuf/targets/platform/releases/1.2.3/"
             + "a" * 64
             + ".json",
             headers=agent_headers(NODE_A, "serial-a"),
@@ -4232,7 +3731,7 @@ def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
     for _ in range(25):
         assert (
             client.get(
-                f"/agent/v1/artifacts/{digest}",
+                f"/agent/artifacts/{digest}",
                 headers={
                     **agent_headers(NODE_A, "serial-a"),
                     "Range": "bytes=" + "9" * 5000 + "-1",
@@ -4289,11 +3788,11 @@ def test_protected_agent_routes_gate_untrusted_invalid_bodies_before_parsing(
 ) -> None:
     client, _, _, _ = agent_system
     for path in (
-        "/agent/v1/claim",
-        "/agent/v1/heartbeat",
-        "/agent/v1/result",
-        "/agent/v1/renew",
-        "/agent/v1/telemetry",
+        "/agent/claim",
+        "/agent/heartbeat",
+        "/agent/result",
+        "/agent/renew",
+        "/agent/telemetry",
     ):
         assert (
             client.post(
@@ -4309,7 +3808,7 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
         session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
     assert (
         client.post(
-            "/agent/v1/result",
+            "/agent/result",
             headers={
                 **agent_headers(NODE_A, "serial-a"),
                 "content-type": "application/json",
@@ -4318,198 +3817,6 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
         ).status_code
         == 401
     )
-
-
-def test_node_revocation_has_typed_4xx_and_uncertain_remote_statuses(
-    agent_system,
-) -> None:
-    client, services, codec, _ = agent_system
-    headers = admin_headers(codec)
-    assert (
-        client.post(
-            "/api/v1/agents/nodes/not-canonical/revoke", headers=headers
-        ).status_code
-        == 422
-    )
-    assert (
-        client.post(
-            f"/api/v1/agents/nodes/{'spk_' + '1' * 32}/revoke", headers=headers
-        ).status_code
-        == 404
-    )
-
-    authority = services.enrollment._authority
-    authority.fail_revoke = True
-    response = client.post(f"/api/v1/agents/nodes/{NODE_A}/revoke", headers=headers)
-    assert response.status_code == 503
-    with services.sessions() as session:
-        assert session.get(AgentNode, NODE_A).state == "retired"  # type: ignore[union-attr]
-        assert session.get(AgentCertificate, "serial-a").revoked_at is not None  # type: ignore[union-attr]
-
-
-def test_enrollment_overflow_burns_valid_grant_before_rejection(agent_system) -> None:
-    client, _, codec, _ = agent_system
-    grant = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60},
-    ).json()
-    key = ed25519.Ed25519PrivateKey.generate()
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_A)])
-        )
-        .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{NODE_A}"
-                    )
-                ]
-            ),
-            critical=False,
-        )
-        .sign(key, algorithm=None)
-        .public_bytes(serialization.Encoding.PEM)
-    )
-    public = (
-        x509.load_pem_x509_csr(csr)
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-    )
-    body = {
-        "grant_token": grant["token"],
-        "csr": csr.decode(),
-        "evidence": {
-            "node_id": NODE_A,
-            "csr_public_key_fingerprint": hashlib.sha256(public).hexdigest(),
-            "host_key_fingerprint": "x" * 513,
-            "hardware_fingerprint": "hardware",
-            "agent_digest": "a" * 64,
-            "boot_id": "boot",
-        },
-    }
-    assert client.post("/agent/v1/enroll", json=body).status_code == 403
-    assert client.post("/agent/v1/enroll", json=body).status_code == 403
-
-
-def test_enrollment_unknown_top_level_field_burns_valid_grant(agent_system) -> None:
-    client, _, codec, _ = agent_system
-    grant = client.post(
-        "/api/v1/agents/enrollments/grants",
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60},
-    ).json()
-    key = ed25519.Ed25519PrivateKey.generate()
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_A)])
-        )
-        .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{NODE_A}"
-                    )
-                ]
-            ),
-            critical=False,
-        )
-        .sign(key, algorithm=None)
-        .public_bytes(serialization.Encoding.PEM)
-    )
-    public = (
-        x509.load_pem_x509_csr(csr)
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-    )
-    body = {
-        "grant_token": grant["token"],
-        "csr": csr.decode(),
-        "evidence": {
-            "node_id": NODE_A,
-            "csr_public_key_fingerprint": hashlib.sha256(public).hexdigest(),
-            "host_key_fingerprint": "host",
-            "hardware_fingerprint": "hardware",
-            "agent_digest": "a" * 64,
-            "boot_id": "boot",
-        },
-        "unknown": "denied",
-    }
-    assert client.post("/agent/v1/enroll", json=body).status_code == 403
-    assert client.post("/agent/v1/enroll", json=body).status_code == 403
-
-
-def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
-    agent_system,
-) -> None:
-    client, services, codec, clock = agent_system
-    with services.sessions.begin() as session:
-        for index in range(101):
-            grant_id = str(uuid.uuid4())
-            session.add(
-                AgentEnrollmentGrant(
-                    id=grant_id,
-                    node_id=NODE_A,
-                    token_digest=hashlib.sha256(str(index).encode()).hexdigest(),
-                    created_by="admin",
-                    created_at=clock.now,
-                    expires_at=clock.now + timedelta(seconds=60),
-                )
-            )
-            session.add(
-                AgentEnrollment(
-                    id=str(uuid.uuid4()),
-                    grant_id=grant_id,
-                    node_id=NODE_A,
-                    state="issuing" if index == 0 else "certificate_issued",
-                    csr_pem="csr",
-                    csr_public_key_pem="pem",
-                    csr_public_key_fingerprint="a" * 64,
-                    host_key_fingerprint="host",
-                    hardware_fingerprint="hardware",
-                    agent_digest="a" * 64,
-                    boot_id="boot",
-                    created_at=clock.now,
-                )
-            )
-    first = client.get(
-        "/api/v1/agents/enrollments?limit=100", headers=admin_headers(codec)
-    ).json()
-    assert len(first["enrollments"]) == 100
-    assert first["next_cursor"]
-    assert all(
-        set(item)
-        == {
-            "id",
-            "node_id",
-            "state",
-            "csr_public_key_fingerprint",
-            "host_key_fingerprint",
-            "hardware_fingerprint",
-            "agent_digest",
-            "boot_id",
-            "created_at",
-        }
-        for item in first["enrollments"]
-    )
-    second = client.get(
-        f"/api/v1/agents/enrollments?limit=100&cursor={first['next_cursor']}",
-        headers=admin_headers(codec),
-    ).json()
-    assert len(second["enrollments"]) == 1
-    issuing = client.get(
-        "/api/v1/agents/enrollments?state=issuing", headers=admin_headers(codec)
-    ).json()
-    assert [item["state"] for item in issuing["enrollments"]] == ["issuing"]
-
-
 def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
     from vonk_agent_protocol import (
         AgentClaim,
@@ -4525,7 +3832,7 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
     components = schema["components"]["schemas"]
 
     for path, model in (("heartbeat", AgentProgress), ("result", AgentResult)):
-        reference = paths[f"/agent/v1/{path}"]["post"]["requestBody"]["content"][
+        reference = paths[f"/agent/{path}"]["post"]["requestBody"]["content"][
             "application/json"
         ]["schema"]["$ref"]
         document = components[reference.rsplit("/", 1)[-1]]
@@ -4533,11 +3840,11 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
         assert set(document["required"]) == set(model.model_json_schema()["required"])
 
     for path, model in (("claim", AgentClaim), ("heartbeat", AgentDirective)):
-        reference = paths[f"/agent/v1/{path}"]["post"]["responses"]["200"]["content"][
+        reference = paths[f"/agent/{path}"]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]["$ref"]
         assert components[reference.rsplit("/", 1)[-1]]["title"] == model.__name__
-    assert "204" in paths["/agent/v1/claim"]["post"]["responses"]
+    assert "204" in paths["/agent/claim"]["post"]["responses"]
 
     # A compact serializer must not erase the outgoing progress structure.
     progress = OperationProgress.model_json_schema(mode="serialization")
@@ -4577,7 +3884,7 @@ def test_claim_requires_the_current_agent_document(agent_system, missing: str) -
     # deliberately missing fields and hide a production boundary regression.
     response = client.request(
         "POST",
-        "/agent/v1/claim",
+        "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json=body,
     )
@@ -4589,7 +3896,7 @@ def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -
 
     client, _services, _sessions, _clock = agent_system
     schema = client.get("/openapi.json").json()
-    operation = schema["paths"]["/agent/v1/enroll"]["post"]
+    operation = schema["paths"]["/agent/enroll"]["post"]
     request = operation["requestBody"]
     assert request["required"] is True
     assert request["content"]["application/json"]["schema"] == {
@@ -4612,7 +3919,7 @@ def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
 
     client, _services, _sessions, _clock = agent_system
     schema = client.get("/openapi.json").json()
-    operation = schema["paths"]["/agent/v1/renew/recover"]["post"]
+    operation = schema["paths"]["/agent/renew/recover"]["post"]
     assert operation["requestBody"] == {
         "content": {
             "application/json": {

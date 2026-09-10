@@ -9,12 +9,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache_progress import cache_progress
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
+from vonk_control.models import (
+    Base,
+    AgentNode,
+    CatalogDocument,
+    CatalogDocumentRevision,
+    Job,
+    RecipeBuild,
+    RuntimeImageReceipt,
+)
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -189,6 +197,55 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     )
     with pytest.raises(ValueError, match="requires failure evidence"):
         restarted.get(queued.id)
+
+
+def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-remove-build", recipe)
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _build_runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    queued = service.start(
+        "revision-remove-build", actor="operator", request_id="a" * 36,
+    )
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id="spark-builder", state="active"))
+        session.add(RecipeBuild(
+            id="00000000-0000-4000-8000-000000000901",
+            recipe_revision_id="revision-remove-build",
+            builder_node_id="spark-builder",
+            source_bundle_sha256="b" * 64,
+            build_input_sha256="f" * 64,
+            state="building",
+            policy_report={}, plan={}, image_digest=None,
+            oci_layout_sha256=None, image_bytes=None, error=None,
+            created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        ))
+
+    result = service.remove_selector(
+        recipe.identity.slug, actor="operator", request_id="c" * 36,
+    )
+    assert result["operation_id"]
+    assert queued.id in result["cancelled_operations"]
+    assert result["cancelled_builds"] == ["00000000-0000-4000-8000-000000000901"]
+    assert result["preserved"] == ["profile-assignments", "spark-local-copies", "model-download"]
+    assert service.run_pending() == 0
+    assert service.get(queued.id).state == "cancelled"
+    observed = service.get_operator_operation(str(result["operation_id"]))
+    assert isinstance(observed, dict)
+    assert observed["operation_id"] == result["operation_id"]
+    with sessions() as session:
+        build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
+        assert build is not None and build.state == "failed"
+        assert session.scalars(select(RuntimeImageReceipt)).all() == []
 
 
 def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(

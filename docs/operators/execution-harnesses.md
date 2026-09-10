@@ -63,8 +63,9 @@ container level currently returns `environment-limited` because the production
 `CompiledExecutionPlan` materializer is not linked; that result is not evidence
 of container execution.
 
-Physical lifecycle work uses Controller Run/Switch, including the normal
-`vonkctl models run --input-file REQUEST.json --json` command. The Controller
+Physical lifecycle work uses `vonkctl recipe download`, profile assignments,
+and `vonkctl profile load`. A profile always covers the entire fleet; unassigned
+Sparks idle when it is loaded. The Controller
 binds the selected automatically refreshed recipe revision and Spark group to
 fresh certificate-bound inventory, capacity, fabric, model and image bytes,
 operation phases, per-rank receipts, and route state. Applying a changed

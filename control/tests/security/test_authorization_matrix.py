@@ -13,7 +13,7 @@ def test_every_mutating_route_has_explicit_role() -> None:
         (method, route.path)
         for route in app.routes
         for method in getattr(route, "methods", set())
-        if method in {"POST", "PUT", "PATCH", "DELETE"} and route.path.startswith("/api/v1/")
+        if method in {"POST", "PUT", "PATCH", "DELETE"} and route.path.startswith("/api/")
     }
     assert routes == set(MUTATION_ROLES)
     assert all(roles and roles <= {"viewer", "operator", "administrator"} for roles in MUTATION_ROLES.values())

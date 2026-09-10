@@ -127,7 +127,7 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   await flush();
   const stream = FakeEventSource.instances[0];
 
-  expect(stream.url).toBe("/api/v1/fleet/stream");
+  expect(stream.url).toBe("/api/fleet/stream");
   expect(screen.getByTestId("cursor")).toHaveTextContent("5");
   act(() => stream.emit("open"));
   expect(screen.getByTestId("connection")).toHaveTextContent("live");

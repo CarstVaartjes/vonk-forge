@@ -300,7 +300,7 @@ not just green branch checks. Search for active legacy authorities, tools,
 settings, generated types, routes, fixtures and contradictory docs; report each
 with a path and user-visible consequence.
 
-Current `/api/v1` routes and private schema-1 wire/build/job contracts are not
+Current `/api` routes and private schema-1 wire/build/job contracts are not
 legacy merely because of their number. Keep retained history inert; do not
 reintroduce old catalog behavior. Preserve meaningful behavior tests rather
 than creating a large collection of tests that only mirror implementation text.

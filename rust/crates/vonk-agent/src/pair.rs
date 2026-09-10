@@ -98,7 +98,7 @@ pub async fn pair(
         .build()?;
     let csr = std::str::from_utf8(&pending.csr_pem).map_err(|_| PairingError::Response)?;
     let endpoint = enrollment
-        .join("/agent/v1/enroll")
+        .join("/agent/enroll")
         .map_err(|_| PairingError::Response)?;
     let request = EnrollmentSubmitRequest {
         csr: csr.to_owned(),

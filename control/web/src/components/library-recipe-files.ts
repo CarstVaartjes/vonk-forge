@@ -1,13 +1,13 @@
-import type {LibraryRecipeDetail} from "../api/types";
+import type {LibraryViewRecipeDetail} from "../api/types";
 
-export type RecipeModelFile = LibraryRecipeDetail["model_documents"][number]["model_document"]["files"][number];
+export type RecipeModelFile = LibraryViewRecipeDetail["model_documents"][number]["model_document"]["files"][number];
 
 export type SelectedRecipeFiles = {
   files: RecipeModelFile[];
   unresolved: string[];
 };
 
-export function selectedRecipeFiles(modelDocuments: LibraryRecipeDetail["model_documents"]): SelectedRecipeFiles {
+export function selectedRecipeFiles(modelDocuments: LibraryViewRecipeDetail["model_documents"]): SelectedRecipeFiles {
   const files: RecipeModelFile[] = [];
   const unresolved: string[] = [];
   for (const item of modelDocuments) {

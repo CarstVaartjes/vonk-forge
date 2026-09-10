@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
-from sqlalchemy import String, cast, delete, func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -21,13 +21,13 @@ from .fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentContext,
     FleetProfileAssignmentInput,
+    FleetProfileAssignmentView,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
     FleetProfileIntendedConfiguration,
-    FleetProfileLibraryPlacementContext,
     FleetProfileList,
     FleetProfileNode,
     FleetProfilePlanStep,
@@ -36,7 +36,6 @@ from .fleet_profile_contract import (
     FleetProfileReason,
     FleetProfileScope,
     FleetProfileScopePreview,
-    FleetProfileStatusView,
     FleetProfileStepResult,
     FleetProfileSwitchAdapter,
     FleetProfileSwitchAdapterResult,
@@ -48,6 +47,7 @@ from .fleet_profile_contract import (
 from .logging import redact_text
 from .models import (
     AgentNode,
+    AgentNodeProfile,
     CatalogDocument,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -84,7 +84,7 @@ from .run_switch_operations import (
 )
 
 _STORED_ASSIGNMENTS = TypeAdapter(
-    list[StoredFleetProfileAssignment], config=ConfigDict(strict=True)
+    list[FleetProfileAssignmentInput], config=ConfigDict(strict=True)
 )
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _ACTIVE_INSTALL_STATES = frozenset(
@@ -96,9 +96,6 @@ _CHILD_PENDING_STATES = frozenset(
 _CHILD_FAILED_STATES = frozenset(
     {"failed", "expired", "cancelled", "waiting-for-operator"}
 )
-_INTERNAL_PLACEMENT_PREFIX = "~placement-"
-
-
 def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview:
     """Load the complete stored preview through its canonical contract."""
 
@@ -149,7 +146,6 @@ def _persisted_profile_progress(
         ) from error
 
 
-_INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
 _PROFILE_PHASE_BY_RUN_PHASE = {
     "transfer": "target-copy",
     "verify": "final-verify",
@@ -668,20 +664,22 @@ def _digest(value: object) -> str:
     return hashlib.sha256(canonical_message(value)).hexdigest()
 
 
-def _assignment_id(value: FleetProfileAssignmentInput) -> str:
+def _choice_id(value: FleetProfileAssignmentInput) -> str:
     identity = ":".join(
         (
-            value.recipe_revision_id,
-            value.topology_name,
+            value.recipe_selector,
+            value.assignment_name or "",
+            value.model_variant or "",
             value.desired_state,
-            value.alias or "",
-            *(
-                f"{node.rank}:{node.node_id}:{node.role}:{int(node.endpoint_owner)}"
-                for node in value.nodes
-            ),
+            *value.spark_ids,
         )
     )
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-forge:fleet-profile:{identity}"))
+
+
+# Execution IDs remain deterministic across previews, while logical authoring
+# changes (choice, variant, group or desired state) produce a new assignment.
+_assignment_id = _choice_id
 
 
 def _expanded_roles(topology: Mapping[str, object]) -> tuple[tuple[str, bool], ...]:
@@ -711,12 +709,13 @@ def _profile_document(row: FleetProfile) -> dict[str, object]:
     return {
         "schema_version": 2,
         "id": row.id,
+        "number": row.number,
+        "revision": row.revision,
         "name": row.name,
         "description": row.description,
         "installation_policy": row.installation_policy,
         "labels": dict(row.labels),
         "favorite": row.favorite,
-        "scope": list(row.scope),
         "assignments": list(row.assignments),
     }
 
@@ -729,6 +728,7 @@ class FleetProfileService:
         clock: Callable[[], datetime],
         recipe_operations: RecipeOperationService | None = None,
         switch_adapter: FleetProfileSwitchAdapter | None = None,
+        cache_resolver: Callable[..., Mapping[str, object]] | None = None,
         preparation_provider: Callable[[
             Session, FleetProfileAssignment, tuple[str, ...]
         ], RolloutPreparation | None] | None = None,
@@ -737,7 +737,159 @@ class FleetProfileService:
         self._clock = clock
         self._recipe_operations = recipe_operations
         self._switch_adapter = switch_adapter
+        self._cache_resolver = cache_resolver
         self._preparation_provider = preparation_provider
+
+    @staticmethod
+    def _next_profile_number(session: Session) -> int:
+        """Allocate the next stable user profile number without renumbering."""
+
+        maximum = session.scalar(select(func.max(FleetProfile.number)))
+        return max(1, int(maximum or 0) + 1)
+
+    @staticmethod
+    def _recipe_document(
+        session: Session, selector: str
+    ) -> tuple[CatalogDocument, CatalogDocumentRevision]:
+        """Resolve one exact recipe selector and its newest active revision."""
+
+        document = None
+        try:
+            document = session.get(CatalogDocument, selector)
+        except (TypeError, ValueError):
+            document = None
+        if document is None or document.kind != "recipe":
+            candidates = tuple(
+                session.scalars(
+                    select(CatalogDocument)
+                    .where(
+                        CatalogDocument.kind == "recipe",
+                        func.lower(CatalogDocument.slug) == selector.lower(),
+                    )
+                    .order_by(CatalogDocument.publisher, CatalogDocument.slug, CatalogDocument.id)
+                )
+            )
+            if len(candidates) != 1:
+                raise FleetProfileConflict(
+                    "recipe selector is not an exact unique active recipe"
+                )
+            document = candidates[0]
+        revision = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.document_id == document.id,
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+            .order_by(
+                CatalogDocumentRevision.revision_number.desc(),
+                CatalogDocumentRevision.created_at.desc(),
+                CatalogDocumentRevision.id.desc(),
+            )
+            .limit(1)
+        )
+        if revision is None:
+            raise FleetProfileConflict("recipe has no active catalog revision")
+        return document, revision
+
+    @staticmethod
+    def _recipe_selector(document: CatalogDocument) -> str:
+        return document.slug
+
+    def _resolve_choice(
+        self, session: Session, choice: FleetProfileAssignmentInput
+    ) -> tuple[CatalogDocument, CatalogDocumentRevision, Mapping[str, object] | None]:
+        """Resolve one choice once for both presentation and execution."""
+
+        document, revision = self._recipe_document(session, choice.recipe_selector)
+        cache: Mapping[str, object] | None = None
+        if self._cache_resolver is not None:
+            try:
+                candidate = self._cache_resolver(
+                    recipe_identity=document.id,
+                    model_variant=choice.model_variant,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                raise FleetProfileConflict("latest cached profile resolution failed") from error
+            if not isinstance(candidate, Mapping):
+                raise FleetProfileConflict("latest cached profile resolution returned an invalid contract")
+            cache = candidate
+            recipe_part = candidate.get("recipe")
+            chosen_id = (
+                recipe_part.get("recipe_revision_id")
+                if isinstance(recipe_part, Mapping)
+                else None
+            )
+            if isinstance(chosen_id, str) and chosen_id != revision.id:
+                chosen = session.get(CatalogDocumentRevision, chosen_id)
+                if (
+                    chosen is None
+                    or chosen.kind != "recipe"
+                    or chosen.state != "active"
+                    or chosen.document_id != document.id
+                ):
+                    raise FleetProfileConflict("cache resolver returned an incompatible recipe revision")
+                revision = chosen
+        return document, revision, cache
+
+    @staticmethod
+    def _assignment_selector(choice: FleetProfileAssignmentInput) -> str:
+        if choice.assignment_name is not None:
+            return choice.assignment_name
+        value = choice.recipe_selector.lower().replace("/", "-").replace(" ", "-")
+        value = "".join(character if character.isalnum() or character in "-_." else "-" for character in value)
+        value = value.strip("-_.") or "assignment"
+        return value[:63].rstrip("-_.") or "assignment"
+
+    @staticmethod
+    def _choices(row: FleetProfile) -> tuple[FleetProfileAssignmentInput, ...]:
+        try:
+            return tuple(_STORED_ASSIGNMENTS.validate_json(canonical_message(row.assignments)))
+        except (TypeError, ValueError, ValidationError) as error:
+            raise FleetProfileConflict("persisted Fleet profile choices are invalid") from error
+
+    def _execution_assignments(
+        self, session: Session, row: FleetProfile
+    ) -> tuple[FleetProfileAssignment, ...]:
+        """Resolve logical choices into strict, load-bound assignments.
+
+        A choice may be an incomplete distributed draft.  The generated rank
+        mapping remains deterministic so preview can report the topology
+        blocker; it is never submitted unless the recipe's exact topology
+        accepts the complete group.
+        """
+
+        result: list[FleetProfileAssignment] = []
+        for choice in self._choices(row):
+            document, revision, _cache = self._resolve_choice(session, choice)
+            topology = recipe_topology(revision.document)
+            roles = _expanded_roles(topology)
+            nodes = [
+                FleetProfileNode(
+                    node_id=node_id,
+                    rank=rank,
+                    role=roles[rank][0] if rank < len(roles) else "unresolved",
+                    endpoint_owner=(roles[rank][1] if rank < len(roles) else rank == 0),
+                )
+                for rank, node_id in enumerate(choice.spark_ids)
+            ]
+            alias = choice.assignment_name
+            if choice.desired_state == "running" and alias is None:
+                alias = self._assignment_selector(choice)
+            result.append(
+                FleetProfileAssignment(
+                    id=_choice_id(choice),
+                    recipe_revision_id=revision.id,
+                    topology_name=str(topology.get("name", "unresolved")),
+                    desired_state=choice.desired_state,
+                    alias=alias,
+                    nodes=nodes,
+                    recipe_id=document.id,
+                    recipe_title=document.title,
+                    model_title=self._model_title(session, revision.document),
+                )
+            )
+        return tuple(result)
 
     def list(self) -> FleetProfileList:
         now = _aware(self._clock())
@@ -745,9 +897,8 @@ class FleetProfileService:
             rows = tuple(
                 session.scalars(
                     select(FleetProfile)
-                    .where(FleetProfile.name.not_like(f"{_INTERNAL_PLACEMENT_PREFIX}%"))
                     .order_by(
-                        FleetProfile.favorite.desc(), FleetProfile.name, FleetProfile.id
+                        FleetProfile.number.asc()
                     )
                     .limit(128)
                 )
@@ -763,285 +914,85 @@ class FleetProfileService:
                 raise KeyError(profile_id)
             return self._view(session, row)
 
-    def duplicate(
-        self,
-        profile_id: str,
-        *,
-        name: str,
-        description: str | None = None,
-        actor: str,
-    ) -> FleetProfileView:
-        source = self.get(profile_id)
-        value = FleetProfileInput(
-            name=name,
-            description=source.description if description is None else description,
-            installation_policy=source.installation_policy,
-            labels=dict(source.labels),
-            favorite=False,
-            scope=source.scope,
-            assignments=[
-                FleetProfileAssignmentInput.model_validate(
-                    item.model_dump(
-                        mode="json",
-                        exclude={
-                            "id",
-                            "recipe_id",
-                            "recipe_title",
-                            "model_title",
-                        },
-                    )
-                )
-                for item in source.assignments
-            ],
-        )
-        return self.create(value, actor=actor)
-
-    def capture_current(
-        self,
-        *,
-        name: str,
-        description: str = "Captured current Fleet setup",
-        installation_policy: str = "keep-cached",
-        labels: Mapping[str, str] | None = None,
-        favorite: bool = False,
-        actor: str,
-    ) -> FleetProfileView:
-        """Capture the controller's current setup as an immutable profile."""
-
+    def get_number(self, number: int) -> FleetProfileView:
+        if type(number) is not int or number < 1:
+            raise KeyError(number)
         with self._sessions() as session:
-            scope = sorted(
-                node.node_id
-                for node in session.scalars(
-                    select(AgentNode).where(AgentNode.revoked_at.is_(None))
-                )
-            )
-            active_installations = tuple(
-                session.scalars(
-                    select(RecipeInstallation)
-                    .where(RecipeInstallation.state.in_(_ACTIVE_INSTALL_STATES))
-                    .order_by(RecipeInstallation.created_at, RecipeInstallation.id)
-                )
-            )
-            runs = {
-                run.installation_id: run
-                for run in session.scalars(
-                    select(RecipeRun).where(RecipeRun.state.in_(_ACTIVE_RUN_STATES))
-                )
-            }
-            assignments: list[FleetProfileAssignmentInput] = []
-            for installation in active_installations:
-                mapping = session.get(ClusterMapping, installation.mapping_id)
-                if mapping is None:
-                    continue
-                members = tuple(
+            row = session.scalar(select(FleetProfile).where(FleetProfile.number == number))
+            if row is None:
+                raise KeyError(number)
+            return self._view(session, row)
+
+    def read_number(self, number: int) -> FleetProfileView:
+        """Read a stable unused number without creating persistent state."""
+
+        try:
+            return self.get_number(number)
+        except KeyError:
+            if type(number) is not int or number < 1:
+                raise
+            now = _aware(self._clock())
+            with self._sessions() as session:
+                roster = tuple(
                     session.scalars(
-                        select(ClusterMappingNode)
-                        .where(ClusterMappingNode.mapping_id == mapping.id)
-                        .order_by(ClusterMappingNode.rank)
+                        select(AgentNode)
+                        .where(AgentNode.revoked_at.is_(None))
+                        .order_by(AgentNode.node_id)
                     )
                 )
-                if not members:
-                    continue
-                run = runs.get(installation.id)
-                assignments.append(
-                    FleetProfileAssignmentInput(
-                        recipe_revision_id=installation.recipe_revision_id,
-                        topology_name=mapping.topology_name,
-                        desired_state="running" if run is not None else "installed",
-                        alias=run.alias if run is not None else None,
-                        nodes=[
-                            FleetProfileNode(
-                                node_id=member.node_id,
-                                rank=member.rank,
-                                role=member.role,
-                                endpoint_owner=member.endpoint_owner,
+                display_names = {
+                    item.node_id: item.display_name
+                    for item in session.scalars(
+                        select(AgentNodeProfile).where(
+                            AgentNodeProfile.node_id.in_(
+                                [node.node_id for node in roster]
                             )
-                            for member in members
-                        ],
+                        )
                     )
-                )
-        value = FleetProfileInput(
-            name=name,
-            description=description,
-            installation_policy=installation_policy,
-            labels=dict(labels or {}),
-            favorite=favorite,
-            scope=FleetProfileScope(node_ids=scope),
-            assignments=assignments,
-        )
-        return self.create(value, actor=actor)
-
-    def status(self, profile_id: str) -> FleetProfileStatusView:
-        preview = self.preview(profile_id)
-        with self._sessions() as session:
-            profile = session.get(FleetProfile, profile_id)
-            if profile is None:
-                raise KeyError(profile_id)
-            active = session.scalar(
-                select(FleetProfileApplication.id)
-                .where(
-                    FleetProfileApplication.profile_id == profile_id,
-                    FleetProfileApplication.state.in_(
-                        ("queued", "running", "waiting-for-operator")
-                    ),
-                )
-                .limit(1)
-            )
-            latest = session.scalar(
-                select(FleetProfileApplication)
-                .where(FleetProfileApplication.profile_id == profile_id)
-                .order_by(
-                    FleetProfileApplication.created_at.desc(),
-                    FleetProfileApplication.id.desc(),
-                )
-                .limit(1)
-            )
-        blocked = not preview.allowed
-        switching = active is not None
-        matched = preview.allowed and not preview.steps and not switching
-        partially_applied = bool(
-            latest is not None
-            and latest.state in {"failed", "waiting-for-operator"}
-            and latest.current_step > 0
-        )
-        needs_preparation = bool(
-            preview.steps
-            and any(
-                step.kind
-                in {"create-placement", "build", "distribute-image", "install"}
-                for step in preview.steps
-            )
-        )
-        ready = bool(preview.steps) and not any(
-            step.kind
-            in {"create-placement", "build", "distribute-image", "install"}
-            for step in preview.steps
-        )
-        state = (
-            "blocked"
-            if blocked
-            else "switching"
-            if switching
-            else "partially-applied"
-            if partially_applied
-            else "matched"
-            if matched
-            else "needs-preparation"
-            if needs_preparation
-            else "ready"
-            if ready
-            else "drifted"
-        )
-        return FleetProfileStatusView(
-            profile_id=preview.profile_id,
-            profile_digest=preview.profile_digest,
-            state=state,
-            matched=matched,
-            drifted=not matched and not blocked,
-            scope=preview.scope,
-            reasons=preview.reasons,
-            generated_at=preview.generated_at,
-        )
-
-    def prepare_preview(self, profile_id: str) -> FleetProfilePreview:
-        """Return the reviewed, preparation-only plan for a profile."""
-
-        preview = self.preview(profile_id)
-        preparation_kinds = {
-            "create-placement",
-            "build",
-            "distribute-image",
-            "install",
-        }
-        steps = [
-            step for step in preview.steps if step.kind in preparation_kinds
-        ]
-        steps = [
-            step.model_copy(update={"index": index})
-            for index, step in enumerate(steps)
-        ]
-        summary = FleetProfilePlanSummary(
-            already_correct=preview.summary.already_correct,
-            placements=sum(step.kind == "create-placement" for step in steps),
-            builds=sum(step.kind == "build" for step in steps),
-            distributions=sum(step.kind == "distribute-image" for step in steps),
-            installs=sum(step.kind == "install" for step in steps),
-            starts=0,
-            stops=0,
-            uninstalls=0,
-            blockers=preview.summary.blockers,
-        )
-        plan_identity = {
-            "schema_version": 2,
-            "mode": "prepare",
-            "profile_id": preview.profile_id,
-            "profile_digest": preview.profile_digest,
-            "scope": preview.scope.model_dump(mode="json"),
-            "assignments": [
-                item.model_dump(mode="json") for item in preview.assignments
-            ],
-            "preparations": [
-                {
-                    "assignment_id": item.assignment_id,
-                    "preparation": self._preparation_identity(item.preparation),
                 }
-                for item in preview.preparations
-            ],
-            "reasons": [reason.model_dump(mode="json") for reason in preview.reasons],
-            "steps": [step.model_dump(mode="json") for step in steps],
-        }
-        return preview.model_copy(
-            update={
-                "steps": steps,
-                "summary": summary,
-                "plan_digest": _digest(plan_identity),
-            }
-        )
+            fleet = [
+                {
+                    "selector": node.node_id,
+                    "display_name": display_names.get(node.node_id, node.node_id),
+                    "state": "Idle",
+                }
+                for node in roster
+            ]
+            document = {"schema_version": 2, "number": number, "revision": 1, "assignments": []}
+            return FleetProfileView(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-forge:profile:{number}")),
+                number=number,
+                revision=1,
+                name="Default" if number == 1 else f"Profile {number}",
+                description="",
+                installation_policy="keep-cached",
+                labels={},
+                favorite=False,
+                assignments=[],
+                fleet=fleet,
+                status="not-created",
+                warnings=["Profile has not been created; the first edit will save it"],
+                next_actions=[f"vonkctl --profile {number} profile add RECIPE --spark SPARK"],
+                profile_digest=_digest(document),
+                created_by="uncreated",
+                created_at=now,
+                updated_at=now,
+            )
 
-    def prepare(
-        self,
-        profile_id: str,
-        *,
-        plan_digest: str,
-        request_key: str,
-        actor: str,
-    ) -> FleetProfileApplicationView:
-        """Queue preparation work while leaving the current setup intact."""
-
-        preview = self.prepare_preview(profile_id)
-        if not preview.allowed:
-            raise FleetProfileConflict("Fleet profile preview is blocked")
-        if preview.plan_digest != plan_digest:
-            raise FleetProfileConflict("Fleet profile preparation preview is stale")
-        return self._queue_application(
-            preview,
-            request_key=request_key,
-            actor=actor,
-            operation_kind="fleet-profile.prepare",
-        )
-
-    def switch(
-        self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
-    ) -> FleetProfileApplicationView:
-        return self.apply(
-            profile_id,
-            plan_digest=plan_digest,
-            request_key=request_key,
-            actor=actor,
-        )
-
-    def create(self, value: FleetProfileInput, *, actor: str) -> FleetProfileView:
+    def create(
+        self, value: FleetProfileInput, *, actor: str, number: int | None = None
+    ) -> FleetProfileView:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
-            scope = self._validated_scope(session, value)
             assignments = self._validated_assignments(session, value.assignments)
             row = FleetProfile(
+                number=number if number is not None else self._next_profile_number(session),
+                revision=1,
                 name=value.name,
                 description=value.description,
                 installation_policy=value.installation_policy,
                 labels=dict(value.labels),
                 favorite=value.favorite,
-                scope=scope,
                 assignments=assignments,
                 created_by=actor,
                 created_at=now,
@@ -1057,142 +1008,6 @@ class FleetProfileService:
             result = self._view(session, row)
         return result
 
-    def ensure_internal_placement(
-        self,
-        profile_id: str,
-        assignment: FleetProfileAssignmentInput,
-        *,
-        actor: str,
-    ) -> FleetProfileView:
-        """Materialize one hidden, deterministic profile for a direct placement.
-
-        The profile coordinator remains the sole multi-step lifecycle engine.  A
-        direct Library placement only supplies a one-assignment desired state and
-        is deliberately omitted from the saved-profile collection.
-        """
-
-        now = _aware(self._clock())
-        name = f"{_INTERNAL_PLACEMENT_PREFIX}{profile_id[:12]}"
-        with self._sessions.begin() as session:
-            scope = self._validated_scope(
-                session,
-                FleetProfileInput(
-                    name="Direct placement",
-                    scope=FleetProfileScope(
-                        node_ids=sorted(node.node_id for node in assignment.nodes)
-                    ),
-                    assignments=[assignment],
-                ),
-            )
-            assignments = self._validated_assignments(session, (assignment,))
-            existing = session.get(FleetProfile, profile_id, with_for_update=True)
-            if existing is None:
-                existing = FleetProfile(
-                    id=profile_id,
-                    name=name,
-                    description="Direct Library placement",
-                    installation_policy="keep-cached",
-                    labels={_INTERNAL_PLACEMENT_LABEL: "true"},
-                    favorite=False,
-                    scope=scope,
-                    assignments=assignments,
-                    created_by=actor,
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(existing)
-                try:
-                    session.flush()
-                except IntegrityError as error:
-                    raise FleetProfileConflict(
-                        "direct placement identity conflicts with saved Fleet state"
-                    ) from error
-            elif (
-                existing.name != name
-                or existing.labels.get(_INTERNAL_PLACEMENT_LABEL) != "true"
-                or existing.installation_policy != "keep-cached"
-                or existing.scope != scope
-                or existing.assignments != assignments
-            ):
-                raise FleetProfileConflict(
-                    "direct placement identity conflicts with saved Fleet state"
-                )
-            return self._view(session, existing)
-
-    def apply_internal_placement(
-        self,
-        profile_id: str,
-        *,
-        profile_plan_digest: str,
-        placement_plan_digest: str,
-        request_key: str,
-        actor: str,
-        metadata: Mapping[str, object],
-    ) -> FleetProfileApplicationView:
-        """Apply through the profile coordinator and bind direct-placement metadata."""
-
-        result = self.apply(
-            profile_id,
-            plan_digest=profile_plan_digest,
-            request_key=request_key,
-            actor=actor,
-        )
-        with self._sessions.begin() as session:
-            row = session.get(FleetProfileApplication, result.id, with_for_update=True)
-            if row is None:
-                raise FleetProfileConflict(
-                    "direct placement application is unavailable"
-                )
-            progress = FleetProfileApplicationProgress.model_validate(
-                row.progress
-            ).model_dump(mode="python")
-            existing = progress.get("library_placement")
-            placement = {
-                **dict(metadata),
-                "plan_digest": placement_plan_digest,
-            }
-            if existing is not None and existing != placement:
-                raise FleetProfileConflict(
-                    "direct placement request key was reused for another plan"
-                )
-            typed_placement = FleetProfileLibraryPlacementContext.model_validate(
-                placement
-            )
-            progress["library_placement"] = typed_placement.model_dump(mode="json")
-            row.progress = FleetProfileApplicationProgress.model_validate(
-                progress
-            ).model_dump(mode="json")
-            row.updated_at = _aware(self._clock())
-            session.flush()
-            return self._application_view(row)
-
-    def replay_internal_placement(
-        self, request_key: str
-    ) -> FleetProfileApplicationView | None:
-        """Return an exact direct-placement replay before live state is re-previewed."""
-
-        with self._sessions() as session:
-            row = session.scalar(
-                select(FleetProfileApplication).where(
-                    FleetProfileApplication.request_key == request_key
-                )
-            )
-            if row is None:
-                return None
-            try:
-                progress = FleetProfileApplicationProgress.model_validate(
-                    row.progress
-                )
-            except ValidationError as error:
-                raise FleetProfileConflict(
-                    "persisted profile application progress is invalid"
-                ) from error
-            if progress.library_placement is None:
-                raise FleetProfileConflict(
-                    "direct placement request key was used by another operation"
-                )
-            return self._application_view(row)
-
     def update(
         self, profile_id: str, value: FleetProfileInput, *, actor: str
     ) -> FleetProfileView:
@@ -1204,14 +1019,17 @@ class FleetProfileService:
             row = session.get(FleetProfile, profile_id, with_for_update=True)
             if row is None:
                 raise KeyError(profile_id)
-            scope = self._validated_scope(session, value)
+            if value.expected_revision is not None and row.revision != value.expected_revision:
+                raise FleetProfileConflict(
+                    f"profile revision conflict: expected {value.expected_revision}, current {row.revision}"
+                )
             assignments = self._validated_assignments(session, value.assignments)
             row.name = value.name
             row.description = value.description
             row.installation_policy = value.installation_policy
             row.labels = dict(value.labels)
             row.favorite = value.favorite
-            row.scope = scope
+            row.revision += 1
             row.assignments = assignments
             row.updated_at = now
             try:
@@ -1223,64 +1041,90 @@ class FleetProfileService:
             result = self._view(session, row)
         return result
 
-    def delete(self, profile_id: str) -> None:
-        with self._sessions.begin() as session:
-            row = session.get(FleetProfile, profile_id, with_for_update=True)
-            if row is None:
-                raise KeyError(profile_id)
-            active = session.scalar(
-                select(FleetProfileApplication.id)
-                .where(
-                    FleetProfileApplication.profile_id == profile_id,
-                    FleetProfileApplication.state.in_(("queued", "running")),
+    def update_number(
+        self, number: int, value: FleetProfileInput, *, actor: str
+    ) -> FleetProfileView:
+        """Autosave a numbered profile with optimistic concurrency."""
+
+        with self._sessions() as session:
+            row = session.scalar(select(FleetProfile).where(FleetProfile.number == number))
+        if row is None:
+            if type(number) is not int or number < 1:
+                raise KeyError(number)
+            return self.create(value, actor=actor, number=number)
+        return self.update(row.id, value, actor=actor)
+
+    def load(
+        self,
+        number: int,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> FleetProfileApplicationView:
+        """Preview and bind one whole-fleet execution in one operator action."""
+
+        profile = self.get_number(number)
+        preview = self.preview(profile.id)
+        if not preview.allowed:
+            raise FleetProfileConflict("Fleet profile preview is blocked")
+        return self._queue_application(
+            preview,
+            request_key=request_key,
+            actor=actor,
+            operation_kind="fleet-profile.apply",
+        )
+
+    def progress_number(self, number: int) -> FleetProfileApplicationView:
+        profile = self.get_number(number)
+        with self._sessions() as session:
+            row = session.scalar(
+                select(FleetProfileApplication)
+                .where(FleetProfileApplication.profile_id == profile.id)
+                .order_by(
+                    FleetProfileApplication.created_at.desc(),
+                    FleetProfileApplication.id.desc(),
                 )
                 .limit(1)
             )
-            if active is not None:
-                raise FleetProfileConflict("Fleet profile has an active application")
-            session.execute(
-                delete(FleetProfileApplication).where(
-                    FleetProfileApplication.profile_id == profile_id
-                )
-            )
-            session.delete(row)
+            if row is None:
+                raise KeyError(number)
+            return self._application_view(row)
 
-    def preview(self, profile_id: str) -> FleetProfilePreview:
+    def preview(
+        self,
+        profile_id: str,
+        *,
+        execution_assignments: tuple[FleetProfileAssignment, ...] | None = None,
+        target_node_ids: tuple[str, ...] | None = None,
+        profile_name: str | None = None,
+        profile_digest: str | None = None,
+    ) -> FleetProfilePreview:
         now = _aware(self._clock())
         with self._sessions() as session:
             row = session.get(FleetProfile, profile_id)
-            if row is None:
+            if row is None and execution_assignments is None:
                 raise KeyError(profile_id)
-            view = self._view(session, row)
+            if row is not None:
+                view = self._view(session, row)
+                resolved_assignments = self._execution_assignments(session, row)
+                resolved_name = view.name
+                resolved_digest = view.profile_digest
+            else:
+                resolved_assignments = execution_assignments
+                resolved_name = profile_name or "Direct placement"
+                resolved_digest = profile_digest or _digest(
+                    {"profile_id": profile_id, "assignments": [item.model_dump(mode="json") for item in resolved_assignments]}
+                )
             assignment_previews: list[FleetProfileAssignmentPreview] = []
             assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             reasons: list[FleetProfileReason] = []
-            scope_rows = {
-                node.node_id: node
-                for node in session.scalars(
-                    select(AgentNode).where(
-                        AgentNode.node_id.in_(view.scope.node_ids)
-                    )
+            roster = tuple(
+                session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.revoked_at.is_(None))
+                    .order_by(AgentNode.node_id)
                 )
-            }
-            missing_scope_nodes = [
-                node_id
-                for node_id in view.scope.node_ids
-                if node_id not in scope_rows
-                or scope_rows[node_id].revoked_at is not None
-            ]
-            if missing_scope_nodes:
-                reasons.append(
-                    FleetProfileReason(
-                        code="profile.scope_changed",
-                        detail=(
-                            "Profile scope contains a Spark that is no longer an "
-                            "active enrolled Fleet member: "
-                            + ", ".join(missing_scope_nodes)
-                        ),
-                        severity="error",
-                    )
-                )
+            )
             stop_steps: list[dict[str, object]] = []
             uninstall_steps: list[dict[str, object]] = []
             preparation_steps: list[dict[str, object]] = []
@@ -1293,12 +1137,49 @@ class FleetProfileService:
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
             # member has no assignment and must still participate in the plan.
-            target_nodes = set(view.scope.node_ids)
+            target_nodes = (
+                set(target_node_ids)
+                if target_node_ids is not None
+                else {node.node_id for node in roster}
+            )
 
-            for assignment in view.assignments:
+            for assignment in resolved_assignments:
                 state = self._assignment_state(session, assignment)
                 preparation = None
                 expected_nodes = tuple(sorted(node.node_id for node in assignment.nodes))
+                item_reasons: list[FleetProfileReason] = []
+                active_node_ids = {node.node_id for node in roster}
+                unknown_nodes = sorted(set(expected_nodes) - active_node_ids)
+                revision = session.get(
+                    CatalogDocumentRevision, assignment.recipe_revision_id
+                )
+                required_count = None
+                if revision is not None:
+                    topology = recipe_topology(revision.document)
+                    value = topology.get("node_count")
+                    required_count = value if type(value) is int else None
+                if unknown_nodes:
+                    item_reasons.append(
+                        FleetProfileReason(
+                            code="profile.spark_unavailable",
+                            detail=(
+                                "Assignment references inactive or unknown Sparks: "
+                                + ", ".join(unknown_nodes)
+                            ),
+                            severity="error",
+                        )
+                    )
+                if required_count is None or len(assignment.nodes) != required_count:
+                    item_reasons.append(
+                        FleetProfileReason(
+                            code="profile.topology_incomplete",
+                            detail=(
+                                f"Recipe requires {required_count or 'a valid'} Sparks; "
+                                f"the draft assigns {len(assignment.nodes)}."
+                            ),
+                            severity="error",
+                        )
+                    )
                 if self._preparation_provider is None:
                     if not preparation_unavailable_reported:
                         reasons.append(
@@ -1382,7 +1263,6 @@ class FleetProfileService:
                 if self._switch_adapter is not None and state.run is not None:
                     managed_run_ids.add(state.run.id)
                 actions: list[str] = []
-                item_reasons: list[FleetProfileReason] = []
                 if (
                     self._switch_adapter is None
                     and assignment.desired_state == "installed"
@@ -1507,7 +1387,7 @@ class FleetProfileService:
                 )
             )
             run_nodes = self._run_nodes(session, [run.id for run in active_runs])
-            if self._switch_adapter is not None and not view.assignments:
+            if self._switch_adapter is not None and not resolved_assignments:
                 # An empty assignment set is an explicit all-idle outcome.  If
                 # the scope currently contains a run, route reconciliation
                 # through the composite child so Run/Switch can stop the
@@ -1569,7 +1449,8 @@ class FleetProfileService:
                 )
                 scheduled_stops.add(run.id)
 
-            if row.installation_policy == "exact" and target_nodes:
+            installation_policy = row.installation_policy if row is not None else "keep-cached"
+            if installation_policy == "exact" and target_nodes:
                 installations = tuple(
                     session.scalars(
                         select(RecipeInstallation)
@@ -1648,7 +1529,7 @@ class FleetProfileService:
                     {
                         "kind": "switch",
                         "node_ids": sorted(target_nodes),
-                        "label": f"Switch profile {view.name}",
+                        "label": f"Switch profile {resolved_name}",
                     }
                 )
             # Prepare images and installations while the current profile can
@@ -1690,8 +1571,8 @@ class FleetProfileService:
             )
             identity = {
                 "schema_version": 2,
-                "profile_id": view.id,
-                "profile_digest": view.profile_digest,
+                "profile_id": profile_id,
+                "profile_digest": resolved_digest,
                 "scope": sorted(target_nodes),
                 "steps": [step.model_dump(mode="json") for step in steps],
                 "assignment_state": [
@@ -1712,9 +1593,9 @@ class FleetProfileService:
                 "reasons": [reason.model_dump(mode="json") for reason in reasons],
             }
             return FleetProfilePreview(
-                profile_id=view.id,
-                profile_name=view.name,
-                profile_digest=view.profile_digest,
+                profile_id=profile_id,
+                profile_name=resolved_name,
+                profile_digest=resolved_digest,
                 generated_at=now,
                 allowed=blocker_count == 0,
                 scope=FleetProfileScopePreview(
@@ -1723,7 +1604,7 @@ class FleetProfileService:
                         target_nodes
                         - {
                             node.node_id
-                            for assignment in view.assignments
+                            for assignment in resolved_assignments
                             for node in assignment.nodes
                         }
                     ),
@@ -1785,11 +1666,24 @@ class FleetProfileService:
                     )
                 return self._application_view(existing)
             intended_view = self._view(session, profile)
-            intended = FleetProfileIntendedConfiguration.model_validate(intended_view.model_dump(include={"profile_digest", "installation_policy", "scope", "assignments"}))
+            frozen_assignments = self._execution_assignments(session, profile)
+            frozen_nodes = tuple(
+                node.node_id
+                for node in session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.revoked_at.is_(None))
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            intended = FleetProfileIntendedConfiguration(
+                profile_digest=intended_view.profile_digest,
+                installation_policy=profile.installation_policy,
+                scope=FleetProfileScope(node_ids=list(frozen_nodes)),
+                assignments=list(frozen_assignments),
+            )
             if intended.profile_digest != preview.profile_digest:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
             attempt = 1
-            placement = None
             if retry_of_application_id is not None:
                 parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
                 if parent is None:
@@ -1799,8 +1693,13 @@ class FleetProfileService:
                     raise FleetProfileConflict("Only failed or waiting applications can be retried")
                 if parent.profile_digest != intended.profile_digest:
                     raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
+                profile_filter = (
+                    FleetProfileApplication.profile_id.is_(None)
+                    if parent.profile_id is None
+                    else FleetProfileApplication.profile_id == parent.profile_id
+                )
                 applications = session.scalars(select(FleetProfileApplication).where(
-                    FleetProfileApplication.profile_id == parent.profile_id,
+                    profile_filter,
                     FleetProfileApplication.id != parent.id,
                 ))
                 for other in applications:
@@ -1813,7 +1712,6 @@ class FleetProfileService:
                     raise FleetProfileConflict("Persisted application intent is unavailable")
                 intended = prior.intended_profile
                 attempt = prior.attempt + 1
-                placement = prior.library_placement
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,
@@ -1828,7 +1726,6 @@ class FleetProfileService:
                     attempt=attempt,
                     retry_of_application_id=retry_of_application_id,
                     intended_profile=intended,
-                    library_placement=placement,
                     completed_steps=0,
                     total_steps=len(preview.steps),
                 ).model_dump(mode="json"),
@@ -1856,8 +1753,11 @@ class FleetProfileService:
             return False
         progress = FleetProfileApplicationProgress.model_validate(row.progress)
         profile = session.get(FleetProfile, row.profile_id)
-        if (progress.intended_profile is None or profile is None
-                or self._view(session, profile).profile_digest != row.profile_digest):
+        if (
+            progress.intended_profile is None
+            or profile is None
+            or self._view(session, profile).profile_digest != row.profile_digest
+        ):
             return False
         others = session.scalars(select(FleetProfileApplication).where(
             FleetProfileApplication.profile_id == row.profile_id,
@@ -1901,11 +1801,12 @@ class FleetProfileService:
                     raise FleetProfileConflict("Current child operation state must be reconciled before retry") from error
                 if child.state not in {"succeeded", "failed", "cancelled", "expired", "waiting-for-operator"}:
                     raise FleetProfileConflict("Current child operation is still active")
-            profile_id = parent.profile_id
             operation_kind = progress.operation_kind or "fleet-profile.apply"
+            if operation_kind != "fleet-profile.apply":
+                raise FleetProfileConflict("Only current profile loads can be recovered")
             profile_digest = parent.profile_digest
-        preview = (self.prepare_preview(profile_id)
-                   if operation_kind == "fleet-profile.prepare" else self.preview(profile_id))
+            persisted_plan = _persisted_profile_plan(parent)
+        preview = self.preview(persisted_plan.profile_id)
         if preview.profile_digest != profile_digest:
             raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
         if not preview.allowed:
@@ -2042,10 +1943,7 @@ class FleetProfileService:
             "id": row.id,
             "parent_id": typed_progress.retry_of_application_id,
             "node_ids": list(cls._operation_scope(row)),
-            "kind": (
-                "library.placement" if typed_progress.library_placement is not None
-                else operation_kind or "fleet-profile.apply"
-            ),
+            "kind": operation_kind or "fleet-profile.apply",
             "state": row.state,
             "attempt": typed_progress.attempt,
             "progress": progress,
@@ -2402,138 +2300,111 @@ class FleetProfileService:
         self, session: Session, values: Sequence[FleetProfileAssignmentInput]
     ) -> list[dict[str, object]]:
         assignments: list[dict[str, object]] = []
-        all_node_ids = {node.node_id for value in values for node in value.nodes}
-        nodes = (
-            {
-                node.node_id: node
-                for node in session.scalars(
-                    select(AgentNode).where(AgentNode.node_id.in_(all_node_ids))
-                )
-            }
-            if all_node_ids
-            else {}
-        )
         for value in values:
-            revision = session.get(CatalogDocumentRevision, value.recipe_revision_id)
-            if revision is None:
-                raise FleetProfileConflict("profile recipe revision does not exist")
-            if revision.kind != "recipe" or revision.state != "active":
-                raise FleetProfileConflict("profile recipe revision must be active")
-            try:
-                topology = recipe_topology(revision.document)
-            except RecipeRuntimeSpecError as error:
-                raise FleetProfileConflict(str(error)) from error
-            if topology.get("name") != value.topology_name:
-                raise FleetProfileConflict(
-                    "profile topology does not match the recipe revision"
-                )
-            node_count = topology.get("node_count")
-            if type(node_count) is not int or node_count != len(value.nodes):
-                raise FleetProfileConflict(
-                    "profile Spark count does not match the recipe topology"
-                )
-            expected_roles = _expanded_roles(topology)
-            actual_roles = tuple(
-                (node.role, node.endpoint_owner)
-                for node in sorted(value.nodes, key=lambda item: item.rank)
+            document, _revision = self._recipe_document(session, value.recipe_selector)
+            # Save the canonical catalog selector.  This is a logical recipe
+            # choice; its active revision is deliberately resolved later.
+            normalized = value.model_copy(
+                update={"recipe_selector": self._recipe_selector(document)}
             )
-            if expected_roles != actual_roles:
-                raise FleetProfileConflict(
-                    "profile ranks and roles do not match the recipe topology"
-                )
-            ranked_node_ids = [
-                node.node_id for node in sorted(value.nodes, key=lambda item: item.rank)
-            ]
-            if ranked_node_ids != sorted(ranked_node_ids):
-                raise FleetProfileConflict(
-                    "profile rank order must match deterministic Spark identity order"
-                )
-            for node in value.nodes:
-                enrolled = nodes.get(node.node_id)
-                if enrolled is None or enrolled.revoked_at is not None:
-                    raise FleetProfileConflict(
-                        "profile Spark is not an active enrolled Fleet member"
-                    )
-            assignments.append(
-                json.loads(canonical_message(StoredFleetProfileAssignment(
-                    id=_assignment_id(value), **value.model_dump(mode="python")
-                )))
-            )
+            assignments.append(json.loads(canonical_message(normalized)))
         return assignments
 
-    def _validated_scope(
-        self, session: Session, value: FleetProfileInput
-    ) -> list[str]:
-        """Resolve and validate the explicit reconciliation boundary."""
-
-        assigned = {
-            node.node_id for assignment in value.assignments for node in assignment.nodes
-        }
-        scope = list(value.scope.node_ids)
-        if not scope:
-            raise FleetProfileConflict(
-                "Fleet profile scope must contain at least one enrolled Spark"
-            )
-        if not assigned <= set(scope):
-            raise FleetProfileConflict(
-                "profile assignment nodes must be inside profile scope"
-            )
-        rows = {
-            node.node_id: node
-            for node in session.scalars(
-                select(AgentNode).where(AgentNode.node_id.in_(scope))
-            )
-        }
-        if len(rows) != len(scope) or any(
-            rows[node].revoked_at is not None for node in scope
-        ):
-            raise FleetProfileConflict(
-                "profile scope contains an inactive Spark; every member must be "
-                "an active enrolled Fleet member"
-            )
-        return sorted(scope)
-
     def _view(self, session: Session, row: FleetProfile) -> FleetProfileView:
-        assignments: list[FleetProfileAssignment] = []
-        try:
-            stored_assignments = _STORED_ASSIGNMENTS.validate_json(canonical_message(row.assignments))
-        except (TypeError, ValueError) as error:
-            raise FleetProfileConflict("stored Fleet profile assignment is invalid") from error
-        for assignment in stored_assignments:
-            revision_id = assignment.recipe_revision_id
-            revision = session.get(CatalogDocumentRevision, revision_id)
-            if revision is None:
-                raise FleetProfileConflict(
-                    "stored Fleet profile recipe revision is unavailable"
-                )
-            recipe = session.get(CatalogDocument, revision.document_id)
-            if recipe is None:
-                raise FleetProfileConflict("stored Fleet profile recipe is unavailable")
-            model_title = self._model_title(session, revision.document)
+        choices = self._choices(row)
+        assignments: list[FleetProfileAssignmentView] = []
+        assigned_nodes = {node_id for choice in choices for node_id in choice.spark_ids}
+        cache_summary: dict[str, object] = {"cached": 0, "missing": 0, "unknown": 0}
+        warnings: list[str] = []
+        for choice in choices:
+            recipe, revision, cache = self._resolve_choice(session, choice)
+            topology = recipe_topology(revision.document)
+            required_sparks = topology.get("node_count")
+            required = required_sparks if type(required_sparks) is int else None
+            if self._cache_resolver is None:
+                warnings.append("Cache resolution is unavailable until the cache service is configured")
+            recipe_state = "Cached" if cache and bool(cache.get("recipe", {}).get("cached")) else "Recipe not cached"
+            model_state = "Cached" if cache and bool(cache.get("model", {}).get("cached")) else "Model not cached"
+            if cache is None:
+                cache_summary["unknown"] = int(cache_summary["unknown"]) + 1
+            elif recipe_state == "Cached" and model_state == "Cached":
+                cache_summary["cached"] = int(cache_summary["cached"]) + 1
+            else:
+                cache_summary["missing"] = int(cache_summary["missing"]) + 1
+            resources = dict(cache.get("resources", {})) if cache else {}
+            model_document = resolve_recipe_entities(session, revision.document).get("models", ())
+            model = model_document[0] if model_document else None
+            model_selector = None
+            model_name = None
+            if model is not None:
+                model_selector = f"{model.publisher}/{model.slug}"
+                model_name = self._model_title(session, revision.document)
+            assignment_selector = self._assignment_selector(choice)
             assignments.append(
-                FleetProfileAssignment(
-                    **assignment.model_dump(mode="python"),
+                FleetProfileAssignmentView(
+                    selector=assignment_selector,
+                    display_name=recipe.title,
+                    recipe_selector=recipe.slug,
                     recipe_id=recipe.id,
-                    recipe_title=recipe.title,
-                    model_title=model_title,
+                    spark_ids=list(choice.spark_ids),
+                    required_sparks=required,
+                    assigned_sparks=len(choice.spark_ids),
+                    model={
+                        "selector": model_selector,
+                        "name": model_name,
+                        "variant": choice.model_variant,
+                        "state": model_state,
+                        "content_sha256": cache.get("model", {}).get("content_sha256") if cache else None,
+                    },
+                    recipe={
+                        "selector": recipe.slug,
+                        "name": recipe.title,
+                        "state": recipe_state,
+                        "revision_id": revision.id,
+                    },
+                    resources=resources,
+                    observed_state="Not loaded",
                 )
             )
-        scope = list(row.scope)
-        try:
-            profile_scope = FleetProfileScope(node_ids=scope)
-        except ValueError as error:
-            raise FleetProfileConflict("stored Fleet profile scope is invalid") from error
+        roster = tuple(
+            session.scalars(
+                select(AgentNode)
+                .where(AgentNode.revoked_at.is_(None))
+                .order_by(AgentNode.node_id)
+            )
+        )
+        display_names = {
+            item.node_id: item.display_name
+            for item in session.scalars(
+                select(AgentNodeProfile).where(
+                    AgentNodeProfile.node_id.in_([node.node_id for node in roster])
+                )
+            )
+        }
+        fleet = [
+            {
+                "selector": node.node_id,
+                "display_name": display_names.get(node.node_id, node.node_id),
+                "state": "Assigned" if node.node_id in assigned_nodes else "Idle",
+            }
+            for node in roster
+        ]
         document = _profile_document(row)
-        document["scope"] = list(profile_scope.node_ids)
         return FleetProfileView(
             id=row.id,
+            number=row.number,
+            revision=row.revision,
             name=row.name,
             description=row.description,
             installation_policy=row.installation_policy,
             labels=dict(row.labels),
             favorite=row.favorite,
-            scope=profile_scope,
             assignments=assignments,
+            fleet=fleet,
+            status="draft",
+            cache_summary=cache_summary,
+            warnings=sorted(set(warnings)),
+            next_actions=[f"vonkctl --profile {row.number} profile load"],
             profile_digest=_digest(document),
             created_by=row.created_by,
             created_at=_aware(row.created_at),
@@ -2821,9 +2692,6 @@ class FleetProfileService:
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
                 raise KeyError(application_id)
-            profile = session.get(FleetProfile, application.profile_id)
-            if profile is None:
-                raise KeyError(application.profile_id)
             return next(
                 (
                     item
@@ -2847,9 +2715,6 @@ class FleetProfileService:
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
                 raise KeyError(application_id)
-            profile = session.get(FleetProfile, application.profile_id)
-            if profile is None:
-                raise KeyError(application.profile_id)
             assignments = self._intended_profile(application).assignments
             return tuple(sorted(assignments, key=lambda item: item.id))
 

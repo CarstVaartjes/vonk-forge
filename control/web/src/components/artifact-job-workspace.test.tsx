@@ -1,6 +1,6 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ArtifactJob, LibraryApi, LibraryRecipeDetail, RecipeDefinition} from "../api/types";
+import type {ArtifactJob, LibraryApi, LibraryViewRecipeDetail, RecipeDefinition} from "../api/types";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {hashArtifactBlob} from "./artifact-hash";
 
@@ -21,7 +21,7 @@ const run = {
   state: "running" as const,
 };
 
-function detail(running = true): LibraryRecipeDetail {
+function detail(running = true): LibraryViewRecipeDetail {
   const definition = canonicalDefinition([canonicalImageInterface()]);
   return {
     schema_version: 2,
@@ -35,7 +35,7 @@ function detail(running = true): LibraryRecipeDetail {
     operational_state: {builds: [], mappings: [], installations: [], runs: running ? [run] : []},
     placement: [],
     reasons: [],
-  } as unknown as LibraryRecipeDetail;
+  } as unknown as LibraryViewRecipeDetail;
 }
 
 function canonicalImageInterface() {
@@ -118,7 +118,7 @@ function api(initialJobs: ArtifactJob[] = []) {
     finalizeArtifactJob: vi.fn().mockResolvedValue(job({operation_id: null, state: "ready"})),
     submitArtifactJob: vi.fn().mockResolvedValue(submitted),
     cancelArtifactJob: vi.fn().mockResolvedValue(job({state: "cancelled", status_reason: "Cancelled by operator"})),
-    artifactJobResultUrl: vi.fn((jobId: string, digest: string) => `/api/v1/artifact-jobs/${jobId}/results/${digest}`),
+    artifactJobResultUrl: vi.fn((jobId: string, digest: string) => `/api/artifact-jobs/${jobId}/results/${digest}`),
   };
 }
 

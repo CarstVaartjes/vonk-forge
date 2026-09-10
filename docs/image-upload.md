@@ -1,7 +1,7 @@
 # Recipe image archive uploads
 
 Spark-to-Controller image transfer uses authenticated `HEAD` and `PUT` on
-`/agent/v1/recipe-builds/{build_id}/image`. Both methods validate the same
+`/agent/recipe-builds/{build_id}/image`. Both methods validate the same
 Pydantic header contract: image digest, archive digest, complete image byte
 length (`x-vonk-image-bytes`), and optional upload offset (defaults to zero).
 `HEAD` returns `x-vonk-upload-offset` and `x-vonk-upload-complete`; their schema

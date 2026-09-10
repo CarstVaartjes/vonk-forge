@@ -169,14 +169,14 @@ git commit -m "feat: enforce repository review workflow"
 - Test: `tests/cluster_profiles/test_control_client.py`
 
 **Interfaces:**
-- API: `/api/v1/repository`, `/documents`, `/proposals`, `/changes`, `/reconciliations`.
+- API: `/api/repository`, `/documents`, `/proposals`, `/changes`, `/reconciliations`.
 - CLI: `vonkctl admin fleet|models|profiles|proposal|deploy|jobs|audit` using the API.
 
 - [ ] **Step 1: Write failing API/CLI equivalence test**
 
 ```python
 def test_cli_and_api_create_same_proposal(api_client, run_cli, change):
-    api = api_client.post("/api/v1/proposals", json=change).json()
+    api = api_client.post("/api/proposals", json=change).json()
     cli = json.loads(run_cli("admin", "proposal", "--file", change.path, "--json").stdout)
     assert (api["digest"], api["patch"]) == (cli["digest"], cli["patch"])
 ```
@@ -218,7 +218,7 @@ git commit -m "feat: administer repository state through API and CLI"
 - Create: `control/web/e2e/admin.spec.ts`
 
 **Interfaces:**
-- UI uses only `/api/v1`; no shell, Git, SSH, or direct database access.
+- UI uses only `/api`; no shell, Git, SSH, or direct database access.
 - Editors require base commit, typed fields, validation, diff preview, and explicit submit.
 - UI links to Caddy-protected LiteLLM administration for keys/teams/spend and Grafana for dashboards; it does not duplicate them or grant LiteLLM model authority.
 

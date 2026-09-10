@@ -23,6 +23,35 @@ def _module():
     return module
 
 
+def _failed_profile_application(reason: str) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "profile_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "profile_digest": "c" * 64,
+        "plan_digest": "d" * 64,
+        "attempt": 1,
+        "retry_of_application_id": None,
+        "state": "failed",
+        "current_step": 0,
+        "total_steps": 1,
+        "current_operation_id": None,
+        "status_reason": reason,
+        "progress": {
+            "attempt": 1,
+            "completed_steps": 0,
+            "total_steps": 1,
+            "current_label": "container-build",
+            "operation_kind": "fleet-profile.apply",
+            "step_results": {},
+            "assignments": {},
+        },
+        "result": None,
+        "created_at": "2026-09-10T10:00:00Z",
+        "updated_at": "2026-09-10T10:00:01Z",
+    }
+
+
 def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     tmp_path: Path,
 ) -> None:
@@ -566,10 +595,10 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         def request(method, path, body):
             assert (method, path, body) == (
                 "POST",
-                "/api/v1/agents/enrollments/grants",
-                {"ttl_seconds": 600},
+                "/api/fleet/enroll",
+                {"name": "Acceptance Spark", "ttl_seconds": 600},
             )
-            return 201, dict(grant)
+            return 201, {"grant": dict(grant)}
 
     run.control = Control()
 
@@ -581,7 +610,7 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     )
 
     invalid = dict(grant, installer_url="https://install.vonkforge.ai/spark")
-    Control.request = staticmethod(lambda method, path, body: (201, invalid))
+    Control.request = staticmethod(lambda method, path, body: (201, {"grant": invalid}))
     with pytest.raises(lifecycle.LifecycleError, match="grant is invalid"):
         run._create_grant()
 
@@ -778,7 +807,7 @@ def test_installer_error_survives_bounded_controller_diagnostics(
     assert "Error: Certificate" in rendered
 
 
-def test_canary_failure_keeps_phase_evidence_and_redacts_provider_secret(
+def test_profile_application_failure_is_typed_and_redacts_provider_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lifecycle = _module()
@@ -786,28 +815,18 @@ def test_canary_failure_keeps_phase_evidence_and_redacts_provider_secret(
     run.control = object()
     secret = "acceptance-provider-secret"
     monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret)
-    operation = {
-        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "state": "failed",
-        "failed_phase": "prepare",
-        "completed_phases": [],
-        "status_reason": "run-switch phase operation failed: failed",
-        "progress": {"phase": "prepare", "subphase": "container-build"},
-        "result": {"failure": {"detail": f"build rejected {secret}"}},
-    }
+    operation = _failed_profile_application(f"container-build rejected {secret}")
 
     with pytest.raises(lifecycle.LifecycleError) as failure:
-        run._await_canary_run_switch(
-            operation, expected_phases=["prepare"], label="synthetic canary run"
-        )
+        run._await_profile_application(operation, label="synthetic canary profile load")
 
     message = str(failure.value)
     assert "container-build" in message
-    assert "build rejected <redacted>" in message
+    assert "<redacted>" in message
     assert secret not in message
 
 
-def test_verbose_canary_transfer_history_cannot_erase_failure_or_service_journals(
+def test_profile_failure_cannot_erase_failure_or_service_journals(
     tmp_path: Path,
 ) -> None:
     lifecycle = _module()
@@ -815,16 +834,6 @@ def test_verbose_canary_transfer_history_cannot_erase_failure_or_service_journal
     run.control = object()
     run.bundle = tmp_path
     run.project = "vonk-spark-42-arm64"
-    operation = {
-        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "state": "failed", "failed_phase": "start", "completed_phases": [],
-        "status_reason": "run-switch phase operation failed",
-        "progress": {"phase": "start", "members": [{"receipt": "x" * 20_000}]},
-        "result": {
-            "failure": {"detail": "container runtime could not start the workload"},
-            "phase_results": [{"phase": "transfer", "receipt": "x" * 20_000}],
-        },
-    }
     def diagnostics(command):
         if "--unit=vonk-forge-package-helper.service" in command:
             message = "model ACL: Read-only file system"
@@ -836,7 +845,10 @@ def test_verbose_canary_transfer_history_cannot_erase_failure_or_service_journal
 
     run._diagnostic_command = diagnostics
     with pytest.raises(lifecycle.LifecycleError) as failure:
-        run._await_canary_run_switch(operation, expected_phases=["start"], label="canary")
+        run._await_profile_application(
+            _failed_profile_application("container runtime could not start the workload"),
+            label="synthetic canary profile load",
+        )
     rendered = str(run._installation_failure("synthetic canary", failure.value))
     assert len(rendered) < 8_000
     assert "container runtime could not start the workload" in rendered
@@ -994,13 +1006,9 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
         queries.append(query)
         return [[json.dumps(evidence)]] if "receipt_fingerprint" in query else []
     run._psql = psql
-    operation = {
-        "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "state": "failed", "completed_phases": [],
-        "status_reason": "runtime_preflight.retry_exhausted",
-    }
+    operation = _failed_profile_application("runtime_preflight.retry_exhausted")
     with pytest.raises(lifecycle.LifecycleError) as failure:
-        run._await_canary_run_switch(operation, expected_phases=["start"], label="canary")
+        run._await_profile_application(operation, label="canary")
     message = str(failure.value)
     assert evidence["current_fingerprint"] in message
     assert evidence["receipt_fingerprint"] in message
@@ -1013,55 +1021,107 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     assert "signed_grant" not in queries[0]
 
 
-def test_failed_canary_uninstall_reports_redacted_operation_evidence(monkeypatch) -> None:
-    from cluster_profiles.generated_control.models.agent_failure_result import (
-        AgentFailureResult,
-    )
-    from cluster_profiles.generated_control.models.operation_response import (
-        OperationResponse,
-    )
-    from cluster_profiles.generated_control.models.recipe_operation_result import (
-        RecipeOperationResult,
-    )
-    from cluster_profiles.generated_control.models.recipe_operation_result_node_evidence import (
-        RecipeOperationResultNodeEvidence,
+def test_profile_run_switch_receipt_is_required_for_successful_execution() -> None:
+    lifecycle = _module()
+    with pytest.raises(lifecycle.LifecycleError, match="child receipt is missing"):
+        lifecycle.SparkLifecycle._profile_run_switch_result(
+            {"0": {"operation_id": "11111111-1111-4111-8111-111111111111"}}
+        )
+    receipt = {"phase_results": [], "completed_phases": ["final_verify"]}
+    assert lifecycle.SparkLifecycle._profile_run_switch_result(
+        {"4": {"result": {"run_switch": receipt}}}
+    ) == receipt
+
+
+def test_recipe_download_consumes_typed_terminal_receipt() -> None:
+    lifecycle = _module()
+    from vonk_agent_protocol import OperationProgress
+    from vonk_control.recipe_image_availability_api import (
+        RecipeImageAvailabilityResponse,
+        RecipeImageAvailabilityResult,
     )
 
-    lifecycle = _module()
+    recipe_digest = "a" * 64
+    model_digest = "b" * 64
+    archive_digest = "c" * 64
+    image_digest = "sha256:" + "d" * 64
+    terminal = RecipeImageAvailabilityResponse(
+        id="11111111-1111-4111-8111-111111111111",
+        request_id="22222222-2222-4222-8222-222222222222",
+        kind="recipe.image.availability.v2",
+        state="succeeded",
+        attempt=1,
+        recipe_revision_id="33333333-3333-4333-8333-333333333333",
+        recipe_content_sha256=recipe_digest,
+        progress=OperationProgress(phase="available"),
+        result=RecipeImageAvailabilityResult(
+            recipe_content_sha256=recipe_digest,
+            model_content_digests=[model_digest],
+            source="controller-build",
+            platform_manifest_digest=image_digest,
+            image_digest=image_digest,
+            oci_archive_sha256=archive_digest,
+            image_bytes=3,
+        ),
+        created_at="2026-09-10T10:00:00Z",
+        updated_at="2026-09-10T10:00:01Z",
+    )
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath("package.tar.gz"),
+        package_bytes=b"package",
+        source_commit="e" * 40,
+        publisher="acceptance",
+        slug="synthetic-canary",
+        recipe_content_sha256=recipe_digest,
+        model_content_sha256=model_digest,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
-    secret = "fixture-upstream-secret"
-    monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret)
-    node_id = "spk_" + "b" * 32
-    evidence = RecipeOperationResultNodeEvidence.from_dict({
-        node_id: AgentFailureResult(
-            error_code="recipe_uninstall_failed",
-            reason="runtime cache cleanup failed: " + secret,
-        ).to_dict(),
-    })
-    operation = OperationResponse(
-        id="11111111-1111-4111-8111-111111111111",
-        kind="recipe.uninstall",
-        state="failed",
-        owner_id="22222222-2222-4222-8222-222222222222",
-        plan_digest="a" * 64,
-        nodes=[node_id],
-        result=RecipeOperationResult(
-            successful_nodes=[], failed_nodes=[node_id], node_evidence=evidence,
-        ),
+
+    observed = run._await_recipe_download(
+        terminal.model_dump(mode="json"),
+        fixture=fixture,
+        recipe_revision_id=terminal.recipe_revision_id,
     )
-    with pytest.raises(lifecycle.LifecycleError) as captured:
-        run._await_canary_recipe_operation(
-            operation.to_dict(),
-            node_id=node_id,
-            owner_id=operation.owner_id,
-            plan_digest=operation.plan_digest,
-        )
-    message = str(captured.value)
-    assert "recipe_uninstall_failed" in message
-    assert "runtime cache cleanup failed" in message
-    assert secret not in message
-    assert "<redacted>" in message
+
+    assert observed["state"] == "succeeded"
+    assert observed["result"]["image_digest"] == image_digest
+    assert observed["result"]["model_content_digests"] == [model_digest]
+
+
+def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
+    lifecycle = _module()
+    pending = _failed_profile_application("pending")
+    pending["state"] = "queued"
+    pending["status_reason"] = None
+    terminal = _failed_profile_application("")
+    terminal.update(
+        state="succeeded",
+        status_reason=None,
+        total_steps=0,
+        progress={"attempt": 1, "completed_steps": 0, "total_steps": 0},
+        result={"changed": False, "completed_steps": 0},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path))
+            assert payload is None
+            return 200, terminal
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    assert run._await_profile_application(pending, label="profile load")["state"] == "succeeded"
+    assert calls == [("GET", "/api/profile/1/progress")]
 
 
 @pytest.mark.parametrize(

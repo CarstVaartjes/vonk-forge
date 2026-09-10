@@ -71,7 +71,7 @@ def install_artifact_job_routes(
     service: ArtifactJobService | None,
 ) -> None:
     @app.get(
-        "/api/v1/artifact-jobs/capabilities",
+        "/api/artifact-jobs/capabilities",
         response_model=ArtifactJobCapabilitiesResponse,
         responses=bounded_error_responses(401, 503),
         operation_id="getArtifactJobCapabilities",
@@ -80,7 +80,7 @@ def install_artifact_job_routes(
         return _service(service).capabilities()
 
     @app.get(
-        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
         response_model=ArtifactJobListResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="listArtifactJobsForRun",
@@ -98,7 +98,7 @@ def install_artifact_job_routes(
             ) from None
 
     @app.post(
-        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,
@@ -128,7 +128,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.put(
-        "/api/v1/artifact-jobs/{job_id}/inputs/{name}",
+        "/api/artifact-jobs/{job_id}/inputs/{name}",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="uploadArtifactJobInput",
@@ -179,7 +179,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.post(
-        "/api/v1/artifact-jobs/{job_id}/finalize",
+        "/api/artifact-jobs/{job_id}/finalize",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="finalizeArtifactJob",
@@ -198,7 +198,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.post(
-        "/api/v1/artifact-jobs/{job_id}/submit",
+        "/api/artifact-jobs/{job_id}/submit",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
@@ -227,7 +227,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get(
-        "/api/v1/artifact-jobs/{job_id}",
+        "/api/artifact-jobs/{job_id}",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getArtifactJobStatus",
@@ -243,7 +243,7 @@ def install_artifact_job_routes(
             ) from None
 
     @app.post(
-        "/api/v1/artifact-jobs/{job_id}/cancel",
+        "/api/artifact-jobs/{job_id}/cancel",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelArtifactJob",
@@ -272,7 +272,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get(
-        "/api/v1/artifact-jobs/{job_id}/result",
+        "/api/artifact-jobs/{job_id}/result",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 404, 409, 422, 503),
         operation_id="getArtifactJobResult",
@@ -290,7 +290,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get(
-        "/api/v1/artifact-jobs/{job_id}/results/{sha256}",
+        "/api/artifact-jobs/{job_id}/results/{sha256}",
         operation_id="downloadArtifactJobResult",
         response_class=StreamingResponse,
         responses={
@@ -331,7 +331,7 @@ def install_artifact_job_routes(
         )
 
     @app.get(
-        "/agent/v1/recipe-jobs/{job_id}/inputs/{sha256}",
+        "/agent/recipe-jobs/{job_id}/inputs/{sha256}",
         response_class=Response,
         responses=download_responses("*/*"),
         openapi_extra={"x-vonk-streaming-transport": True},
@@ -362,7 +362,7 @@ def install_artifact_job_routes(
         )
 
     @app.put(
-        "/agent/v1/recipe-jobs/{job_id}/outputs/{sha256}",
+        "/agent/recipe-jobs/{job_id}/outputs/{sha256}",
         status_code=status.HTTP_204_NO_CONTENT,
         openapi_extra=upload_request_body("*/*"),
     )

@@ -1,6 +1,6 @@
 import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
-import type {ControlApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
 import type {LibraryRoute} from "../lib/library-route";
 import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
 import {formatBytes} from "../lib/fleet";
@@ -20,31 +20,31 @@ export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params =
 export type LibraryRecipeRecord = {
   key: string;
   title: string;
-  recipe?: LibraryRecipeSummary;
-  model?: LibraryModel["model"];
-  modelDocument?: LibraryModel["model_document"];
-  modelCapabilities?: LibraryModel["model_capabilities"];
+  recipe?: LibraryViewRecipe;
+  model?: LibraryViewModel["model"];
+  modelDocument?: LibraryViewModel["model_document"];
+  modelCapabilities?: LibraryViewModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
-  modelFiles: LibraryModel["model_document"]["files"];
+  modelFiles: LibraryViewModel["model_document"]["files"];
   modelBytes: number;
   capabilities: string[];
 };
 
-function modelTitle(model: LibraryModel): string {
+function modelTitle(model: LibraryViewModel): string {
   return model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
 }
 
-function recipeRecordKey(modelKey: string, recipe: LibraryRecipeSummary): string {
+function recipeRecordKey(modelKey: string, recipe: LibraryViewRecipe): string {
   return `${modelKey}:${recipe.recipe_id}:${recipe.publisher}/${recipe.slug}@${recipe.content_sha256}`;
 }
 
-export function recipeAttribution(document: LibraryRecipeSummary["recipe_document"]): string {
+export function recipeAttribution(document: LibraryViewRecipe["recipe_document"]): string {
   const attribution = [...new Set(document.provenance.attribution.map(value => value.trim()).filter(Boolean))];
   return attribution.length > 0 ? `Creator: ${attribution.join(", ")}` : "Creator: not declared";
 }
 
-export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot): LibraryRecipeRecord[] {
+export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): LibraryRecipeRecord[] {
   return snapshot.models.flatMap(model => {
     const key = modelKey(model.model);
     const title = modelTitle(model);
@@ -70,7 +70,7 @@ function NavigateLink({current, href, onNavigate, children}: {current?: boolean;
 
 export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filters, onFiltersChange, onNavigate, onQueryChange, query, route, snapshot}: {
   api: ControlApi;
-  detail?: LibraryRecipeDetail;
+  detail?: LibraryViewRecipeDetail;
   detailError?: string;
   detailLoading?: boolean;
   fleet?: VisualFleetSnapshot;
@@ -84,7 +84,7 @@ export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filt
   onRetryFleet?: () => void;
   query: string;
   route: LibraryRoute;
-  snapshot: LibrarySnapshot;
+  snapshot: LibraryViewSnapshot;
   [key: string]: unknown;
 }) {
   const records = buildLibraryRecipeRecords(snapshot);
