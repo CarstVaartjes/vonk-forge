@@ -1,13 +1,13 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {CacheEntryResponse, ControlApi, LibraryModel, ModelCacheOperationResponse, VisualFleetSnapshot} from "../api/types";
+import type {CacheEntryResponse, ControlApi, LibraryViewModel, ModelCacheOperationResponse, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import type {LibraryRecipeRecord} from "./library-workcell";
 import {availabilityFailure, availabilityRetryable, LibraryAvailabilityFeedback} from "./library-availability-feedback";
 import {LibraryRequestError} from "./library-request-error";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
 
-export type LibraryCacheEntry = {key: string; model: LibraryModel; cache?: CacheEntryResponse; files: LibraryModel["model_document"]["files"]; recipeCount: number; status: string; expectedBytes: number; verifiedBytes: number; error?: string};
+export type LibraryCacheEntry = {key: string; model: LibraryViewModel; cache?: CacheEntryResponse; files: LibraryViewModel["model_document"]["files"]; recipeCount: number; status: string; expectedBytes: number; verifiedBytes: number; error?: string};
 
 export async function loadModelCacheInventory(api: ControlApi, signal: AbortSignal): Promise<import("../api/types").ModelCacheInventoryResponse> {
   let cursor: string | undefined;
@@ -25,7 +25,7 @@ export async function loadModelCacheInventory(api: ControlApi, signal: AbortSign
   return {...first, entries, next_cursor: null, total: entries.length};
 }
 
-export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComplete}: {api: ControlApi; model: LibraryModel; modelAccessUrl?: string; onComplete?(): void}) {
+export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComplete}: {api: ControlApi; model: LibraryViewModel; modelAccessUrl?: string; onComplete?(): void}) {
   const [operation, setOperation] = useState<ModelCacheOperationResponse>();
   const [error, setError] = useState("");
   const completedOperation = useRef<string | undefined>(undefined);
@@ -62,7 +62,7 @@ export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComple
   return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Available on NAS" : retryable ? "Retry download" : "Make available"}</button>{operation && <><small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small><LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/></>}{!active && <details><summary>More actions</summary><button type="button" className="button secondary" onClick={() => void download(true)}>Download again</button></details>}{error && <LibraryRequestError error={error} title="Download to NAS failed." onRetry={() => void download()} retryLabel="Retry download"/>}{operation?.state === "failed" && operation.failure && <LibraryAvailabilityFeedback failure={availabilityFailure(operation.failure, {operationId: operation.id, preservedBytes: operation.progress.downloaded_bytes})} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={() => void checkAccess()} onRetry={retryable ? () => void download() : undefined} retryLabel="Retry download"/>}</span>;
 }
 
-export function aggregateCacheEntries(models: readonly LibraryModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
+export function aggregateCacheEntries(models: readonly LibraryViewModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
   return models.map(model => {
     const files = model.model_document.files;
     const candidates = (inventory?.entries ?? []).filter(entry => entry.model_content_sha256 === model.model.content_sha256);
@@ -79,7 +79,7 @@ export function aggregateCacheEntries(models: readonly LibraryModel[], inventory
 
 function terminal(state: ModelCacheOperationResponse["state"]): boolean { return ["succeeded", "failed", "cancelled"].includes(state); }
 
-export function LibraryCacheView({api, entries: _entries, modelInventory = [], onBusyChange, onNavigate, path: _path}: {api: ControlApi; entries?: LibraryRecipeRecord[]; modelInventory?: LibraryModel[]; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; path: string}) {
+export function LibraryCacheView({api, entries: _entries, modelInventory = [], onBusyChange, onNavigate, path: _path}: {api: ControlApi; entries?: LibraryRecipeRecord[]; modelInventory?: LibraryViewModel[]; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; path: string}) {
   const [inventory, setInventory] = useState<{entries: CacheEntryResponse[]} | undefined>();
   const [operation, setOperation] = useState<ModelCacheOperationResponse>();
   const [error, setError] = useState("");
@@ -92,7 +92,7 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
   const entries = useMemo(() => aggregateCacheEntries(modelInventory, inventory), [inventory, modelInventory]);
   const visible = entries.filter(entry => !query.trim() || `${entry.model.model_document.metadata.description} ${entry.model.model.slug}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const retryable = operation?.state === "failed" && availabilityRetryable(operation.failure);
-  async function download(model: LibraryModel) {
+  async function download(model: LibraryViewModel) {
     if (!api.previewModelCacheDownload || !api.downloadModelCache) return;
     setError("");
     try {

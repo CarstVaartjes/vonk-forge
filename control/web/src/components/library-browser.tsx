@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
 import {modelKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import {LibraryCacheView} from "./library-cache-view";
@@ -12,7 +12,7 @@ import {buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, libraryFilter
 export type LibrarySubview = "models" | "cache" | "profiles" | "recipes";
 
 export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, onBusyChange, onNavigate, onNavigatePath, onQueryChange, onRefresh, onRetryDetail, path, query, route, snapshot, subview}: {
-  api: ControlApi; detail?: LibraryRecipeDetail; detailError: string; detailLoading: boolean; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; onRefresh(signal: AbortSignal): Promise<void>; onRetryDetail(): void; path: string; query: string; route: LibraryRoute; snapshot: LibrarySnapshot; subview: LibrarySubview;
+  api: ControlApi; detail?: LibraryViewRecipeDetail; detailError: string; detailLoading: boolean; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; onRefresh(signal: AbortSignal): Promise<void>; onRetryDetail(): void; path: string; query: string; route: LibraryRoute; snapshot: LibraryViewSnapshot; subview: LibrarySubview;
 }) {
   const [filters, setFilters] = useState(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams));
   const records = useMemo(() => buildLibraryRecipeRecords(snapshot), [snapshot]);

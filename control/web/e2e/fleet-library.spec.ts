@@ -1,40 +1,20 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page, type Route} from "@playwright/test";
-import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import {currentRecipeDetail, libraryViewSnapshot, modelLibrary, recipeLibrary} from "../src/test-fixtures/library";
 import type {components} from "../src/api/generated";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
-const pairedRecipe = fullLibraryDetail.recipe;
-const pairedModel = librarySnapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === pairedRecipe.recipe_id))!;
-const pairedRecipeId = pairedRecipe.recipe_id;
-const pairedRecipeTitle = pairedRecipe.title;
+const pairedRecipe = recipeLibrary.recipes[0]!;
+const pairedModel = libraryViewSnapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === pairedRecipe.identity.recipe_id))!;
+const pairedRecipeId = pairedRecipe.identity.recipe_id;
+const pairedRecipeTitle = pairedRecipe.identity.title;
 const pairedModelKey = `${pairedModel.model.publisher}/${pairedModel.model.slug}@${pairedModel.model.content_sha256}`;
 
 function canonicalRecipeDetail() {
-  const detail = structuredClone(fullLibraryDetail);
-  const placementNode = {
-    artifact_reuse_bytes: 0, disk_free_after_bytes: 240 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_reserved_bytes: 0,
-    endpoint_owner: true, fabric_address: "fabric://node-alpha", fabric_bandwidth_mbps: 25_000, inventory_age_seconds: 1, inventory_observed_at: "2026-09-06T12:00:00Z",
-    memory_available_bytes: 100 * GIB, memory_free_after_bytes: 36 * GIB, memory_kind: "unified" as const, memory_required_bytes: 60 * GIB, memory_reserved_bytes: 4 * GIB,
-    node_id: "node-alpha", rank: 0, role: "leader", telemetry_age_seconds: 1, telemetry_observed_at: "2026-09-06T12:00:00Z",
-  };
-  detail.placement = [{
-    topology_name: detail.topology.name, node_count: 1, candidate_node_ids: ["node-alpha"],
-    recommendations: [{
-      eligible: true, group_complete: true, topology_name: detail.topology.name, node_ids: ["node-alpha"], nodes: [placementNode],
-      preview_targets: [{kind: "run", input: {installation_id: "installation-chat"}}], load_state: "not_loaded", install_state: "complete", reasons: [],
-      installation_ids: ["installation-chat"], mapping_id: null, ranking_scope: "bounded-advisory", recipe_build_id: null,
-      recipe_revision_id: detail.recipe.recipe_revision_id, run_ids: [],
-      score: {active_run_count: 0, artifact_reuse_bytes: 0, exact_install_complete: true, exact_install_partial: false, maximum_telemetry_age_seconds: 1, minimum_disk_headroom_bytes: 240 * GIB, minimum_memory_headroom_bytes: 36 * GIB},
-    }],
-    rejected_groups: [], rejected_nodes: [], evaluated_group_count: 1,
-    evidence_counts: {builds: 0, mappings: 0, mapping_members: 0, installations: 1, installation_members: 1, runs: 0, run_members: 0, truncated_collections: []},
-    limits: {}, reasons: [], rejected_evidence_truncated: false, search_complete: true,
-  }];
-  return detail;
+  return structuredClone(currentRecipeDetail);
 }
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
@@ -306,53 +286,40 @@ async function installLocalFleetFixture(page: Page) {
   });
   const cacheStorage = {schema_version: 2, total_bytes: 1_000, free_bytes: 700, reserve_bytes: 100, available_bytes: 600, unique_used_bytes: 300, in_flight_bytes: 0, protected_bytes: 100, reclaimable_bytes: 200};
   const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
-  const emptyRecipeAvailability: components["schemas"]["RecipeImageAvailabilityListResponse"] = {schema_version: 2, total: 0, operations: [], next_cursor: null};
   await page.route("**/api/model-cache", route => route.fulfill({json: emptyCacheInventory}));
   await page.route("**/api/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
   const emptyModelUpdates = {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null};
   await page.route("**/api/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
   await page.route("**/api/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
-  await page.route("**/api/library/recipe-image-availability", route => route.fulfill({json: emptyRecipeAvailability}));
-  await page.route("**/api/library/recipe-image-availability?*", route => route.fulfill({json: emptyRecipeAvailability}));
-  const librarySnapshotRoute = (route: Route) => {
+  const modelLibraryRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
-    const body = libraryState.empty ? {...librarySnapshot, models: [], unlinked_recipes: []} : librarySnapshot;
-    return route.fulfill({json: body});
+    return route.fulfill({json: libraryState.empty ? {...modelLibrary, models: []} : modelLibrary});
   };
-  await page.route("**/api/library", librarySnapshotRoute);
-  await page.route("**/api/library?*", librarySnapshotRoute);
-  await page.route("**/api/library/recipes/recipe-chat", route => {
+  const recipeLibraryRoute = (route: Route) => route.fulfill({json: libraryState.empty ? {...recipeLibrary, recipes: []} : recipeLibrary});
+  await page.route("**/api/model/library", modelLibraryRoute);
+  await page.route("**/api/model/library?*", modelLibraryRoute);
+  await page.route("**/api/recipe/library", recipeLibraryRoute);
+  await page.route("**/api/recipe/library?*", recipeLibraryRoute);
+  await page.route("**/api/recipe/recipe-chat", route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
-    return route.fulfill({json: fullLibraryDetail});
+    return route.fulfill({json: currentRecipeDetail});
   });
-  await page.route(`**/api/library/recipes/${pairedRecipeId}`, route => {
+  await page.route(`**/api/recipe/${pairedRecipeId}`, route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     return route.fulfill({json: canonicalRecipeDetail()});
   });
-  await page.route("**/api/library/recipes/recipe-code", route => route.fulfill({json: {
-    ...fullLibraryDetail,
-    recipe: {...fullLibraryDetail.recipe, recipe_id: codeRecipe.recipe_id, slug: codeRecipe.slug, title: codeRecipe.title, description: codeRecipe.description},
-  }}));
-  await page.route("**/api/library/recipes/recipe-unlinked", route => route.fulfill({json: {
-    ...minimalLibraryDetail,
-    recipe: {
-      recipe_id: unlinkedRecipe.recipe_id,
-      slug: unlinkedRecipe.slug,
-      title: unlinkedRecipe.title,
-      description: unlinkedRecipe.description,
-      source_kind: unlinkedRecipe.source_kind,
-    },
-  }}));
-  await page.route("**/api/library/recipes/*", route => {
+  await page.route("**/api/recipe/recipe-code", route => route.fulfill({json: currentRecipeDetail}));
+  await page.route("**/api/recipe/recipe-unlinked", route => route.fulfill({json: currentRecipeDetail}));
+  await page.route("**/api/recipe/*", route => {
     const recipeId = new URL(route.request().url()).pathname.split("/").at(-1);
     if (recipeId !== pairedRecipeId) return route.fallback();
     if (libraryState.detailFailuresRemaining > 0) {
@@ -721,38 +688,6 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   await expect(page).toHaveURL(/\/library$/);
 });
 
-test("Library separates installation capacity from load memory admission", async ({page}, testInfo) => {
-  const blocked = canonicalRecipeDetail();
-  const group = blocked.placement[0].recommendations[0];
-  group.eligible = false;
-  group.reasons = [
-    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-alpha, below the 4000000000-byte floor.", severity: "error"},
-    {code: "run.insufficient_memory", detail: "Run would leave 1073741824 bytes on node-beta, below the 4000000000-byte floor.", severity: "error"},
-  ];
-  blocked.placement[0].rejected_groups = [];
-  blocked.placement[0].rejected_nodes = [];
-  await page.unroute(`**/api/library/recipes/${pairedRecipeId}`);
-  await page.unroute("**/api/library/recipes/*");
-  await page.route(`**/api/library/recipes/${pairedRecipeId}`, route => route.fulfill({json: blocked}));
-  await page.setViewportSize({width: 1280, height: 900});
-
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-
-  const placement = page.getByRole("region", {name: "Complete placement groups"});
-  await expect(placement.getByText("1 Sparks · 1 installable")).toBeVisible();
-  const blocker = placement.locator(".placement-load-blocked-summary");
-  await expect(blocker).toContainText("Installable, but cannot be loaded");
-  await expect(blocker).toContainText("1.0 GiB");
-  await expect(blocker).not.toContainText("run.insufficient_memory");
-  await expect(placement.getByText("Unavailable placement evidence").locator("..")).not.toHaveAttribute("open");
-  const selector = placement.getByRole("button", {name: "Select complete group Spark node"});
-  await selector.click();
-  await expect(placement.getByRole("button", {name: "Review Load"})).toHaveCount(0);
-  await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
-  await expectNoSeriousAccessibilityViolations(page);
-  await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
-});
-
 test("Library retries a failed snapshot and recipe detail request", async ({page}) => {
   const state = libraryFixtures.get(page)!;
   state.snapshotFailuresRemaining = 1;
@@ -788,97 +723,9 @@ test("Library route changes restore heading focus and browser back state", async
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
 });
 
-test("Recipe Make available uses durable aggregate progress, access resume, and image-only force", async ({page}) => {
-  const revisionId = fullLibraryDetail.recipe.recipe_revision_id;
-  const modelDigest = "b".repeat(64);
-  const imageDigest = "c".repeat(64);
-  let stage: "empty" | "running" | "failed" | "resumed" | "forced" = "empty";
-  const starts: Record<string, unknown>[] = [];
-  const progress = (phase: string, completedBytes: number, totalBytes: number, step?: string) => ({phase, completed_bytes: completedBytes, total_bytes: totalBytes, total_bytes_known: true, bytes_per_second: 10, eta_seconds: Math.max(0, Math.ceil((totalBytes - completedBytes) / 10)), checkpoint: null, ...(step ? {step} : {})});
-  const operation = (current: typeof stage) => ({
-    schema_version: 2, id: "recipe-availability-operation", request_id: "request-availability", kind: "recipe.image.availability.v2", state: current === "failed" ? "failed" : "running", attempt: current === "forced" ? 2 : 1,
-    recipe_revision_id: revisionId, recipe_content_sha256: "a".repeat(64), progress: progress(current === "forced" ? "build" : "prepare", 40, 100, current === "forced" ? "Rebuilding runtime image" : undefined),
-    children: [
-      {kind: "model-cache", id: "model-child-1", state: current === "failed" ? "failed" : current === "forced" ? "succeeded" : "running", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: progress("download", 40, 100), failure: current === "failed" ? {code: "access_required", detail: "Hugging Face access is required for the exact Model files.", recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retryable: false, retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null} : null},
-      {kind: "runtime-image", id: "image-child-1", state: "running", progress: progress("build", 20, 100, "Building runtime image"), failure: null},
-    ],
-    failure: null, result: null, actions: [], created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z",
-  });
-  await page.route("**/api/library/recipe-image-availability?*", async route => route.fulfill({json: {schema_version: 2, total: stage === "empty" ? 0 : 1, operations: stage === "empty" ? [] : [operation(stage)], next_cursor: null}}));
-  await page.route("**/api/library/recipe-image-availability", async route => {
-    if (route.request().method() !== "POST") return route.fallback();
-    const body = await route.request().postDataJSON() as Record<string, unknown>;
-    starts.push(body);
-    stage = body.force === true ? "forced" : "running";
-    return route.fulfill({status: 202, json: operation(stage)});
-  });
-  await page.route("**/api/library/recipe-image-availability/recipe-availability-operation", route => route.fulfill({json: operation(stage)}));
-  await page.route("**/api/model-cache/operations/model-child-1/check-access-and-resume", async route => {
-    stage = "resumed";
-    return route.fulfill({status: 202, json: {schema_version: 2, id: "model-child-1", kind: "download", state: "queued", attempt: 2, request_key: "request-resume", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: {schema_version: 2, phase: "queued", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 40, expected_bytes: 100, total_bytes_known: true, current_artifact_key: "weights", bytes_per_second: null, eta_seconds: null, members: []}, failure: null, result: null, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:02:00Z", completed_at: null}});
-  });
-
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-  const availability = page.getByRole("region", {name: "Make Recipe available"});
-  await expect(availability.getByRole("button", {name: "Make available"})).toBeVisible();
-  await availability.getByRole("button", {name: "Make available"}).click();
-  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Model files");
-  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Runtime image");
-  await expect(availability.getByText("40 B / 100 B").first()).toBeVisible();
-  expect(starts).toEqual([{request_key: expect.any(String), recipe_revision_id: revisionId, force: false}]);
-
-  await page.reload();
-  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
-  stage = "failed";
-  await page.reload();
-  await expect(availability.getByRole("button", {name: "Check access and resume"})).toBeVisible();
-  await availability.getByRole("button", {name: "Check access and resume"}).click();
-  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
-  await availability.locator("summary").filter({hasText: "More actions"}).click();
-  await availability.getByRole("button", {name: "Rebuild image"}).click();
-  await expect.poll(() => starts.at(-1)?.force).toBe(true);
-  expect(starts).toHaveLength(2);
-  await expect(availability.locator('[data-member-kind="model-cache"]')).toContainText("Succeeded");
-  await expect(availability.locator('[data-member-kind="runtime-image"]')).toContainText("Runtime image");
-});
-
-test("Recipe progress keeps updating after image failure and recovers from a polling error", async ({page}) => {
-  const progress = (bytes: number): components["schemas"]["OperationProgress"] => ({phase: "download", completed_bytes: bytes, total_bytes: 100, total_bytes_known: true});
-  const operation = (bytes: number): components["schemas"]["RecipeImageAvailabilityResponse"] => ({
-    schema_version: 2, id: "continuing-download", request_id: "prepare-request", kind: "recipe.image.availability.v2", state: "failed", attempt: 1,
-    recipe_revision_id: fullLibraryDetail.recipe.recipe_revision_id, recipe_content_sha256: "a".repeat(64),
-    progress: progress(bytes), created_at: "2026-09-09T08:00:00Z", updated_at: "2026-09-09T08:00:01Z",
-    children: [
-      {kind: "model-cache", id: "download-child", model_content_digests: [], state: bytes === 100 ? "succeeded" : "running", progress: progress(bytes)},
-      {kind: "runtime-image", id: "failed-image", model_content_digests: [], state: "failed", progress: {...progress(0), phase: "build"}},
-    ],
-  });
-  let polls = 0;
-  await page.route("**/api/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 1, operations: [operation(40)]}}));
-  await page.route("**/api/library/recipe-image-availability/continuing-download", route => {
-    polls++;
-    return polls === 1 ? route.fulfill({status: 503, json: {detail: "Temporarily unavailable"}}) : route.fulfill({json: operation(polls === 2 ? 75 : 100)});
-  });
-  await page.goto(`/library/recipes/${pairedRecipeId}`);
-  const availability = page.getByRole("region", {name: "Make Recipe available"});
-  const model = availability.locator('[data-member-kind="model-cache"]');
-  await expect(model).toContainText("40 B / 100 B");
-  await expect(availability.getByRole("status")).toContainText("progress updates automatically");
-  await expect(availability.getByText("Availability status could not be loaded.")).toBeVisible();
-  await expect(model).toContainText("75 B / 100 B");
-  await expect(availability.getByText("Availability status could not be loaded.")).not.toBeVisible();
-  await expect(model).toContainText("100 B / 100 B");
-  await expect(model).toContainText("Succeeded");
-  await expect(availability.getByRole("status")).not.toBeVisible();
-  await page.waitForTimeout(1_500);
-  expect(polls).toBe(3);
-  expect(browserProblems.get(page)).toEqual(["error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"]);
-  browserProblems.set(page, []);
-});
-
 test("Library pairs exact model selection with matching recipes and downloads an unlinked Model", async ({page}, testInfo) => {
-  const linked = librarySnapshot.models.find(model => model.recipes.length > 0)!;
-  const unlinked = librarySnapshot.models.find(model => model.recipes.length === 0)!;
+  const linked = libraryViewSnapshot.models.find(model => model.recipes.length > 0)!;
+  const unlinked = libraryViewSnapshot.models.find(model => model.recipes.length === 0)!;
   const modelKey = (model: typeof linked) => `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
   const cacheOperation = {
     schema_version: 2, id: "model-download-operation", attempt: 1, request_key: "00000000-0000-4000-8000-000000000801", kind: "download", state: "running", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
@@ -929,7 +776,7 @@ test("Library pairs exact model selection with matching recipes and downloads an
 });
 
 test("Library retries a transient Model cache operation without restarting its transfer", async ({page}) => {
-  const model = librarySnapshot.models.find(item => item.recipes.length > 0)!;
+  const model = libraryViewSnapshot.models.find(item => item.recipes.length > 0)!;
   const modelKey = `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
   const failedId = "model-download-failed";
   const replacementId = "model-download-retry";

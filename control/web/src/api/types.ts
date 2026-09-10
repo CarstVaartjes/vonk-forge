@@ -39,11 +39,67 @@ export type AuditSummary = components["schemas"]["AuditEventResponse"];
 export type AuditResponse = components["schemas"]["AuditResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
-export type LibraryRecipeModel = components["schemas"]["LibraryRecipeModel"];
-export type LibrarySnapshot = components["schemas"]["LibrarySnapshot"];
-export type LibraryRecipeDetail = components["schemas"]["LibraryRecipeDetail"];
-export type LibraryRecipeSummary = components["schemas"]["LibraryRecipeSummary"];
-export type LibraryModel = components["schemas"]["LibraryModel"];
+export type ModelStatus = components["schemas"]["ModelLibraryResponse"];
+export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
+export type ModelDetail = components["schemas"]["ModelDetailResponse"];
+export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
+export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
+export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
+
+// UI-only projections combine the independent Model and Recipe list responses.
+// They are never sent to the operator API and keep the existing Library layout
+// mechanical while the wire authority remains the four current nouns.
+export type LibraryViewRecipe = {
+  capabilities: string[];
+  content_sha256: string;
+  description: string;
+  recipe_document: RecipeDefinition;
+  recipe_id: string;
+  recipe_revision_id: string;
+  publisher: string;
+  slug: string;
+  title: string;
+  topology_name: string;
+  installations?: unknown[];
+  runs?: unknown[];
+  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  installation_returned_count?: number;
+  installation_total_count?: number;
+  installations_truncated?: boolean;
+  run_returned_count?: number;
+  run_total_count?: number;
+  runs_truncated?: boolean;
+  reasons?: {code: string; severity: string; detail: string}[];
+};
+export type LibraryViewModel = {
+  page_local?: boolean;
+  model: {kind: "model"; publisher: string; slug: string; content_sha256: string};
+  model_document: ModelDefinition;
+  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  recipes: LibraryViewRecipe[];
+};
+export type LibraryViewSnapshot = {
+  schema_version: 2;
+  generated_at: string;
+  freshness_policy: components["schemas"]["FreshnessPolicy"];
+  models: LibraryViewModel[];
+  unlinked_recipes: LibraryViewRecipe[];
+};
+export type LibraryViewRecipeDetail = {
+  schema_version: 2;
+  generated_at: string;
+  definition: RecipeDefinition;
+  recipe: LibraryViewRecipe;
+  model_documents: LibraryViewRecipeModel[];
+  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  operational_state: {builds: unknown[]; installations: unknown[]; mappings: unknown[]; runs: unknown[]};
+  placement: {recommendations: LibraryViewPlacementGroup[]; rejected_groups: LibraryViewPlacementGroup[]; search_complete: boolean}[];
+  reasons: {code: string; severity: string; detail: string}[];
+  topology: RecipeDefinition["topology"];
+};
+export type LibraryViewPlacementGroup = {eligible: boolean; node_ids: string[]; nodes: {node_id: string; memory_free_after_bytes: number}[]; topology_name: string; load_state: string; install_state: string};
 export type ArtifactJobInterface = components["schemas"]["ArtifactJobResponse"]["interface"];
 export type ArtifactJobFile = components["schemas"]["ArtifactOutputFile"];
 export type ArtifactJobInputFile = components["schemas"]["ArtifactFileDeclaration"];
@@ -98,14 +154,6 @@ export type ModelCacheOperationsResponse = components["schemas"]["ModelCacheOper
 export type ModelCacheRetryInput = components["schemas"]["ModelCacheRetryRequest"];
 export type ModelCacheAccessResumeInput = components["schemas"]["ModelCacheAccessResumeRequest"];
 export type ModelCacheAccessResumeResponse = components["schemas"]["ModelCacheOperationResponse"];
-export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
-export type OperationProgress = components["schemas"]["OperationProgress"];
-export type RecipeImageAvailabilityAction = components["schemas"]["RecipeImageAvailabilityAction"];
-export type RecipeImageAvailabilityChild = components["schemas"]["RecipeImageAvailabilityChild"];
-export type RecipeImageAvailabilityInput = components["schemas"]["RecipeImageAvailabilityStart"];
-export type RecipeImageAvailabilityRetryInput = components["schemas"]["RecipeImageAvailabilityRetry"];
-export type RecipeImageAvailabilityOperation = components["schemas"]["RecipeImageAvailabilityResponse"];
-export type RecipeImageAvailabilityList = components["schemas"]["RecipeImageAvailabilityListResponse"];
 export type FleetSnapshotEvent = components["schemas"]["FleetSnapshotEvent"];
 export type FleetTelemetryEvent = components["schemas"]["FleetTelemetryEvent"];
 export type FleetChangeEvent = components["schemas"]["FleetChangeEvent"];
@@ -113,8 +161,12 @@ export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface CatalogApi {
 }
 export interface LibraryApi {
-  librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
-  libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;
+  modelStatus(signal?: AbortSignal): Promise<ModelStatus>;
+  modelLibrary(cursor?: string, signal?: AbortSignal): Promise<ModelLibrary>;
+  modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
+  recipeStatus(signal?: AbortSignal): Promise<RecipeStatus>;
+  recipeLibrary(cursor?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
+  recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
@@ -148,10 +200,6 @@ export interface ControlApi extends LibraryApi {
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse>;
-  recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
-  recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList>;
-  recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
-  retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
   nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse>;

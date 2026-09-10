@@ -1,21 +1,21 @@
 import {act, fireEvent, render, screen} from "@testing-library/react";
 import {ApiError} from "../api/client";
 import type {ModelCacheOperationResponse} from "../api/types";
-import {librarySnapshot} from "../test-fixtures/library";
+import {libraryViewSnapshot} from "../test-fixtures/library";
 import {LibraryCacheView, LibraryModelDownloadAction, aggregateCacheEntries} from "./library-cache-view";
 
 test("aggregates the complete canonical Model file set", () => {
-  const entries = aggregateCacheEntries(librarySnapshot.models);
+  const entries = aggregateCacheEntries(libraryViewSnapshot.models);
   expect(entries).toHaveLength(92);
-  expect(entries[0]!.files).toHaveLength(librarySnapshot.models[0]!.model_document.files.length);
+  expect(entries[0]!.files).toHaveLength(libraryViewSnapshot.models[0]!.model_document.files.length);
   expect(entries[0]!.expectedBytes).toBeGreaterThan(entries[0]!.verifiedBytes);
 });
 test("offers one direct Download to NAS action", () => {
-  render(<LibraryCacheView api={{modelCacheInventory: async () => ({entries: [], schema_version: 2, source_policy: "nas-first", total: 0, next_cursor: null}), previewModelCacheDownload: async () => ({schema_version: 2, artifact_set_sha256: "a".repeat(64), plan_digest: "p", source_policy: "nas-first", artifact_count: 2, expected_bytes: 1, already_cached_bytes: 0, new_bytes: 1, blockers: [], warnings: []}), downloadModelCache: async () => { throw new Error("unused"); }} as never} modelInventory={librarySnapshot.models} onNavigate={() => undefined} path="/library/cache"/>);
+  render(<LibraryCacheView api={{modelCacheInventory: async () => ({entries: [], schema_version: 2, source_policy: "nas-first", total: 0, next_cursor: null}), previewModelCacheDownload: async () => ({schema_version: 2, artifact_set_sha256: "a".repeat(64), plan_digest: "p", source_policy: "nas-first", artifact_count: 2, expected_bytes: 1, already_cached_bytes: 0, new_bytes: 1, blockers: [], warnings: []}), downloadModelCache: async () => { throw new Error("unused"); }} as never} modelInventory={libraryViewSnapshot.models} onNavigate={() => undefined} path="/library/cache"/>);
   expect(screen.getAllByRole("button", {name: "Download to NAS"}).length).toBeGreaterThan(0);
 });
 test("unions multiple cache sets before reporting a complete no-Recipe Model", () => {
-  const model = librarySnapshot.models[79]!;
+  const model = libraryViewSnapshot.models[79]!;
   const [first, second] = model.model_document.files;
   const entry = (artifact: typeof first, set: string) => ({schema_version: 2, artifact_set_sha256: set.repeat(64).slice(0, 64), artifacts: [{schema_version: 2, id: artifact.id, key: artifact.id, path: artifact.path, roles: artifact.roles, sha256: artifact.sha256, expected_bytes: artifact.size_bytes, actual_bytes: artifact.size_bytes, source: "nas", state: "verified"}], coverage: "incomplete", created_at: "2026-09-06T12:00:00Z", expected_bytes: artifact.size_bytes, model_content_sha256: model.model.content_sha256, protected: false, protected_reasons: [], recipe_revision_sha256: null, recipe_update_available: false, state: "cached", unique_bytes: artifact.size_bytes, update_available: false, updated_at: "2026-09-06T12:00:00Z", verified_at: "2026-09-06T12:00:00Z", verified_bytes: artifact.size_bytes});
   expect(aggregateCacheEntries([model], {entries: [entry(first!, "a")] as never})[0]!.status).toBe("partial");
@@ -45,7 +45,7 @@ function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): M
 }
 
 test("retries a transient cache operation in place with retained progress", async () => {
-  const model = librarySnapshot.models[0]!;
+  const model = libraryViewSnapshot.models[0]!;
   const failed = cacheOperation();
   const replacement = cacheOperation({id: "cache-operation-2", state: "running", attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10, measurement: {phase: "download", completed_bytes: 10, total_bytes: 20, total_bytes_known: true, completed_items: 1, total_items: 2, bytes_per_second: 5, eta_seconds: 2}}});
   const previewModelCacheDownload = vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []}));
@@ -66,7 +66,7 @@ test("retries a transient cache operation in place with retained progress", asyn
 });
 
 test("does not offer cache retry for terminal integrity failures", async () => {
-  const model = librarySnapshot.models[0]!;
+  const model = libraryViewSnapshot.models[0]!;
   const failed = cacheOperation({failure: {code: "integrity_mismatch", detail: "artifact digest mismatch", retryable: false, recovery_actions: ["download_again"]}});
   render(<LibraryModelDownloadAction api={{previewModelCacheDownload: vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []})), downloadModelCache: vi.fn(async () => failed)} as never} model={model}/>);
 
@@ -75,7 +75,7 @@ test("does not offer cache retry for terminal integrity failures", async () => {
 });
 
 test("checks Model access and resumes the retained exact operation", async () => {
-  const model = librarySnapshot.models[0]!;
+  const model = libraryViewSnapshot.models[0]!;
   const failed = cacheOperation({failure: {code: "access_required", detail: "Model access is required", retryable: false, recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null}});
   const resumed = cacheOperation({state: "queued", failure: null, updated_at: "2026-09-06T12:02:00Z"});
   const downloadModelCache = vi.fn(async () => failed);
@@ -92,7 +92,7 @@ test("checks Model access and resumes the retained exact operation", async () =>
 
 test("renders failed download requests without inventing an availability operation", async () => {
   const preview = vi.fn().mockRejectedValue(new ApiError(503, "Download request unavailable; token=private"));
-  render(<LibraryModelDownloadAction api={{previewModelCacheDownload: preview} as never} model={librarySnapshot.models[0]!}/>);
+  render(<LibraryModelDownloadAction api={{previewModelCacheDownload: preview} as never} model={libraryViewSnapshot.models[0]!}/>);
   await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
   expect(screen.getByRole("alert")).toHaveTextContent("Download to NAS failed.");
   expect(screen.getByRole("alert")).toHaveTextContent("token=<redacted>");

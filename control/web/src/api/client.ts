@@ -38,9 +38,6 @@ import type {
   ModelCacheRetryInput,
   ModelCacheAccessResumeInput,
   ModelCacheAccessResumeResponse,
-  RecipeImageAvailabilityInput,
-  RecipeImageAvailabilityList,
-  RecipeImageAvailabilityOperation,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -62,6 +59,12 @@ import type {
   ArtifactJobInputFile,
   ArtifactJobList,
   ArtifactTransferProgress,
+  ModelDetail,
+  ModelLibrary,
+  ModelStatus,
+  RecipeDetail,
+  RecipeLibrary,
+  RecipeStatus,
 } from "./types";
 
 function csrfToken(): string | undefined {
@@ -340,32 +343,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.POST("/api/library/recipe-image-availability", {body: input, signal}));
-  }
-
-  async recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList> {
-    return resultData(await this.generated.GET("/api/library/recipe-image-availability", {
-      params: {query: {recipe_revision_id: recipeRevisionId, state, cursor, limit: 100}},
-      signal,
-    }));
-  }
-
-  async recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.GET("/api/library/recipe-image-availability/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.POST("/api/library/recipe-image-availability/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
   async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
     return resultData(await this.generated.PATCH("/api/nodes/{node_id}/profile", {
       body: input,
@@ -374,16 +351,38 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async librarySnapshot(cursor?: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/library", {
+  async modelStatus(signal?: AbortSignal): Promise<ModelStatus> {
+    return resultData(await this.generated.GET("/api/model", {signal}));
+  }
+
+  async modelLibrary(cursor?: string, signal?: AbortSignal): Promise<ModelLibrary> {
+    return resultData(await this.generated.GET("/api/model/library", {
       params: {query: {cursor, limit: 100}},
       signal,
     }));
   }
 
-  async libraryRecipe(recipeId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/library/recipes/{recipe_id}", {
-      params: {path: {recipe_id: recipeId}},
+  async modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail> {
+    return resultData(await this.generated.GET("/api/model/{selector}", {
+      params: {path: {selector}},
+      signal,
+    }));
+  }
+
+  async recipeStatus(signal?: AbortSignal): Promise<RecipeStatus> {
+    return resultData(await this.generated.GET("/api/recipe", {signal}));
+  }
+
+  async recipeLibrary(cursor?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
+    return resultData(await this.generated.GET("/api/recipe/library", {
+      params: {query: {cursor, limit: 100}},
+      signal,
+    }));
+  }
+
+  async recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail> {
+    return resultData(await this.generated.GET("/api/recipe/{selector}", {
+      params: {path: {selector}},
       signal,
     }));
   }

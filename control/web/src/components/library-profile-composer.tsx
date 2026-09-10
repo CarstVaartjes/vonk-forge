@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from "react";
-import type {ControlApi, FleetProfile, FleetProfileInput, LibraryRecipeDetail} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
 
 function nextProfileNumber(profiles: FleetProfile[]): number {
@@ -25,7 +25,7 @@ function inputFromProfile(profile: FleetProfile): FleetProfileInput {
   return input;
 }
 
-export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryRecipeDetail; preferredNodeId?: string}) {
+export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryViewRecipeDetail; preferredNodeId?: string}) {
   const nodeName = useLibraryNodeName();
   const [open, setOpen] = useState(false);
   const [profiles, setProfiles] = useState<FleetProfile[]>([]);

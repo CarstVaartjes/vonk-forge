@@ -160,8 +160,8 @@ it("uses only current Library read and job surfaces", async () => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
     const path = new URL(request.url).pathname;
-    if (path === "/api/library") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
-    if (path === "/api/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
+    if (path === "/api/model/library" || path === "/api/recipe/library") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, facets: {family: [], quantization: [], usage: [], version: []}, filters: {}, models: [], recipes: [], next_cursor: null}), {status: 200});
+    if (path === "/api/recipe/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, selector: "recipe/one", identity: {recipe_id: "recipe/one", recipe_revision_id: "revision-1", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, document: {}, model_documents: [], model_selectors: [], usage: [], resources: {}, local: {}, updated_at: "2026-08-15T12:00:00Z"}), {status: 200});
     if (path.startsWith("/api/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
@@ -172,18 +172,21 @@ it("uses only current Library read and job surfaces", async () => {
   const api = new ApiClient();
   const controller = new AbortController();
 
-  await api.librarySnapshot("cursor-1");
-  await api.libraryRecipe("recipe/one");
+  await api.modelLibrary("cursor-1");
+  await api.recipeLibrary("cursor-1");
+  await api.recipeDetail("recipe/one");
   await api.libraryJobProgress("job-1", controller.signal);
   controller.abort();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/library"],
-    ["GET", "/api/library/recipes/recipe%2Fone"],
+    ["GET", "/api/model/library"],
+    ["GET", "/api/recipe/library"],
+    ["GET", "/api/recipe/recipe%2Fone"],
     ["GET", "/api/jobs/job-1"],
   ]);
   expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
-  expect(requests[2].signal.aborted).toBe(true);
+  expect(Object.fromEntries(new URL(requests[1].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
+  expect(requests[3].signal.aborted).toBe(true);
 });
 
 it("uses the generated model update operation with an explicit upstream check", async () => {
@@ -254,10 +257,6 @@ it("binds NAS cache and rich telemetry routes", async () => {
   await api.modelCacheOperations("operations-cursor");
   await api.modelCacheOperation("cache-operation");
   await api.checkModelCacheAccessAndResume("cache-operation", {schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "access-plan", request_key: requestKey});
-  await api.recipeAvailabilityStart({recipe_revision_id: "recipe-revision-1", request_key: requestKey, force: false});
-  await api.recipeAvailabilityList("recipe-revision-1", "running", "recipe-cursor");
-  await api.recipeAvailabilityOperation("recipe-operation");
-  await api.retryRecipeAvailability("recipe-operation", {request_key: requestKey});
   await api.nodeTelemetryCurrent("spark-a");
   await api.nodeTelemetryCapabilities("spark-a");
   await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
@@ -275,20 +274,15 @@ it("binds NAS cache and rich telemetry routes", async () => {
     ["GET", "/api/model-cache/operations"],
     ["GET", "/api/model-cache/operations/cache-operation"],
     ["POST", "/api/model-cache/operations/cache-operation/check-access-and-resume"],
-    ["POST", "/api/library/recipe-image-availability"],
-    ["GET", "/api/library/recipe-image-availability"],
-    ["GET", "/api/library/recipe-image-availability/recipe-operation"],
-    ["POST", "/api/library/recipe-image-availability/recipe-operation/retry"],
     ["GET", "/api/nodes/spark-a/telemetry/current"],
     ["GET", "/api/nodes/spark-a/telemetry/capabilities"],
     ["GET", "/api/nodes/spark-a/telemetry/workloads"],
   ]);
   expect(Object.fromEntries(new URL(requests[0]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
   expect(Object.fromEntries(new URL(requests[9]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
-  expect(Object.fromEntries(new URL(requests[18]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
+  expect(Object.fromEntries(new URL(requests[14]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
   expect(await requests[3]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
   expect(await requests[5]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
-  expect(Object.fromEntries(new URL(requests[13]!.url).searchParams)).toEqual({cursor: "recipe-cursor", limit: "100", recipe_revision_id: "recipe-revision-1", state: "running"});
   expect(requests.slice(2, 6).every(request => request.headers.get("Content-Type"))).toBe(true);
 });
 

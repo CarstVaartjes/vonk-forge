@@ -7,7 +7,7 @@ import type {
   ArtifactJobInputFile,
   ArtifactJobInterface,
   LibraryApi,
-  LibraryRecipeDetail,
+  LibraryViewRecipeDetail,
   RecipeDefinition,
 } from "../api/types";
 import {formatBytes} from "../lib/fleet";
@@ -153,7 +153,7 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
   </article>;
 }
 
-export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryApi; detail: LibraryRecipeDetail; onBusyChange?(busy: boolean): void}) {
+export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryApi; detail: LibraryViewRecipeDetail; onBusyChange?(busy: boolean): void}) {
   const document = detail.definition;
   const jobInterfaces = useMemo(() => document.interfaces.filter((item): item is JobRecipeInterface => item.adapter !== "openai"), [document]);
   const [interfaceIndex, setInterfaceIndex] = useState(0);

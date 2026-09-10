@@ -74,17 +74,16 @@ function api(
     progress: {completed: 0, failed: 0, running: 1, total: 1},
   }),
   resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"}),
-): Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
+): Pick<ControlApi, "audit" | "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
   return {
     operations: vi.fn().mockResolvedValue({schema_version: 2, operations: [], total: 0, next_cursor: null}),
     operation: vi.fn(),
     audit: loadAudit,
     job: loadJob,
     jobs: loadJobs,
-    librarySnapshot: vi.fn().mockResolvedValue(emptyLibrary),
     resumeJob,
     visualFleet: vi.fn().mockResolvedValue(visualFleet),
-  } as unknown as Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation">;
+  } as unknown as Pick<ControlApi, "audit" | "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
 }
 
 afterEach(() => {

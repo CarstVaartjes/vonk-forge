@@ -41,13 +41,15 @@ test.beforeEach(async ({page}) => {
 
 test("the redesigned shell exposes the focused workspace routes", async ({page}) => {
   await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
-  await page.route("**/api/library**", route => route.fulfill({json: {
-    schema_version: 2,
-    generated_at: new Date().toISOString(),
+  await page.route("**/api/model/library**", route => route.fulfill({json: {
+    schema_version: 2, generated_at: new Date().toISOString(),
     freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
-    models: [],
-    unlinked_recipes: [],
-    next_cursor: null,
+    facets: {family: [], quantization: [], usage: [], version: []}, filters: {}, models: [], next_cursor: null,
+  }}));
+  await page.route("**/api/recipe/library**", route => route.fulfill({json: {
+    schema_version: 2, generated_at: new Date().toISOString(),
+    freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
+    facets: {family: [], quantization: [], usage: [], version: []}, filters: {}, recipes: [], next_cursor: null,
   }}));
   await page.goto("/library");
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeVisible();

@@ -1,13 +1,13 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryModel, LibrarySnapshot, ModelCacheUpdateResponse, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibraryViewModel, LibraryViewSnapshot, ModelCacheUpdateResponse, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
 import {filterLibraryRecipeRecords} from "./library-workcell";
 import {aggregateCacheEntries, LibraryModelDownloadAction, loadModelCacheInventory} from "./library-cache-view";
 
-export function LibraryModelsView({api, entries, filters, modelInventory, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, path, query}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; filters: LibraryWorkcellFilters; modelInventory?: LibrarySnapshot["models"]; onFiltersChange(filters: LibraryWorkcellFilters): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; path: string; query: string}) {
+export function LibraryModelsView({api, entries, filters, modelInventory, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, path, query}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; filters: LibraryWorkcellFilters; modelInventory?: LibraryViewSnapshot["models"]; onFiltersChange(filters: LibraryWorkcellFilters): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; path: string; query: string}) {
   const [cacheInventory, setCacheInventory] = useState<{entries: import("../api/types").CacheEntryResponse[]}>();
   const [cacheAttempt, setCacheAttempt] = useState(0);
   const [cacheLoading, setCacheLoading] = useState(true);
@@ -26,7 +26,7 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     onFiltersChange({...filters, model: value});
     if (onNavigatePath) { const url = new URL(path, location.origin); if (value) url.searchParams.set("model", value); else url.searchParams.delete("model"); onNavigatePath(`${url.pathname}${url.search}`, true); }
   }
-  const titleFor = (model: LibraryModel) => model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
+  const titleFor = (model: LibraryViewModel) => model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
   return <section className="library-models-view" aria-labelledby="library-models-heading">
     <header className="library-subview-heading"><div><h2 id="library-models-heading">Models</h2><p>See what each model can do and keep a copy on your NAS.</p></div><span>{visible.length} of {models.length} Models</span><button type="button" className="button secondary" disabled={updatesLoading} onClick={() => setUpdatesAttempt(value => value + 1)}>{updatesLoading && updatesAttempt > 0 ? "Checking upstream…" : "Check for updates"}</button></header>{cacheError && <div className="library-error" role="alert"><span>NAS cache: {cacheError}</span><button type="button" className="button secondary" onClick={() => setCacheAttempt(value => value + 1)}>Retry cache</button></div>}{updatesError && <div className="library-error" role="alert"><span>Model updates: {updatesError}</span><button type="button" className="button secondary" disabled={updatesLoading} onClick={() => setUpdatesAttempt(value => value + 1)}>Retry updates</button></div>}
     <div className="library-model-controls"><label>Search Models<input type="search" aria-label="Search Models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability"/></label><label>Exact Model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All Models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{titleFor(model)}</option>)}</select></label></div>

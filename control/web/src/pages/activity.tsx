@@ -2,7 +2,7 @@ import {availabilityProgress, LibraryAvailabilityProgress} from "../components/l
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
-import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, VisualFleetSnapshot} from "../api/types";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 
@@ -10,7 +10,7 @@ type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
 type ActivityRecord = AuditSummary & {occurred_at?: string | null; source: "audit" | "job" | "operation"; target_names?: string[]; operation?: OperationDetail};
 type TimestampedJob = JobSummary & {created_at?: string};
-type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation">;
+type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
 
@@ -416,24 +416,10 @@ function JobProgressDetails({
   </details>;
 }
 
-function targetNameLookup(fleet: VisualFleetSnapshot | null, library: LibrarySnapshot | null): Map<string, string> {
+function targetNameLookup(fleet: VisualFleetSnapshot | null): Map<string, string> {
   const names = new Map<string, string>();
   for (const node of fleet?.nodes ?? []) {
     names.set(node.id, nodeDisplayName(node));
-  }
-  const recipes = [
-    ...(library?.models.flatMap(model => model.recipes) ?? []),
-    ...(library?.unlinked_recipes ?? []),
-  ];
-  for (const recipe of recipes) {
-    const title = recipe.recipe_document.metadata.title.trim() && recipe.recipe_document.metadata.title.trim() !== recipe.recipe_id ? recipe.recipe_document.metadata.title.trim() : "Unnamed recipe";
-    names.set(recipe.recipe_id, title);
-    names.set(recipe.content_sha256, `${title} revision ${recipe.recipe_document.release.version}`);
-    recipe.installations.forEach((installation, index) => {
-      names.set(installation.recipe_revision_id, `${title} revision ${recipe.recipe_document.release.version}`);
-      names.set(installation.installation_id, `${title} installation ${index + 1}`);
-    });
-    recipe.runs.forEach((run, index) => names.set(run.run_id, `${title} run ${index + 1}`));
   }
   return names;
 }
@@ -627,8 +613,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       api.jobs(),
       api.operations(undefined, controller.signal),
       api.visualFleet(controller.signal).catch(() => null),
-      api.librarySnapshot(undefined, controller.signal).catch(() => null),
-    ]).then(([auditResult, operationsResult, canonicalResult, fleetResult, libraryResult]) => {
+    ]).then(([auditResult, operationsResult, canonicalResult, fleetResult]) => {
       if (!active) return;
       const audit = auditResult.status === "fulfilled" ? auditResult.value : null;
       const operations = operationsResult.status === "fulfilled" ? operationsResult.value : null;
@@ -655,8 +640,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       setCanonicalTotal(canonical?.total ?? 0);
       setCanonicalCursor(canonical?.next_cursor ?? null);
       const fleet = fleetResult.status === "fulfilled" ? fleetResult.value : null;
-      const library = libraryResult.status === "fulfilled" ? libraryResult.value : null;
-      const names = targetNameLookup(fleet, library);
+      const names = targetNameLookup(fleet);
       setTargetNames(names);
       operationIds.current = new Set((operations?.jobs ?? []).map(job => job.id));
       setAuditCount(audit?.events.length ?? 0);
