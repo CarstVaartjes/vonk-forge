@@ -674,7 +674,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 state="succeeded",
                 owner_id=build_id,
                 result={
-                    "state": "succeeded",
                     "image_digest": image_digest,
                     "oci_layout_sha256": archive_digest,
                     "image_bytes": len(archive),
