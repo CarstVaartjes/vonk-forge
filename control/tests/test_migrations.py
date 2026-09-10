@@ -12,9 +12,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
-
 from vonk_control.models import Base, Job
-
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TABLES = {

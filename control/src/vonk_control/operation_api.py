@@ -15,7 +15,6 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
-    field_validator,
     model_serializer,
 )
 from sqlalchemy import func, or_, select, update

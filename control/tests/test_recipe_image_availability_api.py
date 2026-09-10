@@ -3,24 +3,22 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 import pytest
-from fastapi import FastAPI
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from vonk_control.auth import Actor
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_image_availability_api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
     RecipeOperatorRequest,
-    RecipeOperatorResponse,
     RecipeUpdateRequest,
     _child,
     _progress,
     _view_document,
     install_recipe_operator_routes,
 )
-from vonk_control.auth import Actor
 
 
 @pytest.mark.parametrize("mutation", [{}, {"model_content_digests": [12]}, {"model_content_digests": None}])

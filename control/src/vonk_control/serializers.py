@@ -29,7 +29,7 @@ def _ordered(value: object) -> object:
 def serialize_document(path: str, document: Mapping[str, object]) -> bytes:
     ordered = _ordered(document)
     if not isinstance(ordered, dict):
-        raise ValueError("typed documents must be objects")
+        raise TypeError("typed documents must be objects")
     if path.endswith(".json"):
         return (json.dumps(ordered, ensure_ascii=False, sort_keys=False, indent=2) + "\n").encode()
     if path.endswith(".toml"):

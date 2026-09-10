@@ -8,12 +8,12 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .model_cache_contract import Digest
 from .auth import MUTATION_ROLES
+from .model_cache_contract import Digest
 from .operation_api import bounded_error_responses
 from .operation_contract import (
-    AvailabilityRecoveryAction,
     AvailabilityOperationFailure,
+    AvailabilityRecoveryAction,
     OperationProgress,
 )
 from .recipe_image_availability import (
@@ -269,7 +269,7 @@ def _recipe_error(error: BaseException) -> HTTPException:
     code = str(getattr(error, "code", ""))
     if code.endswith("selector_missing"):
         return HTTPException(status_code=404, detail=str(error))
-    if code.endswith("selector_ambiguous") or code.endswith("request_key_reused"):
+    if code.endswith(("selector_ambiguous", "request_key_reused")):
         return HTTPException(status_code=409, detail=str(error))
     if code.endswith("invalid"):
         return HTTPException(status_code=422, detail=str(error))
@@ -423,11 +423,11 @@ def install_recipe_operator_routes(
 
 __all__ = [
     "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
+    "RecipeImageAvailabilityResponse",
+    "RecipeOperationResponse",
     "RecipeOperatorRequest",
     "RecipeOperatorResponse",
     "RecipeUpdateRequest",
     "RecipeUpdateResponse",
-    "RecipeImageAvailabilityResponse",
-    "RecipeOperationResponse",
     "install_recipe_operator_routes",
 ]

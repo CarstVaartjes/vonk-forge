@@ -30,10 +30,11 @@ from vonk_control.model_cache import (
     _retry_after_seconds,
     _retryable_failure,
 )
-from vonk_control.model_cache_api import ModelCacheOperationProvider, model_cache_operation_provider
+from vonk_control.model_cache_api import (
+    ModelCacheOperationProvider,
+    model_cache_operation_provider,
+)
 from vonk_control.model_cache_contract import (
-    ModelCacheAccessResumeRequest,
-    ModelCacheDownloadRequest,
     ModelCacheDownloadResult,
 )
 from vonk_control.models import (

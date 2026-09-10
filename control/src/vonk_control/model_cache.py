@@ -40,6 +40,7 @@ from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
 from .logging import redact_text
 from .model_cache_contract import (
+    UUID_PATTERN,
     CacheManifest,
     CacheManifestArtifact,
     ModelCacheOperationProgress,
@@ -47,7 +48,6 @@ from .model_cache_contract import (
     ModelCacheOperationResult,
     ModelCacheRepairCheckpoint,
     ModelCacheTransfer,
-    UUID_PATTERN,
     parse_model_cache_payload,
     parse_model_cache_result,
 )
@@ -63,6 +63,8 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     RuntimeImageAuthorization,
+)
+from .models import (
     RuntimeImageReceipt as RuntimeImageReceiptRow,
 )
 from .operation_contract import AvailabilityOperationFailure

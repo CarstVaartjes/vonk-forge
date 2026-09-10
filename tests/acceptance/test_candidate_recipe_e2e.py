@@ -24,11 +24,17 @@ from urllib.parse import quote
 import httpx
 import pytest
 
-from cluster_profiles.generated_control.models.recipe_detail_response import RecipeDetailResponse
-from cluster_profiles.generated_control.models.recipe_library_response import RecipeLibraryResponse
-from cluster_profiles.generated_control.models.model_library_response import ModelLibraryResponse
 from cluster_profiles.generated_control.models.model_definition import ModelDefinition
+from cluster_profiles.generated_control.models.model_library_response import (
+    ModelLibraryResponse,
+)
 from cluster_profiles.generated_control.models.recipe_definition import RecipeDefinition
+from cluster_profiles.generated_control.models.recipe_detail_response import (
+    RecipeDetailResponse,
+)
+from cluster_profiles.generated_control.models.recipe_library_response import (
+    RecipeLibraryResponse,
+)
 
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 DEFAULT_SLUG = "qwen3-8-flash-next-nvfp4-sglang-dual"

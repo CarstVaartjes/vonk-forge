@@ -160,7 +160,7 @@ def test_admitted_application_executes_immutable_assignment_after_profile_edit(
 
 
 def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
-    sessions, operations, service, profile, original = setup_recovery(tmp_path)
+    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
     with sessions() as session:
         installation_id = session.scalar(select(RecipeInstallation.id))
     operations.fail = False
@@ -177,7 +177,6 @@ def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
 
 
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
-    import json
 
     from pydantic import ValidationError
     from vonk_control.fleet_profile_contract import FleetProfileApplicationView

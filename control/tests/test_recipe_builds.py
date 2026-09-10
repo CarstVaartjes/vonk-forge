@@ -260,9 +260,11 @@ def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -
         assert node is not None
         node.binary_digest = "2" * 64
 
-    with pytest.raises(RecipeBuildError, match="runtime identity changed"):
-        with sessions.begin() as session:
-            service.persist_plan_in_session(session, prepared, now=now)
+    with (
+        pytest.raises(RecipeBuildError, match="runtime identity changed"),
+        sessions.begin() as session,
+    ):
+        service.persist_plan_in_session(session, prepared, now=now)
 
     with sessions() as session:
         assert session.get(RecipeBuild, prepared.build_id) is None

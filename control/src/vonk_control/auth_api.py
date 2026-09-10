@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any, Callable, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
