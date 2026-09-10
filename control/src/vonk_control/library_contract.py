@@ -196,6 +196,100 @@ class LibraryRecipeList(_StrictModel):
     recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     freshness_policy: FreshnessPolicy
+
+
+class LibraryLocalProgress(_StrictModel):
+    """Observable progress for a Controller-local preparation operation."""
+
+    operation_id: UuidId | None = None
+    state: Literal["queued", "running", "partial", "succeeded", "failed"]
+    phase: Text64 | None = None
+    completed_bytes: int = Field(default=0, ge=0, le=_MAX_SIGNED_BIGINT)
+    total_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryLocalState(_StrictModel):
+    """Controller cache and Spark-local runtime evidence kept separate."""
+
+    controller: Literal["cached", "preparing", "not_cached", "failed", "unknown"]
+    running_on: list[NodeId] = Field(default_factory=list, max_length=_MAX_AGENT_ROWS)
+    preparation: LibraryLocalProgress | None = None
+
+
+class LibraryResourceProjection(_StrictModel):
+    """Declared resource facts; unknown values remain null."""
+
+    memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    disk_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    runtime_memory_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_SIGNED_BIGINT
+    )
+    image_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryModelProjection(_StrictModel):
+    """One exact canonical model variant with operator-facing projections."""
+
+    schema_version: Literal[2] = 2
+    selector: Text256
+    identity: LibraryModelIdentity
+    document: ModelDefinition
+    family: Text128
+    version: Text128
+    variant: Text128
+    quantization: Text64
+    usage: list[Text64] = Field(max_length=64)
+    resources: LibraryResourceProjection
+    local: LibraryLocalState
+    updated_at: datetime
+
+
+class LibraryFacetValues(_StrictModel):
+    usage: list[Text64] = Field(max_length=64)
+    family: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
+    version: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
+    quantization: list[Text64] = Field(max_length=_MAX_PAGE_RECIPES)
+
+
+class ModelLibraryResponse(_StrictModel):
+    schema_version: Literal[2] = 2
+    generated_at: datetime
+    models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
+    facets: LibraryFacetValues
+    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
+    freshness_policy: FreshnessPolicy
+
+
+class ModelDetailResponse(LibraryModelProjection):
+    pass
+
+
+class LibraryRecipeProjection(_StrictModel):
+    """One exact canonical recipe and its model/resource/local projections."""
+
+    schema_version: Literal[2] = 2
+    selector: Text256
+    identity: LibraryRecipeIdentity
+    document: RecipeDefinition
+    model_selectors: list[Text256] = Field(min_length=1, max_length=32)
+    usage: list[Text64] = Field(max_length=64)
+    resources: LibraryResourceProjection
+    local: LibraryLocalState
+    updated_at: datetime
+
+
+class RecipeLibraryResponse(_StrictModel):
+    schema_version: Literal[2] = 2
+    generated_at: datetime
+    recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
+    facets: LibraryFacetValues
+    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
+    freshness_policy: FreshnessPolicy
+
+
+
 class OperationalBuild(_StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
@@ -425,6 +519,10 @@ class TopologyPlacement(_StrictModel):
 class LibraryRecipeModel(_StrictModel):
     selection: RecipeModelSelection
     model_document: ModelDefinition
+
+
+class RecipeDetailResponse(LibraryRecipeProjection):
+    model_documents: list[LibraryRecipeModel] = Field(max_length=32)
 
 
 class LibraryRecipeDetail(_StrictModel):
