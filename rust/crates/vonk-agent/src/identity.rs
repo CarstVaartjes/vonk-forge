@@ -689,12 +689,18 @@ mod tests {
 
         let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
         assert_eq!(fs::read(paths.certificate).unwrap(), vec![b'n', b'c']);
-        assert!(fs::read_dir(&root).unwrap().flatten().any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("replaced-generation-00000000000000000002-")
-        }));
+        assert!(
+            fs::read_dir(root.join("retired-generations"))
+                .unwrap()
+                .flatten()
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("-00000000000000000002-")
+                        && entry.file_name().to_string_lossy().starts_with("identity-")
+                })
+        );
     }
 
     #[test]
