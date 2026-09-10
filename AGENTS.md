@@ -28,24 +28,50 @@ Use a writable, task-specific uv cache. From `/opt/vonk-forge`:
 
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q control/tests
-UV_CACHE_DIR=/private/tmp/vonk-forge-compose-cache \
-  uv run --frozen pytest -q deploy/compose/tests
+
+# Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
+# Approximately 80s for control/tests and 36s for tests on 8 cores.
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   uv run --project control --frozen --with-editable . pytest -q \
-    tests/test_fresh_nas_acceptance.py \
-    tests/test_spark_lifecycle_runner.py \
-    tests/scripts/test_install_release_publication.py
+    control/tests -m "not lane" -n auto --dist loadfile
+UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
+  uv run --python 3.12 --frozen --with pytest==9.1.1 \
+    --with pytest-xdist==3.8.0 \
+    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+    pytest -q tests -m "not lane" -n auto
+
+# Lane tier: the same trees without the marker filter. Run it in OrbStack or
+# the designated CI lane; it needs Docker, PostgreSQL, cargo, dpkg and a
+# Linux/ARM64 host.
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . pytest -q control/tests
+UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
+  uv run --python 3.12 --frozen --with pytest==9.1.1 \
+    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
+
+# Compose lane.
+UV_CACHE_DIR=/private/tmp/vonk-forge-compose-cache \
+  uv run --frozen pytest -q deploy/compose/tests
 ```
 
-Run the root `tests/` suite through the control project, exactly as CI does.
-The root project is the `vonk-cluster-profiles` package and its lint tooling;
-it deliberately has no dependency on `pydantic`, `vonk_control`, or the recipe
-contracts package, so a bare `uv run pytest` from the root environment cannot
-import what the acceptance and contract tests need.
+The `lane` marker is applied automatically at collection time from what a test
+actually needs: a PostgreSQL fixture, a `*_wire_bridge.py` Rust probe module, a
+Docker build, or a Linux host tool such as `dpkg`. New host-dependent tests are
+classified without further edits, so `-m "not lane"` stays honest. A fast-tier
+failure is a real defect; a lane-tier failure on macOS is usually a missing
+Linux dependency, not a regression.
+
+Run the two trees in separate pytest invocations. Both contain modules with the
+same basename, so a single invocation over `tests control/tests` mis-collects
+them.
+
+Run the root `tests/` suite in the standalone environment CI uses: `pytest`
+plus an editable install of the recipe contracts package. The root project is
+the `vonk-cluster-profiles` package and its lint tooling; it deliberately has
+no dependency on `pydantic`, `vonk_control`, or the contracts package, so a
+bare `uv run pytest` from the root environment cannot import what the
+acceptance and contract tests need. The control environment is a superset and
+can also run that tree for a quick check, but CI parity is the standalone form.
 
 `VONK_RECIPE_LIBRARY_ROOT` is a path to the sibling recipe-library checkout, not
 a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
@@ -182,14 +208,12 @@ recipe-library commit, recipe digest, and resulting evidence.
 ## Deployment and fleet safety
 
 Routine Spark package upgrades are Controller-authorized and signed; do not use
-SSH as the rollout path. Preview and apply the returned digest one Spark at a
-time:
+SSH as the rollout path. `vonkctl` exposes one authorized upgrade command; there
+is no separate candidate/preview/apply or plan-digest subcommand:
 
 ```bash
-vonkctl fleet upgrade candidate --json
-vonkctl fleet upgrade preview --strategy one-at-a-time --json
-vonkctl fleet upgrade apply --strategy one-at-a-time \
-  --plan-digest PLAN_DIGEST --apply --json
+vonkctl fleet upgrade Atlas --strategy one-at-a-time --json
+vonkctl fleet upgrade --all --strategy one-at-a-time --json
 ```
 
 For a mounted controller project, consume the signed NAS installer from the

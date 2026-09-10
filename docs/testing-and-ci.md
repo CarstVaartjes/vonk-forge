@@ -20,14 +20,24 @@ matrices.
 
 ## Local verification before requesting review
 
-Run the tier that matches the change, then run the complete local suite for a
-release-affecting change:
+Run the fast tier while iterating, then the lane tier and the complete suite for
+a release-affecting change:
 
 ```bash
-# Repository and protocol contracts
-uv run --frozen pytest -q
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 
-# Control-plane/API/worker tests
+# Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
+uv run --project control --frozen --with-editable . \
+  pytest -q control/tests -m "not lane" -n auto --dist loadfile
+uv run --python 3.12 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 \
+  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+  pytest -q tests -m "not lane" -n auto
+
+# Repository and protocol contracts, in the standalone environment CI uses.
+uv run --python 3.12 --frozen --with pytest==9.1.1 \
+  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
+
+# Control-plane/API/worker tests, including the container and PostgreSQL lane.
 uv run --project control --frozen --with-editable . pytest -q control/tests
 
 # Browser/admin UX
@@ -41,6 +51,12 @@ uv run --frozen pytest -q deploy/compose/tests
 # Release evidence and generated supply-chain inventory
 scripts/verify-supply-chain --json
 ```
+
+The `lane` marker is applied at collection time to any test that needs a
+PostgreSQL fixture, a Rust wire probe (`*_wire_bridge.py`), a Docker build, or a
+Linux host tool such as `dpkg`. `-m "not lane"` therefore stays honest as tests
+are added. Run `tests` and `control/tests` in separate pytest invocations: the
+two trees contain modules with the same basename.
 
 Hardware-dependent lifecycle, thermal, NCCL, real model-quality, physical
 replacement, and encryption-drill evidence stays on the designated local
