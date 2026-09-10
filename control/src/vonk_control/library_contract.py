@@ -167,37 +167,6 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     )
 
 
-class LibraryModel(_StrictModel):
-    model: LibraryModelIdentity
-    model_document: ModelDefinition
-    page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(
-        min_length=0, max_length=_MAX_PAGE_RECIPES
-    )
-    model_capabilities: LibraryCapabilityInventory = Field(
-        default_factory=lambda: LibraryCapabilityInventory()
-    )
-
-
-class LibrarySnapshot(_StrictModel):
-    schema_version: Literal[2] = 2
-    generated_at: datetime
-    models: list[LibraryModel] = Field(max_length=_MAX_PAGE_RECIPES)
-    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
-    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
-    freshness_policy: FreshnessPolicy
-
-
-class LibraryRecipeList(_StrictModel):
-    """Read-only overview of active canonical Recipe revisions."""
-
-    schema_version: Literal[2] = 2
-    generated_at: datetime
-    recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
-    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
-    freshness_policy: FreshnessPolicy
-
-
 class LibraryLocalProgress(_StrictModel):
     """Observable progress for a Controller-local preparation operation."""
 
@@ -525,7 +494,7 @@ class RecipeDetailResponse(LibraryRecipeProjection):
     model_documents: list[LibraryRecipeModel] = Field(max_length=32)
 
 
-class LibraryRecipeDetail(_StrictModel):
+class LibraryRecipeAuthoringDetail(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
     recipe: LibraryRecipeIdentity

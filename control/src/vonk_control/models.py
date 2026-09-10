@@ -683,6 +683,11 @@ class AgentEnrollmentGrant(Base):
             "purpose IN ('new-node', 're-enroll')",
             name="ck_agent_enrollment_grants_purpose",
         ),
+        CheckConstraint(
+            "requested_display_name IS NULL OR "
+            "length(requested_display_name) BETWEEN 1 AND 200",
+            name="ck_agent_enrollment_grants_requested_display_name",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -691,6 +696,7 @@ class AgentEnrollmentGrant(Base):
     purpose: Mapped[str] = mapped_column(
         String(24), nullable=False, default="new-node", server_default="new-node"
     )
+    requested_display_name: Mapped[str | None] = mapped_column(String(200))
     token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

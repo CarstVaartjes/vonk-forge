@@ -35,9 +35,9 @@ from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import (
-    LibraryRecipeDetail,
-    LibraryRecipeList,
-    LibrarySnapshot,
+    ModelLibraryResponse,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
 )
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentRevision
@@ -254,16 +254,16 @@ def _api_page_limit(api: TestClient, path: str) -> int:
 
 
 def _library_models(api: TestClient) -> list[Any]:
-    limit = _api_page_limit(api, "/api/library")
+    limit = _api_page_limit(api, "/api/model/library")
     cursor: str | None = None
     models: list[Any] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
-        response = api.get("/api/library", params=params)
+        response = api.get("/api/model/library", params=params)
         assert response.status_code == 200, response.text
-        page = LibrarySnapshot.model_validate_json(response.content)
+        page = ModelLibraryResponse.model_validate_json(response.content)
         models.extend(page.models)
         if page.next_cursor is None:
             return models
@@ -272,16 +272,16 @@ def _library_models(api: TestClient) -> list[Any]:
 
 
 def _library_recipes(api: TestClient) -> list[Any]:
-    limit = _api_page_limit(api, "/api/library/recipes")
+    limit = _api_page_limit(api, "/api/recipe/library")
     cursor: str | None = None
     recipes: list[Any] = []
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
-        response = api.get("/api/library/recipes", params=params)
+        response = api.get("/api/recipe/library", params={**params, "all_models": True})
         assert response.status_code == 200, response.text
-        page = LibraryRecipeList.model_validate_json(response.content)
+        page = RecipeLibraryResponse.model_validate_json(response.content)
         recipes.extend(page.recipes)
         if page.next_cursor is None:
             return recipes
@@ -405,7 +405,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     )
     library_models = _library_models(api)
     library_model_keys = {
-        (item.model.publisher, item.model.slug, item.model.content_sha256)
+        (item.identity.publisher, item.identity.slug, item.identity.content_sha256)
         for item in library_models
     }
     assert len(library_model_keys) == len(library_models)
@@ -416,39 +416,31 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         _model_key(row): row["document"] for row in corpus.index["catalog_entities"]
     }
     assert {
-        (item.model.publisher, item.model.slug, item.model.content_sha256): item.model_document.model_dump(
+        (item.identity.publisher, item.identity.slug, item.identity.content_sha256): item.document.model_dump(
             mode="json"
         )
         for item in library_models
     } == expected_model_documents
-    actual_unlinked = {
-        (item.model.publisher, item.model.slug, item.model.content_sha256)
-        for item in library_models
-        if not item.recipes
-    }
-    assert actual_unlinked == {
-        _model_key(row) for row in corpus.index["catalog_entities"]
-    } - _selected_model_keys(corpus.index)
 
     library_recipes = _library_recipes(api)
-    by_digest = {item.content_sha256: item for item in library_recipes}
+    by_digest = {item.identity.content_sha256: item for item in library_recipes}
     assert len(by_digest) == len(library_recipes)
     assert set(by_digest) == {_recipe_key(row)[2] for row in corpus.index["recipes"]}
     expected_recipe_documents = {
         _recipe_key(row)[2]: row["document"] for row in corpus.index["recipes"]
     }
     assert {
-        item.content_sha256: item.recipe_document.model_dump(mode="json")
+        item.identity.content_sha256: item.document.model_dump(mode="json")
         for item in library_recipes
     } == expected_recipe_documents
     multi_model_detail_seen = False
     for row in corpus.index["recipes"]:
         digest = _recipe_key(row)[2]
-        detail_response = api.get(f"/api/library/recipes/{by_digest[digest].recipe_id}")
+        detail_response = api.get(f"/api/recipe/{by_digest[digest].selector}")
         assert detail_response.status_code == 200, detail_response.text
-        detail = LibraryRecipeDetail.model_validate_json(detail_response.content)
-        assert detail.recipe.content_sha256 == digest
-        assert detail.recipe.slug == row["document"]["identity"]["slug"]
+        detail = RecipeDetailResponse.model_validate_json(detail_response.content)
+        assert detail.identity.content_sha256 == digest
+        assert detail.identity.slug == row["document"]["identity"]["slug"]
         assert [entry.selection.model_dump() for entry in detail.model_documents] == row[
             "document"
         ]["models"]
@@ -471,15 +463,15 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 
     forbidden_paths = {
-        "/api/catalog/entities",
-        "/api/catalog/entities/{entity_id}",
-        "/api/catalog/entities/{entity_id}/draft",
-        "/api/catalog/entities/{entity_id}/resolve",
-        "/api/catalog/recipes",
-        "/api/catalog/recipes/{recipe_id}",
-        "/api/catalog/imports/global",
-        "/api/catalog/imports/recipe-library",
-        "/api/catalog/imports/public",
+        "/api/v1/catalog/entities",
+        "/api/v1/catalog/entities/{entity_id}",
+        "/api/v1/catalog/entities/{entity_id}/draft",
+        "/api/v1/catalog/entities/{entity_id}/resolve",
+        "/api/v1/catalog/recipes",
+        "/api/v1/catalog/recipes/{recipe_id}",
+        "/api/v1/catalog/imports/global",
+        "/api/v1/catalog/imports/recipe-library",
+        "/api/v1/catalog/imports/public",
     }
     assert not forbidden_paths.intersection(
         path for _method, path in CATALOG_OPERATION_IDS
@@ -496,9 +488,9 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         for _method, path in CATALOG_OPERATION_IDS
     )
     canonical_library_paths = {
-        "/api/library",
-        "/api/library/recipes",
-        "/api/library/recipes/{recipe_id}",
+        "/api/model/library",
+        "/api/recipe/library",
+        "/api/recipe/{selector}",
     }
     assert canonical_library_paths <= set(api.app.openapi()["paths"])
     operation_ids = {

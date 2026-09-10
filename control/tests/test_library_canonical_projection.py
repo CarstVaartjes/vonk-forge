@@ -13,11 +13,20 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
-from vonk_control.run_switch_contract import RunSwitchPreviewRequest
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+    ClusterMapping,
+    ModelCacheSet,
+    RecipeBuild,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
@@ -215,43 +224,6 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         detail_payload["identity"]["recipe_id"],
         detail_payload["identity"]["content_sha256"],
     }
-    profile_assignment = FleetProfileAssignmentInput.model_validate(
-        {
-            "recipe_revision_id": detail_payload["identity"]["recipe_revision_id"],
-            "topology_name": expected_recipe.topology.name,
-            "desired_state": "installed",
-            "nodes": [
-                {
-                    "node_id": "spk_" + "0" * 32,
-                    "rank": 0,
-                    "role": expected_recipe.topology.roles[0].name,
-                    "endpoint_owner": True,
-                }
-            ],
-        }
-    )
-    run_input = RunSwitchPreviewRequest.model_validate(
-        {
-            "model_content_sha256": "a" * 64,
-            "recipe_revision_id": detail_payload["identity"]["recipe_revision_id"],
-            "spark_group": {
-                "nodes": [
-                    {
-                        "node_id": "spk_" + "0" * 32,
-                        "rank": 0,
-                        "role": expected_recipe.topology.roles[0].name,
-                        "endpoint_owner": True,
-                    }
-                ]
-            },
-            "alias": "canonical",
-        }
-    )
-    assert profile_assignment.recipe_revision_id == detail_payload["identity"][
-        "recipe_revision_id"
-    ]
-    assert run_input.recipe_revision_id == detail_payload["identity"]["recipe_revision_id"]
-
     multi_model_row = next(
         row for row in index["recipes"] if len(row["document"].get("models", [])) > 1
     )
@@ -288,6 +260,165 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert multi_model_payload["model_documents"][0]["selection"]["files"] != multi_model_payload[
         "model_documents"
     ][1]["selection"]["files"]
+
+
+def test_database_local_projection_reads_cache_build_and_spark_evidence(
+    tmp_path: Path,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    model_document = copy.deepcopy(index["catalog_entities"][0]["document"])
+    recipe_document = copy.deepcopy(index["recipes"][0]["document"])
+    engine = create_engine(f"sqlite:///{tmp_path / 'local-state.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    entities = CatalogEntityService(
+        sessions,
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+        cursors=TokenCodec(b"d" * 32).cursor_codec(),
+    )
+    model_revision = entities.create_draft(model_document, actor="test")
+    entities.resolve(model_revision.id, actor="test")
+    recipe_revision = entities.create_draft(recipe_document, actor="test")
+    entities.resolve(recipe_revision.id, actor="test")
+
+    old_document = copy.deepcopy(model_revision.document)
+    old_document["identity"]["version"] = "0.0.1"
+    old_digest = content_sha256(ModelDefinition.model_validate(old_document))
+    old_revision = CatalogDocumentRevision(
+        id=str(uuid.uuid4()),
+        document_id=model_revision.document_id,
+        kind="model",
+        publisher=model_revision.publisher,
+        slug=model_revision.slug,
+        revision_number=2,
+        schema_version=2,
+        state="candidate",
+        document=old_document,
+        content_digest=old_digest,
+        projected={},
+        created_by="test",
+        created_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    node_id = "spk_" + "a" * 32
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_revision.document))
+    with sessions.begin() as session:
+        session.add(old_revision)
+        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256="b" * 64,
+                schema_version=2,
+                model_content_sha256=old_digest,
+                recipe_revision_sha256=recipe_digest,
+                manifest={"schema_version": 2},
+                expected_bytes=10,
+                verified_bytes=10,
+                state="cached",
+                protected=False,
+                protected_reasons=[],
+                created_at=now,
+                updated_at=now,
+                last_accessed_at=now,
+            )
+        )
+        build_id = str(uuid.uuid4())
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id=recipe_revision.id,
+                builder_node_id=node_id,
+                source_bundle_sha256="c" * 64,
+                build_input_sha256="d" * 64,
+                state="succeeded",
+                policy_report={"state": "passed"},
+                plan={"schema_version": 2},
+                image_digest="sha256:" + "e" * 64,
+                image_bytes=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        mapping_id = str(uuid.uuid4())
+        session.add(
+            ClusterMapping(
+                id=mapping_id,
+                recipe_revision_id=recipe_revision.id,
+                topology_name="single",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest="f" * 64,
+                endpoint_owner_node_id=node_id,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        installation_id = str(uuid.uuid4())
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=recipe_revision.id,
+                model_content_sha256=old_digest,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                recipe_build_id=build_id,
+                image_digest="sha256:" + "e" * 64,
+                plan_digest="1" * 64,
+                plan={"schema_version": 2},
+                state="installed",
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        run_id = str(uuid.uuid4())
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=installation_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                run_generation=1,
+                alias="local",
+                plan_digest="2" * 64,
+                plan={"schema_version": 2, "model_content_sha256": old_digest},
+                state="running",
+                route_state="published",
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                state="running",
+                port=8888,
+                reserved_memory_bytes=1,
+                updated_at=now,
+            )
+        )
+
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"q" * 32).cursor_codec(),
+        clock=lambda: now,
+    )
+    models = projection.models(local_only=True).models
+    assert {item.identity.content_sha256 for item in models} == {old_digest}
+    old = next(item for item in models if item.identity.content_sha256 == old_digest)
+    assert old.local.controller == "cached"
+    assert old.local.running_on == [node_id]
+    recipes = projection.recipe_library().recipes
+    assert len(recipes) == 1
+    assert recipes[0].identity.content_sha256 == recipe_digest
+    assert recipes[0].local.controller == "cached"
 
 
 def test_library_pagination_covers_more_than_one_page_without_gaps(tmp_path: Path) -> None:

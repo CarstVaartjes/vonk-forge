@@ -10,15 +10,16 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
 from vonk_agent_protocol import RecipeRunObservationsWire
-from vonk_control.agent_api import GrantRequest, HostHelperGrantResponse
+from vonk_control.agent_api import HostHelperGrantResponse
 from vonk_control.library_contract import (
     FreshnessPolicy,
+    LibraryFacetValues,
     LibraryRecipeIdentity,
-    LibrarySnapshot,
+    ModelLibraryResponse,
 )
-from vonk_control.model_cache_contract import ModelCacheOperatorRequest
+from vonk_control.model_cache_contract import ModelCacheEvictionPreviewRequest
 from vonk_control.operation_contract import AvailabilityOperationFailure
-from vonk_control.recipe_image_availability_api import RecipeOperatorRequest
+from vonk_control.recipe_image_availability_api import RecipeImageAvailabilityStart
 from vonk_control.strict_json import (
     ControllerAPIRoute,
     StrictJSONModel,
@@ -228,26 +229,27 @@ def test_fastapi_presence_policy_traverses_mapping_response_values() -> None:
     }
 
 
-def test_library_snapshot_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
-    snapshot = LibrarySnapshot(
+def test_model_library_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
+    snapshot = ModelLibraryResponse(
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
         models=[],
-        unlinked_recipes=[],
+        facets=LibraryFacetValues(usage=[], family=[], version=[], quantization=[]),
         next_cursor=None,
+        filters={},
         freshness_policy=FreshnessPolicy(),
     )
     wire = snapshot.model_dump_json()
-    restored = LibrarySnapshot.model_validate_json(wire)
+    restored = ModelLibraryResponse.model_validate_json(wire)
     assert restored.generated_at == snapshot.generated_at
 
     for invalid in (True, 2.0):
         payload = snapshot.model_dump(mode="json")
         payload["schema_version"] = invalid
         with pytest.raises(ValidationError):
-            LibrarySnapshot.model_validate_json(json.dumps(payload))
+            ModelLibraryResponse.model_validate_json(json.dumps(payload))
 
     mapping = snapshot.model_dump()
-    assert LibrarySnapshot.model_validate(mapping).generated_at == snapshot.generated_at
+    assert ModelLibraryResponse.model_validate(mapping).generated_at == snapshot.generated_at
 
 
 def test_library_identity_json_roundtrip_preserves_uuid_wire_text() -> None:
@@ -288,8 +290,8 @@ def test_strict_literal_hook_preserves_json_native_representations() -> None:
 
 def test_representative_wire_models_reject_scalar_coercion() -> None:
     with pytest.raises(ValidationError):
-        ModelCacheOperatorRequest.model_validate_json(
-            '{"request_key":"00000000-0000-4000-8000-000000000001","force":1}'
+        ModelCacheEvictionPreviewRequest.model_validate_json(
+            '{"target_bytes":"1"}'
         )
 
     with pytest.raises(ValidationError):
@@ -301,11 +303,9 @@ def test_representative_wire_models_reject_scalar_coercion() -> None:
             {"schema_version": 2.0, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
         )
     with pytest.raises(ValidationError):
-        RecipeOperatorRequest.model_validate_json(
-            '{"request_key":"00000000-0000-4000-8000-000000000002","force":1}'
+        RecipeImageAvailabilityStart.model_validate_json(
+            '{"request_key":"x","recipe_revision_id":"r","force":1}'
         )
-    with pytest.raises(ValidationError):
-        GrantRequest.model_validate_json('{"ttl_seconds":"1"}')
     with pytest.raises(ValidationError):
         AvailabilityOperationFailure.model_validate_json(
             '{"code":"bad","detail":"d",'
@@ -324,16 +324,12 @@ def test_host_grants_require_the_signed_contract_structure() -> None:
 def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -> None:
     app = FastAPI()
 
-    @app.post("/cache", response_model=ModelCacheOperatorRequest)
-    def cache(body: ModelCacheOperatorRequest) -> ModelCacheOperatorRequest:
+    @app.post("/cache", response_model=ModelCacheEvictionPreviewRequest)
+    def cache(body: ModelCacheEvictionPreviewRequest) -> ModelCacheEvictionPreviewRequest:
         return body
 
-    @app.post("/image", response_model=RecipeOperatorRequest)
-    def image(body: RecipeOperatorRequest) -> RecipeOperatorRequest:
-        return body
-
-    @app.post("/grant", response_model=GrantRequest)
-    def grant(body: GrantRequest) -> GrantRequest:
+    @app.post("/image", response_model=RecipeImageAvailabilityStart)
+    def image(body: RecipeImageAvailabilityStart) -> RecipeImageAvailabilityStart:
         return body
 
     @app.post("/observations", response_model=RecipeRunObservationsWire)
@@ -341,16 +337,15 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         return body
 
     with TestClient(app) as client:
-        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001", "force": "1"}).status_code == 422
-        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001"}).status_code == 200
+        assert client.post("/cache", json={"target_bytes": "1"}).status_code == 422
+        assert client.post("/cache", json={"target_bytes": 1}).status_code == 200
         assert (
             client.post(
                 "/image",
-                json={"request_key": "00000000-0000-4000-8000-000000000002", "force": 1},
+                json={"request_key": "x", "recipe_revision_id": "r", "force": 1},
             ).status_code
             == 422
         )
-        assert client.post("/grant", json={"ttl_seconds": "1"}).status_code == 422
         assert (
             client.post(
                 "/observations",
@@ -389,6 +384,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         )
 
     schemas = app.openapi()["components"]["schemas"]
-    assert schemas["ModelCacheOperatorRequest"]["properties"]["force"]["type"] == "boolean"
-    assert schemas["RecipeOperatorRequest"]["properties"]["force"]["type"] == "boolean"
-    assert schemas["GrantRequest"]["properties"]["ttl_seconds"]["type"] == "integer"
+    assert schemas["ModelCacheEvictionPreviewRequest"]["properties"]["target_bytes"][
+        "type"
+    ] == "integer"
+    assert schemas["RecipeImageAvailabilityStart"]["properties"]["force"]["type"] == "boolean"

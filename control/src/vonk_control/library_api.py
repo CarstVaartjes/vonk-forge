@@ -16,7 +16,10 @@ from .library_contract import (
 from .library_projection import LibrarySelectorAmbiguous
 from .operation_api import bounded_error_responses
 
-_SELECTOR_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"
+# Friendly names may contain spaces.  Keep selectors bounded and reject control
+# characters; path routing remains safe because the projection resolves only an
+# exact publisher/slug or slug match.
+_SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 LIBRARY_OPERATION_IDS = {
     ("get", "/api/model"): "getModelStatus",
