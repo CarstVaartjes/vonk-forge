@@ -176,6 +176,31 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
     assert preview.assignments[0].recipe_revision_id == RECIPE_REVISION_ID
 
 
+def test_profile_accepts_the_library_publisher_slug_selector() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Library selector",
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "spark_ids": [NODE_1],
+                        "desired_state": "running",
+                        "assignment_name": "library-selector",
+                    }
+                ],
+            }
+        ),
+        actor="test",
+    )
+
+    assert profile.assignments[0].recipe_selector == "synthetic-tiny-image"
+    assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
+
+
 def test_all_idle_canonical_profile_previews_without_assignments() -> None:
     sessions = _sessions()
     _seed(sessions)

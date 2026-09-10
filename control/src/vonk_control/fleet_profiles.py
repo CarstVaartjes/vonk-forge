@@ -21,9 +21,9 @@ from .fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentContext,
     FleetProfileAssignmentInput,
-    FleetProfileAssignmentView,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
+    FleetProfileAssignmentView,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
@@ -42,7 +42,6 @@ from .fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileView,
-    StoredFleetProfileAssignment,
 )
 from .logging import redact_text
 from .models import (
@@ -65,7 +64,6 @@ from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
     recipe_topology,
     resolve_recipe_entities,
 )
@@ -759,12 +757,21 @@ class FleetProfileService:
         except (TypeError, ValueError):
             document = None
         if document is None or document.kind != "recipe":
+            normalized_selector = selector.strip().casefold()
+            if "/" in normalized_selector:
+                publisher, slug = normalized_selector.split("/", 1)
+                identity_filter = (
+                    CatalogDocument.publisher == publisher,
+                    CatalogDocument.slug == slug,
+                )
+            else:
+                identity_filter = (func.lower(CatalogDocument.slug) == normalized_selector,)
             candidates = tuple(
                 session.scalars(
                     select(CatalogDocument)
                     .where(
                         CatalogDocument.kind == "recipe",
-                        func.lower(CatalogDocument.slug) == selector.lower(),
+                        *identity_filter,
                     )
                     .order_by(CatalogDocument.publisher, CatalogDocument.slug, CatalogDocument.id)
                 )
