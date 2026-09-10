@@ -133,21 +133,12 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
         FleetProfileInput.model_validate(
             {
                 "name": "Canonical idle",
-                "scope": {"node_ids": [NODE_1, NODE_2]},
                 "assignments": [
                     {
-                        "recipe_revision_id": RECIPE_REVISION_ID,
-                        "topology_name": "solo",
+                        "recipe_selector": "synthetic-tiny-image",
+                        "spark_ids": [NODE_1],
                         "desired_state": "running",
-                        "alias": "canonical",
-                        "nodes": [
-                            {
-                                "node_id": NODE_1,
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            }
-                        ],
+                        "assignment_name": "canonical",
                     }
                 ],
             }
@@ -155,9 +146,11 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
         actor="test",
     )
 
+    assert profile.number == 1
+    assert profile.revision == 1
     assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
-    assert profile.assignments[0].recipe_title == "Synthetic Tiny image"
-    assert profile.assignments[0].model_title == "Synthetic Tiny"
+    assert profile.assignments[0].recipe_selector == "synthetic-tiny-image"
+    assert profile.assignments[0].spark_ids == [NODE_1]
     preview = service.preview(profile.id)
     assert preview.scope.node_ids == [NODE_1, NODE_2]
     assert preview.scope.idle_node_ids == [NODE_2]
@@ -171,7 +164,6 @@ def test_all_idle_canonical_profile_previews_without_assignments() -> None:
     profile = service.create(
         FleetProfileInput(
             name="All idle",
-            scope={"node_ids": [NODE_1, NODE_2]},
             assignments=[],
         ),
         actor="test",
@@ -181,3 +173,30 @@ def test_all_idle_canonical_profile_previews_without_assignments() -> None:
     assert preview.assignments == []
     assert preview.preparations == []
     assert preview.scope.idle_node_ids == [NODE_1, NODE_2]
+
+
+def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() -> None:
+    value = FleetProfileInput.model_validate(
+        {
+            "name": "Draft",
+            "assignments": [
+                {
+                    "recipe_selector": "vision-dual",
+                    "spark_ids": [NODE_1],
+                    "model_variant": "fp8",
+                }
+            ],
+        }
+    )
+    document = value.model_dump(mode="json")
+    assert document["assignments"] == [
+        {
+            "recipe_selector": "vision-dual",
+            "spark_ids": [NODE_1],
+            "assignment_name": None,
+            "model_variant": "fp8",
+            "desired_state": "running",
+        }
+    ]
+    assert "scope" not in document
+    assert "recipe_revision_id" not in document["assignments"][0]

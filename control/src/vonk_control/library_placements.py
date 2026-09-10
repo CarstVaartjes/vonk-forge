@@ -12,7 +12,7 @@ from vonk_agent_protocol import canonical_message
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
-    FleetProfileAssignmentInput,
+    FleetProfileExecutionAssignmentInput,
     FleetProfileLibraryPlacementContext,
     FleetProfileNode,
     FleetProfilePreview,
@@ -37,7 +37,7 @@ class LibraryPlacementConflict(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class _PreparedPlacement:
     preview: LibraryPlacementPreview
-    assignment: FleetProfileAssignmentInput | None
+    assignment: FleetProfileExecutionAssignmentInput | None
     profile_id: str | None
     profile_plan_digest: str | None
 
@@ -217,7 +217,7 @@ class LibraryPlacementService:
 
         selected_nodes = self._selected_nodes(group)
         locations = self._locations(group)
-        assignment: FleetProfileAssignmentInput | None = None
+        assignment: FleetProfileExecutionAssignmentInput | None = None
         profile_id: str | None = None
         profile_preview: FleetProfilePreview | None = None
         steps: list[LibraryPlacementStep] = []
@@ -228,7 +228,7 @@ class LibraryPlacementService:
             and group.eligible
             and not blockers
         ):
-            assignment = FleetProfileAssignmentInput(
+            assignment = FleetProfileExecutionAssignmentInput(
                 recipe_revision_id=revision.id,
                 topology_name=topology.name,
                 desired_state=value.desired_state,

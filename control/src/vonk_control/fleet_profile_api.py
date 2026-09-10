@@ -1,65 +1,34 @@
-"""Authenticated saved Fleet profile and profile-application routes."""
+"""Authenticated numbered whole-fleet Profile operator routes."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Path, Request, Response, status
+from fastapi import FastAPI, HTTPException, Path, Request, status
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
-    FleetProfileApplyRequest,
-    FleetProfileCaptureInput,
-    FleetProfileDuplicateInput,
     FleetProfileInput,
     FleetProfileList,
-    FleetProfilePreparePreviewRequest,
-    FleetProfilePrepareRequest,
+    FleetProfileLoadRequest,
     FleetProfilePreview,
-    FleetProfilePreviewRequest,
-    FleetProfileRetryRequest,
-    FleetProfileStatusView,
     FleetProfileView,
 )
 from .fleet_profiles import FleetProfileConflict
 from .operation_api import bounded_error_responses
 
+_PROFILE_PATH = "/api/profile/{number}"
 FLEET_PROFILE_OPERATION_IDS = {
-    ("post", "/api/fleet-profile-applications/{application_id}/retry"): "retryFleetProfileApplication",
-    ("get", "/api/fleet-profiles"): "listFleetProfiles",
-    ("post", "/api/fleet-profiles"): "createFleetProfile",
-    ("post", "/api/fleet-profiles/capture-current"): (
-        "captureCurrentFleetProfile"
-    ),
-    ("get", "/api/fleet-profiles/{profile_id}"): "getFleetProfile",
-    ("put", "/api/fleet-profiles/{profile_id}"): "updateFleetProfile",
-    ("delete", "/api/fleet-profiles/{profile_id}"): "deleteFleetProfile",
-    ("post", "/api/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
-    ("post", "/api/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
-    ("post", "/api/fleet-profiles/{profile_id}/duplicate"): (
-        "duplicateFleetProfile"
-    ),
-    ("get", "/api/fleet-profiles/{profile_id}/status"): (
-        "getFleetProfileStatus"
-    ),
-    ("post", "/api/fleet-profiles/{profile_id}/prepare"): (
-        "prepareFleetProfile"
-    ),
-    ("post", "/api/fleet-profiles/{profile_id}/prepare/preview"): (
-        "previewFleetProfilePreparation"
-    ),
-    ("post", "/api/fleet-profiles/{profile_id}/switch"): "switchFleetProfile",
-    (
-        "get",
-        "/api/fleet-profile-applications/{application_id}",
-    ): "getFleetProfileApplication",
+    ("get", "/api/profile"): "listProfiles",
+    ("get", _PROFILE_PATH): "getProfile",
+    ("put", _PROFILE_PATH): "autosaveProfile",
+    ("post", "/api/profile/{number}/preview"): "previewProfile",
+    ("post", "/api/profile/{number}/load"): "loadProfile",
+    ("get", "/api/profile/{number}/progress"): "getProfileProgress",
 }
-_UUID = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
 
 
 def install_fleet_profile_routes(
@@ -76,25 +45,23 @@ def install_fleet_profile_routes(
 
     def service() -> Any:
         if profiles is None:
-            raise HTTPException(status_code=503, detail="Fleet profiles unavailable")
+            raise HTTPException(status_code=503, detail="Profiles unavailable")
         return profiles
 
     def require_mutation(actor: Actor, method: str, route: str) -> None:
         if actor.role not in MUTATION_ROLES[(method, route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def audit(
-        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
-    ) -> None:
+    def audit(request: Request, actor: Actor, action: str, targets: tuple[str, ...]) -> None:
         audits.append(
             AuditRecord(request.state.request_id, actor.subject, action, None, targets)
         )
 
     @app.get(
-        "/api/fleet-profiles",
+        "/api/profile",
         response_model=FleetProfileList,
         responses=bounded_error_responses(401, 503),
-        operation_id="listFleetProfiles",
+        operation_id="listProfiles",
     )
     def list_profiles(_actor: Actor = authenticated) -> FleetProfileList:
         try:
@@ -102,409 +69,108 @@ def install_fleet_profile_routes(
         except HTTPException:
             raise
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profiles unavailable"
-            ) from None
-
-    @app.post(
-        "/api/fleet-profiles",
-        response_model=FleetProfileView,
-        responses=bounded_error_responses(401, 403, 409, 422, 503),
-        status_code=status.HTTP_201_CREATED,
-        operation_id="createFleetProfile",
-    )
-    def create_profile(
-        request: Request, body: FleetProfileInput, actor: Actor = authenticated
-    ) -> FleetProfileView:
-        require_mutation(actor, "POST", "/api/fleet-profiles")
-        try:
-            result = service().create(body, actor=actor.subject)
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile create unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.create", (result.id,))
-        return result
-
-    @app.post(
-        "/api/fleet-profiles/capture-current",
-        response_model=FleetProfileView,
-        responses=bounded_error_responses(401, 403, 409, 422, 503),
-        status_code=status.HTTP_201_CREATED,
-        operation_id="captureCurrentFleetProfile",
-    )
-    def capture_current_profile(
-        request: Request,
-        body: FleetProfileCaptureInput,
-        actor: Actor = authenticated,
-    ) -> FleetProfileView:
-        require_mutation(actor, "POST", "/api/fleet-profiles/capture-current")
-        try:
-            result = service().capture_current(
-                name=body.name,
-                description=body.description,
-                installation_policy=body.installation_policy,
-                labels=body.labels,
-                favorite=body.favorite,
-                actor=actor.subject,
-            )
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile capture unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.capture-current", (result.id,))
-        return result
+            raise HTTPException(status_code=503, detail="Profiles unavailable") from None
 
     @app.get(
-        "/api/fleet-profiles/{profile_id}",
+        _PROFILE_PATH,
         response_model=FleetProfileView,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetProfile",
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="getProfile",
     )
     def get_profile(
-        profile_id: Annotated[str, Path(pattern=_UUID)], _actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
     ) -> FleetProfileView:
         try:
-            return service().get(profile_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
+            return service().read_number(number)
         except HTTPException:
             raise
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile unavailable"
-            ) from None
+            raise HTTPException(status_code=503, detail="Profile unavailable") from None
 
     @app.put(
-        "/api/fleet-profiles/{profile_id}",
+        _PROFILE_PATH,
         response_model=FleetProfileView,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="updateFleetProfile",
+        responses=bounded_error_responses(401, 403, 409, 422, 503),
+        operation_id="autosaveProfile",
     )
-    def update_profile(
+    def autosave_profile(
         request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
+        number: Annotated[int, Path(ge=1)],
         body: FleetProfileInput,
         actor: Actor = authenticated,
     ) -> FleetProfileView:
-        route = "/api/fleet-profiles/{profile_id}"
-        require_mutation(actor, "PUT", route)
+        require_mutation(actor, "PUT", _PROFILE_PATH)
         try:
-            result = service().update(profile_id, body, actor=actor.subject)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
+            result = service().update_number(number, body, actor=actor.subject)
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+        except KeyError:
+            raise HTTPException(status_code=422, detail="invalid profile number") from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile update unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.update", (profile_id,))
+            raise HTTPException(status_code=503, detail="Profile save unavailable") from None
+        audit(request, actor, "profile.autosave", (str(number),))
         return result
 
-    @app.delete(
-        "/api/fleet-profiles/{profile_id}",
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_204_NO_CONTENT,
-        operation_id="deleteFleetProfile",
-    )
-    def delete_profile(
-        request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        actor: Actor = authenticated,
-    ) -> Response:
-        route = "/api/fleet-profiles/{profile_id}"
-        require_mutation(actor, "DELETE", route)
-        try:
-            service().delete(profile_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile delete unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.delete", (profile_id,))
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
     @app.post(
-        "/api/fleet-profiles/{profile_id}/preview",
+        "/api/profile/{number}/preview",
         response_model=FleetProfilePreview,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="previewFleetProfile",
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="previewProfile",
     )
     def preview_profile(
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfilePreviewRequest,
-        actor: Actor = authenticated,
+        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
     ) -> FleetProfilePreview:
-        del body
-        route = "/api/fleet-profiles/{profile_id}/preview"
-        require_mutation(actor, "POST", route)
         try:
-            return service().preview(profile_id)
+            profile = service().get_number(number)
+            return service().preview(profile.id)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
+            raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile preview unavailable"
-            ) from None
-
-    @app.get(
-        "/api/fleet-profiles/{profile_id}/status",
-        response_model=FleetProfileStatusView,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetProfileStatus",
-    )
-    def profile_status(
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        _actor: Actor = authenticated,
-    ) -> FleetProfileStatusView:
-        try:
-            return service().status(profile_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile status unavailable"
-            ) from None
+            raise HTTPException(status_code=503, detail="Profile preview unavailable") from None
 
     @app.post(
-        "/api/fleet-profiles/{profile_id}/duplicate",
-        response_model=FleetProfileView,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_201_CREATED,
-        operation_id="duplicateFleetProfile",
-    )
-    def duplicate_profile(
-        request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfileDuplicateInput,
-        actor: Actor = authenticated,
-    ) -> FleetProfileView:
-        require_mutation(
-            actor, "POST", "/api/fleet-profiles/{profile_id}/duplicate"
-        )
-        try:
-            result = service().duplicate(
-                profile_id,
-                name=body.name,
-                description=body.description,
-                actor=actor.subject,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile duplicate unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.duplicate", (profile_id, result.id))
-        return result
-    @app.post(
-        "/api/fleet-profiles/{profile_id}/apply",
+        "/api/profile/{number}/load",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
-        operation_id="applyFleetProfile",
+        operation_id="loadProfile",
     )
-    def apply_profile(
+    def load_profile(
         request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfileApplyRequest,
+        number: Annotated[int, Path(ge=1)],
+        body: FleetProfileLoadRequest,
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
-        route = "/api/fleet-profiles/{profile_id}/apply"
-        require_mutation(actor, "POST", route)
+        require_mutation(actor, "POST", "/api/profile/{number}/load")
+        request_key = body.request_key or str(uuid.uuid4())
         try:
-            result = service().apply(
-                profile_id,
-                plan_digest=body.plan_digest,
-                request_key=body.request_key,
-                actor=actor.subject,
-            )
+            result = service().load(number, actor=actor.subject, request_key=request_key)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
+            raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile application unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.apply", (profile_id, result.id))
-        return result
-
-    @app.post(
-        "/api/fleet-profiles/{profile_id}/prepare/preview",
-        response_model=FleetProfilePreview,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="previewFleetProfilePreparation",
-    )
-    def prepare_preview_profile(
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfilePreparePreviewRequest,
-        actor: Actor = authenticated,
-    ) -> FleetProfilePreview:
-        del body
-        route = "/api/fleet-profiles/{profile_id}/prepare/preview"
-        require_mutation(actor, "POST", route)
-        try:
-            return service().prepare_preview(profile_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile preparation preview unavailable"
-            ) from None
-
-    @app.post(
-        "/api/fleet-profiles/{profile_id}/prepare",
-        response_model=FleetProfileApplicationView,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="prepareFleetProfile",
-    )
-    def prepare_profile(
-        request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfilePrepareRequest,
-        actor: Actor = authenticated,
-    ) -> FleetProfileApplicationView:
-        require_mutation(
-            actor, "POST", "/api/fleet-profiles/{profile_id}/prepare"
-        )
-        try:
-            result = service().prepare(
-                profile_id,
-                plan_digest=body.plan_digest,
-                request_key=body.request_key,
-                actor=actor.subject,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile preparation unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.prepare", (profile_id, result.id))
-        return result
-
-    @app.post(
-        "/api/fleet-profiles/{profile_id}/switch",
-        response_model=FleetProfileApplicationView,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="switchFleetProfile",
-    )
-    def switch_profile(
-        request: Request,
-        profile_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfileApplyRequest,
-        actor: Actor = authenticated,
-    ) -> FleetProfileApplicationView:
-        require_mutation(
-            actor, "POST", "/api/fleet-profiles/{profile_id}/switch"
-        )
-        try:
-            result = service().switch(
-                profile_id,
-                plan_digest=body.plan_digest,
-                request_key=body.request_key,
-                actor=actor.subject,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile not found"
-            ) from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile switch unavailable"
-            ) from None
-        audit(request, actor, "fleet-profile.switch", (profile_id, result.id))
+            raise HTTPException(status_code=503, detail="Profile load unavailable") from None
+        audit(request, actor, "profile.load", (str(number), result.id))
         return result
 
     @app.get(
-        "/api/fleet-profile-applications/{application_id}",
+        "/api/profile/{number}/progress",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetProfileApplication",
+        operation_id="getProfileProgress",
     )
-    def get_application(
-        application_id: Annotated[str, Path(pattern=_UUID)],
-        _actor: Actor = authenticated,
+    def profile_progress(
+        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
     ) -> FleetProfileApplicationView:
         try:
-            return service().application(application_id)
+            return service().progress_number(number)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet profile application not found"
-            ) from None
-        except HTTPException:
-            raise
+            raise HTTPException(status_code=404, detail="Profile progress not found") from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile application unavailable"
-            ) from None
-
-
-    @app.post(
-        "/api/fleet-profile-applications/{application_id}/retry",
-        response_model=FleetProfileApplicationView,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="retryFleetProfileApplication",
-    )
-    def retry_application(
-        request: Request,
-        application_id: Annotated[str, Path(pattern=_UUID)],
-        body: FleetProfileRetryRequest,
-        actor: Actor = authenticated,
-    ) -> FleetProfileApplicationView:
-        require_mutation(actor, "POST", "/api/fleet-profile-applications/{application_id}/retry")
-        try:
-            result = service().retry(application_id, request_key=body.request_key, actor=actor.subject)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Application not found") from None
-        except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Application recovery unavailable") from None
-        audit(request, actor, "fleet-profile.retry", (application_id, result.id))
-        return result
+            raise HTTPException(status_code=503, detail="Profile progress unavailable") from None
 
 
 __all__ = ["FLEET_PROFILE_OPERATION_IDS", "install_fleet_profile_routes"]
