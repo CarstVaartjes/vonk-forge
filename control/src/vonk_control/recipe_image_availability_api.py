@@ -336,7 +336,7 @@ def install_recipe_operator_routes(
             raise _recipe_error(error) from None
 
     @app.post(
-        "/api/recipe/{selector}/download",
+        "/api/recipe/{selector:path}/download",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
@@ -364,7 +364,7 @@ def install_recipe_operator_routes(
             raise _recipe_error(error) from None
 
     @app.post(
-        "/api/recipe/{selector}/remove",
+        "/api/recipe/{selector:path}/remove",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeOperatorResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
