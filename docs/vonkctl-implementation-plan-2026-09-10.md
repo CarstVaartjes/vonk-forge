@@ -108,3 +108,21 @@ Use task-specific writable uv caches and the sibling recipe contract package. Ru
 - Prefix-change checks: 42 schema-completeness/client-request tests passed; another 184 auth/agent/healthcheck/generated-client tests passed. Regenerating OpenAPI with `--schema-only` produced no diff. All 29 native agent client tests passed under OrbStack Linux/Rust 1.97.1 after replacing an old positional test-server path parser with an explicit prefix parser. Native macOS compilation encountered existing Linux-only helper filesystem APIs, so Linux was used. These checks validate the prefix change, not yet the new CLI/profile/cache implementation.
 - OrbStack verified as `orbstack`, operating system `OrbStack`, architecture `aarch64`. Full native agent library follow-up passed all 144 tests (including the 29 client tests), covering additional enrollment/execution route consumers.
 - Final worker integration and full acceptance evidence remain pending.
+- CLI commits `a1490ea7` and `25033fab` replace retired command trees and align current request contracts. Review still requires exercising watch/follow, confirmations, and terminal exit status against the completed service contracts; parser flags alone are not acceptance.
+- Shared authentication accepts cookie plus CSRF or bearer on the same operator routes, including Fleet streaming. Login/session/logout/token creation are the only browser-specific surface. Focused auth, profile API and stream checks pass (52 tests).
+- `4bc43d8f` disconnects the retired proposal/change authority, Library placement authority, and direct Recipe/Run-Switch public execution routes. Workers are removing their underlying retired implementations and consumers; this is not a compatibility-wrapper strategy.
+
+## Cross-slice removal ledger
+
+Before completion, verify all of the following against the integrated checkout:
+
+- Remove proposal/change public DTOs, services, persisted proposal table, clients and fixtures. Preserve only authority-head state still used by enrolled agents and Fleet evidence.
+- Remove hidden Library profiles, placement facade/routes/contracts and retry branches. Numbered whole-fleet profiles are the sole operator workload authority. Frozen application records remain the durable execution receipt, not another authoring model.
+- Remove orphan `library_operations` authority and its isolated tests.
+- Remove bulk eviction routes/DTOs/worker kind. Targeted model/recipe removal cancels related work and preserves Spark-local copies and other cache references.
+- Remove direct public mapping/build/install/run/stop/uninstall and Run-Switch routes. Keep only current internals needed by Profile execution; delete the distinct model-uninstall operation end-to-end.
+- Replace old human Agent routes with Fleet actions; retain authenticated Agent transport as a distinct machine protocol.
+- Fold deployment provenance into Fleet evidence; remove the separate web consumer and route.
+- Update browser consumers, qualification runner, candidate-recipe acceptance and Spark lifecycle acceptance to current contracts. Do not leave executable old-route callers merely because physical acceptance needs separate hardware.
+- Regenerate OpenAPI, Python and TypeScript clients and remove retired exported DTOs. Verify route completeness, authorization coverage and producer/store/consumer round trips.
+- Remove obsolete auth/operation registry entries only together with their route removal. Verify current mutations retain explicit role checks for both authentication transports.

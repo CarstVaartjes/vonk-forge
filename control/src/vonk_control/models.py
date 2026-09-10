@@ -1184,7 +1184,7 @@ class ModelCacheOperation(Base):
             "schema_version = 2", name="ck_model_cache_operations_schema_version"
         ),
         CheckConstraint(
-            "kind IN ('download','repair','evict')",
+            "kind IN ('download','repair','remove')",
             name="ck_model_cache_operations_kind",
         ),
         CheckConstraint(

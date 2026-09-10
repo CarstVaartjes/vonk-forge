@@ -75,30 +75,14 @@ global repository metadata that the Controller refreshes at startup and every
 15 minutes through its Caddy proxy. Container qualification remains unavailable
 until the production `CompiledExecutionPlan` materializer is linked; do not
 treat the current `environment-limited` result as a pass. Execute the physical
-lifecycle through Controller Run/Switch, or the equivalent normal CLI command:
+lifecycle through a numbered whole-fleet profile. Loading it idles unassigned
+Sparks, so review the entire profile before loading:
 
 ```sh
-cat > run-request.json <<'JSON'
-{
-  "schema_version": 2,
-  "model_content_sha256": "<MODEL_CONTENT_SHA256>",
-  "recipe_revision_id": "<RECIPE_REVISION_UUID>",
-  "spark_group": {
-    "nodes": [
-      {
-        "node_id": "<SPK_NODE_ID>",
-        "rank": 0,
-        "role": "entrypoint",
-        "endpoint_owner": true
-      }
-    ]
-  },
-  "alias": "<MODEL_ALIAS>",
-  "action": "run",
-  "retention": "retain-cached"
-}
-JSON
-vonkctl models run --input-file run-request.json --json
+vonkctl recipe download RECIPE
+vonkctl --profile 1 profile add RECIPE --spark SPARK
+vonkctl --profile 1 profile load --dry-run --json
+vonkctl --profile 1 profile load --json
 ```
 
 The resulting Controller operation is the authority for preparation, install,
