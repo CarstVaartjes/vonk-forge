@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
     RecipeBuildEvidence,
     RecipeImageImportEvidence,
     RecipeJobRunResult,
-    RecipeModelCleanupResult,
     RecipeStartCollectiveReadinessEvidence,
     RecipeStartRankLaunchEvidence,
     RecipeStartSingleEvidence,
@@ -61,7 +60,6 @@ LifecycleNodeResult = Annotated[
     | RecipeStopResult
     | RecipeUninstallResult
     | RemovedRecipeNodeResult
-    | RecipeModelCleanupResult
     | AgentFailureResult
     | LifecycleCodeFailureResult,
     Field(discriminator=None),
@@ -206,8 +204,6 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         evidence_models = (RecipeStopResult,)
     elif kind == "recipe.uninstall":
         evidence_models = (RecipeUninstallResult, RemovedRecipeNodeResult)
-    elif kind == "recipe.model-uninstall.v1":
-        evidence_models = (RecipeModelCleanupResult,)
     else:
         return
     evidence_models = (*evidence_models, AgentFailureResult, LifecycleCodeFailureResult)

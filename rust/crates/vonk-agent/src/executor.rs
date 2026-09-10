@@ -32,7 +32,7 @@ use crate::{
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
-    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeModelCleanupResult,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult,
     RecipeOperationRequest, RecipeStartPhase, RecipeStartRequest, RecipeStopResult,
     RecipeUninstallResult, canonical_json, hex_sha256,
 };
@@ -506,19 +506,6 @@ pub fn recipe_uninstall_success_body(removed_model_bytes: u64) -> Value {
     };
     result.validate().expect("valid uninstall result");
     serde_json::to_value(result).expect("serializable uninstall result")
-}
-
-pub fn recipe_model_cleanup_success_body(
-    uninstalled_installations: usize,
-    removed_model_bytes: u64,
-) -> Value {
-    let result = RecipeModelCleanupResult {
-        uninstalled_installations: u32::try_from(uninstalled_installations)
-            .expect("bounded model cleanup count"),
-        removed_model_bytes,
-    };
-    result.validate().expect("valid model cleanup result");
-    serde_json::to_value(result).expect("serializable model cleanup result")
 }
 
 pub fn recipe_start_success_body(
@@ -2044,93 +2031,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     body: recipe_uninstall_success_body(removed_model_bytes),
                 }
             }
-            RecipeOperationRequest::ModelCleanup(request) => {
-                self.report_phase(claim, "cleanup").await;
-                let installations = request
-                    .installations
-                    .into_iter()
-                    .map(|installation| {
-                        (
-                            installation.installation_id,
-                            installation.recipe_content_sha256,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let string_installations = installations
-                    .iter()
-                    .map(|(installation_id, digest)| (installation_id.to_string(), digest.clone()))
-                    .collect::<Vec<_>>();
-                let removed_model_bytes = match self
-                    .runtime
-                    .validate_model_uninstall(&string_installations, &request.model_content_sha256)
-                {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        return failed_stage(
-                            "model dependencies could not be safely removed",
-                            "installation-validation",
-                            error.safe_category(),
-                        );
-                    }
-                };
-                for (installation_uuid, _) in &installations {
-                    match self
-                        .runtime
-                        .runtime_cache_present(&installation_uuid.to_string())
-                    {
-                        Ok(false) => {}
-                        Ok(true) => {
-                            if let Err(error) = self
-                                .cleanup_installation_cache(claim, *installation_uuid)
-                                .await
-                            {
-                                return failed_stage_owned(
-                                    "model dependencies could not be safely removed",
-                                    "runtime-cache-cleanup",
-                                    error.preflight_code(),
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            return failed_stage(
-                                "model dependencies could not be safely removed",
-                                "runtime-cache-cleanup",
-                                error.safe_category(),
-                            );
-                        }
-                    }
-                }
-                for (installation_id, recipe_digest) in &string_installations {
-                    match self.runtime.recipe_digest_if_present(installation_id) {
-                        Ok(None) => continue,
-                        Ok(Some(_)) => {}
-                        Err(error) => {
-                            return failed_stage(
-                                "model dependencies could not be safely removed",
-                                "installation-removal",
-                                error.safe_category(),
-                            );
-                        }
-                    }
-                    if let Err(error) = self
-                        .runtime
-                        .finalize_uninstall(installation_id, recipe_digest)
-                    {
-                        return failed_stage(
-                            "model dependencies could not be safely removed",
-                            "installation-removal",
-                            error.safe_category(),
-                        );
-                    }
-                }
-                ExecutionResult {
-                    state: "succeeded",
-                    body: recipe_model_cleanup_success_body(
-                        installations.len(),
-                        removed_model_bytes,
-                    ),
-                }
-            }
         }
     }
 }
@@ -2651,7 +2551,6 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         "recipe.start" => "recipe_start_failed",
         "recipe.stop" => "recipe_stop_failed",
         "recipe.uninstall" => "recipe_uninstall_failed",
-        "recipe.model-uninstall.v1" => "recipe_model_uninstall_failed",
         _ => "operation_failed",
     };
     let mut body = json!({
@@ -3289,7 +3188,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn controller_model_cleanup_payload_is_parsed_and_executed() {
+    async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
         let data = tempdir().unwrap();
         let runtime_root = tempdir().unwrap();
         let installation_id = "00000000-0000-4000-8000-000000000001";
@@ -3315,15 +3214,6 @@ mod tests {
         )
         .unwrap();
 
-        let payload = json!({
-            "schema_version": 1,
-            "model_content_sha256": model_content_sha256,
-            "plan_digest": "b".repeat(64),
-            "installations": [{
-                "installation_id": installation_id,
-                "recipe_content_sha256": recipe_content_sha256,
-            }],
-        });
         let claim = AgentClaim {
             attempt: 1,
             authority_revision: "b".repeat(64),
@@ -3332,10 +3222,24 @@ mod tests {
             fence: Uuid::new_v4(),
             job_id: Uuid::new_v4(),
             node_id: NODE_ID.to_owned(),
-            operation: "recipe.model-uninstall.v1".parse().unwrap(),
+            operation: "recipe.uninstall".parse().unwrap(),
             operation_id: Uuid::new_v4(),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
-            payload: serde_json::from_value(payload).unwrap(),
+            payload_digest: hex_sha256(&canonical_json(&serde_json::json!({
+                "schema_version": 1,
+                "installation_id": installation_id,
+                "recipe_content_sha256": recipe_content_sha256,
+                "cleanup_model_content_sha256": model_content_sha256,
+                "plan_digest": "b".repeat(64),
+            }))
+            .unwrap()),
+            payload: serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "installation_id": installation_id,
+                "recipe_content_sha256": recipe_content_sha256,
+                "cleanup_model_content_sha256": model_content_sha256,
+                "plan_digest": "b".repeat(64),
+            }))
+            .unwrap(),
             schema_version: 1,
         };
         let client = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
@@ -3356,41 +3260,8 @@ mod tests {
         let result = executor.execute(&claim, lease_deadline, cancellation).await;
 
         assert_eq!(result.state, "succeeded");
-        assert_eq!(result.body["uninstalled_installations"], 1);
-        assert_eq!(result.body["removed_model_bytes"], 0);
-        assert!(!installation.exists());
-
-        fs::create_dir_all(&installation).unwrap();
-        fs::write(
-            installation.join("spec.json"),
-            serde_json::to_vec(&plan).unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            installation.join("recipe-content.sha256"),
-            recipe_content_sha256,
-        )
-        .unwrap();
-        let uninstall_payload = json!({
-            "schema_version": 1,
-            "installation_id": installation_id,
-            "recipe_content_sha256": recipe_content_sha256,
-            "cleanup_model_content_sha256": model_content_sha256,
-            "plan_digest": "b".repeat(64),
-        });
-        let mut uninstall_claim = claim.clone();
-        uninstall_claim.operation = "recipe.uninstall".parse().unwrap();
-        uninstall_claim.payload_digest = hex_sha256(&canonical_json(&uninstall_payload).unwrap());
-        uninstall_claim.payload = serde_json::from_value(uninstall_payload).unwrap();
-        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(uninstall_claim.deadline);
-        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
-
-        let result = executor
-            .execute(&uninstall_claim, lease_deadline, cancellation)
-            .await;
-
-        assert_eq!(result.state, "succeeded");
         assert_eq!(result.body["uninstalled"], true);
+        assert_eq!(result.body["removed_model_bytes"], 0);
         assert!(!installation.exists());
     }
 

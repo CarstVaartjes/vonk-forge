@@ -19,7 +19,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_agent_protocol.recipe_operations import (
-    RecipeModelCleanupPayload,
     RecipeUninstallPayload,
 )
 from vonk_control.agent_api import HostRuntimeGrantRequest
@@ -413,32 +412,18 @@ def cleanup_grant_arguments(installation_id: str) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("operation_kind", ["recipe.uninstall", "recipe.model-uninstall.v1"])
 def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload(
-    operation_kind: str,
 ) -> None:
-    if operation_kind == "recipe.uninstall":
-        payload = RecipeUninstallPayload(
-            schema_version=1,
-            installation_id=INSTALLATION_ID,
-            plan_digest="a" * 64,
-            recipe_content_sha256="b" * 64,
-            cleanup_model_content_sha256=None,
-        )
-        authorized = [INSTALLATION_ID]
-        unauthorized = [SECOND_INSTALLATION_ID, OUTSIDE_INSTALLATION_ID]
-    else:
-        payload = RecipeModelCleanupPayload.model_validate({
-            "schema_version": 1,
-            "model_content_sha256": "c" * 64,
-            "plan_digest": "a" * 64,
-            "installations": tuple(
-                {"installation_id": installation_id, "recipe_content_sha256": "b" * 64}
-                for installation_id in (INSTALLATION_ID, SECOND_INSTALLATION_ID)
-            ),
-        })
-        authorized = [INSTALLATION_ID, SECOND_INSTALLATION_ID]
-        unauthorized = [OUTSIDE_INSTALLATION_ID]
+    operation_kind = "recipe.uninstall"
+    payload = RecipeUninstallPayload(
+        schema_version=1,
+        installation_id=INSTALLATION_ID,
+        plan_digest="a" * 64,
+        recipe_content_sha256="b" * 64,
+        cleanup_model_content_sha256=None,
+    )
+    authorized = [INSTALLATION_ID]
+    unauthorized = [SECOND_INSTALLATION_ID, OUTSIDE_INSTALLATION_ID]
     service = runtime_service(
         operation_kind=operation_kind,
         operation_payload=json.loads(canonical_message(payload)),

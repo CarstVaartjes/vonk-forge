@@ -45,5 +45,4 @@ pub const CLAIM_CAPABILITIES: &[&str] = &[
     "recipe.run.inspect.receipt.v1",
     "recipe.stop",
     "recipe.uninstall",
-    "recipe.model-uninstall.v1",
 ];

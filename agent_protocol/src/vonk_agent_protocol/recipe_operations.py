@@ -23,7 +23,6 @@ RECIPE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_START,
         AgentOperation.RECIPE_STOP,
         AgentOperation.RECIPE_UNINSTALL,
-        AgentOperation.RECIPE_MODEL_UNINSTALL,
     }
 )
 
@@ -158,28 +157,6 @@ class RecipeUninstallPayload(_StrictPayload):
     cleanup_model_content_sha256: Digest | None
 
 
-class RecipeModelCleanupInstallation(_StrictPayload):
-    installation_id: CanonicalUuid
-    recipe_content_sha256: Digest
-
-
-class RecipeModelCleanupPayload(_StrictPayload):
-    schema_version: Literal[1]
-    model_content_sha256: Digest
-    plan_digest: Digest
-    installations: tuple[RecipeModelCleanupInstallation, ...] = Field(
-        min_length=1, max_length=512
-    )
-
-    @model_validator(mode="after")
-    def installations_are_unique(self) -> RecipeModelCleanupPayload:
-        if len({item.installation_id for item in self.installations}) != len(
-            self.installations
-        ):
-            raise ValueError("model cleanup installations are duplicated")
-        return self
-
-
 class RecipeStopResult(_StrictPayload):
     stopped: Literal[True]
 
@@ -189,17 +166,11 @@ class RecipeUninstallResult(_StrictPayload):
     removed_model_bytes: int = Field(ge=0, le=16 * 1024**4)
 
 
-class RecipeModelCleanupResult(_StrictPayload):
-    uninstalled_installations: int = Field(ge=1, le=512)
-    removed_model_bytes: int = Field(ge=0, le=16 * 1024**4)
-
-
 _REQUEST_MODELS = {
     AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
     AgentOperation.RECIPE_START: RecipeStartPayload,
     AgentOperation.RECIPE_STOP: RecipeStopPayload,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallPayload,
-    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupPayload,
 }
 
 
@@ -212,7 +183,6 @@ class RecipeOperationRequest(_StrictPayload):
         | RecipeStartPayload
         | RecipeStopPayload
         | RecipeUninstallPayload
-        | RecipeModelCleanupPayload
     )
 
     @classmethod
@@ -339,25 +309,14 @@ class RecipeOperationRequest(_StrictPayload):
     def cleanup_model_content_sha256(self) -> str | None:
         return getattr(self.payload, "cleanup_model_content_sha256", None)
 
-    @property
-    def model_content_sha256(self) -> str | None:
-        return getattr(self.payload, "model_content_sha256", None)
-
-    @property
-    def installations(self) -> tuple[RecipeModelCleanupInstallation, ...]:
-        value = getattr(self.payload, "installations", ())
-        return tuple(value)
-
-
 def parse_recipe_operation_result(
     operation: AgentOperation, result: Any
-) -> RecipeStopResult | RecipeUninstallResult | RecipeModelCleanupResult:
-    """Parse a successful stop, uninstall, or model-cleanup result exactly."""
+) -> RecipeStopResult | RecipeUninstallResult:
+    """Parse a successful stop or uninstall result exactly."""
 
     result_models = {
         AgentOperation.RECIPE_STOP: RecipeStopResult,
         AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
-        AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupResult,
     }
     try:
         model = result_models[operation]
@@ -369,9 +328,6 @@ def parse_recipe_operation_result(
 __all__ = [
     "RECIPE_OPERATIONS",
     "RecipeInstallPayload",
-    "RecipeModelCleanupInstallation",
-    "RecipeModelCleanupPayload",
-    "RecipeModelCleanupResult",
     "RecipeOperationRequest",
     "RecipeStartPayload",
     "RecipeStopPayload",
