@@ -88,6 +88,8 @@ def install_library_routes(
         family: Annotated[list[str] | None, Query(max_length=64)] = None,
         version: Annotated[list[str] | None, Query(max_length=64)] = None,
         quantization: Annotated[list[str] | None, Query(max_length=64)] = None,
+        publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
+        alignment: Annotated[list[str] | None, Query(max_length=64)] = None,
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
@@ -96,7 +98,8 @@ def install_library_routes(
         try:
             return library().models(
                 limit=limit, cursor=cursor, usage=usage or [], family=family or [],
-                version=version or [], quantization=quantization or [], search=search,
+                version=version or [], quantization=quantization or [],
+                publisher=publisher or [], alignment=alignment or [], search=search,
                 updated_since=updated_since, sort=sort,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
@@ -141,6 +144,9 @@ def install_library_routes(
         model: Annotated[str | None, Query(max_length=256)] = None,
         all_models: Annotated[bool, Query()] = False,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
+        publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
+        alignment: Annotated[list[str] | None, Query(max_length=64)] = None,
+        sparks: Annotated[list[int] | None, Query(max_length=64)] = None,
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
@@ -149,7 +155,8 @@ def install_library_routes(
         try:
             return library().recipe_library(
                 limit=limit, cursor=cursor, model_selector=model,
-                all_models=all_models, usage=usage or [], search=search,
+                all_models=all_models, usage=usage or [], publisher=publisher or [],
+                alignment=alignment or [], sparks=sparks or [], search=search,
                 updated_since=updated_since, sort=sort,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:

@@ -79,6 +79,8 @@ export type LibraryViewModel = {
   version: string;
   quantization: string;
   usage: string[];
+  // Alignments declared by the recipes that serve this model.
+  alignment: string[];
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
