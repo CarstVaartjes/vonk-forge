@@ -124,7 +124,7 @@ class FakeClient:
             assert set(payload) == {"name", "ttl_seconds"}
         elif path.endswith("/rename"):
             assert set(payload) == {"display_name"}
-        elif path.endswith("/re-enroll") or path.endswith("/remove"):
+        elif path.endswith(("/re-enroll", "/remove")):
             assert payload is None
         else:
             raise AssertionError(f"invented mutation payload route: {path}")
@@ -292,6 +292,20 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 "revision": 7,
                 "assignments": [],
             },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Boreal",
+                        "hostname": "boreal",
+                    },
+                ]
+            },
             ("PUT", "/api/profile/2"): {
                 "number": 2,
                 "revision": 8,
@@ -318,6 +332,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     assert payload["revision"] == 8
     assert client.calls == [
         ("GET", "/api/profile/2", None, None),
+        ("GET", "/api/fleet", None, None),
         (
             "PUT",
             "/api/profile/2",
@@ -325,7 +340,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 "assignments": [
                     {
                         "recipe_selector": "recipe-uuid",
-                        "spark_ids": ["Atlas", "Boreal"],
+                        "spark_ids": ["spk_" + "a" * 32, "spk_" + "b" * 32],
                         "desired_state": "running",
                     }
                 ],
@@ -335,6 +350,41 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             None,
         ),
     ]
+
+
+def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1"): {
+                "number": 1,
+                "name": "Default",
+                "revision": 1,
+                "assignments": [],
+            },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-a",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-b",
+                    },
+                ]
+            },
+        }
+    )
+
+    status, payload = run(
+        ("profile", "add", "qwen-code", "--spark", "Atlas", "--json"), client
+    )
+
+    assert status == 2
+    assert "ambiguous spark selector" in payload["error"]
+    assert [call[1] for call in client.calls] == ["/api/profile/1", "/api/fleet"]
 
 
 def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
@@ -448,11 +498,21 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
 def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     class ConflictClient(FakeClient):
         def request(self, method, path, payload=None, *, extra_headers=None, query=None):
-            self._validate_request(method, path, payload, query)
-            self.calls.append((method, path, payload, query))
-            if method == "PUT":
-                raise ValueError("profile revision conflict")
-            return {"number": 1, "revision": 4, "assignments": []}
+                self._validate_request(method, path, payload, query)
+                self.calls.append((method, path, payload, query))
+                if method == "PUT":
+                    raise ValueError("profile revision conflict")
+                if path == "/api/fleet":
+                    return {
+                        "nodes": [
+                            {
+                                "id": "spk_" + "a" * 32,
+                                "display_name": "Atlas",
+                                "hostname": "atlas",
+                            }
+                        ]
+                    }
+                return {"number": 1, "revision": 4, "assignments": []}
 
     client = ConflictClient({})
     status, payload = run(
@@ -460,7 +520,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"
-    assert [call[0] for call in client.calls] == ["GET", "PUT"]
+    assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
 
 
 def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
