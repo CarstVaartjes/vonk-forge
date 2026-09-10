@@ -5,6 +5,7 @@ import {AdminMenu} from "./admin-menu";
 
 function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> = {}) {
   const props: React.ComponentProps<typeof AdminMenu> = {
+    onDownloadCliToken: vi.fn(async () => ({expiresAt: "2026-09-12T09:30:00Z"})),
     loggingOut: false,
     logoutError: "",
     onLogout: vi.fn(),
@@ -28,7 +29,7 @@ test("opens an operator disclosure and moves focus to its first action", async (
 
   const actions = screen.getByRole("group", {name: "Operator actions"});
   expect(trigger).toHaveAttribute("aria-expanded", "true");
-  expect(within(actions).getByRole("link", {name: "Open Activity"})).toHaveFocus();
+  expect(within(actions).getByRole("button", {name: "Download CLI token"})).toHaveFocus();
   expect(actions).toHaveClass("admin-menu-panel");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
@@ -39,6 +40,8 @@ test("supports disclosure keyboard navigation and restores trigger focus on Esca
   const trigger = screen.getByRole("button", {name: /admin/i});
   await user.click(trigger);
 
+  await user.keyboard("{ArrowDown}");
+  expect(screen.getByRole("link", {name: "Open Activity"})).toHaveFocus();
   await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("button", {name: "Logout"})).toHaveFocus();
   await user.keyboard("{ArrowUp}");
@@ -67,7 +70,7 @@ test("closes on outside interaction", async () => {
   const onNavigateToActivity = vi.fn(event => event.preventDefault());
   render(<div>
     <button type="button">Outside</button>
-    <AdminMenu loggingOut={false} logoutError="" onLogout={() => undefined} onNavigateToActivity={onNavigateToActivity} role="Administrator" subject="admin"/>
+    <AdminMenu loggingOut={false} logoutError="" onDownloadCliToken={async () => ({expiresAt: ""})} onLogout={() => undefined} onNavigateToActivity={onNavigateToActivity} role="Administrator" subject="admin"/>
   </div>);
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
@@ -79,7 +82,7 @@ test("closes and disables all operator actions while global navigation is locked
   const user = userEvent.setup();
   const onLogout = vi.fn();
   const onNavigateToActivity = vi.fn(event => event.preventDefault());
-  const props = {loggingOut: false, logoutError: "", onLogout, onNavigateToActivity, role: "Administrator", subject: "admin"};
+  const props = {loggingOut: false, logoutError: "", onDownloadCliToken: vi.fn(async () => ({expiresAt: ""})), onLogout, onNavigateToActivity, role: "Administrator", subject: "admin"};
   const view = render(<AdminMenu {...props}/>);
 
   const trigger = screen.getByRole("button", {name: /admin/i});
@@ -93,4 +96,16 @@ test("closes and disables all operator actions while global navigation is locked
   await user.click(trigger);
   expect(onLogout).not.toHaveBeenCalled();
   expect(onNavigateToActivity).not.toHaveBeenCalled();
+});
+
+test("downloads a CLI token from the account menu and reports the result", async () => {
+  const user = userEvent.setup();
+  const onDownloadCliToken = vi.fn(async () => ({expiresAt: "2026-09-12T09:30:00Z"}));
+  renderMenu({onDownloadCliToken});
+
+  await user.click(screen.getByRole("button", {name: /admin/i}));
+  await user.click(screen.getByRole("button", {name: "Download CLI token"}));
+
+  expect(onDownloadCliToken).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("status")).toHaveTextContent("CLI token downloaded");
 });

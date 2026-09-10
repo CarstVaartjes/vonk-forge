@@ -3,6 +3,7 @@ import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
   AuthSession,
+  CliTokenDownload,
   AgentRepairManifest,
   AgentUpgradeApplyInput,
   AgentUpgradeApplyResponse,
@@ -224,6 +225,34 @@ export class ApiClient implements ControlApi {
     const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
+  }
+
+  async downloadCliToken(): Promise<CliTokenDownload> {
+    const headers = new Headers({Accept: "text/plain"});
+    const csrf = csrfToken();
+    if (csrf) headers.set("X-CSRF-Token", csrf);
+    const response = await fetch("/api/v1/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
+    this.requireAuthentication(response);
+    if (!response.ok) {
+      let problem: unknown;
+      try { problem = await response.json(); } catch { problem = null; }
+      const detail = typeof problem === "object" && problem !== null && "detail" in problem
+        ? formatApiDetail(problem.detail)
+        : "request failed";
+      throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`);
+    }
+    const content = await response.blob();
+    if (content.size === 0) throw new ApiError(response.status, "Control API returned an empty CLI token");
+    const downloadUrl = URL.createObjectURL(content);
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = "vonkctl-token";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+    return {expiresAt: response.headers.get("X-Vonk-Token-Expires-At") ?? ""};
   }
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {

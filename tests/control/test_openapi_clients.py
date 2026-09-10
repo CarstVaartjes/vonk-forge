@@ -291,6 +291,7 @@ def test_admin_schema_is_secret_free() -> None:
     }
     operations = _operations(schema)
     assert operations["streamFleetEvents"]["security"] == [{"BrowserSession": []}]
+    assert operations["downloadCliToken"]["security"] == [{"BrowserSession": []}]
     assert all(
         operation["security"] == [{"BearerAuth": []}]
         for operation_id, operation in operations.items()
@@ -299,6 +300,7 @@ def test_admin_schema_is_secret_free() -> None:
             "getBrowserSession",
             "loginBrowser",
             "logoutBrowser",
+            "downloadCliToken",
             "streamFleetEvents",
         }
     )
@@ -355,6 +357,7 @@ def test_browser_auth_contract_declares_cookie_security_and_fixed_validation() -
     assert operations["loginBrowser"]["security"] == []
     assert operations["getBrowserSession"]["security"] == [{"BrowserSession": []}]
     assert operations["logoutBrowser"]["security"] == [{"BrowserSession": []}]
+    assert operations["downloadCliToken"]["security"] == [{"BrowserSession": []}]
     assert operations["loginBrowser"]["responses"]["422"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/LoginRequestInvalid"}

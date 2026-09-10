@@ -1657,6 +1657,7 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/session",
+        "/api/v1/auth/cli-token",
         "/api/v1/fleet/stream",
     }
     includes_browser_auth = any(
