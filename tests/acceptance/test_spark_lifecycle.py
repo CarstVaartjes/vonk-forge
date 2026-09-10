@@ -2595,7 +2595,7 @@ class SparkLifecycle:
                     os.fspath(bundle),
                     "--key",
                     os.fspath(key_v1),
-                    f"https://{AGENT_HOST}:8443/agent/v1/source-bundles/{'0' * 64}",
+                    f"https://{AGENT_HOST}:8443/agent/source-bundles/{'0' * 64}",
                 ],
                 cwd=Path("/"),
                 timeout=40,

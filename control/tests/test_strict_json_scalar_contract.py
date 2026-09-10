@@ -17,9 +17,9 @@ from vonk_control.library_contract import (
     LibraryRecipeIdentity,
     ModelLibraryResponse,
 )
-from vonk_control.model_cache_contract import ModelCacheEvictionPreviewRequest
+from vonk_control.model_cache_contract import ModelCacheOperatorRequest
 from vonk_control.operation_contract import AvailabilityOperationFailure
-from vonk_control.recipe_image_availability_api import RecipeImageAvailabilityStart
+from vonk_control.recipe_image_availability_api import RecipeOperatorRequest
 from vonk_control.strict_json import (
     ControllerAPIRoute,
     StrictJSONModel,
@@ -290,8 +290,8 @@ def test_strict_literal_hook_preserves_json_native_representations() -> None:
 
 def test_representative_wire_models_reject_scalar_coercion() -> None:
     with pytest.raises(ValidationError):
-        ModelCacheEvictionPreviewRequest.model_validate_json(
-            '{"target_bytes":"1"}'
+        ModelCacheOperatorRequest.model_validate_json(
+            '{"request_key":"00000000-0000-4000-8000-000000000001","with_model":"yes"}'
         )
 
     with pytest.raises(ValidationError):
@@ -303,8 +303,8 @@ def test_representative_wire_models_reject_scalar_coercion() -> None:
             {"schema_version": 2.0, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
         )
     with pytest.raises(ValidationError):
-        RecipeImageAvailabilityStart.model_validate_json(
-            '{"request_key":"x","recipe_revision_id":"r","force":1}'
+        RecipeOperatorRequest.model_validate_json(
+            '{"request_key":"00000000-0000-4000-8000-000000000001","with_model":1}'
         )
     with pytest.raises(ValidationError):
         AvailabilityOperationFailure.model_validate_json(
@@ -324,12 +324,12 @@ def test_host_grants_require_the_signed_contract_structure() -> None:
 def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -> None:
     app = FastAPI()
 
-    @app.post("/cache", response_model=ModelCacheEvictionPreviewRequest)
-    def cache(body: ModelCacheEvictionPreviewRequest) -> ModelCacheEvictionPreviewRequest:
+    @app.post("/cache", response_model=ModelCacheOperatorRequest)
+    def cache(body: ModelCacheOperatorRequest) -> ModelCacheOperatorRequest:
         return body
 
-    @app.post("/image", response_model=RecipeImageAvailabilityStart)
-    def image(body: RecipeImageAvailabilityStart) -> RecipeImageAvailabilityStart:
+    @app.post("/image", response_model=RecipeOperatorRequest)
+    def image(body: RecipeOperatorRequest) -> RecipeOperatorRequest:
         return body
 
     @app.post("/observations", response_model=RecipeRunObservationsWire)
@@ -337,12 +337,12 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         return body
 
     with TestClient(app) as client:
-        assert client.post("/cache", json={"target_bytes": "1"}).status_code == 422
-        assert client.post("/cache", json={"target_bytes": 1}).status_code == 200
+        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": "yes"}).status_code == 422
+        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": True}).status_code == 200
         assert (
             client.post(
                 "/image",
-                json={"request_key": "x", "recipe_revision_id": "r", "force": 1},
+                json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": 1},
             ).status_code
             == 422
         )
@@ -384,7 +384,5 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         )
 
     schemas = app.openapi()["components"]["schemas"]
-    assert schemas["ModelCacheEvictionPreviewRequest"]["properties"]["target_bytes"][
-        "type"
-    ] == "integer"
-    assert schemas["RecipeImageAvailabilityStart"]["properties"]["force"]["type"] == "boolean"
+    assert schemas["ModelCacheOperatorRequest"]["properties"]["with_model"]["type"] == "boolean"
+    assert schemas["RecipeOperatorRequest"]["properties"]["with_model"]["type"] == "boolean"

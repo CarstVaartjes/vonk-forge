@@ -4,7 +4,7 @@ import type {ControlApi} from "./api/types";
 import {AppShell} from "./components/app-shell";
 import type {AppRoute} from "./components/app-shell";
 import {ActivityPage} from "./pages/activity";
-import {FleetPage} from "./pages/fleet";
+import {FleetPage} from "./pages/fleet-simplified";
 import {LibraryPage} from "./pages/library";
 
 const pages: AppRoute[] = ["fleet", "library", "activity"];

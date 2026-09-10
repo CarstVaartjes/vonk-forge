@@ -4,55 +4,20 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   CliTokenDownload,
-  AgentRepairManifest,
-  AgentUpgradeApplyInput,
-  AgentUpgradeApplyResponse,
-  AgentUpgradePlan,
-  AgentUpgradeStrategy,
-  AgentsResponse,
   AuditResponse,
   ControlApi,
-  EnrollmentGrantResponse,
-  EnrollmentListResponse,
-  FleetNodeIdentity,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
   FleetProfile,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
-  CacheEntryResponse,
-  ModelCacheDownloadInput,
-  ModelCacheDownloadPreviewInput,
-  ModelCacheDownloadPreviewResponse,
-  ModelCacheEvictInput,
-  ModelCacheEvictionPreviewInput,
-  ModelCacheEvictionPreviewResponse,
-  ModelCacheInventoryResponse,
-  ModelCacheOperationResponse,
-  ModelCacheOperationsResponse,
-  ModelCacheRepairInput,
-  ModelCacheRepairPreviewInput,
-  ModelCacheRepairPreviewResponse,
-  ModelCacheUpdatesResponse,
-  ModelCacheRetryInput,
-  ModelCacheAccessResumeInput,
-  ModelCacheAccessResumeResponse,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
   OperationsResponse,
   OperationDetail,
-  ChangeResponse,
-  ProposalInput,
-  ProposalPreview,
-  TelemetryHistory,
-  TelemetryCurrentResponse,
-  TelemetryCapabilitiesResponse,
-  TelemetryWorkloadsResponse,
-  TelemetryResolution,
   VisualFleetSnapshot,
-  NodeProfileUpdate,
   ArtifactJob,
   ArtifactJobCapabilities,
   ArtifactJobCreateInput,
@@ -277,80 +242,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
-    return resultData(await this.generated.GET("/api/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
-  }
-
-  async modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
-    return resultData(await this.generated.GET("/api/model-cache/entries/{artifact_set_sha256}", {
-      params: {path: {artifact_set_sha256: artifactSetSha256}},
-      signal,
-    }));
-  }
-
-  async previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/download-preview", {body: input, signal}));
-  }
-
-  async downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/download", {body: input, signal}));
-  }
-
-  async previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/repair-preview", {body: input, signal}));
-  }
-
-  async repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/repair", {body: input, signal}));
-  }
-
-  async previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/eviction-preview", {body: input, signal}));
-  }
-
-  async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/evict", {body: input, signal}));
-  }
-
-  async modelCacheUpdates(signal?: AbortSignal, checkUpstream = false): Promise<ModelCacheUpdatesResponse> {
-    return resultData(await this.generated.GET("/api/model-cache/updates", {params: {query: {limit: 100, check_upstream: checkUpstream}}, signal}));
-  }
-
-  async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
-    return resultData(await this.generated.GET("/api/model-cache/operations", {params: {query: {limit: 100, cursor}}, signal}));
-  }
-
-  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.GET("/api/model-cache/operations/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/operations/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse> {
-    return resultData(await this.generated.POST("/api/model-cache/operations/{operation_id}/check-access-and-resume", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
-    return resultData(await this.generated.PATCH("/api/nodes/{node_id}/profile", {
-      body: input,
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
   async modelStatus(signal?: AbortSignal): Promise<ModelStatus> {
     return resultData(await this.generated.GET("/api/model", {signal}));
   }
@@ -473,97 +364,6 @@ export class ApiClient implements ControlApi {
     return `/api/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
   }
 
-  async nodeTelemetryHistory(
-    nodeId: string,
-    start: string,
-    end: string,
-    resolution: TelemetryResolution,
-    maximumPoints: number,
-    signal?: AbortSignal,
-  ): Promise<TelemetryHistory> {
-    return resultData(await this.generated.GET("/api/nodes/{node_id}/telemetry", {
-      params: {
-        path: {node_id: nodeId},
-        query: {start, end, resolution, maximum_points: maximumPoints},
-      },
-      signal,
-    }));
-  }
-
-  async nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
-    return resultData(await this.generated.GET("/api/nodes/{node_id}/telemetry/current", {
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
-  async nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
-    return resultData(await this.generated.GET("/api/nodes/{node_id}/telemetry/capabilities", {
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
-  async nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
-    return resultData(await this.generated.GET("/api/nodes/{node_id}/telemetry/workloads", {
-      params: {path: {node_id: nodeId}, query: {run_id: runId, state}},
-      signal,
-    }));
-  }
-
-  async agents(): Promise<AgentsResponse> {
-    return resultData(await this.generated.GET("/api/agents"));
-  }
-
-  async enrollments(): Promise<EnrollmentListResponse> {
-    return resultData(await this.generated.GET("/api/agents/enrollments"));
-  }
-
-  async createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/agents/enrollments/grants", {
-      body: {ttl_seconds: ttlSeconds, purpose: "new-node"},
-      signal,
-    }));
-  }
-
-  async createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/agents/enrollments/grants", {
-      body: {ttl_seconds: ttlSeconds, purpose: "re-enroll", ...(nodeId ? {node_id: nodeId} : {})},
-      signal,
-    }));
-  }
-
-  async revokeAgentNode(nodeId: string): Promise<void> {
-    const {response} = await this.generated.POST("/api/agents/nodes/{node_id}/revoke", {
-      params: {path: {node_id: nodeId}},
-    });
-    if (!response.ok) throw new Error(`Control API returned ${response.status}`);
-  }
-
-  async previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan> {
-    return resultData(await this.generated.POST("/api/agents/upgrades/preview", {
-      body: {
-        node_ids: nodeIds,
-        ...(repairManifest ? {repair_manifest: repairManifest} : {}),
-        strategy,
-      },
-      signal,
-    }));
-  }
-
-  async applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<AgentUpgradeApplyResponse> {
-    const body: AgentUpgradeApplyInput = {
-        node_ids: plan.node_ids,
-        ...(plan.repair_manifest ? {repair_manifest: plan.repair_manifest} : {package: plan.package}),
-        plan_digest: plan.plan_digest,
-        strategy: plan.strategy,
-    };
-    return resultData(await this.generated.POST("/api/agents/upgrades", {
-      body,
-      signal,
-    }));
-  }
-
   async jobs(cursor?: string): Promise<JobsResponse> {
     return resultData(await this.generated.GET("/api/jobs", {
       params: {query: {cursor, limit: 20}},
@@ -600,6 +400,4 @@ export class ApiClient implements ControlApi {
   async audit(signal?: AbortSignal): Promise<AuditResponse> {
     return resultData(await this.generated.GET("/api/audit", {signal}));
   }
-  preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/proposals", {method: "POST", body: JSON.stringify(input)}); }
-  submit(digest: string) { return this.request<ChangeResponse>("/api/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
 }

@@ -224,7 +224,6 @@ def test_admin_schema_is_secret_free() -> None:
         "getJob",
         "getFleetMetricsHistory",
         "getPublishedEndpoint",
-        "listAgents",
         "listJobLogs",
         "listJobs",
         "resumeJob",

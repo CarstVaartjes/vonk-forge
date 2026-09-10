@@ -154,11 +154,12 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
 }
 
 export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryApi; detail: LibraryViewRecipeDetail; onBusyChange?(busy: boolean): void}) {
+  type ActiveRun = {run_id: string; state: string};
   const document = detail.definition;
   const jobInterfaces = useMemo(() => document.interfaces.filter((item): item is JobRecipeInterface => item.adapter !== "openai"), [document]);
   const [interfaceIndex, setInterfaceIndex] = useState(0);
   const jobInterface = jobInterfaces[interfaceIndex];
-  const activeRun = detail.operational_state.runs.find(run => run.state === "running");
+  const activeRun = detail.operational_state.runs.find((run): run is ActiveRun => typeof run === "object" && run !== null && "run_id" in run && typeof run.run_id === "string" && "state" in run && run.state === "running");
   const parameters = useMemo(() => recipeParameters(document), [document]);
   const input = jobInterface?.input ?? null;
   const inputSlots = useMemo<RecipeInputSlot[]>(() => {

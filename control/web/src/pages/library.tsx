@@ -11,14 +11,14 @@ import "./library.css";
 
 function subview(path: string): LibrarySubview {
   const url = new URL(path, location.origin);
-  if (url.pathname === "/library/cache") return "cache";
+  if (url.pathname === "/library/cache") return "models";
   if (url.pathname === "/library/profiles") return "profiles";
   const view = url.searchParams.get("view");
-  return view === "models" || view === "cache" || view === "profiles" ? view : "recipes";
+  return view === "models" || view === "profiles" ? view : "recipes";
 }
 function tabPath(path: string, view: LibrarySubview): string {
   const url = new URL(path, location.origin);
-  url.pathname = view === "cache" ? "/library/cache" : view === "profiles" ? "/library/profiles" : "/library";
+  url.pathname = view === "profiles" ? "/library/profiles" : "/library";
   if (view === "models") url.searchParams.set("view", "models"); else url.searchParams.delete("view");
   return `${url.pathname}${url.search}`;
 }
@@ -146,7 +146,7 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   return <div className="library-page">
     <header className="library-command-header"><div className="library-command-title"><h1 ref={heading} tabIndex={-1}>Library</h1><p>Choose a Model. Pair it with an exact Recipe, then run it on your Sparks.</p></div></header>
     {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing Models on ${names[preferredNodeId] ?? preferredNodeId}`}><strong>{names[preferredNodeId] ?? preferredNodeId}</strong><span>Choose a compatible Recipe for this Spark.</span><a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a></aside>}
-    <nav className="library-subnav" aria-label="Library sections">{(["models", "recipes", "cache", "profiles"] as const).map(item => <a key={item} className={view === item ? "is-active" : undefined} aria-current={view === item ? "page" : undefined} href={tabPath(path, item)} onClick={event => onNavigate(event, tabPath(path, item))}>{item === "cache" ? "NAS cache" : item[0]!.toUpperCase() + item.slice(1)}</a>)}</nav>
+    <nav className="library-subnav" aria-label="Library sections">{(["models", "recipes", "profiles"] as const).map(item => <a key={item} className={view === item ? "is-active" : undefined} aria-current={view === item ? "page" : undefined} href={tabPath(path, item)} onClick={event => onNavigate(event, tabPath(path, item))}>{item[0]!.toUpperCase() + item.slice(1)}</a>)}</nav>
     {error && <div className="library-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setAttempt(value => value + 1)}>Retry Library</button></div>}
     {fleetError && <div className="library-error" role="status"><span>{fleetError}</span><button type="button" className="button secondary" onClick={() => setFleetAttempt(value => value + 1)}>Retry Sparks</button></div>}
     {snapshot && <LibraryNodeNamesProvider names={names}><LibraryBrowser api={api} detail={detail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} onBusyChange={onBusyChange} onNavigate={contextualNavigate} onNavigatePath={onNavigatePath} onQueryChange={updateQuery} onRefresh={refresh} onRetryDetail={() => setDetailAttempt(value => value + 1)} path={path} query={query} route={route} snapshot={snapshot} subview={view}/></LibraryNodeNamesProvider>}

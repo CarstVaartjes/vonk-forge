@@ -16,7 +16,7 @@ const preview = {allowed: true, steps: [{index: 0, kind: "start", label: "Start 
 const application = {state: "running", progress: {child_progress: {phase: "start", node_ids: [nodeA], bytes: 50, total_bytes: 100}}, status_reason: null} as unknown as FleetProfileApplicationView;
 
 function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {
-  return {profiles: vi.fn(async () => ({profiles: [profile]})), previewProfile: vi.fn(async () => preview), autosaveProfile: vi.fn(async () => profile), loadProfile: vi.fn(async () => application), profileProgress: vi.fn(async () => application), ...overrides} as unknown as ControlApi;
+  return {profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [profile]})), previewProfile: vi.fn(async () => preview), autosaveProfile: vi.fn(async () => profile), loadProfile: vi.fn(async () => application), profileProgress: vi.fn(async () => application), ...overrides} as unknown as ControlApi;
 }
 
 test("reads and loads a numbered profile without legacy status or application routes", async () => {
@@ -45,7 +45,7 @@ test("saves the current numbered draft with recipe selectors and Spark IDs", asy
 
 test("renders an empty profile as an explicit whole-fleet idle outcome", async () => {
   const empty = {...profile, number: 3, name: "Idle", assignments: []} as FleetProfile;
-  const api = apiFor({profiles: vi.fn(async () => ({profiles: [empty]}))});
+  const api = apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [empty]}))});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   const saved = await screen.findByRole("region", {name: "Profile 3 saved profile"});
   expect(within(saved).getByText("Idle fleet")).toBeVisible();

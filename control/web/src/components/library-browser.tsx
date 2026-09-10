@@ -3,13 +3,12 @@ import type {MouseEvent} from "react";
 import type {ControlApi, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
 import {modelKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
-import {LibraryCacheView} from "./library-cache-view";
 import {LibraryModelsView} from "./library-models-view";
 import {LibraryProfilesView} from "./library-profiles-view";
 import {LibraryRecipeAuthority} from "./library-recipe-detail";
 import {buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, libraryFiltersFromSearch, libraryFiltersToSearch, LibraryWorkcell} from "./library-workcell";
 
-export type LibrarySubview = "models" | "cache" | "profiles" | "recipes";
+export type LibrarySubview = "models" | "profiles" | "recipes";
 
 export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, onBusyChange, onNavigate, onNavigatePath, onQueryChange, onRefresh, onRetryDetail, path, query, route, snapshot, subview}: {
   api: ControlApi; detail?: LibraryViewRecipeDetail; detailError: string; detailLoading: boolean; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; onRefresh(signal: AbortSignal): Promise<void>; onRetryDetail(): void; path: string; query: string; route: LibraryRoute; snapshot: LibraryViewSnapshot; subview: LibrarySubview;
@@ -33,7 +32,6 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, 
     const url = new URL(path, location.origin);
     onNavigatePath(`${url.pathname}?${libraryFiltersToSearch(next, url.searchParams).toString()}`, true);
   }
-  if (subview === "cache") return <LibraryCacheView api={api} entries={records} modelInventory={snapshot.models} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate} path={path}/>;
   if (subview === "profiles") return <LibraryProfilesView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>;
   if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} path={path} query={query}/>;
   if (route.kind === "recipe") {

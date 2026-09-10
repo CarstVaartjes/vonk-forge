@@ -1,62 +1,77 @@
-import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryViewModel, LibraryViewSnapshot, ModelCacheUpdateResponse, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibraryViewModel, LibraryViewSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
 import {filterLibraryRecipeRecords} from "./library-workcell";
-import {aggregateCacheEntries, LibraryModelDownloadAction, loadModelCacheInventory} from "./library-cache-view";
 
-export function LibraryModelsView({api, entries, filters, modelInventory, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, path, query}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; filters: LibraryWorkcellFilters; modelInventory?: LibraryViewSnapshot["models"]; onFiltersChange(filters: LibraryWorkcellFilters): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; path: string; query: string}) {
-  const [cacheInventory, setCacheInventory] = useState<{entries: import("../api/types").CacheEntryResponse[]}>();
-  const [cacheAttempt, setCacheAttempt] = useState(0);
-  const [cacheLoading, setCacheLoading] = useState(true);
-  const [cacheError, setCacheError] = useState("");
-  const [updates, setUpdates] = useState<ModelCacheUpdateResponse[]>([]);
-  const [updatesError, setUpdatesError] = useState("");
-  const [updatesLoading, setUpdatesLoading] = useState(false);
-  const [updatesAttempt, setUpdatesAttempt] = useState(0);
+type LibraryModelsViewProps = {
+  api: ControlApi;
+  entries: LibraryRecipeRecord[];
+  fleet?: unknown;
+  modelInventory?: LibraryViewSnapshot["models"];
+  filters: LibraryWorkcellFilters;
+  onFiltersChange(filters: LibraryWorkcellFilters): void;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
+  onNavigatePath?(path: string, replace?: boolean): void;
+  onQueryChange(value: string): void;
+  path: string;
+  query: string;
+};
+
+/** The web library is read-only for now; vonkctl owns cache mutations. */
+export function LibraryModelsView({entries, filters, modelInventory, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, path, query}: LibraryModelsViewProps) {
   const models = modelInventory ?? [];
-  const filtered = filterLibraryRecipeRecords(entries, filters, query);
-  const visible = models.filter(model => !filters.model || modelKey(model.model) === filters.model).filter(model => !query.trim() || filtered.some(record => record.modelKey === modelKey(model.model)));
-  useEffect(() => { if (!api.modelCacheInventory) { setCacheLoading(false); setCacheError("NAS cache API unavailable"); return; } const controller = new AbortController(); setCacheLoading(true); setCacheError(""); void loadModelCacheInventory(api, controller.signal).then(value => { if (!controller.signal.aborted) setCacheInventory(value); }).catch(value => { if (!controller.signal.aborted) setCacheError(value instanceof Error ? value.message : "NAS cache inventory unavailable"); }).finally(() => { if (!controller.signal.aborted) setCacheLoading(false); }); return () => controller.abort(); }, [api, cacheAttempt]);
-  useEffect(() => { if (!api.modelCacheUpdates) return; const controller = new AbortController(); setUpdatesError(""); setUpdatesLoading(true); void api.modelCacheUpdates(controller.signal, updatesAttempt > 0).then(value => { if (!controller.signal.aborted) setUpdates(value.updates); }).catch(value => { if (!controller.signal.aborted) setUpdatesError(value instanceof Error ? value.message : "Model update discovery unavailable"); }).finally(() => { if (!controller.signal.aborted) setUpdatesLoading(false); }); return () => controller.abort(); }, [api, updatesAttempt]);
-  const cacheByModel = useMemo(() => new Map(aggregateCacheEntries(models, cacheInventory).map(entry => [entry.key, entry])), [cacheInventory, models]);
+  const filteredRecipes = filterLibraryRecipeRecords(entries, filters, query);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = models
+    .filter(model => !filters.model || modelKey(model.model) === filters.model)
+    .filter(model => !normalizedQuery || filteredRecipes.some(record => record.modelKey === modelKey(model.model)) || modelTitle(model).toLowerCase().includes(normalizedQuery));
+
   function updateModel(value: string) {
     onFiltersChange({...filters, model: value});
-    if (onNavigatePath) { const url = new URL(path, location.origin); if (value) url.searchParams.set("model", value); else url.searchParams.delete("model"); onNavigatePath(`${url.pathname}${url.search}`, true); }
+    if (!onNavigatePath) return;
+    const url = new URL(path, location.origin);
+    if (value) url.searchParams.set("model", value);
+    else url.searchParams.delete("model");
+    onNavigatePath(`${url.pathname}${url.search}`, true);
   }
-  const titleFor = (model: LibraryViewModel) => model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
+
   return <section className="library-models-view" aria-labelledby="library-models-heading">
-    <header className="library-subview-heading"><div><h2 id="library-models-heading">Models</h2><p>See what each model can do and keep a copy on your NAS.</p></div><span>{visible.length} of {models.length} Models</span><button type="button" className="button secondary" disabled={updatesLoading} onClick={() => setUpdatesAttempt(value => value + 1)}>{updatesLoading && updatesAttempt > 0 ? "Checking upstream…" : "Check for updates"}</button></header>{cacheError && <div className="library-error" role="alert"><span>NAS cache: {cacheError}</span><button type="button" className="button secondary" onClick={() => setCacheAttempt(value => value + 1)}>Retry cache</button></div>}{updatesError && <div className="library-error" role="alert"><span>Model updates: {updatesError}</span><button type="button" className="button secondary" disabled={updatesLoading} onClick={() => setUpdatesAttempt(value => value + 1)}>Retry updates</button></div>}
-    <div className="library-model-controls"><label>Search Models<input type="search" aria-label="Search Models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability"/></label><label>Exact Model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All Models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{titleFor(model)}</option>)}</select></label></div>
-    <div className="library-model-list" aria-label="Exact model inventory">
-      {visible.map(model => {
-        const key = modelKey(model.model);
-        const modelRecords = entries.filter(record => record.modelKey === key && record.recipe);
-        const bytes = model.model_document.files.reduce((sum, file) => sum + file.size_bytes, 0);
-        const caps = (model.model_capabilities?.facts ?? []).filter(fact => fact.support === "supported").map(fact => fact.capability);
-        const cache = cacheByModel.get(model.model.content_sha256);
-        const update = updates.find(candidate => candidate.model_content_sha256 === model.model.content_sha256);
-        const candidates = update?.model_update_candidates ?? [];
-        const cacheLabel = cacheLoading ? "loading" : cacheError ? "unavailable" : cache?.status ?? "not cached";
-        return <div key={key} className="library-model-row">
-          <div><a href={modelLibraryPath(key)} onClick={event => onNavigate(event, modelLibraryPath(key))}><h3>{titleFor(model)}</h3><p>{model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}</p></a><div className="library-model-badges">{caps.length ? caps.map(capability => <span key={capability}>{capability}</span>) : <span>Capabilities unknown</span>}</div><span className={`library-cache-status state-${cacheLabel}`}>NAS cache: {cacheLabel}{!cacheLoading && !cacheError && ` · ${formatBytes(cache?.verifiedBytes ?? 0)} / ${formatBytes(bytes)} verified`}</span></div>
-          {update?.model_update_ambiguous && <div className="library-model-update library-error" role="status"><strong>Model update needs a choice</strong><p>Multiple candidates share this exact Model lineage. Choose the intended publisher, slug, variant, and format before downloading; this row stays pinned to {model.model.content_sha256}.</p><ul>{candidates.map((candidate, index) => <li key={index}>{candidateLabel(candidate)}</li>)}</ul></div>}
-          {update?.model_update_available && !update.model_update_ambiguous && <p className="library-model-update" role="status"><strong>Model update available.</strong> Review the exact candidate before changing this pinned Model.</p>}
-          {!!update?.upstream_revisions?.length && <div className="library-model-update" role="status">{update.upstream_revisions.map(revision => <p key={revision.repository}><strong>{revision.repository}: </strong>{revision.status === "update-available" ? "New upstream version. Update the model in the catalog to download this version." : revision.status === "check-failed" ? "Could not check upstream. Try Check for updates again." : "Up to date with upstream."}</p>)}</div>}
-          <dl><div><dt>Files</dt><dd>{model.model_document.files.length}</dd></div><div><dt>Bytes</dt><dd>{formatBytes(bytes)}</dd></div><div><dt>Recipes</dt><dd>{modelRecords.length || "No Recipe"}</dd></div></dl>
-          <LibraryModelDownloadAction api={api} model={model} modelAccessUrl={model.model_document.provenance.source_url} onComplete={() => setCacheAttempt(value => value + 1)}/>
-        </div>;
-      })}
-      {visible.length === 0 && <p className="library-empty-state">No Models match the current filters.</p>}
+    <header className="library-subview-heading">
+      <div><h2 id="library-models-heading">Models</h2><p>Browse the verified model library and see the recipes that use each model.</p></div>
+      <span>{visible.length} of {models.length} models</span>
+    </header>
+    <div className="library-model-controls">
+      <label>Search models<input type="search" aria-label="Search models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability" /></label>
+      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
     </div>
-    </section>
+    <div className="library-model-list" aria-label="Model library">
+      {visible.map(model => <ModelRow key={modelKey(model.model)} model={model} recipeCount={entries.filter(record => record.modelKey === modelKey(model.model) && record.recipe).length} onNavigate={onNavigate} />)}
+      {visible.length === 0 && <p className="library-empty-state">No models match the current filters.</p>}
+    </div>
+  </section>;
 }
 
-function candidateLabel(candidate: Record<string, unknown>): string {
-  const text = (key: string) => typeof candidate[key] === "string" ? candidate[key] as string : undefined;
-  const digest = text("model_content_sha256") ?? text("content_sha256");
-  const lineage = [text("publisher"), text("slug"), text("variant"), text("format")].filter(Boolean).join("/");
-  return [lineage || "Exact candidate", digest ? `sha256:${digest}` : "identity pending"].join(" · ");
+function ModelRow({model, recipeCount, onNavigate}: {model: LibraryViewModel; recipeCount: number; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void}) {
+  const key = modelKey(model.model);
+  const bytes = model.model_document.files.reduce((sum, file) => sum + file.size_bytes, 0);
+  const capabilities = (model.model_capabilities?.facts ?? [])
+    .filter(fact => fact.support === "supported")
+    .map(fact => fact.capability);
+
+  return <article className="library-model-row">
+    <div>
+      <a href={modelLibraryPath(key)} onClick={event => onNavigate(event, modelLibraryPath(key))}>
+        <h3>{modelTitle(model)}</h3>
+        <p>{model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}</p>
+      </a>
+      <div className="library-model-badges">{capabilities.length ? capabilities.map(capability => <span key={capability}>{capability}</span>) : <span>Capabilities unknown</span>}</div>
+    </div>
+    <dl><div><dt>Files</dt><dd>{model.model_document.files.length}</dd></div><div><dt>Size</dt><dd>{formatBytes(bytes)}</dd></div><div><dt>Recipes</dt><dd>{recipeCount || "None"}</dd></div></dl>
+  </article>;
+}
+
+function modelTitle(model: LibraryViewModel): string {
+  return model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
 }

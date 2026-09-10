@@ -27,10 +27,8 @@ from .generated_control.api.default import (
     get_fleet_status,
     get_job,
     get_published_endpoint,
-    list_agents,
 )
 from .generated_control.client import AuthenticatedClient
-from .generated_control.models.agents_response import AgentsResponse
 from .generated_control.models.endpoint_response import EndpointResponse
 from .generated_control.models.fleet_snapshot import FleetSnapshot
 from .generated_control.models.job_detail_response import JobDetailResponse
@@ -1356,6 +1354,3 @@ class ControlClient:
 
     def endpoint(self, alias: str) -> EndpointResponse:
         return self._call_generated(get_published_endpoint.sync_detailed, alias)  # type: ignore[return-value]
-
-    def agents(self) -> AgentsResponse:
-        return self._call_generated(list_agents.sync_detailed)  # type: ignore[return-value]
