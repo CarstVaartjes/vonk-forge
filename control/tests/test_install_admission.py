@@ -8,7 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
+from vonk_control.install_admission import (
+    InstallAdmissionService,
+    InstallPlanConflict,
+    InstallPreflightExpired,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -844,6 +848,90 @@ def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
         )
         assert node is not None
         node.endpoint_owner = False
+
+
+def _record_inventory(sessions, node_id, at, *, free=200) -> None:
+    """Keep reporting the same authenticated capacity at a later observation."""
+
+    InventoryRepository(sessions, clock=lambda: at).record(
+        InventorySnapshotInput(
+            node_id, at, 1000, free, 1000, 800, 1000, 800, 1, False, ("runtime.vonk.v1",)
+        )
+    )
+
+
+def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
+    tmp_path,
+) -> None:
+    """An identical plan whose only fault is an aged receipt stays separable.
+
+    Acceptance still refuses and persists nothing, but it says which refusal
+    this is so a caller with its own bounded probe can rerun preflight and
+    re-present the same plan.
+    """
+
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    plan = service.plan_install(mapping, build, now=now)
+    assert plan.allowed
+
+    # Inside the window nothing changes: the identical plan is still accepted.
+    warm = _service(sessions, preflight=False, inventory_max_age=300, disk_floor_bytes=10)
+    warm_id = warm.accept_install(plan, actor="admin", now=now + timedelta(seconds=299))
+    with sessions.begin() as session:
+        session.delete(session.get(RecipeInstallation, warm_id))
+        session.execute(
+            ResourceReservation.__table__.delete().where(
+                ResourceReservation.owner_id == warm_id
+            )
+        )
+
+    later = now + timedelta(seconds=716)
+    _record_inventory(sessions, node, later)
+    with pytest.raises(InstallPreflightExpired, match="install.plan_stale_or_blocked"):
+        service.accept_install(plan, actor="admin", now=later)
+    with sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+        assert list(session.scalars(select(ResourceReservation))) == []
+
+    record_passing_preflight(sessions, later, floor=10)
+    installation_id = service.accept_install(plan, actor="admin", now=later)
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation.plan_digest == plan.plan_digest
+        assert installation.mapping_generation == plan.mapping_generation
+
+
+@pytest.mark.parametrize("change", ["inventory", "capacity", "fingerprint"])
+def test_expired_preflight_with_any_other_change_stays_an_opaque_conflict(
+    tmp_path, change
+) -> None:
+    """Only a pure expired receipt is separable; anything else is stale-or-blocked."""
+
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    plan = service.plan_install(mapping, build, now=now)
+    assert plan.allowed
+    later = now + timedelta(seconds=716)
+    if change == "capacity":
+        # Stale preflight and a second, unrelated blocker at the same time.
+        _record_inventory(sessions, node, later, free=20)
+    elif change == "fingerprint":
+        _record_inventory(sessions, node, later)
+        with sessions.begin() as session:
+            host = session.get(AgentNode, node)
+            host.capabilities = [
+                value
+                for value in host.capabilities
+                if not value.startswith("runtime.preflight.fingerprint.")
+            ] + ["runtime.preflight.fingerprint." + "b" * 64]
+
+    with pytest.raises(InstallPlanConflict) as raised:
+        service.accept_install(plan, actor="admin", now=later)
+    assert not isinstance(raised.value, InstallPreflightExpired)
+    assert str(raised.value) == "install.plan_stale_or_blocked"
+    with sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
 
 
 def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_path):

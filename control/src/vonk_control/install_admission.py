@@ -99,6 +99,16 @@ class InstallPlanConflict(RuntimeError):
     pass
 
 
+class InstallPreflightExpired(InstallPlanConflict):
+    """Only the runtime preflight receipts aged out; nothing else changed.
+
+    Acceptance still refuses the plan, so callers that do not know about this
+    narrower outcome keep the ordinary ``InstallPlanConflict`` behaviour.  A
+    caller that owns a bounded preflight refresh may instead rerun its probe
+    and re-present the identical plan.
+    """
+
+
 def _active_recipe_revision(
     session: Session,
     revision_id: str | None,
@@ -623,11 +633,13 @@ class InstallAdmissionService:
             _session=session,
             compiled_execution_plans=plan.compiled_plan_by_node,
         )
-        if (
-            not fresh.allowed
-            or fresh.plan_digest != plan.plan_digest
-            or fresh.mapping_generation != plan.mapping_generation
-        ):
+        identical = (
+            fresh.plan_digest == plan.plan_digest
+            and fresh.mapping_generation == plan.mapping_generation
+        )
+        if not fresh.allowed or not identical:
+            if identical and _expired_preflight_is_the_only_blocker(plan, fresh):
+                raise InstallPreflightExpired("install.plan_stale_or_blocked")
             raise InstallPlanConflict("install.plan_stale_or_blocked")
         if (
             revision is None
@@ -732,6 +744,29 @@ class InstallAdmissionService:
                 )
             )
         return installation.id
+
+
+def _expired_preflight_is_the_only_blocker(
+    plan: InstallPlan, fresh: InstallPlan
+) -> bool:
+    """Recognise the single refusal a bounded preflight rerun can clear.
+
+    The caller has already established that both plans carry the same
+    ``plan_digest``, which binds the mapping generation, recipe revision and
+    content digest, the recipe build, the image identity, the Controller-issued
+    compiled launch documents and every per-node resource envelope.  What is
+    left to establish is that the admitted plan was clean and that expired
+    runtime preflight evidence is the *only* thing the fresh admission now
+    objects to.  Any other blocker — a changed fingerprint or requirement, a
+    failed native probe finding, missing or stale inventory, a read-only
+    artifact store, capacity, topology, licence or compiled-plan evidence —
+    keeps the opaque stale-or-blocked refusal.
+    """
+
+    if not plan.allowed:
+        return False
+    codes = {reason.code for node in fresh.nodes for reason in node.blockers}
+    return codes == {"runtime_preflight.stale"}
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:

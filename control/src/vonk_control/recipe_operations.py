@@ -39,7 +39,11 @@ from .distributed_lifecycle import (
     canonical_distributed_readiness,
 )
 from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
-from .install_admission import InstallAdmissionService, InstallPlan
+from .install_admission import (
+    InstallAdmissionService,
+    InstallPlan,
+    InstallPreflightExpired,
+)
 from .models import (
     AgentNode,
     AgentOperation,
@@ -129,6 +133,15 @@ class AgentJobQueue(Protocol):
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
+
+
+class RecipeInstallPreflightExpired(RecipeOperationConflict):
+    """Acceptance refused an otherwise identical plan on expired preflight.
+
+    Nothing was persisted.  A caller that owns a bounded runtime preflight gate
+    may rerun its ordinary probe and re-present the same plan; every other
+    caller keeps treating this as the conflict it is.
+    """
 
 
 def _validated_result(kind: str, value: object) -> dict[str, object] | None:
@@ -532,6 +545,10 @@ class RecipeOperationService:
                 installation_id = self._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
+            except InstallPreflightExpired as error:
+                # Nothing is persisted: the surrounding transaction rolls back.
+                # Only the caller's own bounded preflight gate may act on this.
+                raise RecipeInstallPreflightExpired(str(error)) from error
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
