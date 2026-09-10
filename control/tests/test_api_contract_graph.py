@@ -19,7 +19,6 @@ EXTENSION_OBJECTS = {
     "CompiledArtifactContract.properties.engine.anyOf.0": "Engine keyword arguments",
     "EffectiveSettingsSelection.properties.knobs": "Recipe-declared settings values",
     "MappingSelection.properties.parameters": "Recipe-declared parameter values",
-    "ProposalChangeRequest.properties.document": "Authority document selected by path",
 }
 
 

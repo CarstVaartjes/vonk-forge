@@ -280,30 +280,16 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
     assert response.status_code == 200
 
 
-def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
+def test_cookie_authenticated_profile_load_requires_matching_csrf() -> None:
     client, issued, _service, _sessions, _clock, _codec, jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
-    document = {"proposal_digest": "a" * 64}
-
-    assert client.post("/api/changes", json=document).status_code == 403
+    route = "/api/profile/1/load"
+    assert client.post(route, json={}).status_code == 403
     client.cookies.set("vonk_csrf", issued.csrf)
-    assert (
-        client.post(
-            "/api/changes",
-            headers={"x-csrf-token": "wrong"},
-            json=document,
-        ).status_code
-        == 403
-    )
+    assert client.post(route, headers={"x-csrf-token": "wrong"}, json={}).status_code == 403
     assert jobs.calls == []
-    assert (
-        client.post(
-            "/api/changes",
-            headers={"x-csrf-token": issued.csrf},
-            json=document,
-        ).status_code
-        == 503
-    )
+    # Authentication succeeds; this fixture intentionally has no profile service.
+    assert client.post(route, headers={"x-csrf-token": issued.csrf}, json={}).status_code == 503
 
 
 def test_browser_admin_can_preview_node_bound_repair_with_matching_csrf() -> None:

@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
 from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
-from vonk_control.api import AdminServices, create_app
+from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfilePreview
@@ -121,11 +121,6 @@ class Jobs:
         return [self.job], None, 1
 
 
-class Repository:
-    def head(self):
-        return COMMIT
-
-
 class ProjectedFleet:
     def __init__(self) -> None:
         self.history_calls: list[tuple[object, ...]] = []
@@ -194,11 +189,6 @@ def _client(*, fleet_projection=None, operations=None, role="operator"):
         audits=audits,
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
-        admin=AdminServices(
-            authority=Repository(),
-            proposals=None,
-            changes=None,
-        ),
         operations=operations,
     )
     token = codec.issue(Actor(role, role), ttl_seconds=100, now=0)

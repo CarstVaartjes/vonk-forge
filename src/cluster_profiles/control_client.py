@@ -1307,14 +1307,8 @@ class ControlClient:
             "sha256": expected_sha256,
         }
 
-    def create_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
-        return self.request("POST", "/api/proposals", payload)
-
     def get(self, path: str) -> dict[str, object]:
         return self.request("GET", path)
-
-    def submit_change(self, digest: str) -> dict[str, object]:
-        return self.request("POST", "/api/changes", {"proposal_digest": digest})
 
     def fleet(self) -> FleetSnapshot:
         return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]

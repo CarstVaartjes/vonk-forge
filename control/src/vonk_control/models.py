@@ -193,29 +193,6 @@ class ControlAuthorityHead(Base):
     )
 
 
-class ControlAuthorityProposal(Base):
-    """Persisted proposal preview, allowing submission after API restart."""
-
-    __tablename__ = "control_authority_proposals"
-    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
-    actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    base_revision: Mapped[str] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"),
-        nullable=False,
-        index=True,
-    )
-    changes: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    patch: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    affected_documents: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    validation_results: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    applied_revision: Mapped[str | None] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"), index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class Observation(Base):
     __tablename__ = "observations"
     __table_args__ = (

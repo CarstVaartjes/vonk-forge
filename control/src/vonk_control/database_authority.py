@@ -1,82 +1,23 @@
-"""PostgreSQL-backed control authority and durable proposal workflow."""
+"""PostgreSQL-backed control authority head and revision persistence."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
-import re
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from types import MappingProxyType
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
 
 from .models import (
     ControlAuthorityHead,
-    ControlAuthorityProposal,
     ControlAuthorityRevision,
 )
-from .serializers import serialize_document
-
-_REVISION = re.compile(r"[0-9a-f]{64}\Z")
-_DEPENDENCIES = TypeAdapter(dict[str, list[str]], config=ConfigDict(strict=True))
-_DOCUMENTS = TypeAdapter(
-    dict[str, dict[str, JsonValue]], config=ConfigDict(strict=True)
-)
-_STRING_LIST = TypeAdapter(list[str], config=ConfigDict(strict=True))
-_ALLOWED_ROOTS = ("inventory/", "locks/", "manifests/", "docs/audits/")
 
 
 class AuthorityPolicyError(ValueError):
     pass
-
-
-class StaleAuthorityRevision(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class AuthorityDocument:
-    revision: str
-    path: str
-    content: bytes
-    sha256: str
-    parsed: object
-
-
-@dataclass(frozen=True)
-class AuthoritySnapshot:
-    revision: str
-    documents: Mapping[str, str]
-    dependencies: Mapping[str, tuple[str, ...]]
-
-
-class ProposalChangeRequest(BaseModel):
-    """Canonical persisted and API proposal change envelope."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    path: str = Field(min_length=1, max_length=512)
-    document: dict[str, object]
-
-
-_PROPOSAL_CHANGES = TypeAdapter(
-    list[ProposalChangeRequest], config=ConfigDict(strict=True)
-)
-
-
-@dataclass(frozen=True)
-class AuthorityProposalPreview:
-    actor: str
-    base_revision: str
-    patch: bytes
-    affected_documents: tuple[str, ...]
-    validation_results: tuple[str, ...]
-    digest: str
 
 
 def _canonical(value: object) -> bytes:
@@ -95,61 +36,8 @@ def _revision(documents: Mapping[str, object], dependencies: Mapping[str, object
     ).hexdigest()
 
 
-def _document_map(value: object) -> dict[str, object]:
-    try:
-        documents = _DOCUMENTS.validate_json(canonical_message(value))
-    except (TypeError, ValueError) as error:
-        raise AuthorityPolicyError("authority documents are invalid") from error
-    normalized: dict[str, object] = {}
-    for path, document in documents.items():
-        try:
-            serialize_document(path, document)
-        except (AssertionError, TypeError, ValueError) as error:
-            raise AuthorityPolicyError("authority documents are invalid") from error
-        normalized[path] = document
-    return normalized
-
-
-def _dependency_map(value: object) -> dict[str, list[str]]:
-    try:
-        return _DEPENDENCIES.validate_json(canonical_message(value))
-    except (TypeError, ValueError) as error:
-        raise AuthorityPolicyError("authority dependencies are invalid") from error
-
-
-def _proposal_changes(
-    value: object, validate_path: Callable[[str], str]
-) -> tuple[ProposalChangeRequest, ...]:
-    try:
-        changes = tuple(
-            _PROPOSAL_CHANGES.validate_json(canonical_message(value))
-        )
-    except (TypeError, ValueError) as error:
-        raise AuthorityPolicyError("authority proposal changes are invalid") from error
-    normalized: list[ProposalChangeRequest] = []
-    seen: set[str] = set()
-    for change in changes:
-        try:
-            path = validate_path(change.path)
-            serialize_document(path, change.document)
-        except (AssertionError, TypeError, ValueError) as error:
-            raise AuthorityPolicyError("authority proposal changes are invalid") from error
-        if path in seen:
-            raise AuthorityPolicyError("authority proposal changes are invalid")
-        seen.add(path)
-        normalized.append(ProposalChangeRequest(path=path, document=change.document))
-    return tuple(normalized)
-
-
-def _stored_string_list(value: object, label: str) -> tuple[str, ...]:
-    try:
-        return tuple(_STRING_LIST.validate_json(canonical_message(value)))
-    except (TypeError, ValueError) as error:
-        raise AuthorityPolicyError(f"authority {label} are invalid") from error
-
-
 class DatabaseAuthorityService:
-    """Immutable authority revisions with a PostgreSQL-owned current head."""
+    """Persist the immutable authority revision and PostgreSQL-owned head."""
 
     def __init__(
         self,
@@ -176,7 +64,7 @@ class DatabaseAuthorityService:
             head = session.get(ControlAuthorityHead, 1)
             if head is not None:
                 return head.revision_id
-            dependencies = _dependency_map({})
+            dependencies: dict[str, list[str]] = {}
             documents: dict[str, object] = {}
             revision_id = _revision(documents, dependencies)
             now = self._clock()
@@ -200,211 +88,10 @@ class DatabaseAuthorityService:
             )
             return revision_id
 
-    def head(self, _branch: str = "HEAD") -> str:
+    def head(self) -> str:
         self.ensure_initialized()
         with self._sessions() as session:
             head = session.get(ControlAuthorityHead, 1)
             if head is None:
                 raise AuthorityPolicyError("authority head is unavailable")
             return head.revision_id
-
-    def _revision_row(self, session: Session, revision: str | None) -> ControlAuthorityRevision:
-        selected = revision or self.head()
-        if _REVISION.fullmatch(selected) is None:
-            raise AuthorityPolicyError("authority revision is invalid")
-        row = session.get(ControlAuthorityRevision, selected)
-        if row is None:
-            raise AuthorityPolicyError("authority revision is unavailable")
-        return row
-
-    def inspect(self, revision: str | None = None) -> AuthoritySnapshot:
-        with self._sessions() as session:
-            row = self._revision_row(session, revision)
-            documents = {
-                path: base64.b64encode(serialize_document(path, document)).decode("ascii")
-                for path, document in _document_map(row.documents).items()
-            }
-            dependencies = {
-                path: tuple(values)
-                for path, values in _dependency_map(row.dependencies).items()
-            }
-            return AuthoritySnapshot(
-                row.revision_id,
-                MappingProxyType(documents),
-                MappingProxyType(dependencies),
-            )
-
-    def read_document(self, revision: str, path: str) -> AuthorityDocument:
-        self.validate_path(path)
-        with self._sessions() as session:
-            row = self._revision_row(session, revision)
-            documents = _document_map(row.documents)
-            try:
-                parsed = documents[path]
-            except KeyError:
-                raise AuthorityPolicyError("managed document does not exist") from None
-            content = serialize_document(path, parsed)
-            return AuthorityDocument(
-                row.revision_id,
-                path,
-                content,
-                hashlib.sha256(content).hexdigest(),
-                parsed,
-            )
-
-    @staticmethod
-    def validate_path(path: str) -> str:
-        if (
-            not isinstance(path, str)
-            or "\\" in path
-            or "\x00" in path
-            or path.startswith("/")
-            or any(part in {"", ".", ".."} for part in path.split("/"))
-            or not any(path.startswith(root) for root in _ALLOWED_ROOTS)
-        ):
-            raise AuthorityPolicyError("managed document path is not allowlisted")
-        return path
-
-    def _snapshot_row(self, session: Session, revision: str) -> ControlAuthorityRevision:
-        row = self._revision_row(session, revision)
-        return row
-
-    def apply(self, preview: AuthorityProposalPreview) -> str:
-        with self._sessions.begin() as session:
-            proposal = session.scalar(
-                select(ControlAuthorityProposal)
-                .where(ControlAuthorityProposal.digest == preview.digest)
-                .with_for_update()
-            )
-            if proposal is None:
-                raise AuthorityPolicyError("authority proposal is unavailable")
-            if proposal.applied_revision is not None:
-                return proposal.applied_revision
-            head = session.scalar(
-                select(ControlAuthorityHead).where(
-                    ControlAuthorityHead.singleton_id == 1
-                ).with_for_update()
-            )
-            if head is None or head.revision_id != proposal.base_revision:
-                raise StaleAuthorityRevision(
-                    "proposal base revision is no longer authority head"
-                )
-            parent = self._snapshot_row(session, proposal.base_revision)
-            documents = _document_map(parent.documents)
-            changes = _proposal_changes(proposal.changes, self.validate_path)
-            for change in changes:
-                documents[change.path] = change.document
-            dependencies = _dependency_map(parent.dependencies)
-            revision_id = _revision(documents, dependencies)
-            existing = session.get(ControlAuthorityRevision, revision_id)
-            if existing is None:
-                session.add(
-                    ControlAuthorityRevision(
-                        revision_id=revision_id,
-                        parent_revision=proposal.base_revision,
-                        documents=documents,
-                        dependencies=dependencies,
-                        actor=proposal.actor,
-                        created_at=self._clock(),
-                    )
-                )
-                session.flush()
-            head.revision_id = revision_id
-            head.updated_at = self._clock()
-            proposal.applied_revision = revision_id
-            return revision_id
-
-
-class DatabaseProposalService:
-    def __init__(self, authority: DatabaseAuthorityService) -> None:
-        self._authority = authority
-
-    def head(self) -> str:
-        return self._authority.head()
-
-    def preview(
-        self,
-        actor: str,
-        base_revision: str,
-        changes: Sequence[ProposalChangeRequest],
-    ) -> AuthorityProposalPreview:
-        if not actor.strip() or not changes:
-            raise ValueError("proposal actor and changes are required")
-        self._authority.inspect(base_revision)
-        normalized: list[dict[str, object]] = []
-        seen: set[str] = set()
-        for change in changes:
-            path = self._authority.validate_path(change.path)
-            if path in seen:
-                raise ValueError(f"duplicate proposal path: {path}")
-            seen.add(path)
-            if not isinstance(change.document, Mapping):
-                raise ValueError("proposal document must be an object")  # noqa: TRY004
-            serialize_document(path, change.document)
-            normalized.append({"path": path, "document": dict(change.document)})
-        normalized.sort(key=lambda value: str(value["path"]))
-        patch = _canonical({"base_revision": base_revision, "changes": normalized})
-        digest = hashlib.sha256(patch).hexdigest()
-        now = self._authority._clock()
-        with self._authority._sessions.begin() as session:
-            existing = session.get(ControlAuthorityProposal, digest)
-            if existing is None:
-                session.add(
-                    ControlAuthorityProposal(
-                        digest=digest,
-                        actor=actor,
-                        base_revision=base_revision,
-                        changes=normalized,
-                        patch=patch,
-                        affected_documents=[str(value["path"]) for value in normalized],
-                        validation_results=["typed-syntax:passed", "path-policy:passed"],
-                        created_at=now,
-                    )
-                )
-        return AuthorityProposalPreview(
-            actor,
-            base_revision,
-            patch,
-            tuple(str(value["path"]) for value in normalized),
-            ("typed-syntax:passed", "path-policy:passed"),
-            digest,
-        )
-
-    def apply(self, digest: str) -> AuthorityProposalPreview:
-        with self._authority._sessions() as session:
-            row = session.get(ControlAuthorityProposal, digest)
-            if row is None:
-                raise ValueError("unknown proposal digest")
-            changes = _proposal_changes(row.changes, self._authority.validate_path)
-            affected_documents = _stored_string_list(
-                row.affected_documents, "proposal affected documents"
-            )
-            validation_results = _stored_string_list(
-                row.validation_results, "proposal validation results"
-            )
-            if tuple(change.path for change in changes) != affected_documents:
-                raise AuthorityPolicyError("authority proposal fields are inconsistent")
-            return AuthorityProposalPreview(
-                row.actor,
-                row.base_revision,
-                row.patch,
-                affected_documents,
-                validation_results,
-                row.digest,
-            )
-
-
-class DatabaseChangeService:
-    def __init__(self, authority: DatabaseAuthorityService, proposals: DatabaseProposalService) -> None:
-        self._authority = authority
-        self._proposals = proposals
-
-    def submit(self, digest: str, actor: str, request_id: str) -> dict[str, object]:
-        preview = self._proposals.apply(digest)
-        revision = self._authority.apply(preview)
-        return {
-            "proposal_digest": digest,
-            "previous_revision": preview.base_revision,
-            "authority_revision": revision,
-            "mode": "database",
-        }

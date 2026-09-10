@@ -92,23 +92,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('singleton_id'),
     sa.UniqueConstraint('revision_id')
     )
-    op.create_table('control_authority_proposals',
-    sa.Column('digest', sa.String(length=64), nullable=False),
-    sa.Column('actor', sa.String(length=200), nullable=False),
-    sa.Column('base_revision', sa.String(length=64), nullable=False),
-    sa.Column('changes', sa.JSON(), nullable=False),
-    sa.Column('patch', sa.LargeBinary(), nullable=False),
-    sa.Column('affected_documents', sa.JSON(), nullable=False),
-    sa.Column('validation_results', sa.JSON(), nullable=False),
-    sa.Column('applied_revision', sa.String(length=64), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['applied_revision'], ['control_authority_revisions.revision_id']),
-    sa.ForeignKeyConstraint(['base_revision'], ['control_authority_revisions.revision_id']),
-    sa.PrimaryKeyConstraint('digest')
-    )
-    op.create_index(op.f('ix_control_authority_proposals_base_revision'), 'control_authority_proposals', ['base_revision'], unique=False)
-    op.create_index(op.f('ix_control_authority_proposals_applied_revision'), 'control_authority_proposals', ['applied_revision'], unique=False)
-    op.create_index(op.f('ix_control_authority_proposals_created_at'), 'control_authority_proposals', ['created_at'], unique=False)
     op.create_table('control_process_heartbeats',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('process_kind', sa.String(length=16), nullable=False),
@@ -998,10 +981,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_audit_events_request_id'), table_name='audit_events')
     op.drop_index(op.f('ix_audit_events_occurred_at'), table_name='audit_events')
     op.drop_table('audit_events')
-    op.drop_index(op.f('ix_control_authority_proposals_created_at'), table_name='control_authority_proposals')
-    op.drop_index(op.f('ix_control_authority_proposals_applied_revision'), table_name='control_authority_proposals')
-    op.drop_index(op.f('ix_control_authority_proposals_base_revision'), table_name='control_authority_proposals')
-    op.drop_table('control_authority_proposals')
     op.drop_table('control_authority_heads')
     op.drop_index(op.f('ix_control_authority_revisions_created_at'), table_name='control_authority_revisions')
     op.drop_index(op.f('ix_control_authority_revisions_parent_revision'), table_name='control_authority_revisions')

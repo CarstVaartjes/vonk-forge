@@ -5,17 +5,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.audit import AuditRecord, SqlAuditStore
-from vonk_control.database_authority import (
-    AuthorityPolicyError,
-    DatabaseAuthorityService,
-    DatabaseProposalService,
-    ProposalChangeRequest,
-)
 from vonk_control.models import (
     AuditEvent,
     Base,
-    ControlAuthorityProposal,
-    ControlAuthorityRevision,
 )
 from vonk_control.operation_api import _stored_activation_marker
 
@@ -37,49 +29,6 @@ def test_sql_audit_store_rejects_malformed_persisted_targets(sessions) -> None:
 
     with pytest.raises(ValueError, match="audit targets are invalid"):
         store.list()
-
-
-def test_authority_proposal_reader_rejects_malformed_json_fields(sessions) -> None:
-    authority = DatabaseAuthorityService(sessions, clock=lambda: NOW)
-    proposals = DatabaseProposalService(authority)
-    base = authority.ensure_initialized(acquire_advisory_lock=False)
-    preview = proposals.preview(
-        "admin",
-        base,
-        [
-            ProposalChangeRequest(
-                path="docs/audits/authority.json", document={"status": "draft"}
-            )
-        ],
-    )
-
-    with sessions.begin() as session:
-        row = session.get(ControlAuthorityProposal, preview.digest)
-        row.affected_documents = "docs/audits/authority.json"
-    with pytest.raises(AuthorityPolicyError, match="proposal affected documents"):
-        proposals.apply(preview.digest)
-
-    with sessions.begin() as session:
-        session.get(ControlAuthorityProposal, preview.digest).affected_documents = [
-            "docs/audits/authority.json"
-        ]
-        session.get(ControlAuthorityProposal, preview.digest).changes = [
-            {"path": "docs/audits/authority.json"}
-        ]
-    with pytest.raises(AuthorityPolicyError, match="proposal changes"):
-        proposals.apply(preview.digest)
-
-
-def test_authority_reader_rejects_non_object_documents(sessions) -> None:
-    authority = DatabaseAuthorityService(sessions, clock=lambda: NOW)
-    base = authority.ensure_initialized(acquire_advisory_lock=False)
-    with sessions.begin() as session:
-        session.get(ControlAuthorityRevision, base).documents = {
-            "docs/audits/authority.json": "scalar"
-        }
-
-    with pytest.raises(AuthorityPolicyError, match="authority documents are invalid"):
-        authority.inspect(base)
 
 
 def test_route_publication_reader_rejects_malformed_activation_marker() -> None:
