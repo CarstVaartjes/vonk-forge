@@ -348,7 +348,7 @@ def install_recipe_operator_routes(
         selector: str = Path(min_length=1, max_length=256),
         actor: Any = actor_dependency,
     ) -> RecipeImageAvailabilityResponse:
-        _mutating(actor, "/api/recipe/{selector}/download")
+        _mutating(actor, "/api/recipe/{selector:path}/download")
         try:
             if service is None:
                 raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
@@ -376,7 +376,7 @@ def install_recipe_operator_routes(
         selector: str = Path(min_length=1, max_length=256),
         actor: Any = actor_dependency,
     ) -> RecipeOperatorResponse:
-        _mutating(actor, "/api/recipe/{selector}/remove")
+        _mutating(actor, "/api/recipe/{selector:path}/remove")
         try:
             if service is None:
                 raise HTTPException(status_code=503, detail="recipe image availability is unavailable")

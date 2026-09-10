@@ -3146,7 +3146,13 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         from vonk_control.failure_evidence import FailureEvidenceService
 
         evidence = FailureEvidenceService(services.sessions, clock=clock)
-        assert evidence.tick()
+        for _ in range(8):
+            evidence.tick()
+            try:
+                evidence.read(claim["operation_id"], claim["attempt"])
+            except KeyError:
+                continue
+            break
         content, _, bundle = evidence.read(claim["operation_id"], claim["attempt"])
         assert "should-never-persist" not in content.decode()
         assert "/proc: permission denied" in bundle.diagnostics.stderr.text

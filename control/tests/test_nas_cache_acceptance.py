@@ -180,11 +180,11 @@ def _seed_recipe_reference(
         if profile:
             session.add(
                 FleetProfile(
+                    number=1,
                     name=f"acceptance-{recipe_id[:8]}",
                     description="",
                     installation_policy="keep-cached",
                     assignments=[{"recipe_revision_id": revision_id}],
-                    scope=[],
                     labels={},
                     favorite=False,
                     created_by="acceptance",

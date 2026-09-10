@@ -1,14 +1,11 @@
 from datetime import timedelta
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.deployment_provenance import (
     DeploymentProvenanceService,
     local_deployment_observations,
 )
-from vonk_control.deployment_provenance_api import install_deployment_provenance_routes
 from vonk_control.deployment_provenance_contract import (
     DeploymentObservations,
     DeploymentProvenance,
@@ -84,27 +81,6 @@ def test_running_image_metadata_supplies_source_without_inventing_digest(tmp_pat
     metadata.write_text('{"source_commit":12}')
     with pytest.raises(ValueError):
         local_deployment_observations()
-
-
-def test_composed_app_serves_provenance_with_authentication(tmp_path):
-    from vonk_control.api import create_app
-    from vonk_control.audit import MemoryAuditStore
-    from vonk_control.auth import Actor, TokenCodec
-
-    from .test_api import Jobs
-
-    sessions, now, _, _ = deployment(tmp_path)
-    codec = TokenCodec(b"k" * 32)
-    app = create_app(
-        jobs=Jobs(), tokens=codec, audits=MemoryAuditStore(), now=lambda: 10,
-        deployment_provenance=DeploymentProvenanceService(sessions, clock=lambda: now),
-    )
-    client = TestClient(app)
-    assert client.get("/api/deployment-provenance").status_code == 401
-    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
-    response = client.get("/api/deployment-provenance", headers={"Authorization": f"Bearer {token}"})
-    assert response.status_code == 200
-    assert DeploymentProvenance.model_validate_json(response.content).agents
 
 
 def test_repository_publication_and_deployment_are_independent(tmp_path):
@@ -217,29 +193,6 @@ def test_configured_malformed_evidence_is_not_silently_unknown(tmp_path, monkeyp
     monkeypatch.setenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(path))
     with pytest.raises(ValueError):
         local_deployment_observations()
-
-
-def test_authenticated_endpoint_serves_typed_projection_and_bounds_errors(tmp_path):
-    sessions, now, _, _ = deployment(tmp_path)
-    service = DeploymentProvenanceService(sessions, clock=lambda: now)
-    app = FastAPI()
-
-    def unauthorized():
-        raise HTTPException(401)
-
-    install_deployment_provenance_routes(
-        app, actor_dependency=Depends(unauthorized), provenance=service
-    )
-    client = TestClient(app)
-    assert client.get("/api/deployment-provenance").status_code == 401
-    app.dependency_overrides[unauthorized] = lambda: object()
-    response = client.get("/api/deployment-provenance")
-    assert response.status_code == 200
-    assert DeploymentProvenance.model_validate_json(response.text) == service.snapshot()
-    service._observations = lambda: (_ for _ in ()).throw(ValueError("secret details"))
-    response = client.get("/api/deployment-provenance")
-    assert response.status_code == 503
-    assert "secret" not in response.text
 
 
 def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
