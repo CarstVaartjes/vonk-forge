@@ -36,6 +36,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
+from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
 from .logging import redact_text
 from .model_cache_contract import (
@@ -5043,8 +5044,8 @@ class ModelCacheService:
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.document_id == current.document_id,
                 CatalogDocumentRevision.state == "active",
+                active_head_revision(),
             )
-            .order_by(CatalogDocumentRevision.revision_number.desc())
         )
         return None if latest is None else latest.content_digest
 

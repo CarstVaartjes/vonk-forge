@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
+from .catalog_queries import active_head_revision
 from .library_contract import (
     _MAX_PAGE_RECIPES,
     FreshnessPolicy,
@@ -833,6 +834,7 @@ class LibraryProjection:
                     CatalogDocumentRevision.document_id == recipe_id,
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
                 )
             )
             model_revisions: list[CatalogDocumentRevision] = []
