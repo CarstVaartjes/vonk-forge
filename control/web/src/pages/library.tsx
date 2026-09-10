@@ -43,6 +43,7 @@ function viewModel(model: ModelLibrary["models"][number], recipes: LibraryViewRe
     model: {kind: "model", publisher: model.identity.publisher, slug: model.identity.slug, content_sha256: model.identity.content_sha256},
     model_document: model.document,
     model_capabilities: model.document.capabilities,
+    local: model.local,
     recipes,
   };
 }

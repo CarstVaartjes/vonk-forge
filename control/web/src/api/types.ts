@@ -31,6 +31,7 @@ export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
 
 // UI-only projections combine the independent Model and Recipe list responses.
@@ -66,6 +67,7 @@ export type LibraryViewModel = {
   model: {kind: "model"; publisher: string; slug: string; content_sha256: string};
   model_document: ModelDefinition;
   model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  local: components["schemas"]["LibraryLocalState"];
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
@@ -139,6 +141,8 @@ export interface LibraryApi {
   cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, sha256: string): string;
+  prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
 }
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;

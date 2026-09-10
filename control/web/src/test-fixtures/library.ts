@@ -31,8 +31,9 @@ function modelDocument(index: number): LibraryViewModel["model_document"] {
 function model(index: number, recipes: LibraryViewRecipe[]): LibraryViewModel {
   const document = modelDocument(index);
   const actual = index >= 2 && index <= 6 ? actualLtxModels[index - 2]!.model : undefined;
-  if (actual) return {...clone(actualLtxModels[index - 2]!), model_document: document, recipes};
-  return {page_local: true, model: {kind: "model", publisher: document.identity.publisher, slug: document.identity.slug, content_sha256: digest(`m${index}`)}, model_document: document, model_capabilities: {...document.capabilities, state: "declared"}, recipes};
+  const local = {controller: "not_cached" as const, running_on: [], preparation: null};
+  if (actual) return {...clone(actualLtxModels[index - 2]!), model_document: document, local, recipes};
+  return {page_local: true, model: {kind: "model", publisher: document.identity.publisher, slug: document.identity.slug, content_sha256: digest(`m${index}`)}, model_document: document, model_capabilities: {...document.capabilities, state: "declared"}, local, recipes};
 }
 
 const syntheticModelTargets = [0, 1, ...Array.from({length: 72}, (_, offset) => offset + 7)];

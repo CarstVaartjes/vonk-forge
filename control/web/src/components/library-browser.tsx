@@ -33,7 +33,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, 
     onNavigatePath(`${url.pathname}?${libraryFiltersToSearch(next, url.searchParams).toString()}`, true);
   }
   if (subview === "profiles") return <LibraryProfilesView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>;
-  if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} path={path} query={query}/>;
+  if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} onRefresh={onRefresh} path={path} query={query}/>;
   if (route.kind === "recipe") {
     if (detailLoading) return <section className="library-detail-state" role="status">Loading the exact Recipe detail…</section>;
     if (detailError) return <section className="library-detail-state is-error" role="alert"><p>{detailError}</p><button type="button" className="button secondary" onClick={onRetryDetail}>Retry Recipe detail</button></section>;
