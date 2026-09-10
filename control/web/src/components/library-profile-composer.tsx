@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useState} from "react";
+import {canonicalRecipeSelector} from "../api/types";
 import type {ControlApi, FleetProfile, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
 
@@ -46,6 +47,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
   );
   const group = eligibleGroups[groupIndex];
   const modelVariant = detail.model_documents[0]?.model_document.identity.variant;
+  const recipeSelector = canonicalRecipeSelector(detail.recipe);
 
   useEffect(() => {
     if (!open || profiles.length > 0 || loadingProfiles) return;
@@ -67,7 +69,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
     if (!group || saving || !assignmentName.trim()) return;
     setSaving(true); setError("");
     const assignment = {
-      recipe_selector: detail.recipe.slug,
+      recipe_selector: recipeSelector,
       spark_ids: group.nodes.map(node => node.node_id).sort(),
       assignment_name: assignmentName.trim(),
       model_variant: modelVariant,
@@ -109,6 +111,6 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
     </div>
     {group && <ol className="profile-rank-preview" aria-label="Selected Sparks">{group.nodes.map(node => <li key={node.node_id}><span>Spark</span><strong>{nodeName(node.node_id)}</strong><small>{node.node_id}</small></li>)}</ol>}
     {error && <p className="dialog-error" role="alert">{error}</p>}
-    <footer><span>{group?.nodes.length ?? 0} {group?.nodes.length === 1 ? "Spark" : "Sparks"} · selector {detail.recipe.slug}</span><button type="button" disabled={!group || saving || !assignmentName.trim() || (target === "new" && !name.trim())} onClick={() => void save()}>{saving ? "Saving profile…" : target === "new" ? "Create Fleet Profile" : "Add workload"}</button></footer>
+    <footer><span>{group?.nodes.length ?? 0} {group?.nodes.length === 1 ? "Spark" : "Sparks"} · selector {recipeSelector}</span><button type="button" disabled={!group || saving || !assignmentName.trim() || (target === "new" && !name.trim())} onClick={() => void save()}>{saving ? "Saving profile…" : target === "new" ? "Create Fleet Profile" : "Add workload"}</button></footer>
   </section>;
 }

@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import Protocol
 
 from .cli_render import progress_line
+from .cli_select import SelectorError
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -669,6 +670,67 @@ def _profile_save(
     return client.request("PUT", f"/api/profile/{_profile_number(args)}", body)
 
 
+def _recipe_rows(client: ControllerClient) -> list[Mapping[str, object]]:
+    """Load the complete recipe library for friendly local resolution."""
+
+    rows: list[Mapping[str, object]] = []
+    cursor: str | None = None
+    while True:
+        query: dict[str, object] = {"all_models": True, "limit": 512, "sort": "name"}
+        if cursor is not None:
+            query["cursor"] = cursor
+        payload = client.request("GET", "/api/recipe/library", query=query)
+        raw_recipes = payload.get("recipes")
+        if not isinstance(raw_recipes, list):
+            raise TypeError("recipe library response does not contain recipes")
+        rows.extend(row for row in raw_recipes if isinstance(row, Mapping))
+        next_cursor = payload.get("next_cursor")
+        if next_cursor is None:
+            return rows
+        if not isinstance(next_cursor, str) or not next_cursor:
+            raise TypeError("recipe library response contains an invalid cursor")
+        cursor = next_cursor
+
+
+def _resolve_recipe_selector(client: ControllerClient, requested: str) -> str:
+    """Resolve a canonical selector, slug, or title to publisher/slug."""
+
+    needle = requested.strip().casefold()
+    if not needle:
+        raise SelectorError("recipe selector cannot be empty")
+    if needle.count("/") == 1 and all(part for part in needle.split("/")):
+        return needle
+    matches: set[str] = set()
+    for row in _recipe_rows(client):
+        identity = row.get("identity")
+        identity_map = identity if isinstance(identity, Mapping) else {}
+        canonical = row.get("selector")
+        if not isinstance(canonical, str) or not canonical:
+            publisher = identity_map.get("publisher")
+            slug = identity_map.get("slug")
+            if isinstance(publisher, str) and isinstance(slug, str):
+                canonical = f"{publisher}/{slug}"
+        if not isinstance(canonical, str) or not canonical:
+            raise ValueError(
+                "recipe library response contains a recipe without a canonical selector"
+            )
+        candidates = [canonical, str(identity_map.get("slug", ""))]
+        title = identity_map.get("title")
+        if isinstance(title, str):
+            candidates.append(title)
+        if any(candidate.casefold() == needle for candidate in candidates if candidate):
+            matches.add(canonical)
+    if len(matches) == 1:
+        return next(iter(matches))
+    if not matches:
+        raise SelectorError(f"unknown recipe selector: {requested}")
+    candidates = tuple(sorted(matches))
+    raise SelectorError(
+        f"ambiguous recipe selector: {requested}; choose one of {', '.join(candidates)}",
+        candidates=candidates,
+    )
+
+
 def _profile(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -701,8 +763,9 @@ def _profile(
                 current_revision=current_revision,
             )
         if action == "add":
+            recipe_selector = _resolve_recipe_selector(client, args.recipe_selector)
             new_assignment: dict[str, object] = {
-                "recipe_selector": args.recipe_selector,
+                "recipe_selector": recipe_selector,
                 "spark_ids": sorted(set(args.spark)),
                 "desired_state": "running",
             }
@@ -713,7 +776,7 @@ def _profile(
             matching = [
                 assignment
                 for assignment in assignments
-                if assignment.get("recipe_selector") == args.recipe_selector
+                if assignment.get("recipe_selector") == recipe_selector
                 and assignment.get("assignment_name") == args.assignment_name
             ]
             if matching:
@@ -725,12 +788,20 @@ def _profile(
                 assignments.append(new_assignment)
         else:
             target = args.assignment.casefold()
+            if not any(
+                str(assignment.get("assignment_name", "")).casefold() == target
+                for assignment in assignments
+            ):
+                try:
+                    target = _resolve_recipe_selector(client, args.assignment).casefold()
+                except SelectorError as error:
+                    if error.candidates:
+                        raise
             kept: list[dict[str, object]] = []
             for assignment in assignments:
                 identity = str(
-                    assignment.get(
-                        "assignment_name", assignment.get("recipe_selector", "")
-                    )
+                    assignment.get("assignment_name")
+                    or assignment.get("recipe_selector", "")
                 )
                 if identity.casefold() != target:
                     kept.append(assignment)

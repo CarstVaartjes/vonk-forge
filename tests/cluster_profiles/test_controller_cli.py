@@ -124,7 +124,7 @@ class FakeClient:
             assert set(payload) == {"name", "ttl_seconds"}
         elif path.endswith("/rename"):
             assert set(payload) == {"display_name"}
-        elif path.endswith("/re-enroll") or path.endswith("/remove"):
+        elif path.endswith(("/re-enroll", "/remove")):
             assert payload is None
         else:
             raise AssertionError(f"invented mutation payload route: {path}")
@@ -292,6 +292,19 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 "revision": 7,
                 "assignments": [],
             },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/recipe-uuid",
+                        "identity": {
+                            "publisher": "vonk-forge",
+                            "slug": "recipe-uuid",
+                            "title": "Recipe UUID",
+                        },
+                    }
+                ],
+                "next_cursor": None,
+            },
             ("PUT", "/api/profile/2"): {
                 "number": 2,
                 "revision": 8,
@@ -305,7 +318,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             "2",
             "profile",
             "add",
-            "recipe-uuid",
+            "Recipe UUID",
             "--spark",
             "Boreal",
             "--spark",
@@ -319,12 +332,18 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     assert client.calls == [
         ("GET", "/api/profile/2", None, None),
         (
+            "GET",
+            "/api/recipe/library",
+            None,
+            {"all_models": True, "limit": 512, "sort": "name"},
+        ),
+        (
             "PUT",
             "/api/profile/2",
             {
                 "assignments": [
                     {
-                        "recipe_selector": "recipe-uuid",
+                        "recipe_selector": "vonk-forge/recipe-uuid",
                         "spark_ids": ["Atlas", "Boreal"],
                         "desired_state": "running",
                     }
@@ -335,6 +354,41 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             None,
         ),
     ]
+
+
+def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1"): {
+                "number": 1,
+                "name": "Default",
+                "revision": 3,
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/recipe-uuid",
+                        "assignment_name": None,
+                        "spark_ids": ["spk_" + "a" * 32],
+                    }
+                ],
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/recipe-uuid",
+                        "identity": {"title": "Recipe UUID", "slug": "recipe-uuid"},
+                    }
+                ],
+                "next_cursor": None,
+            },
+            ("PUT", "/api/profile/1"): {"number": 1, "revision": 4},
+        }
+    )
+
+    status, payload = run(("profile", "remove", "Recipe UUID", "--json"), client)
+
+    assert status == 0
+    assert payload["revision"] == 4
+    assert client.calls[-1][2]["assignments"] == []
 
 
 def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
@@ -456,7 +510,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
 
     client = ConflictClient({})
     status, payload = run(
-        ("profile", "add", "qwen-code", "--spark", "Atlas", "--json"), client
+        ("profile", "add", "vonk-forge/qwen-code", "--spark", "Atlas", "--json"), client
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"

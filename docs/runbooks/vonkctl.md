@@ -119,17 +119,19 @@ cached compatible recipe/model.
 vonkctl profile
 vonkctl profile list
 vonkctl --profile 2 profile name "Coding"
-vonkctl --profile 2 profile add qwen-code --spark Atlas --spark Boreal
-vonkctl --profile 2 profile remove qwen-code --spark Boreal
+vonkctl --profile 2 profile add "Qwen Code" --spark Atlas --spark Boreal
+vonkctl --profile 2 profile remove "Qwen Code" --spark Boreal
 vonkctl --profile 2 profile load --dry-run
 vonkctl --profile 2 profile load
 vonkctl --profile 2 profile load --detach
 vonkctl --profile 2 profile progress --follow
 ```
 
-Profile authoring stores logical recipe identity (`recipe_selector`), sorted Spark identity
-(`spark_ids`), optional assignment name, optional exact model variant, and
-desired state. It does not pin a recipe revision or declare a subset scope.
+Profile authoring stores the canonical recipe identity (`publisher/slug`), sorted
+Spark IDs, optional assignment name, optional exact model variant, and desired
+state. The CLI resolves an exact recipe title, slug, or canonical selector
+before saving; the web editor likewise sends the selected library row's
+canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
 whole-fleet snapshot, resource fit, and the plan it will bind internally.

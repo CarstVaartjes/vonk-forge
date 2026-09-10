@@ -751,36 +751,28 @@ class FleetProfileService:
     ) -> tuple[CatalogDocument, CatalogDocumentRevision]:
         """Resolve one exact recipe selector and its newest active revision."""
 
-        document = None
-        try:
-            document = session.get(CatalogDocument, selector)
-        except (TypeError, ValueError):
-            document = None
-        if document is None or document.kind != "recipe":
-            normalized_selector = selector.strip().casefold()
-            if "/" in normalized_selector:
-                publisher, slug = normalized_selector.split("/", 1)
-                identity_filter = (
+        normalized_selector = selector.strip().casefold()
+        if normalized_selector.count("/") != 1:
+            raise FleetProfileConflict(
+                "recipe selector must use canonical publisher/slug form"
+            )
+        publisher, slug = normalized_selector.split("/", 1)
+        candidates = tuple(
+            session.scalars(
+                select(CatalogDocument)
+                .where(
+                    CatalogDocument.kind == "recipe",
                     CatalogDocument.publisher == publisher,
                     CatalogDocument.slug == slug,
                 )
-            else:
-                identity_filter = (func.lower(CatalogDocument.slug) == normalized_selector,)
-            candidates = tuple(
-                session.scalars(
-                    select(CatalogDocument)
-                    .where(
-                        CatalogDocument.kind == "recipe",
-                        *identity_filter,
-                    )
-                    .order_by(CatalogDocument.publisher, CatalogDocument.slug, CatalogDocument.id)
-                )
+                .order_by(CatalogDocument.publisher, CatalogDocument.slug, CatalogDocument.id)
             )
-            if len(candidates) != 1:
-                raise FleetProfileConflict(
-                    "recipe selector is not an exact unique active recipe"
-                )
-            document = candidates[0]
+        )
+        if len(candidates) != 1:
+            raise FleetProfileConflict(
+                "recipe selector is not an exact unique active recipe"
+            )
+        document = candidates[0]
         revision = session.scalar(
             select(CatalogDocumentRevision)
             .where(
@@ -801,7 +793,7 @@ class FleetProfileService:
 
     @staticmethod
     def _recipe_selector(document: CatalogDocument) -> str:
-        return document.slug
+        return f"{document.publisher}/{document.slug}"
 
     def _resolve_choice(
         self, session: Session, choice: FleetProfileAssignmentInput
@@ -2351,7 +2343,7 @@ class FleetProfileService:
                 FleetProfileAssignmentView(
                     selector=assignment_selector,
                     display_name=recipe.title,
-                    recipe_selector=recipe.slug,
+                    recipe_selector=f"{recipe.publisher}/{recipe.slug}",
                     recipe_id=recipe.id,
                     spark_ids=list(choice.spark_ids),
                     required_sparks=required,
@@ -2364,7 +2356,7 @@ class FleetProfileService:
                         "content_sha256": cache.get("model", {}).get("content_sha256") if cache else None,
                     },
                     recipe={
-                        "selector": recipe.slug,
+                        "selector": f"{recipe.publisher}/{recipe.slug}",
                         "name": recipe.title,
                         "state": recipe_state,
                         "revision_id": revision.id,
