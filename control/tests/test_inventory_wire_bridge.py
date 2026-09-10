@@ -61,7 +61,7 @@ def test_rust_inventory_json_crosses_controller_route_and_repository(
     payload = json.loads(completed.stdout)
     request = InventoryRequest.model_validate(payload)
     response = client.post(
-        "/agent/v1/inventory",
+        "/agent/inventory",
         json=payload,
         headers=agent_headers(NODE_A, "serial-a"),
     )
@@ -81,7 +81,7 @@ def test_rust_inventory_json_crosses_controller_route_and_repository(
     malformed["gpu_count"] = "1"
     assert (
         client.post(
-            "/agent/v1/inventory",
+            "/agent/inventory",
             json=malformed,
             headers=agent_headers(NODE_A, "serial-a"),
         ).status_code

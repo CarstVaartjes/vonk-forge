@@ -627,7 +627,7 @@ def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_h
     ):
         assert header in trusted_serialized
     for path, status in (
-        ("/agent/v1/*", 404),
+        ("/agent/*", 404),
         ("/internal/*", 404),
     ):
         route = next(
@@ -691,7 +691,7 @@ def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed(
     assert "litellm:4000" in trusted_serialized
     assert "grafana:3000" in trusted_serialized
     trusted_adapter_routes = _routes_with_handlers(trusted_routes)
-    for path in ("/agent/v1/*", "/internal/*"):
+    for path in ("/agent/*", "/internal/*"):
         denied = next(
             route
             for route in trusted_adapter_routes
@@ -743,7 +743,7 @@ def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() 
     upload_match = [
         {
             "method": ["PUT"],
-            "path": ["/agent/v1/recipe-builds/*/image"],
+            "path": ["/agent/recipe-builds/*/image"],
         }
     ]
     ordinary_match = [{"not": upload_match}]
@@ -782,7 +782,7 @@ def test_browser_source_bundle_upload_matches_controller_bound_only() -> None:
     upload_match = [
         {
             "method": ["PUT"],
-            "path": ["/api/v1/catalog/source-bundles/*"],
+            "path": ["/api/catalog/source-bundles/*"],
         }
     ]
 
@@ -836,7 +836,7 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     denied = next(
         index
         for index, route in enumerate(control_routes)
-        if route.get("match") == [{"path": ["/agent/v1/*"]}]
+        if route.get("match") == [{"path": ["/agent/*"]}]
     )
     fallback = next(
         index
@@ -855,11 +855,11 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         json.dumps(route["match"], sort_keys=True) for route in enrollment_proxies
     } == {
         json.dumps(
-            [{"method": ["GET"], "path": ["/agent/v1/bootstrap"]}],
+            [{"method": ["GET"], "path": ["/agent/bootstrap"]}],
             sort_keys=True,
         ),
         json.dumps(
-            [{"method": ["POST"], "path": ["/agent/v1/enroll"]}],
+            [{"method": ["POST"], "path": ["/agent/enroll"]}],
             sort_keys=True,
         ),
     }
@@ -911,7 +911,7 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     }
     assert any(
         route.get("match")
-        == [{"not": [{"path": ["/agent/v1/enroll"]}], "path": ["/agent/v1/*"]}]
+        == [{"not": [{"path": ["/agent/enroll"]}], "path": ["/agent/*"]}]
         for route in agent_routes
     )
     mappings = []
@@ -972,7 +972,7 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     )
     tailnet_server = _server_on_port(adapted, 8080)
     backend_server = _server_on_port(adapted, 8443)
-    activation_path = "/agent/v1/renew/activate"
+    activation_path = "/agent/renew/activate"
 
     def site(host: str) -> dict:
         return next(

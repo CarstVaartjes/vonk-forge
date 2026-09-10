@@ -488,21 +488,12 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
             "installation_policy": "keep-cached",
             "labels": {"purpose": "interactive"},
             "favorite": True,
-            "scope": {"node_ids": [_node_id(1)]},
             "assignments": [
                 {
-                    "recipe_revision_id": revision_id,
-                    "topology_name": "solo",
+                    "recipe_selector": "synthetic-tiny-image",
+                    "spark_ids": [_node_id(1)],
                     "desired_state": "running",
-                    "alias": "studio-chat",
-                    "nodes": [
-                        {
-                            "node_id": _node_id(1),
-                            "rank": 0,
-                            "role": "entrypoint",
-                            "endpoint_owner": True,
-                        }
-                    ],
+                    "assignment_name": "studio-chat",
                 }
             ],
         }
@@ -886,32 +877,16 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
     service = FleetProfileService(
         sessions, clock=lambda: NOW, recipe_operations=operations
     )
-    scope = {"node_ids": [_node_id(1), _node_id(2)]}
     profile_a = service.create(
         FleetProfileInput.model_validate(
             {
                 "name": "Dual applied",
-                "scope": scope,
                 "assignments": [
                     {
-                        "recipe_revision_id": dual_revision_id,
-                        "topology_name": "pair",
+                        "recipe_selector": "synthetic-tiny-image",
+                        "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
-                        "alias": "dual-chat",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(1),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            },
-                            {
-                                "node_id": _node_id(2),
-                                "rank": 1,
-                                "role": "worker",
-                                "endpoint_owner": False,
-                            },
-                        ],
+                        "assignment_name": "dual-chat",
                     }
                 ],
             }
@@ -922,21 +897,12 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
         FleetProfileInput.model_validate(
             {
                 "name": "Solo applied",
-                "scope": scope,
                 "assignments": [
                     {
-                        "recipe_revision_id": solo_revision_id,
-                        "topology_name": "solo",
+                        "recipe_selector": "synthetic-tiny-solo",
+                        "spark_ids": [_node_id(1)],
                         "desired_state": "running",
-                        "alias": "solo-chat",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(1),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            }
-                        ],
+                        "assignment_name": "solo-chat",
                     }
                 ],
             }
@@ -1087,20 +1053,6 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     assert item["kind"] == "fleet-profile.apply"
     assert item["progress"] == {"phase": "prepare"}
 
-    preparation_preview = service.prepare_preview(profile.id)
-    prepared = service.prepare(
-        profile.id,
-        plan_digest=preparation_preview.plan_digest,
-        request_key=_uuid(41),
-        actor="admin",
-    )
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, prepared.id)
-        assert row is not None
-        prepared_item = service._operation_item(row)
-    assert prepared_item["kind"] == "fleet-profile.prepare"
-
-
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -1191,43 +1143,18 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
         FleetProfileInput.model_validate(
             {
                 "name": "Dual plus solo",
-                "scope": {
-                    "node_ids": [_node_id(1), _node_id(2), _node_id(3)]
-                },
                 "assignments": [
                     {
-                        "recipe_revision_id": dual_revision_id,
-                        "topology_name": "pair",
+                        "recipe_selector": "synthetic-tiny-image",
+                        "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
-                        "alias": "dual-chat",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(1),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            },
-                            {
-                                "node_id": _node_id(2),
-                                "rank": 1,
-                                "role": "worker",
-                                "endpoint_owner": False,
-                            },
-                        ],
+                        "assignment_name": "dual-chat",
                     },
                     {
-                        "recipe_revision_id": solo_revision_id,
-                        "topology_name": "solo",
+                        "recipe_selector": "synthetic-tiny-solo",
+                        "spark_ids": [_node_id(3)],
                         "desired_state": "running",
-                        "alias": "solo-chat",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(3),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            }
-                        ],
+                        "assignment_name": "solo-chat",
                     },
                 ],
             }
@@ -1440,35 +1367,18 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
         FleetProfileInput.model_validate(
             {
                 "name": "Two solo assignments",
-                "scope": {"node_ids": [_node_id(1), _node_id(2)]},
                 "assignments": [
                     {
-                        "recipe_revision_id": solo_revision_id,
-                        "topology_name": "solo",
+                        "recipe_selector": "synthetic-tiny-solo",
+                        "spark_ids": [_node_id(1)],
                         "desired_state": "running",
-                        "alias": "solo-one",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(1),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            }
-                        ],
+                        "assignment_name": "solo-one",
                     },
                     {
-                        "recipe_revision_id": solo_revision_id,
-                        "topology_name": "solo",
+                        "recipe_selector": "synthetic-tiny-solo",
+                        "spark_ids": [_node_id(2)],
                         "desired_state": "running",
-                        "alias": "solo-two",
-                        "nodes": [
-                            {
-                                "node_id": _node_id(2),
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            }
-                        ],
+                        "assignment_name": "solo-two",
                     },
                 ],
             }
@@ -1515,7 +1425,6 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     profile = service.create(
         FleetProfileInput(
             name="All idle",
-            scope=FleetProfileScope(node_ids=[_node_id(1), _node_id(2)]),
             assignments=[],
         ),
         actor="admin",
@@ -1586,27 +1495,12 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         FleetProfileInput.model_validate(
             {
                 "name": "Production child",
-                "scope": {"node_ids": list(nodes)},
                 "assignments": [
                     {
-                        "recipe_revision_id": revision.id,
-                        "topology_name": "nodes_2",
+                        "recipe_selector": revision.slug,
+                        "spark_ids": list(nodes),
                         "desired_state": "running",
-                        "alias": "production-child",
-                        "nodes": [
-                            {
-                                "node_id": nodes[0],
-                                "rank": 0,
-                                "role": "entrypoint",
-                                "endpoint_owner": True,
-                            },
-                            {
-                                "node_id": nodes[1],
-                                "rank": 1,
-                                "role": "worker",
-                                "endpoint_owner": False,
-                            },
-                        ],
+                        "assignment_name": "production-child",
                     }
                 ],
             }
@@ -1726,7 +1620,6 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     profile = service.create(
         FleetProfileInput(
             name="All idle through RunSwitch",
-            scope=FleetProfileScope(node_ids=list(nodes)),
             assignments=[],
         ),
         actor="admin",
@@ -1794,32 +1687,14 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
         )
     assignments = [
         {
-            "recipe_revision_id": revision_id,
-            "topology_name": "solo",
+            "recipe_selector": "synthetic-tiny-image",
+            "spark_ids": [_node_id(2)],
             "desired_state": "installed",
-            "alias": None,
-            "nodes": [
-                {
-                    "node_id": _node_id(2),
-                    "rank": 0,
-                    "role": "entrypoint",
-                    "endpoint_owner": True,
-                }
-            ],
         },
         {
-            "recipe_revision_id": revision_id,
-            "topology_name": "solo",
+            "recipe_selector": "synthetic-tiny-image",
+            "spark_ids": [_node_id(1)],
             "desired_state": "installed",
-            "alias": None,
-            "nodes": [
-                {
-                    "node_id": _node_id(1),
-                    "rank": 0,
-                    "role": "entrypoint",
-                    "endpoint_owner": True,
-                }
-            ],
         },
     ]
     service = FleetProfileService(
@@ -1832,7 +1707,6 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
     profile = service.create(
         FleetProfileInput(
             name="Two cached copies",
-            scope=FleetProfileScope(node_ids=[_node_id(1), _node_id(2)]),
             assignments=assignments,
         ),
         actor="admin",
@@ -1902,13 +1776,13 @@ def test_profile_rejects_preparation_evidence_for_another_scope() -> None:
 
 def test_profile_contract_rejects_ambiguous_or_incomplete_assignments() -> None:
     value = _input(_uuid(2)).model_dump(mode="json")
-    value["assignments"][0]["alias"] = None
-    with pytest.raises(ValidationError, match="require an endpoint alias"):
+    value["assignments"][0]["spark_ids"] = [_node_id(1), _node_id(1)]
+    with pytest.raises(ValidationError, match="unique"):
         FleetProfileInput.model_validate(value)
 
     value = _input(_uuid(2)).model_dump(mode="json")
-    value["assignments"][0]["nodes"][0]["endpoint_owner"] = False
-    with pytest.raises(ValidationError, match="exactly one endpoint owner"):
+    value["assignments"][0]["spark_ids"] = []
+    with pytest.raises(ValidationError, match="at least 1"):
         FleetProfileInput.model_validate(value)
 
 
@@ -1924,61 +1798,10 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     assert created == loaded
     assert listed.profiles == [created]
     assert created.name == "Studio ready"
-    assert created.assignments[0].recipe_title == "Synthetic Tiny image"
-    assert created.assignments[0].nodes[0].node_id == _node_id(1)
+    assert created.assignments[0].recipe["name"] == "Synthetic Tiny image"
+    assert created.assignments[0].spark_ids == [_node_id(1)]
     assert len(created.profile_digest) == 64
     assert created.profile_digest == loaded.profile_digest
-
-
-def test_direct_placement_profile_is_deterministic_and_hidden_from_saved_profiles() -> (
-    None
-):
-    sessions = _database()
-    _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
-    profile_id = _uuid(30)
-    assignment = _input(revision_id).assignments[0]
-
-    first = service.ensure_internal_placement(profile_id, assignment, actor="admin")
-    replay = service.ensure_internal_placement(profile_id, assignment, actor="admin")
-
-    assert first == replay
-    assert first.id == profile_id
-    assert service.list().profiles == []
-
-
-def test_profile_delete_removes_terminal_application_history() -> None:
-    sessions = _database()
-    _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
-    profile = service.create(_input(revision_id), actor="admin")
-    application_id = _uuid(20)
-    with sessions.begin() as session:
-        session.add(
-            FleetProfileApplication(
-                id=application_id,
-                request_key=_uuid(21),
-                profile_id=profile.id,
-                profile_digest=profile.profile_digest,
-                plan_digest="e" * 64,
-                state="waiting-for-operator",
-                plan={"steps": []},
-                current_step=0,
-                current_operation_id=None,
-                progress={},
-                result=None,
-                status_reason="Operator review required",
-                actor="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-
-    service.delete(profile.id)
-
-    with sessions() as session:
-        assert session.get(FleetProfile, profile.id) is None
-        assert session.get(FleetProfileApplication, application_id) is None
 
 
 def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -> None:
@@ -1986,16 +1809,19 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(sessions, clock=lambda: NOW)
     value = _input(revision_id).model_dump(mode="json")
-    value["assignments"][0]["nodes"][0]["node_id"] = _node_id(9)
-    value["scope"] = {"node_ids": [_node_id(9)]}
-
-    with pytest.raises(FleetProfileConflict, match="active enrolled Fleet member"):
-        service.create(FleetProfileInput.model_validate(value), actor="admin")
+    value["assignments"][0]["spark_ids"] = [_node_id(9)]
+    profile = service.create(FleetProfileInput.model_validate(value), actor="admin")
+    preview = service.preview(profile.id)
+    assert not preview.allowed
+    assert any(reason.code == "profile.spark_unavailable" for reason in preview.reasons)
 
     value = _input(revision_id).model_dump(mode="json")
-    value["assignments"][0]["topology_name"] = "pair"
-    with pytest.raises(FleetProfileConflict, match="topology"):
-        service.create(FleetProfileInput.model_validate(value), actor="admin")
+    value["assignments"][0]["spark_ids"] = [_node_id(1), _node_id(2)]
+    value["name"] = "Topology drift"
+    profile = service.create(FleetProfileInput.model_validate(value), actor="admin")
+    preview = service.preview(profile.id)
+    assert not preview.allowed
+    assert any(reason.code == "profile.topology_incomplete" for reason in preview.reasons)
 
 
 def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> None:
@@ -2048,33 +1874,9 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
         )
 
     value = _input(revision_id).model_dump(mode="json")
-    value["assignments"][0].update(
-        {
-            "topology_name": "pair",
-            "nodes": [
-                {
-                    "node_id": _node_id(2),
-                    "rank": 0,
-                    "role": "leader",
-                    "endpoint_owner": True,
-                },
-                {
-                    "node_id": _node_id(1),
-                    "rank": 1,
-                    "role": "worker",
-                    "endpoint_owner": False,
-                },
-            ],
-        }
-    )
-    value["scope"] = {"node_ids": [_node_id(1), _node_id(2)]}
-
-    with pytest.raises(
-        FleetProfileConflict, match="deterministic Spark identity order"
-    ):
-        FleetProfileService(sessions, clock=lambda: NOW).create(
-            FleetProfileInput.model_validate(value), actor="admin"
-        )
+    value["assignments"][0]["spark_ids"] = [_node_id(2), _node_id(1)]
+    with pytest.raises(ValidationError, match="sorted"):
+        FleetProfileInput.model_validate(value)
 
 
 def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() -> None:
@@ -2405,19 +2207,15 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         )
 
     service = FleetProfileService(sessions, clock=lambda: NOW)
-    scope = {"node_ids": [_node_id(1), _node_id(2)]}
     profile_a = service.create(
         FleetProfileInput.model_validate(
             {
                 "name": "Dual",
-                "scope": scope,
                 "assignments": [{
-                    "recipe_revision_id": dual_revision_id, "topology_name": "pair",
-                    "desired_state": "running", "alias": "dual-chat",
-                    "nodes": [
-                        {"node_id": _node_id(1), "rank": 0, "role": "entrypoint", "endpoint_owner": True},
-                        {"node_id": _node_id(2), "rank": 1, "role": "worker", "endpoint_owner": False},
-                    ],
+                    "recipe_selector": "synthetic-tiny-image",
+                    "spark_ids": [_node_id(1), _node_id(2)],
+                    "desired_state": "running",
+                    "assignment_name": "dual-chat",
                 }],
             }
         ),
@@ -2427,34 +2225,20 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         FleetProfileInput.model_validate(
             {
                 "name": "Solo and idle",
-                "scope": scope,
                 "assignments": [{
-                    "recipe_revision_id": solo_revision_id, "topology_name": "solo",
-                    "desired_state": "running", "alias": "solo-chat",
-                    "nodes": [{"node_id": _node_id(1), "rank": 0, "role": "entrypoint", "endpoint_owner": True}],
+                    "recipe_selector": "synthetic-tiny-solo",
+                    "spark_ids": [_node_id(1)],
+                    "desired_state": "running",
+                    "assignment_name": "solo-chat",
                 }],
             }
         ),
         actor="admin",
     )
     assert service.preview(profile_a.id).steps == []
-    cross_scope = service.create(
-        FleetProfileInput.model_validate(
-            {
-                "name": "Narrow scope",
-                "scope": {"node_ids": [_node_id(1)]},
-                "assignments": [],
-            }
-        ),
-        actor="admin",
-    )
-    cross_preview = service.preview(cross_scope.id)
-    assert cross_preview.allowed is False
-    assert any(
-        reason.code == "profile.distributed_cross_scope"
-        for reason in cross_preview.reasons
-    )
     switch_to_b = service.preview(profile_b.id)
+    assert switch_to_b.scope.node_ids == [_node_id(1), _node_id(2)]
+    assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
     assert [step.kind for step in switch_to_b.steps].count("stop") == 1
     assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
     assert switch_to_b.summary.uninstalls == 0
@@ -2467,7 +2251,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     assert back_to_a.summary.installs == 0
 
 
-@pytest.mark.parametrize("damage", ["numeric-topology", "missing-nodes", "extra", "invalid-root"])
+@pytest.mark.parametrize("damage", ["numeric-variant", "missing-spark-ids", "extra", "invalid-root"])
 def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -2476,15 +2260,18 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     assert service.get(created.id) == created
     with sessions.begin() as session:
         row = session.get(FleetProfile, created.id)
+        assert row is not None
         assignments = deepcopy(row.assignments)
         if damage == "invalid-root":
             assignments = {}
-        elif damage == "numeric-topology":
-            assignments[0]["topology_name"] = 123
-        elif damage == "missing-nodes":
-            del assignments[0]["nodes"]
+        elif damage == "numeric-variant":
+            assignments[0]["model_variant"] = 123
+        elif damage == "missing-spark-ids":
+            del assignments[0]["spark_ids"]
         else:
             assignments[0]["undeclared"] = None
         row.assignments = assignments
-    with pytest.raises(FleetProfileConflict, match="stored Fleet profile assignment is invalid"):
+    with pytest.raises(
+        FleetProfileConflict, match="persisted Fleet profile choices are invalid"
+    ):
         service.get(created.id)

@@ -36,7 +36,6 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
 from vonk_agent_protocol.recipe_operations import (
-    RecipeModelCleanupPayload,
     RecipeUninstallPayload,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -209,7 +208,7 @@ class HostRuntimeAuthorityService:
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
         ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset(
-            {"recipe.uninstall", "recipe.model-uninstall.v1"}
+            {"recipe.uninstall"}
         ),
     }
 
@@ -725,19 +724,11 @@ class HostRuntimeAuthorityService:
                 )
             if action is ContainerRuntimeAction.INSTALLATION_CLEANUP:
                 try:
-                    if operation.kind == "recipe.uninstall":
-                        authorized = {
-                            RecipeUninstallPayload.model_validate_json(
-                                canonical_message(operation.payload)
-                            ).installation_id
-                        }
-                    else:
-                        authorized = {
-                            item.installation_id
-                            for item in RecipeModelCleanupPayload.model_validate_json(
-                                canonical_message(operation.payload)
-                            ).installations
-                        }
+                    authorized = {
+                        RecipeUninstallPayload.model_validate_json(
+                            canonical_message(operation.payload)
+                        ).installation_id
+                    }
                 except (TypeError, ValueError) as error:
                     raise HostHelperAuthorityError(
                         "container runtime cleanup authority is invalid"

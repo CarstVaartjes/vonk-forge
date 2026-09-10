@@ -10,27 +10,19 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.database_authority import (
-    AuthorityPolicyError,
     DatabaseAuthorityService,
-    DatabaseProposalService,
-    ProposalChangeRequest,
-    StaleAuthorityRevision,
 )
 from vonk_control.db import initialize_database
 from vonk_control.models import (
     Base,
     ControlAuthorityHead,
-    ControlAuthorityProposal,
     ControlAuthorityRevision,
 )
-
-AUTHORITY_DOCUMENT_PATH = "docs/audits/authority-review.json"
 
 
 @pytest.fixture
 def authority(postgres_engine: Engine):
     tables = [
-        ControlAuthorityProposal.__table__,
         ControlAuthorityHead.__table__,
         ControlAuthorityRevision.__table__,
     ]
@@ -40,110 +32,17 @@ def authority(postgres_engine: Engine):
     service = DatabaseAuthorityService(
         sessions, clock=lambda: datetime(2026, 1, 1, tzinfo=UTC)
     )
-    return service, DatabaseProposalService(service), sessions
+    return service, sessions
 
 
 def test_postgres_initialization_persists_revision_before_head(authority):
-    service, _, sessions = authority
+    service, sessions = authority
 
     revision = service.ensure_initialized()
 
     with sessions() as session:
         assert session.get(ControlAuthorityRevision, revision) is not None
         assert session.get(ControlAuthorityHead, 1).revision_id == revision
-
-
-def test_postgres_initial_authority_has_no_legacy_topology_document(authority):
-    service, _, _ = authority
-
-    revision = service.ensure_initialized()
-
-    assert service.inspect(revision).documents == {}
-    with pytest.raises(AuthorityPolicyError, match="managed document does not exist"):
-        service.read_document(revision, "inventory/topology.json")
-
-
-def test_postgres_apply_persists_revision_before_moving_head(authority):
-    service, proposals, sessions = authority
-    base = service.ensure_initialized()
-    preview = proposals.preview(
-        "admin",
-        base,
-        [
-            ProposalChangeRequest(
-                path=AUTHORITY_DOCUMENT_PATH,
-                document={"kind": "authority-review", "status": "draft", "summary": "first"},
-            )
-        ],
-    )
-
-    revision = service.apply(preview)
-
-    assert revision != base
-    with sessions() as session:
-        assert session.get(ControlAuthorityRevision, revision) is not None
-        assert session.get(ControlAuthorityHead, 1).revision_id == revision
-        assert (
-            session.get(ControlAuthorityProposal, preview.digest).applied_revision
-            == revision
-        )
-
-
-def test_postgres_preview_survives_service_restart_and_apply_is_idempotent(authority):
-    service, proposals, sessions = authority
-    base = service.ensure_initialized()
-    preview = proposals.preview(
-        "admin",
-        base,
-        [
-            ProposalChangeRequest(
-                path=AUTHORITY_DOCUMENT_PATH,
-                document={"kind": "authority-review", "status": "draft", "summary": "first"},
-            )
-        ],
-    )
-
-    restarted = DatabaseProposalService(service)
-    persisted = restarted.apply(preview.digest)
-    changed = service.apply(persisted)
-
-    assert service.apply(persisted) == changed
-    assert service.head() == changed
-    with sessions() as session:
-        assert (
-            session.get(ControlAuthorityProposal, preview.digest).applied_revision
-            == changed
-        )
-
-
-def test_postgres_compare_and_swap_rejects_stale_proposal(authority):
-    service, proposals, _ = authority
-    base = service.ensure_initialized()
-    first = proposals.preview(
-        "admin",
-        base,
-        [
-            ProposalChangeRequest(
-                path=AUTHORITY_DOCUMENT_PATH,
-                document={"kind": "authority-review", "status": "draft", "summary": "first"},
-            )
-        ],
-    )
-    second = proposals.preview(
-        "admin",
-        base,
-        [
-            ProposalChangeRequest(
-                path=AUTHORITY_DOCUMENT_PATH,
-                document={"kind": "authority-review", "status": "draft", "summary": "second"},
-            )
-        ],
-    )
-
-    service.apply(first)
-
-    with pytest.raises(StaleAuthorityRevision):
-        service.apply(second)
 
 
 def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
@@ -168,7 +67,6 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
                 range(2),
             )
         )
-
     assert revisions[0] == revisions[1]
     with postgres_engine.connect() as connection:
         assert (
@@ -200,24 +98,3 @@ def test_concurrent_fresh_startup_migrates_once_and_creates_one_authority_head(
             ).scalar_one()
             == 1
         )
-
-
-@pytest.mark.parametrize("dependencies", [{"inventory/a.json": "invalid"}, {"inventory/a.json": [1]}, [], None])
-def test_postgres_authority_dependencies_reject_corruption_without_filtering(authority, dependencies):
-    service, proposals, sessions = authority
-    base = service.ensure_initialized()
-    preview = proposals.preview(
-        "admin", base, [ProposalChangeRequest(path=AUTHORITY_DOCUMENT_PATH, document={"status": "current"})]
-    )
-    revision = service.apply(preview)
-    assert dict(service.inspect(revision).dependencies) == {}
-    next_preview = proposals.preview(
-        "admin", revision, [ProposalChangeRequest(path=AUTHORITY_DOCUMENT_PATH, document={"status": "changed"})]
-    )
-    with sessions.begin() as session:
-        session.get(ControlAuthorityRevision, revision).dependencies = dependencies
-    with pytest.raises(AuthorityPolicyError, match="authority dependencies are invalid"):
-        service.inspect(revision)
-    with pytest.raises(AuthorityPolicyError, match="authority dependencies are invalid"):
-        service.apply(next_preview)
-    assert service.head() == revision

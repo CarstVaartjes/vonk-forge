@@ -137,7 +137,27 @@ class EnrollmentService:
     def create(
         self, node_id: str | None, actor: str, ttl_seconds: int
     ) -> EnrollmentGrant:
-        return self._create(node_id, actor, ttl_seconds, purpose="new-node")
+        return self._create(
+            node_id, actor, ttl_seconds, purpose="new-node", requested_display_name=None
+        )
+
+    def create_named(
+        self,
+        display_name: str,
+        actor: str,
+        ttl_seconds: int,
+    ) -> EnrollmentGrant:
+        """Create a one-time grant whose approved name is bound on enrollment."""
+        normalized = " ".join(display_name.split())
+        if not 1 <= len(normalized) <= 200:
+            raise ValueError("enrollment display name must be between one and 200 characters")
+        return self._create(
+            None,
+            actor,
+            ttl_seconds,
+            purpose="new-node",
+            requested_display_name=normalized,
+        )
 
     def create_reenrollment(
         self, node_id: str | None, actor: str, ttl_seconds: int
@@ -148,10 +168,18 @@ class EnrollmentService:
         the CSR-derived node identity remains cryptographically bound to the
         one-time grant when the former node row no longer exists.
         """
-        return self._create(node_id, actor, ttl_seconds, purpose="re-enroll")
+        return self._create(
+            node_id, actor, ttl_seconds, purpose="re-enroll", requested_display_name=None
+        )
 
     def _create(
-        self, node_id: str | None, actor: str, ttl_seconds: int, *, purpose: str
+        self,
+        node_id: str | None,
+        actor: str,
+        ttl_seconds: int,
+        *,
+        purpose: str,
+        requested_display_name: str | None,
     ) -> EnrollmentGrant:
         if node_id is not None:
             _validate_node_id(node_id)
@@ -168,6 +196,7 @@ class EnrollmentService:
             id=str(uuid.uuid4()),
             node_id=node_id,
             purpose=purpose,
+            requested_display_name=requested_display_name,
             token_digest=_digest(token_bytes),
             created_by=actor,
             created_at=now,
@@ -1140,6 +1169,9 @@ def _persist_issued_enrollment(
         raise EnrollmentDenied(
             "certificate authority returned non-PEM certificate material"
         ) from error
+    grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
+    if grant is None:
+        raise EnrollmentDenied("enrollment grant does not exist")
     node = session.scalar(
         select(AgentNode)
         .where(AgentNode.node_id == enrollment.node_id)
@@ -1163,7 +1195,7 @@ def _persist_issued_enrollment(
         session.add(
             AgentNodeProfile(
                 node_id=enrollment.node_id,
-                display_name=enrollment.node_id,
+                display_name=grant.requested_display_name or enrollment.node_id,
                 hostname="",
                 lifecycle="ready",
                 labels={},

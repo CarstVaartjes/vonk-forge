@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import hashlib
+import json
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -15,52 +17,58 @@ from .library_contract import (
     _MAX_PAGE_RECIPES,
     FreshnessPolicy,
     LibraryCapabilityInventory,
-    LibraryModel,
+    LibraryFacetValues,
+    LibraryLocalProgress,
+    LibraryLocalState,
     LibraryModelIdentity,
-    LibraryRecipeDetail,
-    LibraryRecipeList,
+    LibraryModelProjection,
+    LibraryRecipeAuthoringDetail,
+    LibraryRecipeIdentity,
     LibraryRecipeModel,
+    LibraryRecipeProjection,
     LibraryRecipeSummary,
-    LibrarySnapshot,
+    LibraryResourceProjection,
+    ModelDetailResponse,
+    ModelLibraryResponse,
     OperationalState,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
     _utc,
 )
-from .models import CatalogDocumentRevision
+from .models import (
+    CatalogDocumentRevision,
+    InstallationNode,
+    ModelCacheOperation,
+    ModelCacheSet,
+    RecipeBuild,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 
 
 class LibraryProjectionError(RuntimeError):
     """The active catalog contains a document outside the public authority."""
 
 
-_MODEL_RESOURCE = "canonical-library-models"
-_RECIPE_RESOURCE = "canonical-library-recipes"
-_ORDER = "publisher/slug/content-digest-asc/v1"
+class LibrarySelectorAmbiguous(ValueError):
+    """A short selector names more than one canonical catalog identity."""
+
+    def __init__(self, selector: str, candidates: Sequence[str]) -> None:
+        self.selector = selector
+        self.candidates = tuple(candidates)
+        super().__init__(f"selector is ambiguous: {selector}")
 
 
-def _after_boundary(boundary: object) -> tuple[str, str, str]:
-    if (
-        not isinstance(boundary, list)
-        or len(boundary) != 3
-        or not all(isinstance(value, str) for value in boundary)
-    ):
-        raise ValueError("canonical library cursor is invalid")
-    return boundary[0], boundary[1], boundary[2]
+_LIBRARY_ORDER = "catalog"
+_LOCAL_STATE_PRIORITY = {"unknown": 0, "failed": 1, "preparing": 2, "cached": 3}
 
 
-def _after_clause(boundary: tuple[str, str, str]):
-    publisher, slug, digest = boundary
-    return or_(
-        CatalogDocumentRevision.publisher > publisher,
-        and_(
-            CatalogDocumentRevision.publisher == publisher,
-            CatalogDocumentRevision.slug > slug,
-        ),
-        and_(
-            CatalogDocumentRevision.publisher == publisher,
-            CatalogDocumentRevision.slug == slug,
-            CatalogDocumentRevision.content_digest > digest,
-        ),
-    )
+def _filter_digest(filters: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        filters, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _canonical_document(
@@ -143,6 +151,7 @@ class LibraryProjection:
         inventory_fresh_seconds: int = 300,
         telemetry_live_seconds: int = 6,
         telemetry_delayed_seconds: int = 20,
+        local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
         **_: object,
     ) -> None:
         if any(
@@ -164,106 +173,660 @@ class LibraryProjection:
             telemetry_live_seconds=telemetry_live_seconds,
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
+        self._local_state = local_state or self._database_local_state
 
-    def list(self, *, limit: int = 100, cursor: str | None = None) -> LibrarySnapshot:
-        if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
-            raise ValueError("library limit is invalid")
-        context = {"limit": limit}
-        boundary = None
-        if cursor is not None:
-            try:
-                boundary = _after_boundary(
-                    self._cursors.decode(
-                        cursor,
-                        resource=_MODEL_RESOURCE,
-                        order=_ORDER,
-                        context=context,
-                    )
-                )
-            except (TypeError, ValueError):
-                raise ValueError("canonical library cursor is invalid") from None
+    @staticmethod
+    def selector(publisher: str, slug: str) -> str:
+        return f"{publisher}/{slug}"
+
+    def _local_state_snapshot(self) -> Mapping[str, Mapping[str, object]]:
+        snapshot = self._local_state()
+        if not isinstance(snapshot, Mapping):
+            raise LibraryProjectionError("local state provider did not return a mapping")
+        return snapshot
+
+    def _local(
+        self,
+        digest: str,
+        *,
+        kind: str,
+        snapshot: Mapping[str, Mapping[str, object]],
+    ) -> LibraryLocalState:
+        raw = snapshot.get(digest, {})
+        if not isinstance(raw, Mapping):
+            raise LibraryProjectionError(f"{kind} local state is not a mapping")
+        controller = raw.get("controller", "unknown")
+        if controller not in {"cached", "preparing", "not_cached", "failed", "unknown"}:
+            raise LibraryProjectionError(f"{kind} local state is invalid")
+        running = raw.get("running_on", [])
+        if not isinstance(running, list) or not all(isinstance(item, str) for item in running):
+            raise LibraryProjectionError(f"{kind} running state is invalid")
+        preparation_value = raw.get("preparation")
+        preparation = None
+        if preparation_value is not None:
+            if not isinstance(preparation_value, Mapping):
+                raise LibraryProjectionError(f"{kind} preparation state is invalid")
+            preparation = LibraryLocalProgress.model_validate(preparation_value)
+        return LibraryLocalState(controller=controller, running_on=running, preparation=preparation)
+
+    @staticmethod
+    def _merge_local(
+        result: dict[str, dict[str, object]],
+        digest: str | None,
+        *,
+        controller: str,
+        running_on: Sequence[str] = (),
+        preparation: Mapping[str, object] | None = None,
+    ) -> None:
+        if digest is None:
+            return
+        current = result.setdefault(
+            digest, {"controller": "unknown", "running_on": []}
+        )
+        if _LOCAL_STATE_PRIORITY[controller] > _LOCAL_STATE_PRIORITY[
+            str(current["controller"])
+        ]:
+            current["controller"] = controller
+        nodes = current["running_on"]
+        if not isinstance(nodes, list):
+            raise LibraryProjectionError("local state running set is not a list")
+        current["running_on"] = sorted(set(nodes) | set(running_on))
+        if preparation is not None:
+            previous = current.get("preparation")
+            if previous is None or str(preparation.get("operation_id", "")) >= str(
+                previous.get("operation_id", "")
+            ):
+                current["preparation"] = dict(preparation)
+
+    @staticmethod
+    def _cache_progress(operation: ModelCacheOperation) -> dict[str, object]:
+        progress = operation.progress
+        if not isinstance(progress, Mapping):
+            raise LibraryProjectionError("persisted cache progress is not a mapping")
+        measurement = progress.get("measurement", progress)
+        if not isinstance(measurement, Mapping):
+            raise LibraryProjectionError("persisted cache measurement is not a mapping")
+        state = operation.state
+        projected_state = {
+            "queued": "queued",
+            "running": "running",
+            "partial": "partial",
+            "succeeded": "succeeded",
+            "failed": "failed",
+            "cancelled": "failed",
+        }.get(state)
+        if projected_state is None:
+            raise LibraryProjectionError("persisted cache operation state is invalid")
+        completed = measurement.get("completed_bytes", progress.get("downloaded_bytes", 0))
+        total = measurement.get("total_bytes", progress.get("expected_bytes"))
+        if type(completed) is not int or completed < 0:
+            raise LibraryProjectionError("persisted cache progress bytes are invalid")
+        if total is not None and (type(total) is not int or total < 1):
+            raise LibraryProjectionError("persisted cache progress total is invalid")
+        phase = measurement.get("phase")
+        return {
+            "operation_id": operation.id,
+            "state": projected_state,
+            "phase": phase if isinstance(phase, str) else None,
+            "completed_bytes": completed,
+            "total_bytes": total,
+        }
+
+    def _database_local_state(self) -> Mapping[str, Mapping[str, object]]:
+        """Read all controller/cache/Spark-local evidence in one bounded batch.
+
+        This is deliberately a projection query, not a per-document callback.  A
+        local revision remains visible even when the active catalog pointer has
+        moved on; the immutable catalog row supplies its canonical document.
+        """
         with self._sessions() as session:
-            model_query = select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == "active",
+            cache_sets = list(session.scalars(select(ModelCacheSet)))
+            cache_operations = list(session.scalars(select(ModelCacheOperation)))
+            revisions = list(session.scalars(select(CatalogDocumentRevision)))
+            builds = list(session.scalars(select(RecipeBuild)))
+            installations = list(session.scalars(select(RecipeInstallation)))
+            installation_nodes = list(session.scalars(select(InstallationNode)))
+            runs = list(session.scalars(select(RecipeRun)))
+            run_nodes = list(session.scalars(select(RunNode)))
+
+        revision_digests = {revision.id: revision.content_digest for revision in revisions}
+        result: dict[str, dict[str, object]] = {}
+        for cache_set in cache_sets:
+            controller = {
+                "cached": "cached",
+                "downloading": "preparing",
+                "verifying": "preparing",
+                "incomplete": "preparing",
+                "needs-repair": "failed",
+                "failed": "failed",
+            }.get(cache_set.state)
+            if controller is None:
+                raise LibraryProjectionError("persisted cache set state is invalid")
+            self._merge_local(
+                result,
+                cache_set.model_content_sha256,
+                controller=controller,
             )
-            if boundary is not None:
-                model_query = model_query.where(_after_clause(boundary))
-            models = list(
-                session.scalars(
-                    model_query.order_by(
-                        CatalogDocumentRevision.publisher,
-                        CatalogDocumentRevision.slug,
-                        CatalogDocumentRevision.content_digest,
-                    ).limit(limit + 1)
-                )
+            self._merge_local(
+                result,
+                cache_set.recipe_revision_sha256,
+                controller=controller,
             )
-            recipes = list(
-                session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(
-                        CatalogDocumentRevision.publisher,
-                        CatalogDocumentRevision.slug,
-                        CatalogDocumentRevision.content_digest,
-                    )
-                )
-            )
-        has_more = len(models) > limit
-        models = models[:limit]
-        next_cursor = None
-        if has_more:
-            last = models[-1]
-            next_cursor = self._cursors.encode(
-                resource=_MODEL_RESOURCE,
-                order=_ORDER,
-                context=context,
-                boundary=[last.publisher, last.slug, last.content_digest],
-            )
-        model_documents = {
-            revision.id: _canonical_model(revision) for revision in models
+        cache_sets_by_id = {
+            cache_set.artifact_set_sha256: cache_set for cache_set in cache_sets
         }
-        recipe_documents = {
-            revision.id: _canonical_recipe(revision) for revision in recipes
-        }
-        grouped: dict[tuple[str, str, str], list[LibraryRecipeSummary]] = {}
-        unlinked: list[LibraryRecipeSummary] = []
-        for revision in recipes:
-            document = recipe_documents[revision.id]
-            summary = _canonical_recipe_summary(revision, document)
-            linked = False
-            for selection in document.models:
-                reference = selection.model
-                key = (
-                    reference.publisher,
-                    reference.slug,
-                    reference.content_sha256,
+        for operation in cache_operations:
+            if operation.kind not in {"download", "repair"}:
+                continue
+            payload = operation.payload
+            if not isinstance(payload, Mapping):
+                raise LibraryProjectionError("persisted cache payload is not a mapping")
+            digest_values = {
+                payload.get("model_content_sha256"),
+                payload.get("recipe_revision_sha256"),
+            }
+            if operation.artifact_set_sha256:
+                cache_set = cache_sets_by_id.get(operation.artifact_set_sha256)
+                if cache_set is not None:
+                    digest_values.update(
+                        digest
+                        for digest in (
+                            cache_set.model_content_sha256,
+                            cache_set.recipe_revision_sha256,
+                        )
+                        if digest is not None
+                    )
+            preparation = self._cache_progress(operation)
+            controller = "preparing" if operation.state in {"queued", "running", "partial"} else (
+                "cached" if operation.state == "succeeded" else "failed"
+            )
+            for digest in digest_values:
+                if digest is not None and not isinstance(digest, str):
+                    raise LibraryProjectionError("persisted cache digest is invalid")
+                self._merge_local(
+                    result,
+                    digest,
+                    controller=controller,
+                    preparation=preparation,
                 )
-                grouped.setdefault(key, []).append(summary)
-                linked = True
-            if not linked:
-                unlinked.append(summary)
-        return LibrarySnapshot(
-            generated_at=_utc(self._clock()),
-            models=[
-                LibraryModel(
-                    model=_model_identity(revision, model_documents[revision.id]),
-                    model_document=model_documents[revision.id],
-                    recipes=grouped.get(
-                        (revision.publisher, revision.slug, revision.content_digest), []
+        for build in builds:
+            controller = {
+                "planned": "preparing",
+                "building": "preparing",
+                "succeeded": "cached",
+                "failed": "failed",
+            }.get(build.state)
+            if controller is None:
+                raise LibraryProjectionError("persisted recipe build state is invalid")
+            self._merge_local(
+                result,
+                revision_digests.get(build.recipe_revision_id),
+                controller=controller,
+            )
+        for installation in installations:
+            controller = {
+                "planned": "preparing",
+                "installing": "preparing",
+                "installed": "cached",
+                "partial": "preparing",
+                "failed": "failed",
+                "uninstalled": "unknown",
+            }.get(installation.state)
+            if controller is None:
+                raise LibraryProjectionError("persisted installation state is invalid")
+            self._merge_local(
+                result,
+                revision_digests.get(installation.recipe_revision_id),
+                controller=controller,
+            )
+        running_nodes_by_installation: dict[str, list[str]] = {}
+        for node in installation_nodes:
+            if node.state == "installed":
+                running_nodes_by_installation.setdefault(node.installation_id, []).append(node.node_id)
+        installations_by_id = {installation.id: installation for installation in installations}
+        for run in runs:
+            if run.state not in {"planned", "starting", "running", "stopping", "stopped", "failed", "lost"}:
+                raise LibraryProjectionError("persisted recipe run state is invalid")
+            if run.state in {"planned", "starting", "running", "stopping"}:
+                installation = installations_by_id.get(run.installation_id)
+                plan = run.plan
+                if not isinstance(plan, Mapping):
+                    raise LibraryProjectionError("persisted recipe run plan is not a mapping")
+                model_digest = plan.get("model_content_sha256")
+                if model_digest is not None and not isinstance(model_digest, str):
+                    raise LibraryProjectionError("persisted recipe run model digest is invalid")
+                run_nodes_for_run = [
+                    node
+                    for node in run_nodes
+                    if node.run_id == run.id and node.state == "running"
+                ]
+                nodes = [node.node_id for node in run_nodes_for_run]
+                if model_digest is not None:
+                    self._merge_local(
+                        result,
+                        model_digest,
+                        controller="cached",
+                        running_on=nodes,
+                    )
+                self._merge_local(
+                    result,
+                    revision_digests.get(
+                        installation.recipe_revision_id if installation is not None else None
                     ),
+                    controller="cached",
+                    running_on=nodes,
                 )
-                for revision in models
-            ],
-            unlinked_recipes=unlinked,
-            next_cursor=next_cursor,
-            freshness_policy=self._freshness,
+        return result
+
+    @staticmethod
+    def _model_usage(document: ModelDefinition) -> list[str]:
+        return sorted(fact.capability for fact in document.capabilities.facts if fact.support == "supported")
+
+    @staticmethod
+    def _recipe_resources(document: RecipeDefinition) -> LibraryResourceProjection:
+        roles = document.topology.roles
+        memory = max((role.resources.memory.startup_peak_bytes for role in roles), default=None)
+        disk = max(
+            (
+                role.resources.disk.image_bytes
+                + role.resources.disk.artifact_bytes
+                + role.resources.disk.staging_bytes
+                + role.resources.disk.cache_bytes
+                + role.resources.disk.rollback_bytes
+                + role.resources.disk.safety_margin_bytes
+                for role in roles
+            ),
+            default=None,
+        )
+        image = max((role.resources.disk.image_bytes for role in roles), default=None)
+        return LibraryResourceProjection(
+            memory_bytes=memory,
+            disk_bytes=disk,
+            runtime_memory_bytes=memory,
+            image_bytes=image,
         )
 
-    def detail(self, recipe_id: str) -> LibraryRecipeDetail:
+    def _model_projection(
+        self,
+        revision: CatalogDocumentRevision,
+        document: ModelDefinition,
+        snapshot: Mapping[str, Mapping[str, object]],
+    ) -> LibraryModelProjection:
+        return LibraryModelProjection(
+            selector=self.selector(document.identity.publisher, document.identity.slug),
+            identity=_model_identity(revision, document),
+            document=document,
+            family=self.selector(document.identity.family.publisher, document.identity.family.slug),
+            version=document.identity.version,
+            variant=document.identity.variant,
+            quantization=document.format.quantization,
+            usage=self._model_usage(document),
+            resources=LibraryResourceProjection(disk_bytes=document.download_bytes),
+            local=self._local(
+                revision.content_digest, kind="model", snapshot=snapshot
+            ),
+            updated_at=_utc(revision.created_at),
+        )
+
+    def _recipe_projection(
+        self,
+        revision: CatalogDocumentRevision,
+        document: RecipeDefinition,
+        model_by_key: Mapping[tuple[str, str, str], ModelDefinition],
+        snapshot: Mapping[str, Mapping[str, object]],
+    ) -> LibraryRecipeProjection:
+        model_selectors = [
+            self.selector(selection.model.publisher, selection.model.slug)
+            for selection in document.models
+        ]
+        known_models = [
+            model_by_key[key]
+            for selection in document.models
+            if (key := (selection.model.publisher, selection.model.slug, selection.model.content_sha256)) in model_by_key
+        ]
+        usage = sorted({item for model in known_models for item in self._model_usage(model)})
+        resources = self._recipe_resources(document)
+        return LibraryRecipeProjection(
+            selector=self.selector(document.identity.publisher, document.identity.slug),
+            identity=LibraryRecipeIdentity(
+                recipe_id=revision.document_id,
+                recipe_revision_id=revision.id,
+                publisher=document.identity.publisher,
+                slug=document.identity.slug,
+                content_sha256=revision.content_digest,
+                title=document.metadata.title,
+                description=document.metadata.description,
+            ),
+            document=document,
+            model_selectors=model_selectors,
+            usage=usage,
+            resources=resources,
+            local=self._local(
+                revision.content_digest, kind="recipe", snapshot=snapshot
+            ),
+            updated_at=_utc(revision.created_at),
+        )
+
+    def _catalog_documents(
+        self,
+        *,
+        kind: str,
+        local_digests: Sequence[str],
+    ) -> list[CatalogDocumentRevision]:
+        with self._sessions() as session:
+            query = select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == kind,
+                or_(
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.content_digest.in_(local_digests),
+                ),
+            )
+            return list(session.scalars(query))
+
+    def _documents_for_snapshot(
+        self, snapshot: Mapping[str, Mapping[str, object]]
+    ) -> tuple[list[CatalogDocumentRevision], list[CatalogDocumentRevision]]:
+        local_digests = tuple(snapshot)
+        return (
+            self._catalog_documents(kind="model", local_digests=local_digests),
+            self._catalog_documents(kind="recipe", local_digests=local_digests),
+        )
+
+    @staticmethod
+    def _matches_any(values: Sequence[str], selected: Sequence[str]) -> bool:
+        return not selected or bool({value.casefold() for value in values} & {value.casefold() for value in selected})
+
+    @staticmethod
+    def _resolve_selector(items: Sequence[object], selector: str, getter: Callable[[object], tuple[str, str]]) -> object:
+        wanted = selector.casefold()
+        matches = [item for item in items if wanted in {
+            "/".join(getter(item)).casefold(), getter(item)[1].casefold()
+        }]
+        if not matches:
+            raise KeyError(selector)
+        if len(matches) > 1:
+            raise LibrarySelectorAmbiguous(selector, ["/".join(getter(item)) for item in matches])
+        return matches[0]
+
+    @staticmethod
+    def _facet_values(models: Sequence[LibraryModelProjection]) -> LibraryFacetValues:
+        return LibraryFacetValues(
+            usage=sorted({value for model in models for value in model.usage}),
+            family=sorted({model.family for model in models}),
+            version=sorted({model.version for model in models}),
+            quantization=sorted({model.quantization for model in models}),
+        )
+
+    def models(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        usage: Sequence[str] = (),
+        family: Sequence[str] = (),
+        version: Sequence[str] = (),
+        quantization: Sequence[str] = (),
+        search: str | None = None,
+        updated_since: datetime | None = None,
+        sort: str = "updated",
+        local_only: bool = False,
+    ) -> ModelLibraryResponse:
+        if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
+            raise ValueError("model library limit is invalid")
+        if sort not in {"updated", "name"}:
+            raise ValueError("model library sort is invalid")
+        snapshot = self._local_state_snapshot()
+        model_rows, _ = self._documents_for_snapshot(snapshot)
+        entries = [
+            self._model_projection(row, _canonical_model(row), snapshot)
+            for row in model_rows
+        ]
+        if local_only:
+            entries = [
+                item
+                for item in entries
+                if item.local.controller in {"cached", "preparing"}
+                or item.local.running_on
+            ]
+        wanted_search = search.casefold() if search else None
+        filtered = [
+            item for item in entries
+            if self._matches_any(item.usage, usage)
+            and self._matches_any([item.family], family)
+            and self._matches_any([item.version], version)
+            and self._matches_any([item.quantization], quantization)
+            and (
+                wanted_search is None
+                or wanted_search in item.selector.casefold()
+                or wanted_search in item.document.identity.model.title.casefold()
+                or wanted_search in item.document.metadata.description.casefold()
+            )
+            and (updated_since is None or item.updated_at >= _utc(updated_since))
+        ]
+        key = self._model_sort_key(sort)
+        filtered.sort(key=key, reverse=sort == "updated")
+        context = {
+            "l": limit,
+            "s": sort,
+            "f": _filter_digest(
+                {
+                    "usage": list(usage),
+                    "family": list(family),
+                    "version": list(version),
+                    "quantization": list(quantization),
+                    "search": search,
+                    "updated_since": None
+                    if updated_since is None
+                    else _utc(updated_since).isoformat(),
+                    "local_only": local_only,
+                }
+            ),
+        }
+        if cursor is not None:
+            boundary = self._cursors.decode(
+                cursor, resource="models", order=_LIBRARY_ORDER, context=context
+            )
+            expected_length = 3 if sort == "updated" else 2
+            if not isinstance(boundary, list) or len(boundary) != expected_length:
+                raise ValueError("model library cursor is invalid")
+            boundary_key = tuple(str(value) for value in boundary)
+            if sort == "updated":
+                filtered = [item for item in filtered if key(item) < boundary_key]
+            else:
+                filtered = [item for item in filtered if key(item) > boundary_key]
+        page = filtered[:limit]
+        next_cursor = None
+        if len(filtered) > limit and page:
+            next_cursor = self._cursors.encode(
+                resource="models", order=_LIBRARY_ORDER, context=context,
+                boundary=list(key(page[-1])),
+            )
+        return ModelLibraryResponse(
+            generated_at=_utc(self._clock()), models=page,
+            facets=self._facet_values(entries), next_cursor=next_cursor,
+            filters={
+                "usage": list(usage), "family": list(family), "version": list(version),
+                "quantization": list(quantization), "search": search,
+                "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
+                "sort": sort, "local_only": local_only,
+            }, freshness_policy=self._freshness,
+        )
+
+    @staticmethod
+    def _model_sort_key(sort: str) -> Callable[[LibraryModelProjection], tuple[str, ...]]:
+        if sort == "updated":
+            return lambda item: (
+                item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
+                item.selector.casefold(),
+                item.identity.content_sha256,
+            )
+        return lambda item: (item.selector.casefold(), item.identity.content_sha256)
+
+    def model_detail(self, selector: str) -> ModelDetailResponse:
+        snapshot = self._local_state_snapshot()
+        model_rows, _ = self._documents_for_snapshot(snapshot)
+        entries = [
+            self._model_projection(row, _canonical_model(row), snapshot)
+            for row in model_rows
+        ]
+        entry = self._resolve_selector(
+            entries, selector,
+            lambda item: (item.identity.publisher, item.identity.slug),
+        )
+        assert isinstance(entry, LibraryModelProjection)
+        return ModelDetailResponse.model_validate(entry.model_dump(mode="python"))
+
+    def recipe_library(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        model_selector: str | None = None,
+        all_models: bool = False,
+        usage: Sequence[str] = (),
+        search: str | None = None,
+        updated_since: datetime | None = None,
+        sort: str = "updated",
+    ) -> RecipeLibraryResponse:
+        if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
+            raise ValueError("recipe library limit is invalid")
+        if sort not in {"updated", "name"}:
+            raise ValueError("recipe library sort is invalid")
+        snapshot = self._local_state_snapshot()
+        model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+        models = [_canonical_model(row) for row in model_rows]
+        model_by_key = {
+            (model.identity.publisher, model.identity.slug, row.content_digest): model
+            for row, model in zip(model_rows, models, strict=True)
+        }
+        model_entries = [
+            self._model_projection(row, model, snapshot)
+            for row, model in zip(model_rows, models, strict=True)
+        ]
+        selected_keys: set[tuple[str, str, str]] | None = None
+        local_recipe_digests: set[str] = set()
+        if model_selector and not all_models:
+            selected = self._resolve_selector(
+                model_entries, model_selector,
+                lambda item: (item.identity.publisher, item.identity.slug),
+            )
+            assert isinstance(selected, LibraryModelProjection)
+            selected_keys = {(selected.identity.publisher, selected.identity.slug, selected.identity.content_sha256)}
+        elif not all_models:
+            selected_keys = {
+                (item.identity.publisher, item.identity.slug, item.identity.content_sha256)
+                for item in model_entries
+                if item.local.controller in {"cached", "preparing"} or item.local.running_on
+            }
+            local_recipe_digests = set(snapshot)
+        entries = [
+            self._recipe_projection(row, _canonical_recipe(row), model_by_key, snapshot)
+            for row in recipe_rows
+        ]
+        wanted_search = search.casefold() if search else None
+        filtered = [
+            item for item in entries
+            if (
+                selected_keys is None
+                or item.identity.content_sha256 in local_recipe_digests
+                or any(
+                    (selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys
+                    for selection in item.document.models
+                )
+            )
+            and self._matches_any(item.usage, usage)
+            and (
+                wanted_search is None
+                or wanted_search in item.selector.casefold()
+                or wanted_search in item.document.metadata.title.casefold()
+                or wanted_search in item.document.metadata.description.casefold()
+            )
+            and (updated_since is None or item.updated_at >= _utc(updated_since))
+        ]
+        key = self._recipe_sort_key(sort)
+        filtered.sort(key=key, reverse=sort == "updated")
+        context = {
+            "l": limit,
+            "s": sort,
+            "f": _filter_digest(
+                {
+                    "model": model_selector,
+                    "all_models": all_models,
+                    "usage": list(usage),
+                    "search": search,
+                    "updated_since": None
+                    if updated_since is None
+                    else _utc(updated_since).isoformat(),
+                }
+            ),
+        }
+        if cursor is not None:
+            boundary = self._cursors.decode(
+                cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
+            )
+            if not isinstance(boundary, list) or len(boundary) != 3:
+                raise ValueError("recipe library cursor is invalid")
+            boundary_key = tuple(str(value) for value in boundary)
+            filtered = [item for item in filtered if (key(item) < boundary_key if sort == "updated" else key(item) > boundary_key)]
+        page = filtered[:limit]
+        next_cursor = None
+        if len(filtered) > limit and page:
+            next_cursor = self._cursors.encode(
+                resource="recipes", order=_LIBRARY_ORDER, context=context,
+                boundary=list(key(page[-1])),
+            )
+        return RecipeLibraryResponse(
+            generated_at=_utc(self._clock()), recipes=page,
+            facets=self._facet_values(model_entries), next_cursor=next_cursor,
+            filters={
+                "model": model_selector, "all_models": all_models, "usage": list(usage),
+                "search": search,
+                "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
+                "sort": sort,
+            }, freshness_policy=self._freshness,
+        )
+
+    @staticmethod
+    def _recipe_sort_key(sort: str) -> Callable[[LibraryRecipeProjection], tuple[str, ...]]:
+        if sort == "updated":
+            return lambda item: (
+                item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
+                item.selector.casefold(),
+                item.identity.content_sha256,
+            )
+        return lambda item: (item.selector.casefold(), item.identity.content_sha256, "")
+
+    def recipe_detail(self, selector: str) -> RecipeDetailResponse:
+        snapshot = self._local_state_snapshot()
+        model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+        models = [_canonical_model(row) for row in model_rows]
+        model_by_key = {
+            (model.identity.publisher, model.identity.slug, row.content_digest): model
+            for row, model in zip(model_rows, models, strict=True)
+        }
+        entries = [
+            self._recipe_projection(row, _canonical_recipe(row), model_by_key, snapshot)
+            for row in recipe_rows
+        ]
+        entry = self._resolve_selector(
+            entries, selector,
+            lambda item: (item.identity.publisher, item.identity.slug),
+        )
+        assert isinstance(entry, LibraryRecipeProjection)
+        recipe_row = next(row for row in recipe_rows if row.content_digest == entry.identity.content_sha256)
+        recipe = _canonical_recipe(recipe_row)
+        model_documents = []
+        for selection in recipe.models:
+            model = model_by_key.get((selection.model.publisher, selection.model.slug, selection.model.content_sha256))
+            if model is None:
+                raise LibraryProjectionError("active recipe references a missing active Model document")
+            model_documents.append(LibraryRecipeModel(selection=selection, model_document=model))
+        return RecipeDetailResponse.model_validate(
+            entry.model_dump(mode="python")
+            | {"model_documents": [model.model_dump(mode="json") for model in model_documents]}
+        )
+
+    def authoring_recipe_detail(self, recipe_id: str) -> LibraryRecipeAuthoringDetail:
         with self._sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -314,7 +877,7 @@ class LibraryProjection:
                 document.models, model_revisions, strict=True
             )
         ]
-        return LibraryRecipeDetail(
+        return LibraryRecipeAuthoringDetail(
             generated_at=_utc(self._clock()),
             recipe=_canonical_recipe_summary(revision, document),
             definition=document,
@@ -325,60 +888,4 @@ class LibraryProjection:
             model_documents=model_documents,
             model_capabilities=LibraryCapabilityInventory(),
             recipe_capabilities=LibraryCapabilityInventory(),
-        )
-
-    def recipes(
-        self, *, limit: int = 100, cursor: str | None = None
-    ) -> LibraryRecipeList:
-        if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
-            raise ValueError("library recipe limit is invalid")
-        context = {"limit": limit}
-        boundary = None
-        if cursor is not None:
-            try:
-                boundary = _after_boundary(
-                    self._cursors.decode(
-                        cursor,
-                        resource=_RECIPE_RESOURCE,
-                        order=_ORDER,
-                        context=context,
-                    )
-                )
-            except (TypeError, ValueError):
-                raise ValueError("canonical library recipe cursor is invalid") from None
-        with self._sessions() as session:
-            recipe_query = select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
-            )
-            if boundary is not None:
-                recipe_query = recipe_query.where(_after_clause(boundary))
-            revisions = list(
-                session.scalars(
-                    recipe_query.order_by(
-                        CatalogDocumentRevision.publisher,
-                        CatalogDocumentRevision.slug,
-                        CatalogDocumentRevision.content_digest,
-                    ).limit(limit + 1)
-                )
-            )
-        has_more = len(revisions) > limit
-        revisions = revisions[:limit]
-        next_cursor = None
-        if has_more:
-            last = revisions[-1]
-            next_cursor = self._cursors.encode(
-                resource=_RECIPE_RESOURCE,
-                order=_ORDER,
-                context=context,
-                boundary=[last.publisher, last.slug, last.content_digest],
-            )
-        return LibraryRecipeList(
-            generated_at=_utc(self._clock()),
-            recipes=[
-                _canonical_recipe_summary(revision, _canonical_recipe(revision))
-                for revision in revisions
-            ],
-            next_cursor=next_cursor,
-            freshness_policy=self._freshness,
         )

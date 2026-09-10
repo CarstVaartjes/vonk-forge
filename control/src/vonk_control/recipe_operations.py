@@ -19,8 +19,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import (
     RecipeInstallPayload,
-    RecipeModelCleanupPayload,
-    RecipeModelCleanupResult,
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeUninstallPayload,
@@ -58,15 +56,11 @@ from .models import (
     RunNode,
 )
 from .recipe_action_plans import (
-    ModelDeletionInstallationImpact,
-    ModelDeletionNodeImpact,
-    ModelDeletionPlan,
     StopNodeImpact,
     StopPlan,
     UninstallActiveRun,
     UninstallNodeImpact,
     UninstallPlan,
-    model_deletion_plan,
     stop_plan,
     uninstall_plan,
 )
@@ -173,7 +167,6 @@ _RECIPE_WIRE_PAYLOAD_MODELS = {
     "recipe.start": RecipeStartPayload,
     "recipe.stop": RecipeStopPayload,
     "recipe.uninstall": RecipeUninstallPayload,
-    "recipe.model-uninstall.v1": RecipeModelCleanupPayload,
 }
 
 
@@ -953,23 +946,6 @@ class RecipeOperationService:
             )
             if active_uninstall is not None:
                 raise RecipeOperationConflict("recipe installation is not runnable")
-            active_model_deletions = tuple(
-                session.scalars(
-                    select(Job).where(
-                        Job.kind == "recipe.model-uninstall.v1",
-                        Job.state.in_({"queued", "running"}),
-                    )
-                )
-            )
-            if any(
-                plan.installation_id in job.payload.get("installation_ids", [])
-                for job in active_model_deletions
-                if isinstance(job.payload, Mapping)
-                and isinstance(job.payload.get("installation_ids"), list)
-            ):
-                raise RecipeOperationConflict(
-                    "recipe installation belongs to an active model deletion"
-                )
             try:
                 run_id = self._run_admission.accept_run_in_session(
                     session, plan, actor=actor, now=now
@@ -1500,105 +1476,6 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
-    def preview_model_deletion(self, model_content_sha256: str) -> ModelDeletionPlan:
-        with self._sessions() as session:
-            return self._model_deletion_plan_in_session(
-                session, model_content_sha256, lock=False
-            )
-
-    def delete_model(
-        self,
-        model_content_sha256: str,
-        *,
-        plan_digest: str,
-        actor: str,
-        request_id: str,
-    ) -> RecipeOperationView:
-        kind = "recipe.model-uninstall.v1"
-        existing = self._idempotent(
-            request_id,
-            kind,
-            plan_digest,
-            owner_kind="model",
-            owner_id=model_content_sha256,
-        )
-        if existing is not None:
-            return existing
-        now = self._clock()
-        try:
-            with self._sessions.begin() as session:
-                plan = self._model_deletion_plan_in_session(
-                    session, model_content_sha256, lock=True
-                )
-                existing = self._idempotent_in_session(
-                    session,
-                    request_id,
-                    kind,
-                    plan_digest,
-                    owner_kind="model",
-                    owner_id=model_content_sha256,
-                )
-                if existing is not None:
-                    return existing
-                if not plan.allowed or plan.plan_digest != plan_digest:
-                    raise RecipeOperationConflict(
-                        "model deletion plan is stale or blocked"
-                    )
-                installations = {
-                    item.installation_id: item for item in plan.installations
-                }
-                node_payloads: list[tuple[str, Mapping[str, object]]] = []
-                for node in plan.nodes:
-                    node_payloads.append(
-                        (
-                            node.node_id,
-                            {
-                                "schema_version": 1,
-                                "model_content_sha256": model_content_sha256,
-                                "plan_digest": plan.plan_digest,
-                                "installations": [
-                                    {
-                                        "installation_id": installation_id,
-                                        "recipe_content_sha256": installations[
-                                            installation_id
-                                        ].recipe_content_sha256,
-                                    }
-                                    for installation_id in node.installation_ids
-                                ],
-                            },
-                        )
-                    )
-                job = self._queue_in_session(
-                    session,
-                    kind=kind,
-                    owner_kind="model",
-                    owner_id=model_content_sha256,
-                    plan_digest=plan.plan_digest,
-                    actor=actor,
-                    request_id=request_id,
-                    node_payloads=tuple(node_payloads),
-                    authority_digest=model_content_sha256,
-                    now=now,
-                    job_context={
-                        "installation_ids": sorted(installations),
-                    },
-                )
-        except IntegrityError as error:
-            raced = self._idempotent(
-                request_id,
-                kind,
-                plan_digest,
-                owner_kind="model",
-                owner_id=model_content_sha256,
-            )
-            if raced is not None:
-                return raced
-            raise RecipeOperationConflict(
-                "request key was already used differently"
-            ) from error
-        self._agent_jobs.notify_available()
-        return self.get(job.id)
-
     def retry(
         self, operation_id: str, *, actor: str, request_id: str
     ) -> RecipeOperationView:
@@ -1919,7 +1796,6 @@ class RecipeOperationService:
         if state == "succeeded" and job.kind in {
             "recipe.stop",
             "recipe.uninstall",
-            "recipe.model-uninstall.v1",
         }:
             try:
                 parsed_result = parse_recipe_operation_result(
@@ -2105,43 +1981,6 @@ class RecipeOperationService:
             assert node is not None
             node.state = "uninstalled" if succeeded else "failed"
             node.updated_at = now
-        elif job.kind == "recipe.model-uninstall.v1":
-            try:
-                cleanup_request = RecipeModelCleanupPayload.model_validate_json(
-                    canonical_message(operation.payload)
-                )
-            except ValueError as error:
-                raise RecipeOperationConflict(
-                    "model deletion authority is invalid"
-                ) from error
-            raw_installations = cleanup_request.installations
-            if not raw_installations:
-                raise RecipeOperationConflict("model deletion authority is invalid")
-            if succeeded:
-                try:
-                    cleanup_result = RecipeModelCleanupResult.model_validate_json(
-                        canonical_message(evidence)
-                    )
-                except ValueError as error:
-                    raise RecipeOperationConflict(
-                        "model deletion evidence is invalid"
-                    ) from error
-                if cleanup_result.uninstalled_installations != len(raw_installations):
-                    raise RecipeOperationConflict("model deletion evidence is invalid")
-            for raw_installation in raw_installations:
-                installation_id = raw_installation.installation_id
-                node = session.scalar(
-                    select(InstallationNode).where(
-                        InstallationNode.installation_id == installation_id,
-                        InstallationNode.node_id == node_id,
-                    )
-                )
-                if node is None:
-                    raise RecipeOperationConflict(
-                        "model deletion installation membership changed"
-                    )
-                node.state = "uninstalled" if succeeded else "failed"
-                node.updated_at = now
         recorded_result = _validated_result(job.kind, job.result) or {}
         evidence_field = (
             "launch_evidence"
@@ -2424,38 +2263,6 @@ class RecipeOperationService:
                 installation.updated_at = now
                 if not failed:
                     self._release(session, "installation", owner_id, now)
-            elif job.kind == "recipe.model-uninstall.v1":
-                raw_installation_ids = job.payload.get("installation_ids")
-                if not isinstance(raw_installation_ids, list) or not all(
-                    isinstance(item, str) for item in raw_installation_ids
-                ):
-                    raise RecipeOperationConflict(
-                        "model deletion installation authority is invalid"
-                    )
-                for installation_id in raw_installation_ids:
-                    installation = session.get(
-                        RecipeInstallation, installation_id, with_for_update=True
-                    )
-                    if installation is None:
-                        raise RecipeOperationConflict(
-                            "model deletion installation disappeared"
-                        )
-                    installation_nodes = tuple(
-                        session.scalars(
-                            select(InstallationNode).where(
-                                InstallationNode.installation_id == installation_id
-                            )
-                        )
-                    )
-                    installation_failed = any(
-                        node.state == "failed" for node in installation_nodes
-                    )
-                    installation.state = (
-                        "failed" if installation_failed else "uninstalled"
-                    )
-                    installation.updated_at = now
-                    if not installation_failed:
-                        self._release(session, "installation", installation_id, now)
         else:
             job.state = "running"
         job.updated_at = now
@@ -2975,151 +2782,6 @@ class RecipeOperationService:
             node_id: tuple(sorted(recipe_ids))
             for node_id, recipe_ids in sorted(dependent_recipe_ids.items())
         }
-
-    def _model_deletion_plan_in_session(
-        self, session: Session, model_content_sha256: str, *, lock: bool
-    ) -> ModelDeletionPlan:
-        if not _lower_hex_digest(model_content_sha256):
-            raise RecipeOperationConflict("model content identity is invalid")
-        statement = select(RecipeInstallation).where(
-            RecipeInstallation.state != "uninstalled"
-        )
-        if lock:
-            statement = statement.with_for_update(of=RecipeInstallation)
-        candidates = tuple(session.scalars(statement))
-        selected: list[tuple[RecipeInstallation, CatalogDocumentRevision, str]] = []
-        model_title = model_content_sha256[:12]
-        for installation in candidates:
-            revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            if revision is None or revision.content_digest is None:
-                raise RecipeOperationConflict(
-                    "recipe revision authority is unavailable"
-                )
-            primary_digest, _primary_title = _primary_model_identity(revision.document)
-            if installation.model_content_sha256 not in {None, primary_digest}:
-                raise RecipeOperationConflict("installation model authority is invalid")
-            matched_title = next(
-                (
-                    title
-                    for digest, title in _recipe_model_identities(session, revision.document)
-                    if digest == model_content_sha256
-                ),
-                None,
-            )
-            if matched_title is not None:
-                selected.append((installation, revision, matched_title))
-                model_title = matched_title
-
-        selected_ids = [item.id for item, _revision, _title in selected]
-        node_statement = select(InstallationNode).where(
-            InstallationNode.installation_id.in_(selected_ids)
-        )
-        if lock:
-            node_statement = node_statement.with_for_update(of=InstallationNode)
-        node_rows = tuple(session.scalars(node_statement)) if selected_ids else ()
-        nodes_by_installation: dict[str, list[InstallationNode]] = {}
-        for node in node_rows:
-            nodes_by_installation.setdefault(node.installation_id, []).append(node)
-
-        active_statement = (
-            select(RecipeRun)
-            .where(
-                RecipeRun.installation_id.in_(selected_ids),
-                RecipeRun.state != "stopped",
-            )
-            .order_by(RecipeRun.id)
-        )
-        if lock:
-            active_statement = active_statement.with_for_update(of=RecipeRun)
-        all_active_runs = (
-            tuple(session.scalars(active_statement)) if selected_ids else ()
-        )
-        active_runs = all_active_runs[:_MAX_ACTIVE_RUNS]
-
-        operation_statement = (
-            select(Job.id)
-            .where(
-                Job.kind == "recipe.model-uninstall.v1",
-                Job.state.in_({"queued", "running"}),
-                Job.payload["owner_id"].as_string() == model_content_sha256,
-            )
-            .limit(1)
-        )
-        if lock:
-            operation_statement = operation_statement.with_for_update(of=Job)
-        active_operation = session.scalar(operation_statement) is not None
-
-        evidence_exact = True
-        installation_impacts: list[ModelDeletionInstallationImpact] = []
-        by_node: dict[str, dict[str, object]] = {}
-        for installation, revision, _title in selected:
-            nodes = sorted(
-                nodes_by_installation.get(installation.id, []),
-                key=lambda item: (item.rank, item.node_id),
-            )
-            expected = _stored_installation_plan(installation.plan).get("nodes")
-            exact = (
-                installation.state == "installed"
-                and isinstance(expected, list)
-                and len(expected) == len(nodes)
-                and all(
-                    node.state == "installed" and node.installed_bytes is not None
-                    for node in nodes
-                )
-                and {
-                    (item.get("node_id"), item.get("rank"), item.get("role"))
-                    for item in expected
-                    if isinstance(item, Mapping)
-                }
-                == {(node.node_id, node.rank, node.role) for node in nodes}
-            )
-            evidence_exact = evidence_exact and exact and bool(nodes)
-            installation_impacts.append(
-                ModelDeletionInstallationImpact(
-                    installation_id=installation.id,
-                    recipe_id=revision.document_id,
-                    recipe_revision_id=revision.id,
-                    recipe_content_sha256=revision.content_digest,
-                    node_ids=tuple(node.node_id for node in nodes),
-                    installed_bytes=sum(node.installed_bytes or 0 for node in nodes),
-                )
-            )
-            for node in nodes:
-                item = by_node.setdefault(
-                    node.node_id,
-                    {"installation_ids": [], "recipe_ids": set(), "bytes": 0},
-                )
-                item["installation_ids"].append(installation.id)  # type: ignore[union-attr]
-                item["recipe_ids"].add(revision.document_id)  # type: ignore[union-attr]
-                item["bytes"] += node.installed_bytes  # type: ignore[operator]
-        node_impacts = tuple(
-            ModelDeletionNodeImpact(
-                node_id=node_id,
-                installation_ids=tuple(sorted(value["installation_ids"])),
-                recipe_ids=tuple(sorted(value["recipe_ids"])),
-                installed_bytes=int(value["bytes"]),
-            )
-            for node_id, value in sorted(by_node.items())
-        )
-        return model_deletion_plan(
-            model_content_sha256=model_content_sha256,
-            model_title=model_title,
-            installations=installation_impacts,
-            nodes=node_impacts,
-            active_runs=tuple(
-                UninstallActiveRun(
-                    run_id=run.id,
-                    alias=run.alias,
-                    state=run.state,
-                    route_state=run.route_state,
-                )
-                for run in active_runs
-            ),
-            active_run_count=len(all_active_runs),
-            active_runs_truncated=len(all_active_runs) > _MAX_ACTIVE_RUNS,
-            active_operation=active_operation,
-            evidence_exact=evidence_exact,
-        )
 
     def _idempotent(
         self,

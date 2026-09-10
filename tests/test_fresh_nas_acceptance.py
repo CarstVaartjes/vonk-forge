@@ -1022,7 +1022,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
                 b'HTTP/1.1 200 OK\r\n\r\n{"uid":"vonk-prometheus","type":"prometheus"}'
             )
         if path.startswith(
-            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
+            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
         ):
             return b'HTTP/1.1 200 OK\r\n\r\n{"status":"success","data":{"resultType":"vector","result":[{"metric":{"job":"vonk-control"},"value":["1","1"]}]}}'
         if path == "/grafana/api/search?query=Vonk%20Forge":
@@ -1049,7 +1049,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     assert models["accepted_statuses"] == {200}
     assert any(
         path.startswith(
-            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/v1/query?"
+            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
         )
         for path in requests
     )

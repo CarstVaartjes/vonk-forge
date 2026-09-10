@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .auth import CursorCodec
 from .model_cache_contract import Digest
+from .auth import MUTATION_ROLES
 from .operation_api import bounded_error_responses
 from .operation_contract import (
-    AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
+    AvailabilityOperationFailure,
     OperationProgress,
 )
 from .recipe_image_availability import (
@@ -23,20 +22,6 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityView,
 )
 from .strict_json import StrictJSONModel
-
-
-class RecipeImageAvailabilityStart(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    request_key: str = Field(min_length=1, max_length=36)
-    recipe_revision_id: str = Field(min_length=1, max_length=128)
-    force: bool = False
-
-
-class RecipeImageAvailabilityRetry(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    request_key: str = Field(min_length=1, max_length=36)
 
 
 class RecipeImageAvailabilityArtifact(StrictJSONModel):
@@ -61,7 +46,7 @@ class RecipeImageAvailabilityChild(StrictJSONModel):
     kind: Literal["model-cache", "runtime-image"]
     id: str
     request_key: str | None = None
-    state: Literal["queued", "running", "partial", "succeeded", "failed"]
+    state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     model_content_digests: list[Digest]
@@ -113,7 +98,7 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     id: str = Field(min_length=1, max_length=128)
     request_id: str = Field(min_length=1, max_length=128)
     kind: Literal["recipe.image.availability.v2"]
-    state: Literal["queued", "running", "partial", "succeeded", "failed"]
+    state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
     attempt: int = Field(ge=0)
     recipe_revision_id: str
     recipe_content_sha256: str
@@ -136,62 +121,59 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
         return self
 
 
-class RecipeImageAvailabilityListResponse(StrictJSONModel):
+class RecipeOperatorRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    operations: list[RecipeImageAvailabilityResponse]
-    total: int = Field(ge=0)
-    next_cursor: str | None = None
+    request_key: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    with_model: bool = False
 
 
-class RecipeImageAvailabilityErrorResponse(StrictJSONModel):
+class RecipeOperatorResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    failure: AvailabilityOperationFailure
+    action: Literal["remove"]
+    selector: str = Field(min_length=1, max_length=256)
+    request_key: str = Field(min_length=1, max_length=128)
+    operation_id: str = Field(min_length=1, max_length=128)
+    recipe_revision_id: str = Field(min_length=1, max_length=128)
+    state: Literal["accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"]
+    progress: OperationProgress
+    reclaimed_bytes: int = Field(ge=0)
+    preserved: list[str] = Field(default_factory=list, max_length=32)
+    next_actions: list[str] = Field(default_factory=list, max_length=32)
+    cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
+    cancelled_builds: list[str] = Field(default_factory=list, max_length=32)
+    model_removals: list[str] = Field(default_factory=list, max_length=32)
+
+
+class RecipeUpdateRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[2] = 2
+    request_key: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    selectors: list[str] | None = Field(default=None, max_length=100)
+    all: bool = False
+
+
+class RecipeUpdateResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[2] = 2
+    action: Literal["update"] = "update"
+    updates: list[RecipeImageAvailabilityResponse] = Field(max_length=100)
+
+
+RecipeOperationResponse = RecipeImageAvailabilityResponse | RecipeOperatorResponse
 
 
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
-    ("post", "/api/v1/library/recipe-image-availability"): "startRecipeImageAvailability",
-    ("get", "/api/v1/library/recipe-image-availability"): "listRecipeImageAvailability",
-    ("get", "/api/v1/library/recipe-image-availability/{operation_id}"):
-        "getRecipeImageAvailability",
-    ("post", "/api/v1/library/recipe-image-availability/{operation_id}/retry"):
-        "retryRecipeImageAvailability",
+    ("get", "/api/recipe/operations/{operation_id}"): "getRecipeOperation",
+    ("post", "/api/recipe/{selector}/download"): "downloadRecipe",
+    ("post", "/api/recipe/{selector}/remove"): "removeRecipe",
+    ("post", "/api/recipe/update"): "updateRecipes",
 }
-
-
-def _failure_document(error: RecipeImageAvailabilityError) -> dict[str, object]:
-    retry_time = None
-    if isinstance(error.retry_time, str):
-        retry_time = error.retry_time
-    elif error.retry_after_seconds is not None:
-        retry_time = (datetime.now(UTC) + timedelta(seconds=error.retry_after_seconds)).isoformat()
-    return AvailabilityOperationFailure.model_validate(
-        {
-            "code": str(error.code),
-            "detail": str(error.detail)[:512],
-            "recovery_actions": list(error.recovery_actions),
-            "retryable": bool(error.retryable),
-            "retry_time": retry_time,
-            "retry_after_seconds": error.retry_after_seconds,
-            "log_excerpt": error.log_excerpt[:1024]
-            if isinstance(error.log_excerpt, str)
-            else None,
-            "required_bytes": error.required_bytes,
-            "free_bytes": error.free_bytes,
-            "shortfall_bytes": error.shortfall_bytes,
-        }
-    ).model_dump(mode="json")
-
-
-def _failure_response(error: RecipeImageAvailabilityError) -> RecipeImageAvailabilityErrorResponse:
-    """Build the complete documented conflict response through its model."""
-
-    return RecipeImageAvailabilityErrorResponse(
-        failure=AvailabilityOperationFailure.model_validate(_failure_document(error))
-    )
 
 
 def _progress(value: object) -> OperationProgress:
@@ -276,108 +258,176 @@ def _service(service: RecipeImageAvailabilityService | None) -> RecipeImageAvail
     return service
 
 
-def _mutating(actor: Any) -> None:
-    if getattr(actor, "role", None) not in {"operator", "administrator"}:
+def _mutating(actor: Any, route: str) -> None:
+    if getattr(actor, "role", None) not in MUTATION_ROLES[("POST", route)]:
         raise HTTPException(status_code=403, detail="insufficient role")
 
 
-def install_recipe_image_availability_routes(
+def _recipe_error(error: BaseException) -> HTTPException:
+    if isinstance(error, KeyError):
+        return HTTPException(status_code=404, detail="recipe operation was not found")
+    code = str(getattr(error, "code", ""))
+    if code.endswith("selector_missing"):
+        return HTTPException(status_code=404, detail=str(error))
+    if code.endswith("selector_ambiguous") or code.endswith("request_key_reused"):
+        return HTTPException(status_code=409, detail=str(error))
+    if code.endswith("invalid"):
+        return HTTPException(status_code=422, detail=str(error))
+    return HTTPException(status_code=503, detail="recipe image availability is unavailable")
+
+
+def install_recipe_operator_routes(
     app: FastAPI,
     *,
     actor_dependency: Any,
     service: RecipeImageAvailabilityService | None,
-    cursor_codec: CursorCodec | None = None,
+    audits: Any | None = None,
 ) -> None:
-    """Install the typed schema-2 Recipe Make available API."""
+    """Install current singular Recipe download/remove/update mutations."""
 
     from .operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
-    @app.post(
-        "/api/v1/library/recipe-image-availability",
-        status_code=status.HTTP_202_ACCEPTED,
-        response_model=RecipeImageAvailabilityResponse,
-        responses=bounded_error_responses(401, 403, 409, 422, 503)
-        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
-        operation_id="startRecipeImageAvailability",
-    )
-    def start(body: RecipeImageAvailabilityStart, _request: Request, actor: Any = actor_dependency):
-        _mutating(actor)
-        try:
-            return _view_document(_service(service).start(body.recipe_revision_id, actor=actor.subject, request_id=body.request_key, force=body.force))
-        except RecipeImageAvailabilityError as error:
-            return JSONResponse(status_code=409, content=_failure_response(error).model_dump(mode="json"))
+    def removal_document(result: Mapping[str, object]) -> RecipeOperatorResponse:
+        return RecipeOperatorResponse(
+            schema_version=int(result.get("schema_version", 2)),
+            action="remove",
+            selector=str(result["selector"]),
+            request_key=str(result["request_key"]),
+            operation_id=str(result["operation_id"]),
+            recipe_revision_id=str(result["recipe_revision_id"]),
+            state=str(result["state"]),
+            progress=OperationProgress(
+                phase="completed",
+                completed_bytes=int(result.get("reclaimed_bytes", 0)),
+                total_bytes=int(result.get("reclaimed_bytes", 0)),
+                total_bytes_known=True,
+                completed_items=len(result.get("cancelled_operations", [])),
+                total_items=len(result.get("cancelled_operations", [])),
+            ),
+            reclaimed_bytes=int(result.get("reclaimed_bytes", 0)),
+            preserved=[str(item) for item in result.get("preserved", [])],
+            next_actions=[str(item) for item in result.get("next_actions", [])],
+            cancelled_operations=[str(item) for item in result.get("cancelled_operations", [])],
+            cancelled_builds=[str(item) for item in result.get("cancelled_builds", [])],
+            model_removals=[str(item) for item in result.get("model_removals", [])],
+        )
 
     @app.get(
-        "/api/v1/library/recipe-image-availability",
-        response_model=RecipeImageAvailabilityListResponse,
-        responses=bounded_error_responses(400, 401, 422, 503),
-        operation_id="listRecipeImageAvailability",
+        "/api/recipe/operations/{operation_id}",
+        response_model=RecipeOperationResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getRecipeOperation",
     )
-    def list_operations(
-        recipe_revision_id: Annotated[str | None, Query(max_length=128)] = None,
-        state: Annotated[Literal["queued", "running", "partial", "succeeded", "failed"] | None, Query()] = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        cursor: Annotated[str | None, Query(max_length=512)] = None,
-        _actor: Any = actor_dependency,
-    ):
-        context = {"recipe_revision_id": recipe_revision_id, "state": state, "limit": limit}
-        boundary = None
-        if cursor is not None:
-            if cursor_codec is None:
-                raise HTTPException(status_code=503, detail="availability cursor unavailable")
-            try:
-                raw = cursor_codec.decode(cursor, resource="recipe-image-availability", order="created-at-desc/id-desc/v1", context=context)
-                if not isinstance(raw, list) or len(raw) != 2 or not all(isinstance(item, str) for item in raw):
-                    raise ValueError
-                boundary = (raw[0], raw[1])
-            except ValueError:
-                raise HTTPException(status_code=400, detail="cursor is invalid") from None
-        try:
-            rows, total, next_boundary = _service(service).list_page(recipe_revision_id=recipe_revision_id, state=state, limit=limit, boundary=boundary)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="cursor is invalid") from None
-        next_cursor = None
-        if next_boundary is not None and cursor_codec is not None:
-            next_cursor = cursor_codec.encode(resource="recipe-image-availability", order="created-at-desc/id-desc/v1", context=context, boundary=list(next_boundary))
-        return RecipeImageAvailabilityListResponse(operations=[_view_document(row) for row in rows], total=total, next_cursor=next_cursor)
+    def get_operation(
+        operation_id: Annotated[str, Path(min_length=1, max_length=128)],
+        actor: Any = actor_dependency,
+    ) -> RecipeOperationResponse:
+        """Observe a submitted recipe mutation; any authenticated actor may read it."""
 
-    @app.get(
-        "/api/v1/library/recipe-image-availability/{operation_id}",
-        response_model=RecipeImageAvailabilityResponse,
-        responses=bounded_error_responses(401, 404, 422, 503)
-        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
-        operation_id="getRecipeImageAvailability",
-    )
-    def get(operation_id: str = Path(min_length=1, max_length=64), _actor: Any = actor_dependency):
+        del actor
         try:
-            return _view_document(_service(service).get(operation_id))
-        except KeyError:
-            raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
+            operation = _service(service).get_operator_operation(operation_id)
+            if isinstance(operation, RecipeImageAvailabilityView):
+                return _view_document(operation)
+            return removal_document(operation)
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
 
     @app.post(
-        "/api/v1/library/recipe-image-availability/{operation_id}/retry",
+        "/api/recipe/{selector:path}/download",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503)
-        | {409: {"model": RecipeImageAvailabilityErrorResponse}},
-        operation_id="retryRecipeImageAvailability",
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="downloadRecipe",
     )
-    def retry(body: RecipeImageAvailabilityRetry, _request: Request, operation_id: str = Path(min_length=1, max_length=64), actor: Any = actor_dependency):
-        _mutating(actor)
+    def download(
+        body: RecipeOperatorRequest,
+        _request: Request,
+        selector: str = Path(min_length=1, max_length=256),
+        actor: Any = actor_dependency,
+    ) -> RecipeImageAvailabilityResponse:
+        _mutating(actor, "/api/recipe/{selector:path}/download")
         try:
-            return _view_document(_service(service).retry(operation_id, actor=actor.subject, request_id=body.request_key))
-        except KeyError:
-            raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
-        except RecipeImageAvailabilityError as error:
-            return JSONResponse(status_code=409, content=_failure_response(error).model_dump(mode="json"))
+            if service is None:
+                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+            return _view_document(service.start_selector(
+                selector,
+                actor=actor.subject,
+                request_id=body.request_key,
+                force=True,
+            ))
+        except HTTPException:
+            raise
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.post(
+        "/api/recipe/{selector:path}/remove",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=RecipeOperatorResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="removeRecipe",
+    )
+    def remove(
+        body: RecipeOperatorRequest,
+        _request: Request,
+        selector: str = Path(min_length=1, max_length=256),
+        actor: Any = actor_dependency,
+    ) -> RecipeOperatorResponse:
+        _mutating(actor, "/api/recipe/{selector:path}/remove")
+        try:
+            if service is None:
+                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+            result = service.remove_selector(
+                selector,
+                actor=actor.subject,
+                request_id=body.request_key,
+                with_model=body.with_model,
+            )
+            return removal_document(result)
+        except HTTPException:
+            raise
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.post(
+        "/api/recipe/update",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=RecipeUpdateResponse,
+        responses=bounded_error_responses(401, 403, 409, 422, 503),
+        operation_id="updateRecipes",
+    )
+    def update(
+        body: RecipeUpdateRequest,
+        _request: Request,
+        actor: Any = actor_dependency,
+    ) -> RecipeUpdateResponse:
+        _mutating(actor, "/api/recipe/update")
+        try:
+            if service is None:
+                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+            views = service.update(
+                actor=actor.subject,
+                request_id=body.request_key,
+                selectors=body.selectors,
+                all=body.all,
+            )
+            return RecipeUpdateResponse(updates=[_view_document(view) for view in views])
+        except HTTPException:
+            raise
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
 
 
 __all__ = [
     "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
+    "RecipeOperatorRequest",
+    "RecipeOperatorResponse",
+    "RecipeUpdateRequest",
+    "RecipeUpdateResponse",
     "RecipeImageAvailabilityResponse",
-    "RecipeImageAvailabilityRetry",
-    "RecipeImageAvailabilityStart",
-    "install_recipe_image_availability_routes",
+    "RecipeOperationResponse",
+    "install_recipe_operator_routes",
 ]

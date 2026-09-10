@@ -138,25 +138,15 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
 
     result = client.request(
         "GET",
-        "/api/v1/jobs",
+        "/api/jobs",
         query={"cursor": "next page", "status": "waiting-for-operator"},
     )
 
     assert result == {"jobs": [], "total": 0, "next_cursor": None}
     assert observed[0].full_url == (
-        "https://forge.example.test/api/v1/jobs?cursor=next+page&status=waiting-for-operator"
+        "https://forge.example.test/api/jobs?cursor=next+page&status=waiting-for-operator"
     )
     assert observed[0].get_header("Authorization") == "Bearer private-token"
-
-
-def test_raw_request_accepts_no_content_mutation_response(tmp_path: Path) -> None:
-    client = ControlClient(
-        "https://forge.example.test",
-        _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _Response(204, None),
-    )
-
-    assert client.request("POST", "/api/v1/agents/nodes/spk_node/revoke") == {}
 
 
 def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
@@ -167,7 +157,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/jobs",
+            "https://forge.example.test/api/jobs",
             401,
             "Unauthorized",
             headers,
@@ -179,7 +169,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ControlUnauthorized) as raised:
-        client.request("GET", "/api/v1/jobs")
+        client.request("GET", "/api/jobs")
 
     assert raised.value.detail == "bad token <redacted>"
     assert raised.value.retry_after_seconds == 7
@@ -198,7 +188,7 @@ def test_raw_request_rejects_malformed_typed_errors(
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/jobs",
+            "https://forge.example.test/api/jobs",
             401,
             "Unauthorized",
             headers,
@@ -210,7 +200,7 @@ def test_raw_request_rejects_malformed_typed_errors(
     )
 
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
-        client.request("GET", "/api/v1/jobs")
+        client.request("GET", "/api/jobs")
 
 
 def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Path) -> None:
@@ -229,7 +219,7 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Pat
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/model-cache/download",
+            "https://forge.example.test/api/model/qwen-code/download",
             403,
             "Forbidden",
             headers,
@@ -243,14 +233,13 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Pat
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
         client.request(
             "POST",
-            "/api/v1/model-cache/download",
+            "/api/model/qwen-code/download",
             {
                 "request_key": "11111111-1111-4111-8111-111111111111",
-                "plan_digest": "a" * 64,
             },
         )
 
-def test_request_validates_canonical_route_models_and_preserves_204(
+def test_request_validates_canonical_route_models(
     tmp_path: Path,
 ) -> None:
     capabilities = {
@@ -287,15 +276,9 @@ def test_request_validates_canonical_route_models_and_preserves_204(
 
     result = client.request(
         "GET",
-        "/api/v1/artifact-jobs/capabilities",
+        "/api/artifact-jobs/capabilities",
     )
     assert result == capabilities
-
-    assert client.request(
-        "POST", "/api/v1/agents/nodes/spk_node/revoke"
-    ) == {}
-    assert observed[-1] is None
-
 
 def test_request_rejects_undocumented_no_content_status(tmp_path: Path) -> None:
     client = ControlClient(
@@ -305,7 +288,7 @@ def test_request_rejects_undocumented_no_content_status(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ControlMalformedResponse, match="undocumented status"):
-        client.request("GET", "/api/v1/artifact-jobs/capabilities")
+        client.request("GET", "/api/artifact-jobs/capabilities")
 
 
 def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) -> None:
@@ -321,7 +304,7 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
         client.request(
             "GET",
-            "/api/v1/artifact-jobs/capabilities",
+            "/api/artifact-jobs/capabilities",
         )
 
 
@@ -365,7 +348,7 @@ def test_request_rejects_scalar_and_unknown_response_fields(
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
         client.request(
             "GET",
-            "/api/v1/artifact-jobs/capabilities",
+            "/api/artifact-jobs/capabilities",
         )
 
 
@@ -388,7 +371,7 @@ def test_request_rejects_scalar_and_unknown_request_fields(
     with pytest.raises(ControlClientError, match="OpenAPI schema"):
         client.request(
             "POST",
-            "/api/v1/artifact-jobs/job-1/cancel",
+            "/api/artifact-jobs/job-1/cancel",
             payload,
         )
 
@@ -420,14 +403,14 @@ def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ControlMalformedResponse, match="undocumented status"):
-        client.request("GET", "/api/v1/artifact-jobs/capabilities")
+        client.request("GET", "/api/artifact-jobs/capabilities")
 
 
 def test_request_rejects_route_missing_from_bundled_openapi(tmp_path: Path) -> None:
     client = ControlClient("https://forge.example.test", _token(tmp_path))
 
     with pytest.raises(ControlClientError, match="not in the bundled schema"):
-        client.request("GET", "/api/v1/retired-route")
+        client.request("GET", "/api/retired-route")
 
 
 def test_request_rejects_json_body_on_binary_route(tmp_path: Path) -> None:
@@ -436,7 +419,7 @@ def test_request_rejects_json_body_on_binary_route(tmp_path: Path) -> None:
     with pytest.raises(ControlClientError, match="does not accept application/json"):
         client.request(
             "PUT",
-            "/api/v1/artifact-jobs/job-1/inputs/prompt.txt",
+            "/api/artifact-jobs/job-1/inputs/prompt.txt",
             {"content": "not bytes"},
         )
 
@@ -505,12 +488,11 @@ def test_generated_transport_rejects_malformed_request_before_network() -> None:
     transport = _RecordingTransport(underlying)
     request = httpx.Request(
         "POST",
-        "https://forge.example.test/api/v1/model-cache/download",
+        "https://forge.example.test/api/model/qwen-code/download",
         headers={"Content-Type": "application/json"},
         content=json.dumps(
             {
                 "request_key": 7,
-                "plan_digest": "a" * 64,
             }
         ).encode(),
     )
@@ -528,7 +510,7 @@ def test_generated_transport_rejects_malformed_typed_error(tmp_path: Path) -> No
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/fleet",
+            "https://forge.example.test/api/fleet",
             401,
             "Unauthorized",
             headers,
@@ -577,7 +559,7 @@ def test_openapi_validation_is_safe_for_concurrent_requests(
             executor.map(
                 lambda _index: client.request(
                     "GET",
-                    "/api/v1/artifact-jobs/capabilities",
+                    "/api/artifact-jobs/capabilities",
                 ),
                 range(32),
             )
@@ -612,7 +594,7 @@ def test_artifact_input_upload_streams_the_reverified_local_file(
     )
 
     result = client.upload_file(
-        "/api/v1/artifact-jobs/job-1/inputs/prompt.txt",
+        "/api/artifact-jobs/job-1/inputs/prompt.txt",
         source,
         media_type="text/plain",
         expected_sha256=digest,
@@ -621,7 +603,7 @@ def test_artifact_input_upload_streams_the_reverified_local_file(
 
     assert result["state"] == "draft"
     assert observed == [
-        "https://forge.example.test/api/v1/artifact-jobs/job-1/inputs/prompt.txt",
+        "https://forge.example.test/api/artifact-jobs/job-1/inputs/prompt.txt",
         "text/plain",
         digest,
         content,
@@ -644,7 +626,7 @@ def test_artifact_output_download_is_verified_and_atomically_published(
     destination = tmp_path / "result.png"
 
     result = client.download_file(
-        f"/api/v1/artifact-jobs/job-1/results/{digest}",
+        f"/api/artifact-jobs/job-1/results/{digest}",
         destination,
         media_type="image/png",
         expected_sha256=digest,
@@ -678,7 +660,7 @@ def test_artifact_output_download_fails_closed_without_partial_file(
 
     with pytest.raises(ControlMalformedResponse, match="does not match"):
         client.download_file(
-            f"/api/v1/artifact-jobs/job-1/results/{expected}",
+            f"/api/artifact-jobs/job-1/results/{expected}",
             destination,
             media_type="image/png",
             expected_sha256=expected,

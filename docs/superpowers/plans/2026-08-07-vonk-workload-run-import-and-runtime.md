@@ -295,15 +295,15 @@ git commit -m "feat: resolve imported runtime artifacts"
 - Modify: `control/src/vonk_control/catalog_service.py`
 
 **Interfaces:**
-- Produces: `POST /api/v1/catalog/imports/workload_run/preview`
-- Produces: `POST /api/v1/catalog/imports/workload_run`
-- Produces: `POST /api/v1/catalog/recipes/{recipe_id}/resolve-import`
+- Produces: `POST /api/catalog/imports/workload_run/preview`
+- Produces: `POST /api/catalog/imports/workload_run`
+- Produces: `POST /api/catalog/recipes/{recipe_id}/resolve-import`
 
 - [ ] **Step 1: Write failing preview/apply separation test**
 
 ```python
 def test_preview_does_not_persist_recipe(client, admin_headers, workload_run_yaml, session) -> None:
-    response = client.post("/api/v1/catalog/imports/workload_run/preview", headers=admin_headers, content=workload_run_yaml)
+    response = client.post("/api/catalog/imports/workload_run/preview", headers=admin_headers, content=workload_run_yaml)
     assert response.status_code == 200
     assert session.query(LocalRecipe).count() == 0
 ```

@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Request, status
+from vonk_agent_protocol import OperationProgress
 
 from .audit import AuditRecord
-from .auth import MUTATION_ROLES, Actor, CursorCodec
+from .auth import MUTATION_ROLES, Actor
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -16,24 +17,7 @@ from .model_cache import (
     ModelCacheResolutionError,
     ModelCacheService,
 )
-from .model_cache_contract import (
-    CacheEntryResponse,
-    ModelCacheAccessResumeRequest,
-    ModelCacheDownloadPreviewRequest,
-    ModelCacheDownloadPreviewResponse,
-    ModelCacheDownloadRequest,
-    ModelCacheEvictionPreviewRequest,
-    ModelCacheEvictionPreviewResponse,
-    ModelCacheEvictRequest,
-    ModelCacheInventoryResponse,
-    ModelCacheOperationResponse,
-    ModelCacheOperationsResponse,
-    ModelCacheRepairPreviewRequest,
-    ModelCacheRepairPreviewResponse,
-    ModelCacheRepairRequest,
-    ModelCacheRetryRequest,
-    ModelCacheUpdatesResponse,
-)
+from .model_cache_contract import ModelCacheOperatorRequest, ModelCacheOperatorResponse
 from .model_cache_progress import project_cache_progress
 from .operation_api import (
     OperationApiServices,
@@ -45,61 +29,82 @@ from .operation_api import (
 from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
-    ("get", "/api/v1/model-cache"): "getModelCacheInventory",
-    ("get", "/api/v1/model-cache/entries/{artifact_set_sha256}"):
-        "getModelCacheEntry",
-    ("post", "/api/v1/model-cache/download-preview"):
-        "previewModelCacheDownload",
-    ("post", "/api/v1/model-cache/download"): "downloadModelCache",
-    ("post", "/api/v1/model-cache/repair-preview"): "previewModelCacheRepair",
-    ("post", "/api/v1/model-cache/repair"): "repairModelCache",
-    ("post", "/api/v1/model-cache/eviction-preview"):
-        "previewModelCacheEviction",
-    ("post", "/api/v1/model-cache/evict"): "evictModelCache",
-    ("get", "/api/v1/model-cache/updates"): "getModelCacheUpdates",
-    ("get", "/api/v1/model-cache/operations"): "listModelCacheOperations",
-    ("get", "/api/v1/model-cache/operations/{operation_id}"):
-        "getModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/cancel"):
-        "cancelModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
-        "retryModelCacheOperation",
-    ("post", "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume"):
-        "checkModelCacheAccessAndResume",
+    ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
+    ("post", "/api/model/{selector}/download"): "downloadModel",
+    ("post", "/api/model/{selector}/remove"): "removeModel",
 }
 
-_DIGEST = r"^[0-9a-f]{64}$"
-_UUID = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+def _model_operator_response(operation: Any, *, action: str, selector: str) -> ModelCacheOperatorResponse:
+    raw = project_cache_progress(operation.progress)
+    progress = OperationProgress.model_validate(raw)
+    result = (
+        None
+        if operation.result is None
+        else operation.result.model_dump(mode="json")
+    )
+    cancelled = (
+        result.get("cancelled_operations", [])
+        if isinstance(result, Mapping)
+        else []
+    )
+    return ModelCacheOperatorResponse(
+        action=action,
+        selector=selector,
+        request_key=operation.request_key,
+        operation_id=operation.id,
+        state=operation.state,
+        phase=str(raw.get("phase", progress.phase)),
+        progress=progress,
+        transferred_bytes=progress.completed_bytes,
+        total_bytes=progress.total_bytes,
+        eta_seconds=progress.eta_seconds,
+        preserved=(
+            ["verified-controller-copy"]
+            if action == "download" and operation.state == "succeeded"
+            else []
+        ),
+        next_actions=(
+            ["retry"]
+            if operation.state == "failed" and operation.retryable
+            else []
+        ),
+        cancelled_operations=list(cancelled),
+        result=result,
+        failure=(
+            AvailabilityOperationFailure.model_validate(operation.failure)
+            if isinstance(operation.failure, Mapping)
+            else None
+        ),
+    )
 
 
-def install_model_cache_routes(
+def install_model_operator_routes(
     app: FastAPI,
     *,
     actor_dependency: Any,
     service: ModelCacheService | None,
     audits: Any,
-    cursors: CursorCodec | None = None,
 ) -> None:
-    """Install the cache routes without exposing fixture transport inputs."""
+    """Install the current singular Model mutation routes.
+
+    The service resolves selectors and binds its own current preview.  The
+    operator therefore submits only intent and a request identity.
+    """
 
     from .operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
-    authenticated = actor_dependency
 
     def cache() -> ModelCacheService:
         if service is None:
             raise HTTPException(status_code=503, detail="model cache unavailable")
         return service
 
-    def require_mutation(actor: Actor, method: str, route: str) -> None:
-        if actor.role not in MUTATION_ROLES[(method, route)]:
+    def require_operator(actor: Actor, route: str) -> None:
+        if actor.role not in MUTATION_ROLES[("POST", route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def audit(request: Request, actor: Actor, action: str, *targets: str) -> None:
+    def audit(request: Request, actor: Actor, action: str, selector: str, operation_id: str) -> None:
         if audits is not None:
             audits.append(
                 AuditRecord(
@@ -107,481 +112,95 @@ def install_model_cache_routes(
                     actor.subject,
                     action,
                     None,
-                    tuple(targets),
+                    (selector, operation_id),
                 )
             )
 
-    def error(error: BaseException, unavailable: str) -> HTTPException:
+    def failure(error: BaseException) -> HTTPException:
         if isinstance(error, ModelCacheNotFound):
             return HTTPException(status_code=404, detail=error.detail)
         if isinstance(error, ModelCacheConflict):
             return HTTPException(status_code=409, detail=error.detail)
         if isinstance(error, ModelCacheResolutionError):
             return HTTPException(status_code=422, detail=error.detail)
-        if isinstance(error, ModelCacheError):
-            return HTTPException(status_code=503, detail=unavailable)
-        return HTTPException(status_code=503, detail=unavailable)
-
-    def operation_response(operation: Any) -> ModelCacheOperationResponse:
-        result = operation.result
-        failure = None
-        raw_failure = getattr(operation, "failure", None)
-        if isinstance(raw_failure, Mapping):
-            failure = AvailabilityOperationFailure.model_validate(raw_failure)
-        return ModelCacheOperationResponse.model_validate(
-            {
-                "schema_version": 2,
-                "id": operation.id,
-                "request_key": operation.request_key,
-                "kind": operation.kind,
-                "state": operation.state,
-                "attempt": operation.attempt,
-                "artifact_set_sha256": operation.artifact_set_sha256,
-                "plan_digest": operation.plan_digest,
-                "progress": dict(operation.progress, measurement=project_cache_progress(operation.progress)),
-                "result": result,
-                "failure": failure,
-                "created_at": operation.created_at,
-                "updated_at": operation.updated_at,
-                "completed_at": operation.completed_at,
-            }
-        )
-
-    def decode_cursor(
-        cursor: str | None,
-        *,
-        resource: str,
-        order: str,
-        context: dict[str, object],
-    ) -> tuple[str, str] | None:
-        if cursor is None:
-            return None
-        if cursors is None:
-            raise HTTPException(status_code=422, detail="cache cursor is invalid")
-        try:
-            value = cursors.decode(
-                cursor, resource=resource, order=order, context=context
-            )
-            if (
-                not isinstance(value, list)
-                or len(value) != 2
-                or not all(isinstance(item, str) for item in value)
-            ):
-                raise ValueError
-            return value[0], value[1]
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="cache cursor is invalid") from None
-
-    def encode_cursor(
-        boundary: tuple[str, str] | None,
-        *,
-        resource: str,
-        order: str,
-        context: dict[str, object],
-    ) -> str | None:
-        if boundary is None:
-            return None
-        if cursors is None:
-            raise HTTPException(status_code=503, detail="cache pagination unavailable")
-        return cursors.encode(
-            resource=resource,
-            order=order,
-            context=context,
-            boundary=list(boundary),
-        )
+        return HTTPException(status_code=503, detail="model cache unavailable")
 
     @app.get(
-        "/api/v1/model-cache",
-        response_model=ModelCacheInventoryResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getModelCacheInventory",
-    )
-    def get_inventory(
-        limit: Annotated[int, Query(ge=1, le=100)] = 100,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
-        _actor: Actor = authenticated,
-    ) -> ModelCacheInventoryResponse:
-        try:
-            context = {"limit": limit}
-            boundary = decode_cursor(
-                cursor,
-                resource="model-cache-inventory",
-                order="updated-at-desc/digest-desc/v1",
-                context=context,
-            )
-            result = cache().inventory(limit=limit, boundary=boundary)
-            return {
-                "schema_version": 2,
-                "source_policy": "nas-first",
-                "entries": result["entries"],
-                "storage": result["storage"],
-                "total": result["total"],
-                "next_cursor": encode_cursor(
-                    result.get("_next_boundary"),
-                    resource="model-cache-inventory",
-                    order="updated-at-desc/digest-desc/v1",
-                    context=context,
-                ),
-            }
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache inventory unavailable") from None
-
-    @app.get(
-        "/api/v1/model-cache/entries/{artifact_set_sha256}",
-        response_model=CacheEntryResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getModelCacheEntry",
-    )
-    def get_entry(
-        artifact_set_sha256: Annotated[str, Path(pattern=_DIGEST)],
-        _actor: Actor = authenticated,
-    ) -> CacheEntryResponse:
-        try:
-            return cache().get_entry(artifact_set_sha256)
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache entry unavailable") from None
-
-    @app.post(
-        "/api/v1/model-cache/download-preview",
-        response_model=ModelCacheDownloadPreviewResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="previewModelCacheDownload",
-    )
-    def preview_download(
-        body: ModelCacheDownloadPreviewRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheDownloadPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/download-preview")
-        try:
-            result = cache().download_preview(
-                artifact_set_sha256=body.artifact_set_sha256,
-                model_content_sha256=body.model_content_sha256,
-                recipe_revision_sha256=body.recipe_revision_sha256,
-                recipe_revision_id=body.recipe_revision_id,
-            )
-            return {
-                key: value for key, value in result.items() if not key.startswith("_")
-            }
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache download preview unavailable") from None
-
-    @app.post(
-        "/api/v1/model-cache/download",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="downloadModelCache",
-    )
-    def download(
-        request: Request,
-        body: ModelCacheDownloadRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/download")
-        try:
-            result = cache().start_download(
-                actor=actor.subject,
-                request_key=body.request_key,
-                plan_digest=body.plan_digest,
-                artifact_set_sha256=body.artifact_set_sha256,
-                model_content_sha256=body.model_content_sha256,
-                recipe_revision_sha256=body.recipe_revision_sha256,
-                recipe_revision_id=body.recipe_revision_id,
-            )
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache download unavailable") from None
-        audit(request, actor, "model-cache.download", result.id, result.artifact_set_sha256 or "")
-        return operation_response(result)
-
-    @app.post(
-        "/api/v1/model-cache/repair-preview",
-        response_model=ModelCacheRepairPreviewResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="previewModelCacheRepair",
-    )
-    def preview_repair(
-        body: ModelCacheRepairPreviewRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheRepairPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/repair-preview")
-        try:
-            return cache().repair_preview(body.artifact_set_sha256)
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache repair preview unavailable") from None
-
-    @app.post(
-        "/api/v1/model-cache/repair",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="repairModelCache",
-    )
-    def repair(
-        request: Request,
-        body: ModelCacheRepairRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/repair")
-        try:
-            result = cache().start_repair(
-                actor=actor.subject,
-                request_key=body.request_key,
-                artifact_set_sha256=body.artifact_set_sha256,
-                plan_digest=body.plan_digest,
-            )
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache repair unavailable") from None
-        audit(request, actor, "model-cache.repair", result.id, result.artifact_set_sha256 or "")
-        return operation_response(result)
-
-    @app.post(
-        "/api/v1/model-cache/eviction-preview",
-        response_model=ModelCacheEvictionPreviewResponse,
-        responses=bounded_error_responses(401, 403, 409, 422, 503),
-        operation_id="previewModelCacheEviction",
-    )
-    def preview_eviction(
-        body: ModelCacheEvictionPreviewRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheEvictionPreviewResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/eviction-preview")
-        try:
-            result = cache().eviction_preview(target_bytes=body.target_bytes)
-            return {
-                key: value
-                for key, value in result.items()
-                if not key.startswith("_") and key != "selected_objects"
-            }
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache eviction preview unavailable") from None
-
-    @app.post(
-        "/api/v1/model-cache/evict",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="evictModelCache",
-    )
-    def evict(
-        request: Request,
-        body: ModelCacheEvictRequest,
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/evict")
-        try:
-            result = cache().evict(
-                actor=actor.subject,
-                request_key=body.request_key,
-                plan_digest=body.plan_digest,
-                target_bytes=body.target_bytes,
-            )
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache eviction unavailable") from None
-        audit(request, actor, "model-cache.evict", result.id)
-        return operation_response(result)
-
-    @app.get(
-        "/api/v1/model-cache/updates",
-        response_model=ModelCacheUpdatesResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getModelCacheUpdates",
-    )
-    def get_updates(
-        artifact_set_sha256: Annotated[str | None, Query(pattern=_DIGEST)] = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 100,
-        check_upstream: bool = False,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
-        _actor: Actor = authenticated,
-    ) -> ModelCacheUpdatesResponse:
-        try:
-            context = {"limit": limit, "artifact_set_sha256": artifact_set_sha256, "check_upstream": check_upstream}
-            boundary = decode_cursor(
-                cursor,
-                resource="model-cache-updates",
-                order="updated-at-desc/digest-desc/v1",
-                context=context,
-            )
-            result = cache().discover_updates(
-                artifact_set_sha256=artifact_set_sha256,
-                limit=limit,
-                check_upstream=check_upstream,
-                boundary=boundary,
-            )
-            return ModelCacheUpdatesResponse(
-                schema_version=2,
-                source_policy="nas-first",
-                updates=list(result["updates"]),
-                total=result["total"],
-                next_cursor=encode_cursor(
-                    result.get("_next_boundary"),
-                    resource="model-cache-updates",
-                    order="updated-at-desc/digest-desc/v1",
-                    context=context,
-                ),
-            )
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache updates unavailable") from None
-
-    @app.get(
-        "/api/v1/model-cache/operations",
-        response_model=ModelCacheOperationsResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="listModelCacheOperations",
-    )
-    def list_operations(
-        limit: Annotated[int, Query(ge=1, le=100)] = 100,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
-        _actor: Actor = authenticated,
-    ) -> ModelCacheOperationsResponse:
-        try:
-            context = {"limit": limit}
-            boundary = decode_cursor(
-                cursor,
-                resource="model-cache-operations",
-                order="created-at-desc/id-desc/v1",
-                context=context,
-            )
-            result = cache().operations_page(limit=limit, boundary=boundary)
-            return {
-                "schema_version": 2,
-                "operations": [
-                    operation_response(item) for item in result["operations"]
-                ],
-                "total": result["total"],
-                "next_cursor": encode_cursor(
-                    result.get("_next_boundary"),
-                    resource="model-cache-operations",
-                    order="created-at-desc/id-desc/v1",
-                    context=context,
-                ),
-            }
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache operations unavailable") from None
-
-    @app.get(
-        "/api/v1/model-cache/operations/{operation_id}",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getModelCacheOperation",
+        "/api/model/operations/{operation_id}",
+        response_model=ModelCacheOperatorResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelOperation",
     )
     def get_operation(
-        operation_id: Annotated[str, Path(pattern=_UUID)],
-        _actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
+        operation_id: Annotated[str, Path(min_length=1, max_length=128)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        """Observe a submitted model mutation; any authenticated actor may read it."""
+
+        del actor
         try:
-            return operation_response(cache().get_operation(operation_id))
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache operation unavailable") from None
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
 
     @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/cancel",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        operation_id="cancelModelCacheOperation",
-        openapi_extra={"x-vonk-request-body": "none"},
-    )
-    def cancel_operation(
-        request: Request,
-        operation_id: Annotated[str, Path(pattern=_UUID)],
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/cancel")
-        try:
-            result = cache().cancel_operation(operation_id)
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache operation cancellation unavailable") from None
-        audit(request, actor, "model-cache.cancel", operation_id)
-        return operation_response(result)
-
-    @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/retry",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        "/api/model/{selector}/download",
+        response_model=ModelCacheOperatorResponse,
         status_code=status.HTTP_202_ACCEPTED,
-        operation_id="retryModelCacheOperation",
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="downloadModel",
     )
-    def retry_operation(
-        body: ModelCacheRetryRequest,
+    def download(
+        body: ModelCacheOperatorRequest,
         request: Request,
-        operation_id: Annotated[str, Path(pattern=_UUID)],
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/retry")
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/{selector}/download")
         try:
-            result = cache().retry(
-                operation_id,
+            operation = cache().download_model_selector(
+                selector,
+                actor=actor.subject,
+                request_key=body.request_key,
+                force=True,
+            )
+            audit(request, actor, "model.download", selector, operation.id)
+            return _model_operator_response(operation, action="download", selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
+    @app.post(
+        "/api/model/{selector}/remove",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="removeModel",
+    )
+    def remove(
+        body: ModelCacheOperatorRequest,
+        request: Request,
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/{selector}/remove")
+        try:
+            operation = cache().remove_model_selector(
+                selector,
                 actor=actor.subject,
                 request_key=body.request_key,
             )
+            audit(request, actor, "model.remove", selector, operation.id)
+            return _model_operator_response(operation, action="remove", selector=selector)
         except HTTPException:
             raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache operation retry unavailable") from None
-        audit(request, actor, "model-cache.retry", operation_id, result.id)
-        return operation_response(result)
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
 
-    @app.post(
-        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
-        response_model=ModelCacheOperationResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="checkModelCacheAccessAndResume",
-    )
-    def check_access_and_resume(
-        body: ModelCacheAccessResumeRequest,
-        request: Request,
-        operation_id: Annotated[str, Path(pattern=_UUID)],
-        actor: Actor = authenticated,
-    ) -> ModelCacheOperationResponse:
-        require_mutation(
-            actor,
-            "POST",
-            "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
-        )
-        try:
-            result = cache().check_access_and_resume(
-                operation_id,
-                actor=actor.subject,
-                request_key=body.request_key,
-                artifact_set_sha256=body.artifact_set_sha256,
-                plan_digest=body.plan_digest,
-            )
-        except HTTPException:
-            raise
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            raise error(exc, "model cache access recheck unavailable") from None
-        audit(
-            request,
-            actor,
-            "model-cache.check-access-and-resume",
-            operation_id,
-            result.id,
-        )
-        return operation_response(result)
 
 class ModelCacheOperationProvider:
     """Current Activity provider for the Controller-owned cache family."""
@@ -701,7 +320,7 @@ def register_model_cache_operation_provider(
 __all__ = [
     "MODEL_CACHE_OPERATION_IDS",
     "ModelCacheOperationProvider",
-    "install_model_cache_routes",
+    "install_model_operator_routes",
     "model_cache_operation_provider",
     "register_model_cache_operation_provider",
 ]

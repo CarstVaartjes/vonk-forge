@@ -29,17 +29,17 @@
 - Test: `control/tests/test_operation_api.py`
 
 **Interfaces:**
-- Produces `/api/v1/nodes/status`, `/api/v1/profiles/{id}/plan`, `/api/v1/reconciliations`, `/api/v1/endpoints/{alias}`, `/api/v1/agents`, and job status/log resources.
+- Produces `/api/nodes/status`, `/api/profiles/{id}/plan`, `/api/reconciliations`, `/api/endpoints/{alias}`, `/api/agents`, and job status/log resources.
 - Plan responses include commit and digest; apply requests require exact digest.
 
 - [ ] **Step 1: Write failing plan/apply/status tests**
 
 ```python
 def test_apply_requires_exact_server_plan_digest(client, operator) -> None:
-    plan = client.post("/api/v1/profiles/agent/plan", headers=operator).json()
-    stale = client.post("/api/v1/reconciliations", headers=operator, json={"plan_digest": "0" * 64})
+    plan = client.post("/api/profiles/agent/plan", headers=operator).json()
+    stale = client.post("/api/reconciliations", headers=operator, json={"plan_digest": "0" * 64})
     assert stale.status_code == 409
-    accepted = client.post("/api/v1/reconciliations", headers=operator, json={"plan_digest": plan["digest"]})
+    accepted = client.post("/api/reconciliations", headers=operator, json={"plan_digest": plan["digest"]})
     assert accepted.status_code == 202
 ```
 

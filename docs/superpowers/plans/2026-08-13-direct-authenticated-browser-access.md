@@ -269,7 +269,7 @@ git commit -m "feat(auth): add durable browser sessions"
 **Interfaces:**
 - Consumes: `BrowserAuthService`, `AuditSink`, existing `TokenCodec`
 - Produces: `install_auth_routes(app, service, audits, actor_dependency)`
-- Produces endpoints `POST /api/v1/auth/login`, `GET /api/v1/auth/session`, `POST /api/v1/auth/logout`
+- Produces endpoints `POST /api/auth/login`, `GET /api/auth/session`, `POST /api/auth/logout`
 - Changes: `create_app(..., browser_auth: BrowserAuthService | None = None)`
 - Preserves: `Authorization: Bearer <signed-token>` behavior
 
@@ -288,7 +288,7 @@ Assert no response body or header contains the password, verifier, or raw bearer
 
 Run: `uv run --project control --frozen pytest control/tests/test_auth_api.py -q`
 
-Expected: FAIL with HTTP 404 for `/api/v1/auth/login`.
+Expected: FAIL with HTTP 404 for `/api/auth/login`.
 
 - [ ] **Step 3: Implement strict auth documents and routes**
 
@@ -516,7 +516,7 @@ git commit -m "feat(web): add administrator login experience"
 
 - [ ] **Step 1: Write failing Caddy route/security tests**
 
-Assert the development Caddyfile has one `:8080` site, blocks `/agent/v1/*` and `/internal/*`, protects LiteLLM repository-authority mutation paths, strips `X-Vonk-Agent-*`, applies edge headers/body limits, and does not add a host port. Retain every existing enrollment/mTLS assertion.
+Assert the development Caddyfile has one `:8080` site, blocks `/agent/*` and `/internal/*`, protects LiteLLM repository-authority mutation paths, strips `X-Vonk-Agent-*`, applies edge headers/body limits, and does not add a host port. Retain every existing enrollment/mTLS assertion.
 
 - [ ] **Step 2: Run Caddy tests and verify RED**
 
@@ -530,7 +530,7 @@ Copy the reviewed route semantics, not the production file wholesale. Keep Caddy
 
 - [ ] **Step 4: Extend running-stack acceptance**
 
-From a disposable container on the private edge network, assert `/` serves the login HTML, `/api/v1/auth/session` returns 401 before login, `/agent/v1/claim` returns 404 on the browser site, and the existing real mTLS agent endpoint still reaches the API.
+From a disposable container on the private edge network, assert `/` serves the login HTML, `/api/auth/session` returns 401 before login, `/agent/claim` returns 404 on the browser site, and the existing real mTLS agent endpoint still reaches the API.
 
 - [ ] **Step 5: Run focused runtime acceptance**
 

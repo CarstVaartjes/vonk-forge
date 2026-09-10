@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from .api_preexec import drop_runtime_privileges
 from .operation_api import ReadyzResponse
 
-_READINESS_URL = "http://127.0.0.1:8000/api/v1/readyz"
+_READINESS_URL = "http://127.0.0.1:8000/api/readyz"
 _MAXIMUM_RESPONSE_BYTES = 256
 
 

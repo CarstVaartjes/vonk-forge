@@ -20,7 +20,6 @@ dependencies = [
 
 [project.scripts]
 vonkctl = "cluster_profiles.cli:main"
-vonk-fleet-qualify = "cluster_profiles.fleet_qualification_cli:main"
 vonk-fleet-qualify-campaign = "cluster_profiles.fleet_qualification_campaign_cli:main"
 
 [dependency-groups]

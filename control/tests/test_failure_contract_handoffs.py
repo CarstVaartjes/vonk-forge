@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
@@ -14,23 +13,18 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
-from vonk_control.model_cache_api import register_model_cache_operation_provider
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperationAttempt,
     Base,
     Job,
-    ModelCacheOperation,
 )
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.strict_json import serialize_json_value
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, NODE_A, STOP_PAYLOAD, Clock, parent
-from .test_model_cache_availability_regressions import _artifact, _drain, _start
 from .test_operation_api import Jobs
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
@@ -42,19 +36,17 @@ def sessions(postgres_engine):
     return sessionmaker(postgres_engine, expire_on_commit=False)
 
 
-def client_for(sessions, tmp_path, cache=None):
+def client_for(sessions, tmp_path):
     tokens = TokenCodec(b"f" * 32)
     operations = durable_operation_services(
         sessions, tmp_path / "routes", clock=lambda: NOW, cursors=tokens.cursor_codec()
     )
-    operations = register_model_cache_operation_provider(operations, cache)
     app = create_app(
         jobs=Jobs(),
         tokens=tokens,
         audits=MemoryAuditStore(),
         now=lambda: 0,
         operations=operations,
-        model_cache=cache,
     )
     token = tokens.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     return TestClient(app), {"Authorization": f"Bearer {token}"}
@@ -129,86 +121,11 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
             .result
         )
     client, headers = client_for(sessions, tmp_path)
-    response = client.get(f"/api/v1/operations/{operation.id}", headers=headers)
+    response = client.get(f"/api/operations/{operation.id}", headers=headers)
     assert response.status_code == 200, response.text
     assert response.json()["failure"] == serialize_json_value(
         AgentFailureResult.model_validate(persisted)
     )
-    listing = client.get("/api/v1/operations", headers=headers)
+    listing = client.get("/api/operations", headers=headers)
     assert listing.status_code == 200, listing.text
     assert listing.json()["operations"][0]["failure"] == response.json()["failure"]
-
-
-@pytest.mark.parametrize(
-    "status, expected_state, expected_code",
-    [(403, "failed", "access_denied"), (429, "queued", "rate_limited")],
-)
-def test_cache_failure_is_identical_in_persistence_family_api_and_activity(
-    sessions, tmp_path, status, expected_state, expected_code
-):
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            status, request=request, headers={"Retry-After": "30"}
-        )
-    )
-    token_path = tmp_path / "hf-token"
-    token_path.write_text("fixture-token")
-    cache = ModelCacheService(
-        sessions,
-        tmp_path / "cache",
-        reserve_bytes=0,
-        fixture_sources=True,
-        http_client=httpx.Client(transport=transport),
-        clock=lambda: NOW,
-        huggingface_token_path=token_path,
-    )
-    artifact = _artifact("failure", b"model", host="huggingface.co")
-    artifact["source"] = (
-        "https://huggingface.co/acme/model/resolve/" + "a" * 40 + "/weights"
-    )
-    operation = _start(cache, [artifact], "00000000-0000-4000-8000-000000000041")
-    if status == 403:
-        _drain(cache, operation.id)
-    else:
-        # Run a single attempt: the durable queued state retains cooldown evidence.
-        cache.run_pending(limit=1)
-    view = cache.get_operation(operation.id)
-    assert view.state == expected_state
-    assert view.failure["code"] == expected_code
-    with sessions() as session:
-        persisted = session.get(ModelCacheOperation, operation.id).payload["failure"]
-    client, headers = client_for(sessions, tmp_path, cache)
-    family = client.get(
-        f"/api/v1/model-cache/operations/{operation.id}", headers=headers
-    )
-    activity = client.get(f"/api/v1/operations/{operation.id}", headers=headers)
-    assert family.status_code == activity.status_code == 200, (
-        family.text,
-        activity.text,
-    )
-    assert family.json()["failure"] == activity.json()["failure"] == serialize_json_value(
-        AvailabilityOperationFailure.model_validate(persisted)
-    )
-    if status == 429:
-        assert persisted["retry_after_seconds"] == 30
-        assert persisted["retry_time"] is not None
-    else:
-        assert "check_access_and_resume" in persisted["recovery_actions"]
-    for invalid in (
-        {},
-        dict(persisted, retryable="true"),
-        dict(persisted, retry_time=123),
-        dict(persisted, required_bytes=200, free_bytes="100", shortfall_bytes=100),
-        dict(persisted, required_bytes=200, free_bytes=100, shortfall_bytes=99),
-    ):
-        with sessions.begin() as session:
-            row = session.get(ModelCacheOperation, operation.id)
-            row.payload = dict(row.payload, failure=invalid)
-        with pytest.raises(ModelCacheStorageError, match="payload is invalid"):
-            cache.get_operation(operation.id)
-        assert (
-            client.get(
-                f"/api/v1/model-cache/operations/{operation.id}", headers=headers
-            ).status_code
-            == 503
-        )

@@ -266,13 +266,9 @@ jobs:
           control/tests/test_api_response_witness.py
           control/tests/test_source_bundle_client_handoff.py
           control/tests/test_artifact_job_api.py
-          control/tests/test_endpoint_handoff_coverage.py
-          control/tests/test_recipe_api.py::test_start_progress_stop_retry_and_uninstall_routes_are_stable
-          control/tests/test_recipe_api.py::test_administrator_run_status_is_typed_rank_health_without_secrets
-          control/tests/test_fleet_profile_api.py::test_profiles_are_authenticated_role_bound_and_audited
-          control/tests/test_fleet_profile_api.py::test_profile_contract_exposes_capture_duplicate_status_prepare_and_switch
-          control/tests/test_run_switch_api.py::test_cancel_route_records_durable_intent_and_audit
-          control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_availability_auth_status_and_retry
+          control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned
+          control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route
+          control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status
           --api-response-witness=${{ runner.temp }}/api-response-witnesses.json
       - name: Check generated Rust wire contracts
         run: >-

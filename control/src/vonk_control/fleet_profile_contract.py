@@ -55,10 +55,11 @@ class FleetProfileNode(_StrictModel):
 
 
 class FleetProfileScope(_StrictModel):
-    """The complete set of Sparks reconciled by a profile.
+    """Frozen complete fleet boundary for a single execution plan.
 
-    Scope is deliberately independent from assignments.  A member with no
-    assignment is an intentional idle outcome when the profile is applied.
+    User profiles do not author this field.  It is captured from the enrolled
+    roster when preview/load admits an operation and is retained so a running
+    operation cannot silently expand or shrink with fleet membership changes.
     """
 
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
@@ -66,13 +67,40 @@ class FleetProfileScope(_StrictModel):
     @model_validator(mode="after")
     def validate_scope(self) -> FleetProfileScope:
         if len(self.node_ids) != len(set(self.node_ids)):
-            raise ValueError("profile scope node IDs must be unique")
+            raise ValueError("execution scope node IDs must be unique")
         if self.node_ids != sorted(self.node_ids):
-            raise ValueError("profile scope node IDs must be sorted")
+            raise ValueError("execution scope node IDs must be sorted")
         return self
 
 
 class FleetProfileAssignmentInput(_StrictModel):
+    """Permissive autosaved recipe choice, not an execution assignment.
+
+    A logical model variant is selected by its canonical identity.  The
+    content digest is resolved from that identity for a load and is never a
+    profile-pinned execution revision.  Topology/rank validation belongs to
+    preview/load, so incomplete distributed drafts can be saved.
+    """
+
+    recipe_selector: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    assignment_name: Alias | None = None
+    model_variant: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    desired_state: Literal["installed", "running"] = "running"
+
+    @model_validator(mode="after")
+    def validate_assignment(self) -> FleetProfileAssignmentInput:
+        if len(self.spark_ids) != len(set(self.spark_ids)):
+            raise ValueError("profile assignment Spark IDs must be unique")
+        if self.spark_ids != sorted(self.spark_ids):
+            raise ValueError("profile assignment Spark IDs must be sorted")
+        return self
+
+
+class StoredFleetProfileAssignment(_StrictModel):
+    """Resolved assignment retained in an immutable execution snapshot."""
+
+    id: UuidId
     recipe_revision_id: UuidId
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     desired_state: Literal["installed", "running"]
@@ -80,7 +108,7 @@ class FleetProfileAssignmentInput(_StrictModel):
     nodes: list[FleetProfileNode] = Field(min_length=1, max_length=32)
 
     @model_validator(mode="after")
-    def validate_assignment(self) -> FleetProfileAssignmentInput:
+    def validate_execution_assignment(self) -> StoredFleetProfileAssignment:
         node_ids = [node.node_id for node in self.nodes]
         ranks = [node.rank for node in self.nodes]
         if len(node_ids) != len(set(node_ids)):
@@ -92,14 +120,8 @@ class FleetProfileAssignmentInput(_StrictModel):
         if self.desired_state == "running" and self.alias is None:
             raise ValueError("running profile assignments require an endpoint alias")
         if self.desired_state == "installed" and self.alias is not None:
-            raise ValueError(
-                "installed-only profile assignments cannot declare an alias"
-            )
+            raise ValueError("installed-only profile assignments cannot declare an endpoint alias")
         return self
-
-
-class StoredFleetProfileAssignment(FleetProfileAssignmentInput):
-    id: UuidId
 
 
 class FleetProfileAssignment(StoredFleetProfileAssignment):
@@ -110,13 +132,37 @@ class FleetProfileAssignment(StoredFleetProfileAssignment):
     ) = None
 
 
+class FleetProfileAssignmentView(_StrictModel):
+    """Canonical read projection of one logical profile assignment."""
+
+    selector: Alias
+    display_name: Name
+    recipe_selector: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    recipe_id: UuidId | None = None
+    spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    required_sparks: int | None = Field(default=None, ge=1, le=32)
+    assigned_sparks: int = Field(ge=1, le=32)
+    model: dict[str, object] = Field(default_factory=dict)
+    recipe: dict[str, object] = Field(default_factory=dict)
+    resources: dict[str, object] = Field(default_factory=dict)
+    observed_state: str = "Not loaded"
+
+    @model_validator(mode="after")
+    def validate_spark_projection(self) -> FleetProfileAssignmentView:
+        if self.spark_ids != sorted(set(self.spark_ids)):
+            raise ValueError("profile assignment Spark IDs must be sorted and unique")
+        if self.assigned_sparks != len(self.spark_ids):
+            raise ValueError("assigned_sparks must match spark_ids")
+        return self
+
+
 class FleetProfileInput(_StrictModel):
-    name: Name
+    name: Name = "Default"
     description: Description = ""
     installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
     labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
     favorite: bool = False
-    scope: FleetProfileScope
+    expected_revision: int | None = Field(default=None, ge=1)
     assignments: list[FleetProfileAssignmentInput] = Field(
         default_factory=list, max_length=64
     )
@@ -124,10 +170,7 @@ class FleetProfileInput(_StrictModel):
     @model_validator(mode="after")
     def validate_profile(self) -> FleetProfileInput:
         identities = [
-            (
-                assignment.recipe_revision_id,
-                tuple(node.node_id for node in assignment.nodes),
-            )
+            (assignment.recipe_selector, tuple(assignment.spark_ids), assignment.assignment_name)
             for assignment in self.assignments
         ]
         if len(identities) != len(set(identities)):
@@ -135,29 +178,32 @@ class FleetProfileInput(_StrictModel):
                 "profile assignments must be unique by recipe revision and Spark group"
             )
         aliases = [
-            assignment.alias for assignment in self.assignments if assignment.alias
+            assignment.assignment_name
+            for assignment in self.assignments
+            if assignment.assignment_name
         ]
         if len(aliases) != len(set(aliases)):
             raise ValueError("running profile assignment aliases must be unique")
-        scope = set(self.scope.node_ids)
-        assigned = {
-            node.node_id for assignment in self.assignments for node in assignment.nodes
-        }
-        if not assigned <= scope:
-            raise ValueError("profile assignment nodes must be inside profile scope")
         return self
 
 
 class FleetProfileView(_StrictModel):
     schema_version: Literal[2] = 2
     id: UuidId
+    number: int = Field(ge=1)
+    revision: int = Field(ge=1)
     name: Name
     description: Description
     installation_policy: Literal["keep-cached", "exact"]
     labels: dict[LabelName, LabelValue]
     favorite: bool
-    scope: FleetProfileScope
-    assignments: list[FleetProfileAssignment]
+    assignments: list[FleetProfileAssignmentView]
+    fleet: list[dict[str, object]] = Field(default_factory=list)
+    status: str = "draft"
+    loaded_revision: int | None = Field(default=None, ge=1)
+    cache_summary: dict[str, object] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list, max_length=128)
+    next_actions: list[str] = Field(default_factory=list, max_length=32)
     profile_digest: Digest
     created_by: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     created_at: datetime
@@ -384,20 +430,6 @@ class FleetProfileAssignmentContext(_StrictModel):
     installation_id: UuidId | None = None
 
 
-class FleetProfileLibraryPlacementContext(_StrictModel):
-    """Identity binding retained for replay of a direct Library placement."""
-
-    recipe_id: UuidId
-    recipe_revision_id: UuidId
-    selected_node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    desired_state: Literal["installed", "running"]
-    alias: Alias | None = None
-    profile_plan_digest: Digest
-    installation_ids: list[UuidId] = Field(default_factory=list, max_length=16)
-    run_ids: list[UuidId] = Field(default_factory=list, max_length=16)
-    plan_digest: Digest
-
-
 FleetProfileChildResult = (
     FleetProfileSwitchChildResult
     | FleetProfileSwitchAdapterResult
@@ -428,7 +460,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
-    operation_kind: Literal["fleet-profile.apply", "fleet-profile.prepare"] | None = None
+    operation_kind: Literal["fleet-profile.apply"] | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
     current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
@@ -437,7 +469,6 @@ class FleetProfileApplicationProgress(_StrictModel):
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
     assignments: dict[UuidId, FleetProfileAssignmentContext] = Field(default_factory=dict)
-    library_placement: FleetProfileLibraryPlacementContext | None = None
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
@@ -511,17 +542,9 @@ class FleetProfilePreview(_StrictModel):
     plan_digest: Digest
 
 
-class FleetProfileApplyRequest(_StrictModel):
-    plan_digest: Digest
-    request_key: UuidId
-
-
-class FleetProfileRetryRequest(_StrictModel):
-    request_key: UuidId
-
-
-class FleetProfilePreviewRequest(_StrictModel):
-    """Explicit empty body keeps CSRF-protected preview calls typed."""
+class FleetProfileLoadRequest(_StrictModel):
+    dry_run: bool = False
+    request_key: UuidId | None = None
 
 
 class FleetProfileApplicationView(_StrictModel):
@@ -561,79 +584,29 @@ class FleetProfileApplicationView(_StrictModel):
         return self
 
 
-class FleetProfileStatusView(_StrictModel):
-    schema_version: Literal[2] = 2
-    profile_id: UuidId
-    profile_digest: Digest
-    state: Literal[
-        "draft",
-        "needs-preparation",
-        "ready",
-        "matched",
-        "switching",
-        "partially-applied",
-        "blocked",
-        "drifted",
-    ]
-    matched: bool
-    drifted: bool
-    scope: FleetProfileScopePreview
-    reasons: list[FleetProfileReason] = Field(max_length=128)
-    generated_at: datetime
-
-
-class FleetProfileDuplicateInput(_StrictModel):
-    name: Name
-    description: Description | None = None
-
-
-class FleetProfilePrepareRequest(_StrictModel):
-    plan_digest: Digest
-    request_key: UuidId
-
-
-class FleetProfilePreparePreviewRequest(_StrictModel):
-    """Explicit empty body for the digest-bound preparation preview."""
-
-
-class FleetProfileCaptureInput(_StrictModel):
-    name: Name
-    description: Description = "Captured current Fleet setup"
-    installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
-    labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
-    favorite: bool = False
-
-
 __all__ = [
     "FleetProfileApplicationProgress",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
-    "FleetProfileApplyRequest",
     "FleetProfileAssignment",
     "FleetProfileAssignmentInput",
+    "FleetProfileAssignmentView",
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
-    "FleetProfileCaptureInput",
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
-    "FleetProfileDuplicateInput",
     "FleetProfileInput",
     "FleetProfileIntendedConfiguration",
-    "FleetProfileLibraryPlacementContext",
     "FleetProfileList",
+    "FleetProfileLoadRequest",
     "FleetProfileNode",
     "FleetProfilePlanStep",
     "FleetProfilePlanSummary",
-    "FleetProfilePreparePreviewRequest",
-    "FleetProfilePrepareRequest",
     "FleetProfilePreview",
-    "FleetProfilePreviewRequest",
     "FleetProfileReason",
-    "FleetProfileRetryRequest",
     "FleetProfileScope",
     "FleetProfileScopePreview",
-    "FleetProfileStatusView",
     "FleetProfileStepResult",
     "FleetProfileSwitchAdapter",
     "FleetProfileSwitchAdapterResult",

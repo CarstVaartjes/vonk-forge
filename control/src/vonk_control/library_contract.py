@@ -167,35 +167,98 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     )
 
 
-class LibraryModel(_StrictModel):
-    model: LibraryModelIdentity
-    model_document: ModelDefinition
-    page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(
-        min_length=0, max_length=_MAX_PAGE_RECIPES
-    )
-    model_capabilities: LibraryCapabilityInventory = Field(
-        default_factory=lambda: LibraryCapabilityInventory()
-    )
+class LibraryLocalProgress(_StrictModel):
+    """Observable progress for a Controller-local preparation operation."""
+
+    operation_id: UuidId | None = None
+    state: Literal["queued", "running", "partial", "succeeded", "failed"]
+    phase: Text64 | None = None
+    completed_bytes: int = Field(default=0, ge=0, le=_MAX_SIGNED_BIGINT)
+    total_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
 
 
-class LibrarySnapshot(_StrictModel):
+class LibraryLocalState(_StrictModel):
+    """Controller cache and Spark-local runtime evidence kept separate."""
+
+    controller: Literal["cached", "preparing", "not_cached", "failed", "unknown"]
+    running_on: list[NodeId] = Field(default_factory=list, max_length=_MAX_AGENT_ROWS)
+    preparation: LibraryLocalProgress | None = None
+
+
+class LibraryResourceProjection(_StrictModel):
+    """Declared resource facts; unknown values remain null."""
+
+    memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    disk_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    runtime_memory_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_SIGNED_BIGINT
+    )
+    image_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryModelProjection(_StrictModel):
+    """One exact canonical model variant with operator-facing projections."""
+
+    schema_version: Literal[2] = 2
+    selector: Text256
+    identity: LibraryModelIdentity
+    document: ModelDefinition
+    family: Text128
+    version: Text128
+    variant: Text128
+    quantization: Text64
+    usage: list[Text64] = Field(max_length=64)
+    resources: LibraryResourceProjection
+    local: LibraryLocalState
+    updated_at: datetime
+
+
+class LibraryFacetValues(_StrictModel):
+    usage: list[Text64] = Field(max_length=64)
+    family: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
+    version: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
+    quantization: list[Text64] = Field(max_length=_MAX_PAGE_RECIPES)
+
+
+class ModelLibraryResponse(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
-    models: list[LibraryModel] = Field(max_length=_MAX_PAGE_RECIPES)
-    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
+    models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
+    facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
     freshness_policy: FreshnessPolicy
 
 
-class LibraryRecipeList(_StrictModel):
-    """Read-only overview of active canonical Recipe revisions."""
+class ModelDetailResponse(LibraryModelProjection):
+    pass
+
+
+class LibraryRecipeProjection(_StrictModel):
+    """One exact canonical recipe and its model/resource/local projections."""
 
     schema_version: Literal[2] = 2
+    selector: Text256
+    identity: LibraryRecipeIdentity
+    document: RecipeDefinition
+    model_selectors: list[Text256] = Field(min_length=1, max_length=32)
+    usage: list[Text64] = Field(max_length=64)
+    resources: LibraryResourceProjection
+    local: LibraryLocalState
+    updated_at: datetime
+
+
+class RecipeLibraryResponse(_StrictModel):
+    schema_version: Literal[2] = 2
     generated_at: datetime
-    recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
+    recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
+    facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
     freshness_policy: FreshnessPolicy
+
+
+
 class OperationalBuild(_StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
@@ -427,7 +490,11 @@ class LibraryRecipeModel(_StrictModel):
     model_document: ModelDefinition
 
 
-class LibraryRecipeDetail(_StrictModel):
+class RecipeDetailResponse(LibraryRecipeProjection):
+    model_documents: list[LibraryRecipeModel] = Field(max_length=32)
+
+
+class LibraryRecipeAuthoringDetail(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
     recipe: LibraryRecipeIdentity

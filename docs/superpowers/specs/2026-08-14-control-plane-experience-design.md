@@ -249,7 +249,7 @@ failure never prevents operation claims or result delivery.
 
 ### Ingestion and storage
 
-`POST /agent/v1/telemetry` accepts at most 16 ordered samples and 64 KiB. The
+`POST /agent/telemetry` accepts at most 16 ordered samples and 64 KiB. The
 controller binds the authenticated certificate identity to the node, rejects
 future/stale observations and duplicate or regressing sequences within one
 boot, and records receive time independently.
@@ -276,7 +276,7 @@ once tables are very large.
 
 ### Browser delivery
 
-`GET /api/v1/fleet/stream` is an authenticated Server-Sent Events endpoint.
+`GET /api/fleet/stream` is an authenticated Server-Sent Events endpoint.
 It sends an initial fleet snapshot, named `node-telemetry`, `recipe-state`, and
 `operation-state` events, a monotonically increasing event ID, and a keepalive
 at least every 15 seconds. EventSource reconnect semantics and `Last-Event-ID`
@@ -284,7 +284,7 @@ allow recovery without inventing a bidirectional protocol. If streaming is
 unavailable, the browser uses bounded 10-second polling and visibly labels the
 connection “Reconnecting”; stale node timestamps remain truthful.
 
-`GET /api/v1/nodes/{node_id}/telemetry` returns bounded history for a requested
+`GET /api/nodes/{node_id}/telemetry` returns bounded history for a requested
 window and server-selected bucket size. The browser never downloads raw
 24-hour samples merely to draw a small chart.
 

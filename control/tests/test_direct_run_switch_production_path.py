@@ -585,7 +585,7 @@ def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, install
     }
     with TestClient(app) as client:
         return client.get(
-            f"/agent/v1/recipe-installations/{installation_id}/spec",
+            f"/agent/recipe-installations/{installation_id}/spec",
             headers=headers,
         )
 

@@ -2355,7 +2355,7 @@ fn discover_enrollment(
     runner: &mut dyn CommandRunner,
 ) -> Result<EnrollmentDiscovery, SetupError> {
     let mut bootstrap_url = expected_enrollment.clone();
-    bootstrap_url.set_path("/agent/v1/bootstrap");
+    bootstrap_url.set_path("/agent/bootstrap");
     let output = run_checked(
         runner,
         bootstrap_curl(&bootstrap_url, expected_controller_address, None),

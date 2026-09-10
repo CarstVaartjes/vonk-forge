@@ -1,28 +1,48 @@
-"""Authenticated read-only Library HTTP routes."""
+"""Authenticated Model and Recipe operator read routes."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
 from .library_contract import (
-    _MAX_PAGE_RECIPES,
-    LibraryRecipeDetail,
-    LibraryRecipeList,
-    LibrarySnapshot,
+    ModelDetailResponse,
+    ModelLibraryResponse,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
 )
+from .library_projection import LibrarySelectorAmbiguous
 from .operation_api import bounded_error_responses
 
+# Friendly names may contain spaces.  Keep selectors bounded and reject control
+# characters; path routing remains safe because the projection resolves only an
+# exact publisher/slug or slug match.
+_SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
+
 LIBRARY_OPERATION_IDS = {
-    ("get", "/api/v1/library"): "listLibrary",
-    ("get", "/api/v1/library/recipes"): "listLibraryRecipes",
-    ("get", "/api/v1/library/recipes/{recipe_id}"): "getLibraryRecipe",
+    ("get", "/api/model"): "getModelStatus",
+    ("get", "/api/model/library"): "listModelLibrary",
+    ("get", "/api/model/{selector}"): "getModel",
+    ("get", "/api/recipe"): "getRecipeStatus",
+    ("get", "/api/recipe/library"): "listRecipeLibrary",
+    ("get", "/api/recipe/{selector}"): "getRecipe",
 }
-_UUID = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+
+
+def _error(error: Exception) -> HTTPException:
+    if isinstance(error, LibrarySelectorAmbiguous):
+        candidates = ", ".join(error.candidates[:16])
+        return HTTPException(
+            status_code=422,
+            detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}",
+        )
+    if isinstance(error, KeyError):
+        return HTTPException(status_code=404, detail="operator object not found")
+    if isinstance(error, ValueError):
+        return HTTPException(status_code=422, detail=str(error)[:256])
+    return HTTPException(status_code=503, detail="library projection unavailable")
 
 
 def install_library_routes(
@@ -31,7 +51,7 @@ def install_library_routes(
     actor_dependency: Any,
     projection: Any | None,
 ) -> None:
-    """Register the bounded Library read surface without mutation authority."""
+    """Install the singular read hierarchy; no legacy library aliases remain."""
 
     from .operation_api import _ADMIN_OPERATION_IDS
 
@@ -40,74 +60,115 @@ def install_library_routes(
 
     def library() -> Any:
         if projection is None:
-            raise HTTPException(
-                status_code=503, detail="Library projection unavailable"
-            )
+            raise HTTPException(status_code=503, detail="library projection unavailable")
         return projection
 
     @app.get(
-        "/api/v1/library",
-        response_model=LibrarySnapshot,
-        responses=bounded_error_responses(401, 422, 503),
-        operation_id="listLibrary",
+        "/api/model",
+        response_model=ModelLibraryResponse,
+        responses=bounded_error_responses(401, 503),
+        operation_id="getModelStatus",
     )
-    def list_library(
-        limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_RECIPES)] = 100,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
-        _actor: Any = authenticated,
-    ) -> LibrarySnapshot:
+    def model_status(_actor: Any = authenticated) -> ModelLibraryResponse:
         try:
-            return library().list(limit=limit, cursor=cursor)
-        except HTTPException:
-            raise
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Library projection unavailable"
-            ) from None
+            return library().models(local_only=True)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
 
     @app.get(
-        "/api/v1/library/recipes",
-        response_model=LibraryRecipeList,
+        "/api/model/library",
+        response_model=ModelLibraryResponse,
         responses=bounded_error_responses(401, 422, 503),
-        operation_id="listLibraryRecipes",
+        operation_id="listModelLibrary",
     )
-    def list_library_recipes(
-        limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_RECIPES)] = 100,
+    def model_library(
+        limit: Annotated[int, Query(ge=1, le=512)] = 100,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
+        usage: Annotated[list[str] | None, Query(max_length=64)] = None,
+        family: Annotated[list[str] | None, Query(max_length=64)] = None,
+        version: Annotated[list[str] | None, Query(max_length=64)] = None,
+        quantization: Annotated[list[str] | None, Query(max_length=64)] = None,
+        search: Annotated[str | None, Query(max_length=256)] = None,
+        updated_since: Annotated[datetime | None, Query()] = None,
+        sort: Annotated[Literal["updated", "name"], Query()] = "updated",
         _actor: Any = authenticated,
-    ) -> LibraryRecipeList:
+    ) -> ModelLibraryResponse:
         try:
-            return library().recipes(limit=limit, cursor=cursor)
-        except HTTPException:
-            raise
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Library projection unavailable"
-            ) from None
+            return library().models(
+                limit=limit, cursor=cursor, usage=usage or [], family=family or [],
+                version=version or [], quantization=quantization or [], search=search,
+                updated_since=updated_since, sort=sort,
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
 
     @app.get(
-        "/api/v1/library/recipes/{recipe_id}",
-        response_model=LibraryRecipeDetail,
+        "/api/model/{selector:path}",
+        response_model=ModelDetailResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getLibraryRecipe",
+        operation_id="getModel",
     )
-    def get_library_recipe(
-        recipe_id: Annotated[str, Path(pattern=_UUID)],
+    def model_detail(
+        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         _actor: Any = authenticated,
-    ) -> LibraryRecipeDetail:
+    ) -> ModelDetailResponse:
         try:
-            return library().detail(recipe_id)
-        except HTTPException:
-            raise
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Library recipe not found"
-            ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Library projection unavailable"
-            ) from None
+            return library().model_detail(selector)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/recipe",
+        response_model=RecipeLibraryResponse,
+        responses=bounded_error_responses(401, 503),
+        operation_id="getRecipeStatus",
+    )
+    def recipe_status(_actor: Any = authenticated) -> RecipeLibraryResponse:
+        try:
+            return library().recipe_library()
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/recipe/library",
+        response_model=RecipeLibraryResponse,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="listRecipeLibrary",
+    )
+    def recipe_library(
+        limit: Annotated[int, Query(ge=1, le=512)] = 100,
+        cursor: Annotated[str | None, Query(max_length=1024)] = None,
+        model: Annotated[str | None, Query(max_length=256)] = None,
+        all_models: Annotated[bool, Query()] = False,
+        usage: Annotated[list[str] | None, Query(max_length=64)] = None,
+        search: Annotated[str | None, Query(max_length=256)] = None,
+        updated_since: Annotated[datetime | None, Query()] = None,
+        sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        _actor: Any = authenticated,
+    ) -> RecipeLibraryResponse:
+        try:
+            return library().recipe_library(
+                limit=limit, cursor=cursor, model_selector=model,
+                all_models=all_models, usage=usage or [], search=search,
+                updated_since=updated_since, sort=sort,
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/recipe/{selector:path}",
+        response_model=RecipeDetailResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getRecipe",
+    )
+    def recipe_detail(
+        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
+        _actor: Any = authenticated,
+    ) -> RecipeDetailResponse:
+        try:
+            return library().recipe_detail(selector)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _error(error) from None
+
+
+__all__ = ["LIBRARY_OPERATION_IDS", "install_library_routes"]

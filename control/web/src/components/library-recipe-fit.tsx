@@ -1,16 +1,16 @@
-import type {LibraryRecipeDetail} from "../api/types";
+import type {LibraryViewRecipeDetail} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {selectedRecipeFiles} from "./library-recipe-files";
 
 export type RecipeMemoryFit = "comfortable" | "tight" | "impossible" | "unknown";
-export function recipeMemoryFit(detail: LibraryRecipeDetail): {fit: RecipeMemoryFit; groupsEvaluated: number; bestHeadroomBytes?: number} {
+export function recipeMemoryFit(detail: LibraryViewRecipeDetail): {fit: RecipeMemoryFit; groupsEvaluated: number; bestHeadroomBytes?: number} {
   const groups = detail.placement.flatMap(placement => [...placement.recommendations, ...placement.rejected_groups]);
   const headrooms = groups.flatMap(group => group.nodes.length ? [Math.min(...group.nodes.map(node => node.memory_free_after_bytes))] : []);
   if (!headrooms.length) return {fit: "unknown", groupsEvaluated: groups.length};
   const best = Math.max(...headrooms);
   return {bestHeadroomBytes: best, groupsEvaluated: headrooms.length, fit: best >= 8 * 1024 ** 3 ? "comfortable" : best >= 0 ? "tight" : detail.placement.every(item => item.search_complete) ? "impossible" : "unknown"};
 }
-export function LibraryRecipeFit({detail}: {detail: LibraryRecipeDetail}) {
+export function LibraryRecipeFit({detail}: {detail: LibraryViewRecipeDetail}) {
   const fit = recipeMemoryFit(detail);
   const title = detail.model_documents[0]?.model_document.identity.model.title ?? "Model metadata unavailable";
   const selected = selectedRecipeFiles(detail.model_documents);

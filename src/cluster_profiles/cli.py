@@ -1,4 +1,4 @@
-"""Control-API command line adapter for routine GPU node administration."""
+"""Authenticated command-line adapter for the four operator nouns."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
 
+from .cli_render import render_payload
 from .control_client import (
     ControlClient,
     ControlClientError,
     ControlTransportError,
     ControlUnavailable,
 )
-from .controller_cli import add_controller_commands, run_controller
+from .controller_cli import add_controller_commands, result_exit_code, run_controller
 
 _MAX_TEXT_CHARS = 1_024
 _MAX_COLLECTION_ITEMS = 1_024
@@ -40,54 +40,13 @@ class _CliParser(argparse.ArgumentParser):
         raise _UsageError(message)
 
 
-class _GeneratedModel(Protocol):
-    def to_dict(self) -> dict[str, object]: ...
-
-
-class _RoutineControlClient(Protocol):
-    def endpoint(self, alias: str) -> _GeneratedModel: ...
-
-
-def _runs_without_controller(args: argparse.Namespace) -> bool:
-    if args.command == "admin" and args.admin_command == "deploy":
-        return not args.apply
-    if (
-        args.command == "library"
-        and args.library_command == "job"
-        and args.artifact_job_command == "download"
-    ):
-        return False
-    return hasattr(args, "apply") and not args.apply
-
-
-def _add_json(command: argparse.ArgumentParser) -> None:
-    command.add_argument("--json", action="store_true")
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = _CliParser(prog="vonkctl")
     parser.add_argument("--json", dest="global_json", action="store_true")
+    parser.add_argument("--profile", dest="profile_number", type=int, default=1)
     commands = parser.add_subparsers(
-        dest="command", required=True, parser_class=_CliParser
+        dest="command", required=False, parser_class=_CliParser
     )
-
-    endpoint = commands.add_parser("endpoint")
-    endpoint.add_argument("name")
-    _add_json(endpoint)
-
-    admin = commands.add_parser("admin")
-    admin_commands = admin.add_subparsers(
-        dest="admin_command", required=True, parser_class=_CliParser
-    )
-    for name in ("fleet", "jobs", "audit"):
-        _add_json(admin_commands.add_parser(name))
-    proposal = admin_commands.add_parser("proposal")
-    proposal.add_argument("--file", type=Path, required=True)
-    _add_json(proposal)
-    deploy = admin_commands.add_parser("deploy")
-    deploy.add_argument("--proposal-digest", required=True)
-    deploy.add_argument("--apply", action="store_true")
-    _add_json(deploy)
     add_controller_commands(commands)
     return parser
 
@@ -125,293 +84,14 @@ def _arguments_may_contain_secrets(argv: Sequence[str]) -> bool:
     )
 
 
-def _table_cell(value: object, *, maximum: int = 48) -> str:
-    if value is None:
-        return "-"
-    if isinstance(value, list):
-        text = ", ".join(str(item) for item in value)
-    elif isinstance(value, Mapping):
-        text = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    else:
-        text = str(value)
-    text = " ".join(text.split())
-    return text if len(text) <= maximum else text[: maximum - 1] + "…"
-
-
-def _print_table(
-    rows: list[Mapping[str, object]], columns: tuple[tuple[str, str], ...]
-) -> None:
-    rendered = [[_table_cell(row.get(key)) for key, _label in columns] for row in rows]
-    widths = [
-        max(len(label), *(len(row[index]) for row in rendered))
-        for index, (_key, label) in enumerate(columns)
-    ]
-    print(
-        "  ".join(
-            label.ljust(widths[index]) for index, (_key, label) in enumerate(columns)
-        )
-    )
-    print("  ".join("-" * width for width in widths))
-    for row in rendered:
-        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
-
-
-def _emit_list_table(payload: Mapping[str, object]) -> bool:
-    facets = payload.get("facets")
-    if isinstance(facets, Mapping):
-        for facet, raw_options in facets.items():
-            if not isinstance(raw_options, list):
-                continue
-            print(str(facet).replace("_", " ").title())
-            rows = [option for option in raw_options if isinstance(option, Mapping)]
-            if rows:
-                _print_table(rows, (("value", "VALUE"), ("count", "COUNT")))
-            else:
-                print("No available values.")
-            print()
-        if "matching_count" in payload:
-            print(f"matching_count: {_table_cell(payload['matching_count'])}")
-        return True
-
-    models = payload.get("models")
-    if isinstance(models, list):
-        library_rows: list[Mapping[str, object]] = []
-        for model in models:
-            if not isinstance(model, Mapping):
-                continue
-            identity = model.get("model")
-            if isinstance(identity, Mapping):
-                model_name = (
-                    f"{identity.get('publisher', '-')}/{identity.get('slug', '-')}"
-                )
-            else:
-                model_name = "-"
-            recipes = model.get("recipes")
-            if isinstance(recipes, list):
-                library_rows.extend(
-                    {**recipe, "model_name": model_name}
-                    for recipe in recipes
-                    if isinstance(recipe, Mapping)
-                )
-        unlinked = payload.get("unlinked_recipes")
-        if isinstance(unlinked, list):
-            library_rows.extend(
-                {**recipe, "model_name": "Unlinked"}
-                for recipe in unlinked
-                if isinstance(recipe, Mapping)
-            )
-        if library_rows:
-            _print_table(
-                library_rows,
-                (
-                    ("model_name", "MODEL"),
-                    ("title", "RECIPE"),
-                    ("source_kind", "SOURCE"),
-                    ("topology_name", "TOPOLOGY"),
-                    ("recipe_id", "RECIPE ID"),
-                ),
-            )
-        else:
-            print("No models or recipes.")
-        if payload.get("next_cursor") is not None:
-            print(f"next_cursor: {_table_cell(payload['next_cursor'])}")
-        return True
-
-    recipes = payload.get("recipes")
-    if isinstance(recipes, list):
-        recipe_rows = [recipe for recipe in recipes if isinstance(recipe, Mapping)]
-        if recipe_rows:
-            _print_table(
-                recipe_rows,
-                (
-                    ("title", "RECIPE"),
-                    ("qualification", "QUALIFICATION"),
-                    ("execution_readiness", "READINESS"),
-                    ("node_count", "SPARKS"),
-                    ("recipe_id", "RECIPE ID"),
-                ),
-            )
-        else:
-            print("No recipes.")
-        for metadata in ("filtered_count", "next_cursor"):
-            if metadata in payload and payload[metadata] is not None:
-                print(f"{metadata}: {_table_cell(payload[metadata])}")
-        return True
-
-    candidates: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
-        (
-            "nodes",
-            (
-                ("display_name", "NAME"),
-                ("operational_state", "HEALTH"),
-                ("lifecycle", "LIFECYCLE"),
-                ("id", "NODE ID"),
-            ),
-        ),
-        (
-            "jobs",
-            (
-                ("created_at", "CREATED"),
-                ("kind", "KIND"),
-                ("state", "STATE"),
-                ("id", "JOB ID"),
-            ),
-        ),
-        (
-            "events",
-            (
-                ("label", "EVENT"),
-                ("area", "AREA"),
-                ("status", "STATUS"),
-                ("occurred_at", "OCCURRED"),
-                ("actor", "OPERATOR"),
-                ("request_id", "REQUEST ID"),
-            ),
-        ),
-        (
-            "agents",
-            (
-                ("node_id", "NODE ID"),
-                ("state", "STATE"),
-                ("semantic_version", "VERSION"),
-                ("last_seen_at", "LAST SEEN"),
-            ),
-        ),
-        (
-            "enrollments",
-            (
-                ("created_at", "CREATED"),
-                ("state", "STATE"),
-                ("node_id", "NODE ID"),
-                ("id", "ENROLLMENT ID"),
-            ),
-        ),
-    )
-    for key, columns in candidates:
-        value = payload.get(key)
-        if not isinstance(value, list):
-            continue
-        rows = [row for row in value if isinstance(row, Mapping)]
-        if rows:
-            _print_table(rows, columns)
-        else:
-            print(f"No {key}.")
-        for metadata in ("filtered_count", "next_cursor", "total"):
-            if metadata in payload and payload[metadata] is not None:
-                print(f"{metadata}: {_table_cell(payload[metadata])}")
-        return True
-    return False
-
-
-def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
-    diagnostics = payload.get("agent_upgrade_diagnostics")
-    if payload.get("kind") != "agent-upgrade" or not isinstance(diagnostics, Mapping):
-        return False
-    print(f"state: {_table_cell(payload.get('state'), maximum=80)}")
-    if payload.get("status_reason"):
-        print(f"summary: {payload['status_reason']}")
-    expected = diagnostics.get("expected_identity")
-    if isinstance(expected, Mapping):
-        print(f"expected_release: {_table_cell(expected.get('version'), maximum=128)}")
-        print(
-            f"expected_binary_digest: {_table_cell(expected.get('binary_digest'), maximum=80)}"
-        )
-        print(
-            f"expected_build_digest: {_table_cell(expected.get('build_digest'), maximum=80)}"
-        )
-    targets = diagnostics.get("targets")
-    if isinstance(targets, list):
-        for target in targets:
-            if not isinstance(target, Mapping):
-                continue
-            node_id = _table_cell(target.get("node_id"), maximum=128)
-            print(f"spark: {node_id}")
-            print(f"  install_attempts: {_table_cell(target.get('attempts'))}")
-            print(f"  target_proven: {str(bool(target.get('target_proven'))).lower()}")
-            observed = target.get("observed_identity")
-            if isinstance(observed, Mapping):
-                print(
-                    f"  observed_version: {_table_cell(observed.get('version'), maximum=128)}"
-                )
-                print(
-                    f"  observed_binary_digest: {_table_cell(observed.get('binary_digest'), maximum=80)}"
-                )
-                print(
-                    f"  observed_build_digest: {_table_cell(observed.get('build_digest'), maximum=80)}"
-                )
-            if target.get("raw_reason"):
-                print(f"  raw_helper_reason: {target['raw_reason']}")
-            if target.get("retry_not_before"):
-                print(f"  retry_not_before: {target['retry_not_before']}")
-                print(
-                    f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
-                )
-    if diagnostics.get("failure_details_unavailable") is True:
-        print(
-            "diagnosis: helper did not report the failed stage; the exact target "
-            "identity remains the success gate"
-        )
-    if diagnostics.get("next_action"):
-        print(f"next_action: {diagnostics['next_action']}")
-    return True
-
-
-def _emit(
-    payload: Mapping[str, object],
-    args: argparse.Namespace,
-    *,
-    exact_structure: bool = False,
-) -> None:
-    safe = dict(payload) if exact_structure else _sanitize(payload)
-    assert isinstance(safe, dict)
-    if args.global_json or getattr(args, "json", False):
-        print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
-        return
-    if getattr(args, "fleet_command", None) == "provenance" and "platform" in safe:
-        from .deployment_provenance_cli import render_deployment_provenance
-
-        print(render_deployment_provenance(safe))
-        return
-    if _emit_agent_upgrade_detail(safe):
-        return
-    if _emit_list_table(safe):
-        return
-    priority = (
-        "state",
-        "status",
-        "digest",
-        "job_id",
-        "id",
-        "alias",
-        "error",
-    )
-    keys = [key for key in priority if key in safe]
-    keys.extend(sorted(set(safe) - set(keys)))
-    for key in keys:
-        value = safe[key]
-        if value is None:
-            rendered = "-"
-        elif isinstance(value, (dict, list)):
-            rendered = json.dumps(value, sort_keys=True, separators=(",", ":"))
-        else:
-            rendered = str(value).lower() if isinstance(value, bool) else str(value)
-        print(f"{key}: {rendered}")
-
-
-def _model_payload(result: _GeneratedModel) -> dict[str, object]:
-    payload = result.to_dict()
-    if not isinstance(payload, dict):
-        raise ControlClientError("control API response must be an object")
-    return payload
-
-
 def _control_error(
     error: BaseException, args: argparse.Namespace | None = None
 ) -> dict[str, object]:
-    if isinstance(error, (ControlUnavailable, ControlTransportError, OSError)):
-        message = "control API unavailable"
-    else:
-        message = _sanitize_text(error)
+    message = (
+        "control API unavailable"
+        if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
+        else _sanitize_text(error)
+    )
     result: dict[str, object] = {
         "error": message,
         "error_type": "control_api",
@@ -432,58 +112,25 @@ def _control_error(
         result.update(context.as_dict())
     result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
-    operation_id = getattr(args, "operation_id", None) if args is not None else None
     if isinstance(request_key, str) and request_key:
         result["request_key"] = request_key
         result["reconcile"] = {
             "operation": "inspect the durable operation with the same request key",
             "request_key": request_key,
         }
-        if isinstance(operation_id, str) and operation_id:
-            result["operation_id"] = operation_id
-            result["reconcile"]["operation_id"] = operation_id
     return result
 
 
-def _admin(
-    args: argparse.Namespace,
-    client: object,
-    request_id_factory: Callable[[], str],
-) -> Mapping[str, object]:
-    if args.admin_command == "proposal":
-        path = args.file
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > 1_048_576:
-            raise ControlClientError(
-                "proposal input must be a bounded regular non-symlink file"
-            )
-        payload = json.loads(path.read_bytes())
-        if not isinstance(payload, dict):
-            raise ControlClientError("proposal input must be a JSON object")
-        return client.create_proposal(payload)  # type: ignore[attr-defined, no-any-return]
-    if args.admin_command == "deploy":
-        if args.apply:
-            return client.submit_change(args.proposal_digest)  # type: ignore[attr-defined, no-any-return]
-        return {
-            "mode": "plan",
-            "proposal_digest": args.proposal_digest,
-            "apply": False,
-        }
-    endpoint = {
-        "fleet": "/api/v1/fleet",
-        "jobs": "/api/v1/jobs",
-        "audit": "/api/v1/audit",
-    }[args.admin_command]
-    return client.get(endpoint)  # type: ignore[attr-defined, no-any-return]
-
-
-def _routine(
-    args: argparse.Namespace,
-    client: _RoutineControlClient,
-    request_id_factory: Callable[[], str],
-) -> dict[str, object]:
-    if args.command == "endpoint":
-        return _model_payload(client.endpoint(args.name))
-    raise ControlClientError("unsupported routine command")
+def _emit(payload: Mapping[str, object], args: argparse.Namespace) -> None:
+    safe = dict(payload) if args.global_json or getattr(args, "json", False) else _sanitize(payload)
+    if args.global_json or getattr(args, "json", False):
+        print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
+        return
+    render_payload(
+        safe,
+        getattr(args, "command", None) or "profile",
+        wide=getattr(args, "wide", False),
+    )
 
 
 def main(
@@ -499,7 +146,9 @@ def main(
     try:
         args = _parser().parse_args(raw_argv)
     except _UsageError as error:
-        error_args = argparse.Namespace(global_json="--json" in raw_argv, json=False)
+        error_args = argparse.Namespace(
+            global_json="--json" in raw_argv, json=False, command="profile"
+        )
         _emit(
             {
                 "error": (
@@ -514,43 +163,30 @@ def main(
         return 2
 
     try:
-        client = control_client
-        if client is None and not _runs_without_controller(args):
-            client = ControlClient.from_environment()
-        if args.command == "admin":
-            result = _admin(
-                args,
-                client,
-                request_id_factory or (lambda: str(uuid.uuid4())),
+        client = control_client or ControlClient.from_environment()
+        watch_rendered = False
+
+        def render_watch(observed: Mapping[str, object]) -> None:
+            nonlocal watch_rendered
+            if sys.stdout.isatty():
+                print("\033[2J\033[H", end="")
+            render_payload(
+                _sanitize(observed),
+                getattr(args, "command", None) or "profile",
+                wide=getattr(args, "wide", False),
             )
-        elif args.command in {
-            "fleet",
-            "library",
-            "activity",
-            "models",
-            "recipes",
-            "cache",
-            "profiles",
-            "operations",
-        }:
-            result = run_controller(
-                args,
-                client,  # type: ignore[arg-type]
-                request_id_factory or (lambda: str(uuid.uuid4())),
-            )
-        else:
-            result = _routine(
-                args,
-                client,  # type: ignore[arg-type]
-                request_id_factory or (lambda: str(uuid.uuid4())),
-            )
-        _emit(
-            result,
+            watch_rendered = True
+
+        if not args.global_json and not getattr(args, "json", False):
+            args._watch_callback = render_watch
+        result = run_controller(
             args,
-            exact_structure=args.command
-            not in {"admin", "fleet", "library", "activity", "recipes"},
+            client,  # type: ignore[arg-type]
+            request_id_factory or (lambda: str(uuid.uuid4())),
         )
-        return 0
+        if not watch_rendered or args.global_json or getattr(args, "json", False):
+            _emit(result, args)
+        return result_exit_code(result)
     except (
         ControlClientError,
         OSError,

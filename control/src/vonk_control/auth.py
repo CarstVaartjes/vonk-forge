@@ -23,134 +23,27 @@ _CURSOR_DOMAIN = b"vonk-forge/control-cursor/v1\0"
 _MAX_CURSOR_LENGTH = 512
 
 MUTATION_ROLES = {
-    ("POST", "/api/v1/fleet-profile-applications/{application_id}/retry"): frozenset({"administrator"}),
-    ("POST", "/api/v1/library/placements/{placement_id}/retry"): frozenset({"administrator"}),
-    ("PATCH", "/api/v1/nodes/{node_id}/profile"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/proposals"): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/changes"): frozenset({"administrator"}),
-    ("POST", "/api/v1/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/agents/enrollments/grants"): frozenset({"administrator"}),
-    ("POST", "/api/v1/agents/nodes/{node_id}/revoke"): frozenset({"administrator"}),
-    ("POST", "/api/v1/agents/upgrades/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/agents/upgrades"): frozenset({"administrator"}),
-    ("POST", "/api/v1/fleet-profiles"): frozenset({"administrator"}),
-    ("POST", "/api/v1/fleet-profiles/capture-current"): frozenset(
-        {"administrator"}
-    ),
-    ("PUT", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
-    ("DELETE", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/duplicate"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/fleet-profiles/{profile_id}/switch"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
-    ("POST", "/api/v1/library/recipe-image-availability"): frozenset(
-        {"operator", "administrator"}
-    ),
-    (
-        "POST", "/api/v1/library/recipe-image-availability/{operation_id}/retry"
-    ): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/model-cache/download-preview"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/download"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/repair-preview"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/repair"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/eviction-preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
-    (
-        "POST",
-        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
-    ): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/catalog/managed-recipes/sync"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/source-checks"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/build-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/image-distribution-plans/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/builds"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/mapping-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/mappings"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/image-distributions"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/install-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/run-switch-plans/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/run-switches"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/run-switches/{operation_id}/retry"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/run-switches/{operation_id}/cancel"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/run-switch-stops"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/job-runs"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/runs/{run_id}/artifact-jobs"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("PUT", "/api/v1/artifact-jobs/{job_id}/inputs/{name}"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/artifact-jobs/{job_id}/finalize"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/artifact-jobs/{job_id}/submit"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/artifact-jobs/{job_id}/cancel"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/recipes/stop-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/uninstall-plans/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/library/model-deletion-plans/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/library/models/{model_content_sha256}/delete"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/operations/{operation_id}/cancel"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/model-cache/operations/{operation_id}/retry"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/recipes/runs/{run_id}/stop"): frozenset({"administrator"}),
-    ("POST", "/api/v1/recipes/installations/{installation_id}/uninstall"): frozenset(
-        {"administrator"}
-    ),
+    ("POST", "/api/fleet/enroll"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/re-enroll"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/remove"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/rename"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/fleet/upgrade"): frozenset({"administrator"}),
+    ("POST", "/api/model/{selector}/download"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/model/{selector}/remove"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/recipe/{selector:path}/download"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/recipe/{selector:path}/remove"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/recipe/update"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/jobs/{job_id}/resume"): frozenset({"administrator", "operator"}),
+    ("PUT", "/api/profile/{number}"): frozenset({"administrator"}),
+    ("POST", "/api/profile/{number}/preview"): frozenset({"administrator"}),
+    ("POST", "/api/profile/{number}/load"): frozenset({"administrator"}),
+    ("POST", "/api/catalog/managed-recipes/sync"): frozenset({"administrator"}),
+    ("PUT", "/api/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
+    ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset({"administrator", "operator"}),
+    ("PUT", "/api/artifact-jobs/{job_id}/inputs/{name}"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/artifact-jobs/{job_id}/finalize"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/artifact-jobs/{job_id}/submit"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/artifact-jobs/{job_id}/cancel"): frozenset({"administrator", "operator"}),
 }
 
 
@@ -311,13 +204,13 @@ class TrustedProxyAgentIdentityMiddleware:
         path = safe_scope.get("path")
         validator = (
             self._activation_identity_validator
-            if path == "/agent/v1/renew/activate"
+            if path == "/agent/renew/activate"
             else self._agent_identity_validator
         )
         if (
             isinstance(path, str)
-            and path.startswith("/agent/v1/")
-            and path not in {"/agent/v1/bootstrap", "/agent/v1/enroll"}
+            and path.startswith("/agent/")
+            and path not in {"/agent/bootstrap", "/agent/enroll"}
             and (
                 agent_identity_from_scope(safe_scope) is None
                 or validator is None

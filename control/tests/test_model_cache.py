@@ -10,14 +10,11 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.auth import Actor, TokenCodec
-from vonk_control.catalog_entities import _build_projection
+from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
     ModelCacheVerifiedObjectSource,
@@ -33,25 +30,23 @@ from vonk_control.model_cache import (
     _retry_after_seconds,
     _retryable_failure,
 )
-from vonk_control.model_cache_api import (
-    ModelCacheOperationProvider,
-    install_model_cache_routes,
-    model_cache_operation_provider,
-)
+from vonk_control.model_cache_api import ModelCacheOperationProvider, model_cache_operation_provider
 from vonk_control.model_cache_contract import (
     ModelCacheAccessResumeRequest,
     ModelCacheDownloadRequest,
     ModelCacheDownloadResult,
-    ModelCacheEvictionPreviewRequest,
-    ModelCacheEvictRequest,
 )
 from vonk_control.models import (
+    AgentNode,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
-    FleetProfile,
     ModelCacheArtifact,
     ModelCacheOperation,
+    ModelCacheSet,
+    RecipeBuild,
+    RuntimeImageAuthorization,
+    RuntimeImageReceipt,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
@@ -316,6 +311,145 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
     assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
         ("weights.bin", 3, ("weights",))
     ]
+
+
+def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_revision(cache):
+    service, sessions = cache
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="resolver-model",
+        file_id="weights",
+        file_digest="1" * 64,
+    )
+    model_digest = content_sha256(model)
+    newer_model = _canonical_model(
+        publisher="vonk-forge",
+        slug="resolver-model",
+        file_id="weights",
+        file_digest="2" * 64,
+    )
+    newer_model_digest = content_sha256(newer_model)
+    old_document = _canonical_recipe(model_digest)
+    old_document["identity"] = {"publisher": "vonk-forge", "slug": "resolver-recipe"}
+    old_recipe = RecipeDefinition.model_validate(old_document)
+    new_document = json.loads(json.dumps(old_document))
+    new_document["models"][0]["model"]["content_sha256"] = newer_model_digest
+    new_document["metadata"]["description"] += " newer"
+    new_recipe = RecipeDefinition.model_validate(new_document)
+    model_root = CatalogDocument(
+        id="00000000-0000-0000-0000-000000000101", kind="model",
+        publisher="vonk-forge", slug="resolver-model", title="Resolver model",
+        created_by="test", created_at=NOW, updated_at=NOW,
+    )
+    recipe_root = CatalogDocument(
+        id="00000000-0000-0000-0000-000000000102", kind="recipe",
+        publisher="vonk-forge", slug="resolver-recipe", title="Resolver recipe",
+        created_by="test", created_at=NOW, updated_at=NOW,
+    )
+    old_digest = content_sha256(old_recipe)
+    new_digest = content_sha256(new_recipe)
+    old_revision = CatalogDocumentRevision(
+        id="00000000-0000-0000-0000-000000000103", document_id=recipe_root.id,
+        kind="recipe", publisher=recipe_root.publisher, slug=recipe_root.slug,
+        revision_number=1, schema_version=2, state="active",
+        document=old_recipe.model_dump(mode="json"), content_digest=old_digest,
+        execution_key="a" * 64, projected={}, created_by="test", created_at=NOW,
+    )
+    new_revision = CatalogDocumentRevision(
+        id="00000000-0000-0000-0000-000000000104", document_id=recipe_root.id,
+        kind="recipe", publisher=recipe_root.publisher, slug=recipe_root.slug,
+        revision_number=2, schema_version=2, state="active",
+        document=new_recipe.model_dump(mode="json"), content_digest=new_digest,
+        execution_key="b" * 64, projected={}, created_by="test", created_at=NOW,
+    )
+    model_revision = CatalogDocumentRevision(
+        id="00000000-0000-0000-0000-000000000105", document_id=model_root.id,
+        kind="model", publisher=model_root.publisher, slug=model_root.slug,
+        revision_number=1, schema_version=2, state="failed",
+        document=model.model_dump(mode="json"), content_digest=model_digest,
+        projected={}, created_by="test", created_at=NOW,
+    )
+    newer_model_revision = CatalogDocumentRevision(
+        id="00000000-0000-0000-0000-000000000109", document_id=model_root.id,
+        kind="model", publisher=model_root.publisher, slug=model_root.slug,
+        revision_number=2, schema_version=2, state="active",
+        document=newer_model.model_dump(mode="json"), content_digest=newer_model_digest,
+        projected={}, created_by="test", created_at=NOW,
+    )
+    build = RecipeBuild(
+        id="00000000-0000-0000-0000-000000000106",
+        recipe_revision_id=old_revision.id, builder_node_id="resolver-builder",
+        source_bundle_sha256="2" * 64, build_input_sha256="3" * 64,
+        state="succeeded", policy_report={}, plan={}, image_digest="sha256:" + "4" * 64,
+        oci_layout_sha256="5" * 64, image_bytes=17, error=None,
+        created_at=NOW, updated_at=NOW,
+    )
+    receipt = RuntimeImageReceipt(
+        id="00000000-0000-0000-0000-000000000107", recipe_revision_id=old_revision.id,
+        source="controller-build", original_content_digest=old_digest,
+        effective_execution_key=old_revision.execution_key, registry_manifest_digest=None,
+        platform_manifest_digest="sha256:" + "6" * 64,
+        local_image_config_id="sha256:" + "7" * 64, oci_archive_sha256="8" * 64,
+        image_bytes=17, architecture="linux-arm64", runtime_interface="vonk.runtime.v1",
+        runtime_interface_label="v1", build_id=build.id, verified_at=NOW, state="verified",
+    )
+    authorization = RuntimeImageAuthorization(
+        id="00000000-0000-0000-0000-000000000108", recipe_revision_id=old_revision.id,
+        receipt_id=receipt.id, source=receipt.source,
+        original_content_digest=receipt.original_content_digest,
+        effective_execution_key=receipt.effective_execution_key, registry_manifest_digest=None,
+        platform_manifest_digest=receipt.platform_manifest_digest,
+        local_image_config_id=receipt.local_image_config_id,
+        oci_archive_sha256=receipt.oci_archive_sha256, image_bytes=17,
+        build_id=build.id, authorized_at=NOW, state="authorized",
+    )
+    model_cache = ModelCacheSet(
+        artifact_set_sha256="9" * 64, schema_version=2,
+        model_content_sha256=model_digest, recipe_revision_sha256=None,
+        manifest={"schema_version": 2}, expected_bytes=3, verified_bytes=3,
+        state="cached", protected=False, protected_reasons=[], created_at=NOW,
+        updated_at=NOW, verified_at=NOW, last_accessed_at=NOW, last_error=None,
+    )
+    with sessions.begin() as session:
+        session.add_all([model_root, recipe_root, model_revision, newer_model_revision,
+                         old_revision, new_revision,
+                         AgentNode(node_id="resolver-builder", state="active"), build,
+                         receipt, authorization, model_cache])
+
+    resolved = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert resolved["recipe"]["recipe_revision_id"] == old_revision.id
+    assert resolved["recipe"]["source"] == "controller-build"
+    assert resolved["recipe"]["update_available"] is True
+    assert resolved["model"]["content_sha256"] == model_digest
+    assert resolved["resources"] == {
+        "per_spark_memory_bytes": None,
+        "additional_disk_bytes": 20,
+        "model_bytes": 3,
+        "image_bytes": 17,
+    }
+
+    with sessions.begin() as session:
+        session.delete(model_cache)
+    image_only = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert image_only["recipe"]["recipe_revision_id"] == old_revision.id
+    assert image_only["recipe"]["cached"] is True
+    assert image_only["model"]["cached"] is False
+    assert image_only["resources"]["additional_disk_bytes"] is None
+
+    with sessions.begin() as session:
+        session.delete(authorization)
+        session.delete(receipt)
+    missing = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert missing["recipe"]["recipe_revision_id"] == new_revision.id
+    assert missing["recipe"]["expected_bytes"] is None
+    assert missing["model"]["expected_bytes"] is None
+    assert missing["resources"]["additional_disk_bytes"] is None
 
 
 @pytest.mark.parametrize("shared_object", [False, True])
@@ -1019,184 +1153,6 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     assert target.read_bytes() == good
 
 
-def test_protection_is_derived_from_durable_references_and_blocks_eviction(
-    cache, tmp_path: Path
-) -> None:
-    service, sessions = cache
-    model = "e" * 64
-    data = b"protected model"
-    artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    set_digest = _download(
-        service,
-        [artifact],
-        model_content_sha256=model,
-        request_key="00000000-0000-4000-8000-000000000008",
-    ).artifact_set_sha256 or ""
-    recipe_revision_id = "00000000-0000-4000-8000-000000000022"
-    recipe_document = _canonical_recipe(model)
-    recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
-    recipe_projection = {
-        "title": recipe.metadata.title,
-        "description": recipe.metadata.description,
-        "tags": list(recipe.metadata.tags),
-        "runtime_engine": recipe.runtime.engine,
-        "topology": recipe.topology.model_dump(mode="json"),
-    }
-    recipe_projection.update(_build_projection(recipe))
-    with sessions.begin() as session:
-        session.add(
-            CatalogDocument(
-                    id="00000000-0000-4000-8000-000000000021",
-                    kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                title="Protected recipe",
-                created_by="test",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        session.add(
-            CatalogDocumentRevision(
-                id=recipe_revision_id,
-                document_id="00000000-0000-4000-8000-000000000021",
-                kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                revision_number=1,
-                state="active",
-                schema_version=2,
-                document=recipe_document,
-                content_digest=recipe_digest,
-                    projected=recipe_projection,
-                created_by="test",
-                created_at=NOW,
-            )
-        )
-    with sessions.begin() as session:
-        session.add(
-            FleetProfile(
-                name="protected-profile",
-                description="",
-                installation_policy="keep-cached",
-                assignments=[{"recipe_revision_id": recipe_revision_id}],
-                labels={},
-                favorite=False,
-                created_by="test",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-
-    preview = service.eviction_preview(target_bytes=len(data))
-    assert preview["selected"] == []
-    assert preview["selected_bytes"] == 0
-    assert preview["protected_entries"][0]["artifact_set_sha256"] == set_digest
-    assert "protected entries require separate reference removal" in preview["blockers"]
-    assert service.storage_summary().protected_bytes == len(data)
-    with pytest.raises(ModelCacheConflict):
-        service.evict(
-            actor="test",
-            request_key="00000000-0000-4000-8000-000000000009",
-            plan_digest=str(preview["plan_digest"]),
-            target_bytes=len(data),
-        )
-
-    with sessions.begin() as session:
-        session.query(FleetProfile).delete()
-    unprotected = service.eviction_preview(target_bytes=len(data))
-    assert unprotected["blockers"] == []
-    assert unprotected["selected_bytes"] == len(data)
-    removed = service.evict(
-        actor="test",
-        request_key="00000000-0000-4000-8000-000000000010",
-        plan_digest=str(unprotected["plan_digest"]),
-        target_bytes=len(data),
-    )
-    service.run_pending()
-    removed = service.get_operation(removed.id)
-    assert removed.state == "succeeded"
-    assert service.storage_summary().unique_used_bytes == 0
-
-
-def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_flags(
-    cache,
-) -> None:
-    service, _sessions = cache
-    assert "artifacts" not in ModelCacheDownloadRequest.model_fields
-    assert "protected" not in ModelCacheEvictionPreviewRequest.model_fields
-    assert set(ModelCacheDownloadRequest.model_fields) >= {"request_key", "plan_digest"}
-    assert set(ModelCacheEvictRequest.model_fields) >= {"request_key", "plan_digest"}
-    assert set(ModelCacheAccessResumeRequest.model_fields) >= {
-        "request_key",
-        "artifact_set_sha256",
-        "plan_digest",
-    }
-    with pytest.raises(ValueError):
-        ModelCacheDownloadRequest(
-            request_key="00000000-0000-4000-8000-000000000011",
-            plan_digest="f" * 64,
-            artifacts=[],
-        )
-
-    app = FastAPI()
-    install_model_cache_routes(
-        app,
-        actor_dependency=Depends(lambda: Actor("admin", "administrator")),
-        service=service,
-        audits=[],
-    )
-    client = TestClient(app)
-    inventory = client.get("/api/v1/model-cache")
-    assert inventory.status_code == 200
-    assert inventory.json()["schema_version"] == 2
-    assert inventory.json()["storage"]["unique_used_bytes"] == 0
-    operations = client.get("/api/v1/model-cache/operations")
-    assert operations.status_code == 200
-    assert operations.json() == {
-        "schema_version": 2,
-        "operations": [],
-        "total": 0,
-        "next_cursor": None,
-    }
-    updates = client.get("/api/v1/model-cache/updates")
-    assert updates.status_code == 200
-    assert updates.json() == {
-        "schema_version": 2,
-        "source_policy": "nas-first",
-        "updates": [],
-        "total": 0,
-        "next_cursor": None,
-    }
-    bad = client.post(
-        "/api/v1/model-cache/download",
-        json={
-            "schema_version": 2,
-            "request_key": "00000000-0000-4000-8000-000000000012",
-            "plan_digest": "f" * 64,
-            "model_content_sha256": "a" * 64,
-            "artifacts": [{"source": "file:///etc/passwd"}],
-            "protected": True,
-        },
-    )
-    assert bad.status_code == 422
-    assert {route.path for route in app.routes} >= {
-        "/api/v1/model-cache",
-        "/api/v1/model-cache/download-preview",
-        "/api/v1/model-cache/download",
-        "/api/v1/model-cache/repair-preview",
-        "/api/v1/model-cache/repair",
-        "/api/v1/model-cache/eviction-preview",
-        "/api/v1/model-cache/evict",
-        "/api/v1/model-cache/updates",
-        "/api/v1/model-cache/operations",
-        "/api/v1/model-cache/operations/{operation_id}",
-        "/api/v1/model-cache/operations/{operation_id}/retry",
-        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
-    }
-
-
 def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_path: Path) -> None:
     service, _sessions = cache
     model = "f" * 64
@@ -1300,55 +1256,6 @@ def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> Non
     assert "bytes_per_second" not in progress
     with pytest.raises(ValidationError):
         ModelCacheOperationProvider._progress({"phase": "downloading", "downloaded_bytes": 12})
-
-
-def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, monkeypatch):
-    service, sessions = cache
-    downloaded = _download(
-        service, [_artifact(tmp_path, b"eviction bytes")],
-        model_content_sha256="a" * 64,
-        request_key="00000000-0000-4000-8000-000000000071",
-    )
-    preview = service.eviction_preview(target_bytes=14)
-    operation = service.evict(
-        actor="test", request_key="00000000-0000-4000-8000-000000000072",
-        plan_digest=preview["plan_digest"], target_bytes=14,
-    )
-    original = Path.unlink
-
-    def fail_object_removal(path, *args, **kwargs):
-        if path.parent == service.root / "objects" or "objects" in path.parts:
-            raise OSError("object removal failed")
-        return original(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", fail_object_removal)
-    service.run_pending()
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
-    app = FastAPI()
-    install_model_cache_routes(
-        app, actor_dependency=Depends(lambda: Actor("admin", "administrator")),
-        service=restarted, audits=[],
-    )
-    client = TestClient(app)
-    response = client.get(f"/api/v1/model-cache/operations/{operation.id}")
-    assert response.status_code == 200
-    document = response.json()
-    assert document["state"] == "failed"
-    assert document["result"] is None
-    assert document["failure"]["code"] == "model_cache.eviction_failed"
-    assert document["failure"]["detail"] == "object removal failed"
-    from vonk_control.model_cache_contract import ModelCacheOperationResponse
-    with pytest.raises(ValidationError, match="requires failure evidence"):
-        ModelCacheOperationResponse.model_validate(document | {"failure": None})
-    succeeded = client.get(f"/api/v1/model-cache/operations/{downloaded.id}").json()
-    assert succeeded["state"] == "succeeded"
-    with pytest.raises(ValidationError, match="requires a result"):
-        ModelCacheOperationResponse.model_validate(succeeded | {"result": None})
-    with sessions.begin() as session:
-        row = session.get(ModelCacheOperation, downloaded.id)
-        row.payload = {key: value for key, value in row.payload.items() if key != "result"}
-    with pytest.raises(ValidationError, match="requires a result"):
-        restarted.get_operation(downloaded.id)
 
 
 def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeypatch):
@@ -2047,6 +1954,83 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cac
         service.close()
         api.close()
         client.close()
+
+
+def test_remove_model_cancels_preparation_preserves_shared_blob_and_running_node(cache, tmp_path: Path):
+    service, sessions = cache
+    model_a = _canonical_model(
+        publisher="vonk-forge", slug="remove-model-a", file_id="weights",
+        file_digest="a" * 64,
+    )
+    model_b = _canonical_model(
+        publisher="vonk-forge", slug="remove-model-b", file_id="weights",
+        file_digest="a" * 64,
+    )
+    digest_a = content_sha256(model_a)
+    digest_b = content_sha256(model_b)
+    with sessions.begin() as session:
+        for index, (slug, model, digest) in enumerate(
+            (("remove-model-a", model_a, digest_a), ("remove-model-b", model_b, digest_b)),
+            start=1,
+        ):
+            document_id = f"00000000-0000-4000-8000-00000000010{index}"
+            root = CatalogDocument(
+                id=document_id, kind="model", publisher="vonk-forge", slug=slug,
+                title=slug, created_by="test", created_at=NOW, updated_at=NOW,
+            )
+            session.add(root)
+            session.flush()
+            session.add(CatalogDocumentRevision(
+                id=f"00000000-0000-4000-8000-00000000011{index}",
+                document_id=document_id, kind="model", publisher="vonk-forge", slug=slug,
+                revision_number=1, schema_version=2, state="active",
+                document=model.model_dump(mode="json"), content_digest=digest,
+                projected={}, created_by="test", created_at=NOW,
+            ))
+        session.add(AgentNode(node_id="spark-live", state="active"))
+
+    payload = b"shared model payload"
+    first = _download(
+        service, [_artifact(tmp_path, payload, model_content_sha256=digest_a)],
+        model_content_sha256=digest_a,
+        request_key="00000000-0000-4000-8000-000000001030",
+    )
+    second = _download(
+        service, [_artifact(tmp_path, payload, model_content_sha256=digest_b)],
+        model_content_sha256=digest_b,
+        request_key="00000000-0000-4000-8000-000000001031",
+    )
+    assert first.state == second.state == "succeeded"
+    artifact = _artifact(tmp_path, payload, model_content_sha256=digest_a)
+    preview = service.download_preview(model_content_sha256=digest_a, artifacts=[artifact])
+    pending = service.start_download(
+        actor="operator", request_key="00000000-0000-4000-8000-000000001032",
+        plan_digest=str(preview["plan_digest"]), model_content_sha256=digest_a,
+        artifacts=[artifact], force=True, selector="vonk-forge/remove-model-a",
+    )
+    removed = service.remove_model_selector(
+        "vonk-forge/remove-model-a", actor="operator",
+        request_key="00000000-0000-4000-8000-000000001033",
+    )
+    assert removed.kind == "remove"
+    assert removed.state == "succeeded"
+    assert pending.id in removed.result.cancelled_operations
+    assert service.get_operation(pending.id).state == "cancelled"
+    service.run_pending()
+
+    with sessions() as session:
+        assert session.scalar(select(ModelCacheSet).where(
+            ModelCacheSet.model_content_sha256 == digest_a,
+        )) is None
+        assert session.scalar(select(ModelCacheSet).where(
+            ModelCacheSet.model_content_sha256 == digest_b,
+        )) is not None
+        assert session.get(AgentNode, "spark-live") is not None
+    assert service._object_path(artifact["sha256"]).is_file()
+    observed, action, selector = service.get_operator_operation(removed.id)
+    assert observed.id == removed.id
+    assert action == "remove"
+    assert selector == "vonk-forge/remove-model-a"
 
 
 @pytest.mark.parametrize("range_supported", [True, False])

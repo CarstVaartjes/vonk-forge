@@ -81,7 +81,7 @@ it("renders the bounded throttle guidance for an ApiClient login 429", async () 
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     const path = new URL(request.url).pathname;
     paths.push(path);
-    if (path === "/api/v1/auth/session") {
+    if (path === "/api/auth/session") {
       return new Response(JSON.stringify({detail: "authentication failed"}), {status: 401});
     }
     return new Response(JSON.stringify({detail: "authentication temporarily unavailable"}), {status: 429});
@@ -95,7 +95,7 @@ it("renders the bounded throttle guidance for an ApiClient login 429", async () 
   await user.click(screen.getByRole("button", {name: "Sign in"}));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Sign in is temporarily unavailable. Please try again.");
-  expect(paths).toEqual(["/api/v1/auth/session", "/api/v1/auth/login"]);
+  expect(paths).toEqual(["/api/auth/session", "/api/auth/login"]);
 });
 
 it("opens Fleet with the authenticated administrator identity after a successful login", async () => {

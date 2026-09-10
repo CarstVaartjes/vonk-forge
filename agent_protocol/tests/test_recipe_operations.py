@@ -4,7 +4,6 @@ import pytest
 from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
-    RecipeModelCleanupResult,
     RecipeOperationRequest,
     RecipeStopResult,
     RecipeUninstallResult,
@@ -28,17 +27,6 @@ UNINSTALL = {
     "plan_digest": PLAN_DIGEST,
 }
 UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" * 64}
-MODEL_UNINSTALL = {
-    "schema_version": 1,
-    "model_content_sha256": "f" * 64,
-    "plan_digest": PLAN_DIGEST,
-    "installations": [
-        {
-            "installation_id": INSTALLATION_ID,
-            "recipe_content_sha256": RECIPE_DIGEST,
-        }
-    ],
-}
 
 
 def test_recipe_operation_vocabulary_is_closed() -> None:
@@ -54,7 +42,6 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
         "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
-        "recipe.model-uninstall.v1",
     }
 
 
@@ -64,7 +51,6 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL_WITH_MODEL_CLEANUP),
-        (AgentOperation.RECIPE_MODEL_UNINSTALL, MODEL_UNINSTALL),
     ],
 )
 def test_recipe_operation_payloads_are_typed_and_digest_bound(
@@ -108,11 +94,6 @@ def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
             AgentOperation.RECIPE_UNINSTALL,
             {"uninstalled": True, "removed_model_bytes": 0},
             RecipeUninstallResult,
-        ),
-        (
-            AgentOperation.RECIPE_MODEL_UNINSTALL,
-            {"uninstalled_installations": 1, "removed_model_bytes": 0},
-            RecipeModelCleanupResult,
         ),
     ],
 )

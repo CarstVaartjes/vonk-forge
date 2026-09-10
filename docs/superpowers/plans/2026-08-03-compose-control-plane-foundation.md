@@ -181,19 +181,19 @@ git commit -m "feat: run durable fenced control jobs"
 - Create: `control/tests/test_auth.py`
 
 **Interfaces:**
-- API prefix `/api/v1`; endpoints `/healthz`, `/readyz`, `/fleet`, `/jobs`, `/jobs/{id}`.
+- API prefix `/api`; endpoints `/healthz`, `/readyz`, `/fleet`, `/jobs`, `/jobs/{id}`.
 - Roles: viewer, operator, administrator.
 
 - [ ] **Step 1: Write failing authorization and audit tests**
 
 ```python
 def test_viewer_cannot_enqueue_mutation(client, viewer_token):
-    response = client.post("/api/v1/jobs", headers=viewer_token, json=MUTATION)
+    response = client.post("/api/jobs", headers=viewer_token, json=MUTATION)
     assert response.status_code == 403
 
 
 def test_admin_mutation_has_actor_request_commit_and_targets(client, admin_token, audit_store):
-    response = client.post("/api/v1/jobs", headers=admin_token, json=MUTATION)
+    response = client.post("/api/jobs", headers=admin_token, json=MUTATION)
     event = audit_store.for_request(response.headers["x-request-id"])
     assert (event.actor, event.authority_revision, event.targets) == ("admin", COMMIT, TARGETS)
 ```

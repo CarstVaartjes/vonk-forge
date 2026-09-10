@@ -142,7 +142,6 @@ pub enum AgentClaimPayload {
     RecipeStartPayload(RecipeStartPayload),
     RecipeStopPayload(RecipeStopPayload),
     RecipeUninstallPayload(RecipeUninstallPayload),
-    RecipeModelCleanupPayload(RecipeModelCleanupPayload),
 }
 impl ::std::convert::From<RuntimePreflightRequest> for AgentClaimPayload {
     fn from(value: RuntimePreflightRequest) -> Self {
@@ -192,11 +191,6 @@ impl ::std::convert::From<RecipeStopPayload> for AgentClaimPayload {
 impl ::std::convert::From<RecipeUninstallPayload> for AgentClaimPayload {
     fn from(value: RecipeUninstallPayload) -> Self {
         Self::RecipeUninstallPayload(value)
-    }
-}
-impl ::std::convert::From<RecipeModelCleanupPayload> for AgentClaimPayload {
-    fn from(value: RecipeModelCleanupPayload) -> Self {
-        Self::RecipeModelCleanupPayload(value)
     }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -275,8 +269,6 @@ pub enum AgentOperation {
     RecipeStop,
     #[serde(rename = "recipe.uninstall")]
     RecipeUninstall,
-    #[serde(rename = "recipe.model-uninstall.v1")]
-    RecipeModelUninstallV1,
 }
 impl ::std::fmt::Display for AgentOperation {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -291,7 +283,6 @@ impl ::std::fmt::Display for AgentOperation {
             Self::RecipeJobRunV1 => f.write_str("recipe.job.run.v1"),
             Self::RecipeStop => f.write_str("recipe.stop"),
             Self::RecipeUninstall => f.write_str("recipe.uninstall"),
-            Self::RecipeModelUninstallV1 => f.write_str("recipe.model-uninstall.v1"),
         }
     }
 }
@@ -309,7 +300,6 @@ impl ::std::str::FromStr for AgentOperation {
             "recipe.job.run.v1" => Ok(Self::RecipeJobRunV1),
             "recipe.stop" => Ok(Self::RecipeStop),
             "recipe.uninstall" => Ok(Self::RecipeUninstall),
-            "recipe.model-uninstall.v1" => Ok(Self::RecipeModelUninstallV1),
             _ => Err("invalid value".into()),
         }
     }
@@ -392,7 +382,6 @@ pub enum AgentResultResult {
     RecipeStartResult(RecipeStartResult),
     RecipeStopResult(RecipeStopResult),
     RecipeUninstallResult(RecipeUninstallResult),
-    RecipeModelCleanupResult(RecipeModelCleanupResult),
     RecipeBuildEvidence(RecipeBuildEvidence),
     RecipeImageImportEvidence(RecipeImageImportEvidence),
     RecipeJobRunResult(RecipeJobRunResult),
@@ -423,11 +412,6 @@ impl ::std::convert::From<RecipeStopResult> for AgentResultResult {
 impl ::std::convert::From<RecipeUninstallResult> for AgentResultResult {
     fn from(value: RecipeUninstallResult) -> Self {
         Self::RecipeUninstallResult(value)
-    }
-}
-impl ::std::convert::From<RecipeModelCleanupResult> for AgentResultResult {
-    fn from(value: RecipeModelCleanupResult) -> Self {
-        Self::RecipeModelCleanupResult(value)
     }
 }
 impl ::std::convert::From<RecipeBuildEvidence> for AgentResultResult {
@@ -4030,29 +4014,6 @@ pub struct RecipeJobRunResult {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeModelCleanupInstallation {
-    pub installation_id: ::uuid::Uuid,
-    pub recipe_content_sha256: ::std::string::String,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeModelCleanupPayload {
-    pub installations: ::std::vec::Vec<RecipeModelCleanupInstallation>,
-    pub model_content_sha256: ::std::string::String,
-    pub plan_digest: ::std::string::String,
-    pub schema_version: u8,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeModelCleanupResult {
-    pub removed_model_bytes: u64,
-    pub uninstalled_installations: u32,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
 pub struct RecipeOperationRequest {
     pub operation: AgentOperation,
     pub payload: RecipeOperationRequestPayload,
@@ -4066,7 +4027,6 @@ pub enum RecipeOperationRequestPayload {
     StartPayload(RecipeStartPayload),
     StopPayload(RecipeStopPayload),
     UninstallPayload(RecipeUninstallPayload),
-    ModelCleanupPayload(RecipeModelCleanupPayload),
 }
 impl ::std::convert::From<RecipeInstallPayload> for RecipeOperationRequestPayload {
     fn from(value: RecipeInstallPayload) -> Self {
@@ -4086,11 +4046,6 @@ impl ::std::convert::From<RecipeStopPayload> for RecipeOperationRequestPayload {
 impl ::std::convert::From<RecipeUninstallPayload> for RecipeOperationRequestPayload {
     fn from(value: RecipeUninstallPayload) -> Self {
         Self::UninstallPayload(value)
-    }
-}
-impl ::std::convert::From<RecipeModelCleanupPayload> for RecipeOperationRequestPayload {
-    fn from(value: RecipeModelCleanupPayload) -> Self {
-        Self::ModelCleanupPayload(value)
     }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -6351,7 +6306,6 @@ impl AgentOperation {
             Self::RecipeJobRunV1 => "recipe.job.run.v1",
             Self::RecipeStop => "recipe.stop",
             Self::RecipeUninstall => "recipe.uninstall",
-            Self::RecipeModelUninstallV1 => "recipe.model-uninstall.v1",
         }
     }
 }
@@ -6409,8 +6363,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             RecipeStop,
             #[serde(rename = "recipe.uninstall")]
             RecipeUninstall,
-            #[serde(rename = "recipe.model-uninstall.v1")]
-            RecipeModelUninstallV1,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
@@ -6424,7 +6376,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             Raw::RecipeJobRunV1 => Self::RecipeJobRunV1,
             Raw::RecipeStop => Self::RecipeStop,
             Raw::RecipeUninstall => Self::RecipeUninstall,
-            Raw::RecipeModelUninstallV1 => Self::RecipeModelUninstallV1,
         })
     }
 }
@@ -10574,67 +10525,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunResult {
             reason: raw.reason,
             run_id: raw.run_id,
             schema_version: raw.schema_version,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeModelCleanupInstallation {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeModelCleanupInstallation", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub installation_id: ::uuid::Uuid,
-            pub recipe_content_sha256: ::std::string::String,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            installation_id: raw.installation_id,
-            recipe_content_sha256: raw.recipe_content_sha256,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeModelCleanupPayload {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeModelCleanupPayload", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub installations: ::std::vec::Vec<RecipeModelCleanupInstallation>,
-            pub model_content_sha256: ::std::string::String,
-            pub plan_digest: ::std::string::String,
-            pub schema_version: u8,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            installations: raw.installations,
-            model_content_sha256: raw.model_content_sha256,
-            plan_digest: raw.plan_digest,
-            schema_version: raw.schema_version,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeModelCleanupResult {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeModelCleanupResult", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub removed_model_bytes: u64,
-            pub uninstalled_installations: u32,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            removed_model_bytes: raw.removed_model_bytes,
-            uninstalled_installations: raw.uninstalled_installations,
         })
     }
 }

@@ -125,18 +125,18 @@ git commit -m "feat: enroll immutable GPU node agent identities"
 - Test: `control/tests/security/test_agent_identity.py`
 
 **Interfaces:**
-- Produces operator endpoints `/api/v1/agents/enrollments*` and agent endpoints `/agent/v1/enroll`, `/agent/v1/claim`, `/agent/v1/heartbeat`, `/agent/v1/result`, `/agent/v1/renew`, and `/agent/v1/artifacts/{sha256}`.
+- Produces operator endpoints `/api/agents/enrollments*` and agent endpoints `/agent/enroll`, `/agent/claim`, `/agent/heartbeat`, `/agent/result`, `/agent/renew`, and `/agent/artifacts/{sha256}`.
 - Consumes verified node identity via ASGI scope populated only by trusted proxy middleware.
 
 - [ ] **Step 1: Write failing authorization tests**
 
 ```python
 def test_spoofed_agent_header_is_rejected(client) -> None:
-    response = client.post("/agent/v1/claim", headers={"x-vonk-agent-node": NODE_ID})
+    response = client.post("/agent/claim", headers={"x-vonk-agent-node": NODE_ID})
     assert response.status_code == 401
 
 def test_verified_identity_cannot_claim_other_node(agent_client) -> None:
-    response = agent_client(NODE_A).post("/agent/v1/claim", json={"node_id": NODE_B})
+    response = agent_client(NODE_A).post("/agent/claim", json={"node_id": NODE_B})
     assert response.status_code == 403
 ```
 
@@ -201,7 +201,7 @@ git commit -m "feat: expose authenticated GPU node agent API"
 - [ ] **Step 1: Write failing rendered-boundary tests**
 
 Assert agent routes are not reachable through ordinary browser ingress,
-client-auth is mandatory except `/agent/v1/enroll`, Caddy is the only published
+client-auth is mandatory except `/agent/enroll`, Caddy is the only published
 port, CA/intermediate files are secrets, control-api trusts proxy identity
 only on the private ingress network, provider overlays fail closed when
 combined in either order, and Caddy/Python canonicalize the proxy secret to

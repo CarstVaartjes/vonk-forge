@@ -18,7 +18,7 @@ at an unaccepted GPU node endpoint.
 
 ## Stale fleet evidence
 
-Open `/api/v1/fleet` and inspect the node's connection state, certificate
+Open `/api/fleet` and inspect the node's connection state, certificate
 validity, admission inventory freshness, and telemetry freshness. Missing,
 delayed, and stale evidence remain distinct; an online connection alone does
 not establish readiness. A hostname or address change must be updated through

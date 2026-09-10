@@ -4,90 +4,32 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   CliTokenDownload,
-  AgentRepairManifest,
-  AgentUpgradeApplyInput,
-  AgentUpgradeApplyResponse,
-  AgentUpgradePlan,
-  AgentUpgradeStrategy,
-  AgentsResponse,
   AuditResponse,
   ControlApi,
-  DeploymentProvenance,
-  EnrollmentGrantResponse,
-  EnrollmentListResponse,
-  FleetNodeIdentity,
-  FleetProfile,
-  FleetProfileApplication,
-  FleetProfileApplyInput,
-  FleetProfileRetryInput,
-  FleetProfileCaptureInput,
-  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
-  FleetProfileStatus,
-  RunSwitchApplyRequest,
-  RunSwitchCancelRequest,
-  RunSwitchOperation,
-  RunSwitchPlan,
-  RunSwitchPreviewRequest,
-  CacheEntryResponse,
-  ModelCacheDownloadInput,
-  ModelCacheDownloadPreviewInput,
-  ModelCacheDownloadPreviewResponse,
-  ModelCacheEvictInput,
-  ModelCacheEvictionPreviewInput,
-  ModelCacheEvictionPreviewResponse,
-  ModelCacheInventoryResponse,
-  ModelCacheOperationResponse,
-  ModelCacheOperationsResponse,
-  ModelCacheRepairInput,
-  ModelCacheRepairPreviewInput,
-  ModelCacheRepairPreviewResponse,
-  ModelCacheUpdatesResponse,
-  ModelCacheRetryInput,
-  ModelCacheAccessResumeInput,
-  ModelCacheAccessResumeResponse,
-  RecipeImageAvailabilityInput,
-  RecipeImageAvailabilityList,
-  RecipeImageAvailabilityOperation,
-  RecipeImageAvailabilityRetryInput,
-  RunSwitchRetryInput,
+  FleetProfile,
+  FleetProfileApplicationView,
+  FleetProfileLoadInput,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
   OperationsResponse,
   OperationDetail,
-  ChangeResponse,
-  ProposalInput,
-  ProposalPreview,
-  TelemetryHistory,
-  TelemetryCurrentResponse,
-  TelemetryCapabilitiesResponse,
-  TelemetryWorkloadsResponse,
-  TelemetryResolution,
   VisualFleetSnapshot,
-  NodeProfileUpdate,
-  LibraryBuildApplyInput,
-  LibraryBuildPreviewInput,
-  LibraryImageDistributionApplyInput,
-  LibraryImageDistributionPreviewInput,
-  LibraryInstallApplyInput,
-  LibraryInstallPreviewInput,
-  LibraryLoadApplyInput,
-  LibraryLoadPreviewInput,
-  LibraryPlacementApplyInput,
-  LibraryPlacementPreviewInput,
-  LibraryMappingApplyInput,
-  LibraryMappingPreviewInput,
-  LibraryStopApplyInput,
-  LibraryUninstallApplyInput,
   ArtifactJob,
   ArtifactJobCapabilities,
   ArtifactJobCreateInput,
   ArtifactJobInputFile,
   ArtifactJobList,
   ArtifactTransferProgress,
+  ModelDetail,
+  ModelLibrary,
+  ModelStatus,
+  RecipeDetail,
+  RecipeLibrary,
+  RecipeStatus,
 } from "./types";
 
 function csrfToken(): string | undefined {
@@ -188,7 +130,7 @@ export class ApiClient implements ControlApi {
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    if (!path.startsWith("/api/v1/") || path.includes("..")) throw new Error("Unsafe API path");
+    if (!path.startsWith("/api/") || path.includes("..")) throw new Error("Unsafe API path");
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
@@ -211,18 +153,18 @@ export class ApiClient implements ControlApi {
   }
 
   session(): Promise<AuthSession> {
-    return this.request("/api/v1/auth/session");
+    return this.request("/api/auth/session");
   }
 
   login(subject: "admin", password: string): Promise<AuthSession> {
-    return this.request("/api/v1/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
+    return this.request("/api/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
   }
 
   async logout(): Promise<void> {
     const headers = new Headers({Accept: "application/json"});
     const csrf = csrfToken();
     if (csrf) headers.set("X-CSRF-Token", csrf);
-    const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
   }
@@ -231,7 +173,7 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "text/plain"});
     const csrf = csrfToken();
     if (csrf) headers.set("X-CSRF-Token", csrf);
-    const response = await fetch("/api/v1/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
+    const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
@@ -256,386 +198,103 @@ export class ApiClient implements ControlApi {
   }
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
-    return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+    return resultData(await this.generated.GET("/api/fleet", {signal}));
   }
 
-  async fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList> {
-    return resultData(await this.generated.GET("/api/v1/fleet-profiles", {signal}));
+  async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
+    return resultData(await this.generated.GET("/api/profile", {signal}));
   }
 
-  async fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
+  async profile(number: number, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.GET("/api/profile/{number}", {
+      params: {path: {number}},
       signal,
     }));
   }
 
-  async createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profiles", {body: input, signal}));
-  }
-
-  async updateFleetProfile(profileId: string, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.PUT("/api/v1/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
+  async autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.PUT("/api/profile/{number}", {
+      params: {path: {number}},
       body: input,
       signal,
     }));
   }
 
-  async deleteFleetProfile(profileId: string, signal?: AbortSignal): Promise<void> {
-    const {response} = await this.generated.DELETE("/api/v1/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
-      signal,
-    });
-    if (!response.ok) throw new ApiError(response.status, `Control API returned ${response.status}`);
-  }
-
-  async previewFleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfilePreview> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/preview", {
-      params: {path: {profile_id: profileId}},
-      body: {},
+  async previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview> {
+    return resultData(await this.generated.POST("/api/profile/{number}/preview", {
+      params: {path: {number}},
       signal,
     }));
   }
 
-  async captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profiles/capture-current", {body: input, signal}));
-  }
-
-  async duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/duplicate", {
-      params: {path: {profile_id: profileId}},
+  async loadProfile(number: number, input: FleetProfileLoadInput = {dry_run: false}, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.POST("/api/profile/{number}/load", {
+      params: {path: {number}},
       body: input,
       signal,
     }));
   }
 
-  async fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus> {
-    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}/status", {
-      params: {path: {profile_id: profileId}},
+  async profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.GET("/api/profile/{number}/progress", {
+      params: {path: {number}},
       signal,
     }));
   }
 
-  async applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/apply", {
-      params: {path: {profile_id: profileId}},
-      body: input,
-      signal,
-    }));
+  async modelStatus(signal?: AbortSignal): Promise<ModelStatus> {
+    return resultData(await this.generated.GET("/api/model", {signal}));
   }
 
-  async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.GET("/api/v1/fleet-profile-applications/{application_id}", {
-      params: {path: {application_id: applicationId}},
-      signal,
-    }));
-  }
-
-  async retryFleetProfileApplication(applicationId: string, input: FleetProfileRetryInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.POST("/api/v1/fleet-profile-applications/{application_id}/retry", {
-      params: {path: {application_id: applicationId}}, body: input, signal,
-    }));
-  }
-
-  async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
-    return resultData(await this.generated.POST("/api/v1/recipes/run-switch-plans/preview", {body: input, signal}));
-  }
-
-  async applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/v1/recipes/run-switches", {body: input, signal}));
-  }
-
-  async getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.GET("/api/v1/recipes/run-switches/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async cancelRecipeRunSwitchOperation(operationId: string, input: RunSwitchCancelRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/cancel", {
-      params: {path: {operation_id: operationId}}, body: input, signal,
-    }));
-  }
-
-  async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
-  }
-
-  async modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/entries/{artifact_set_sha256}", {
-      params: {path: {artifact_set_sha256: artifactSetSha256}},
-      signal,
-    }));
-  }
-
-  async previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/download-preview", {body: input, signal}));
-  }
-
-  async downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/download", {body: input, signal}));
-  }
-
-  async previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/repair-preview", {body: input, signal}));
-  }
-
-  async repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/repair", {body: input, signal}));
-  }
-
-  async previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/eviction-preview", {body: input, signal}));
-  }
-
-  async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
-  }
-
-  async deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance> {
-    return resultData(await this.generated.GET("/api/v1/deployment-provenance", {signal}));
-  }
-
-  async modelCacheUpdates(signal?: AbortSignal, checkUpstream = false): Promise<ModelCacheUpdatesResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100, check_upstream: checkUpstream}}, signal}));
-  }
-
-  async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/operations", {params: {query: {limit: 100, cursor}}, signal}));
-  }
-
-  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.GET("/api/v1/model-cache/operations/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse> {
-    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/check-access-and-resume", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability", {body: input, signal}));
-  }
-
-  async recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList> {
-    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability", {
-      params: {query: {recipe_revision_id: recipeRevisionId, state, cursor, limit: 100}},
-      signal,
-    }));
-  }
-
-  async recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
-    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
-    return resultData(await this.generated.PATCH("/api/v1/nodes/{node_id}/profile", {
-      body: input,
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
-  async librarySnapshot(cursor?: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/library", {
+  async modelLibrary(cursor?: string, signal?: AbortSignal): Promise<ModelLibrary> {
+    return resultData(await this.generated.GET("/api/model/library", {
       params: {query: {cursor, limit: 100}},
       signal,
     }));
   }
 
-  async libraryRecipe(recipeId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/library/recipes/{recipe_id}", {
-      params: {path: {recipe_id: recipeId}},
+  async modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail> {
+    return resultData(await this.generated.GET("/api/model/{selector}", {
+      params: {path: {selector}},
       signal,
     }));
   }
 
-  async previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/placements/preview", {body: input, signal}));
+  async recipeStatus(signal?: AbortSignal): Promise<RecipeStatus> {
+    return resultData(await this.generated.GET("/api/recipe", {signal}));
   }
 
-  async applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/placements", {body: input, signal}));
-  }
-
-  async libraryPlacement(placementId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/library/placements/{placement_id}", {
-      params: {path: {placement_id: placementId}},
+  async recipeLibrary(cursor?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
+    return resultData(await this.generated.GET("/api/recipe/library", {
+      params: {query: {cursor, limit: 100}},
       signal,
     }));
   }
 
-  async retryLibraryPlacement(placementId: string, input: FleetProfileRetryInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/placements/{placement_id}/retry", {
-      params: {path: {placement_id: placementId}}, body: input, signal,
-    }));
-  }
-
-  async previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/model-deletion-plans/preview", {
-      body: {model_content_sha256: modelContentSha256},
-      signal,
-    }));
-  }
-
-  async deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/library/models/{model_content_sha256}/delete", {
-      params: {path: {model_content_sha256: modelContentSha256}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/build-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/builds", {body: input, signal}));
-  }
-
-  async previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/mapping-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryMapping(input: LibraryMappingApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/mappings", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryImageDistribution(input: LibraryImageDistributionPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/image-distribution-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryImageDistribution(input: LibraryImageDistributionApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/image-distributions", {body: input, signal}));
-  }
-
-  async previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/install-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryInstall(input: LibraryInstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/installations", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryLoad(input: LibraryLoadPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/run-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryLoad(input: LibraryLoadApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/runs", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryStop(runId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/stop-plans/preview", {body: {run_id: runId}, signal}));
-  }
-
-  async applyLibraryStop(runId: string, input: LibraryStopApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/runs/{run_id}/stop", {
-      params: {path: {run_id: runId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryUninstall(installationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/uninstall-plans/preview", {
-      body: {installation_id: installationId},
-      signal,
-    }));
-  }
-
-  async applyLibraryUninstall(installationId: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/installations/{installation_id}/uninstall", {
-      params: {path: {installation_id: installationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async libraryOperation(operationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/recipes/operations/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryLibraryOperation(operationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/v1/recipes/operations/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: {request_key: crypto.randomUUID()},
-      signal,
-    }));
-  }
-
-  async libraryRunStatus(runId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/recipes/runs/{run_id}", {
-      params: {path: {run_id: runId}},
+  async recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail> {
+    return resultData(await this.generated.GET("/api/recipe/{selector}", {
+      params: {path: {selector}},
       signal,
     }));
   }
 
   async libraryJobProgress(jobId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/v1/jobs/{job_id}", {
+    return resultData(await this.generated.GET("/api/jobs/{job_id}", {
       params: {path: {job_id: jobId}, query: {}},
       signal,
     }));
   }
 
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList> {
-    return this.request(`/api/v1/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
+    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
   }
 
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
-    return this.request("/api/v1/artifact-jobs/capabilities", {signal});
+    return this.request("/api/artifact-jobs/capabilities", {signal});
   }
 
   createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
+    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
       body: JSON.stringify(input),
       signal,
@@ -643,7 +302,7 @@ export class ApiClient implements ControlApi {
   }
 
   async uploadArtifactJobInput(jobId: string, file: ArtifactJobInputFile, content: Blob, signal?: AbortSignal, onProgress?: (progress: ArtifactTransferProgress) => void): Promise<ArtifactJob> {
-    const path = `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/inputs/${encodeURIComponent(file.name)}`;
+    const path = `/api/artifact-jobs/${encodeURIComponent(jobId)}/inputs/${encodeURIComponent(file.name)}`;
     return new Promise((resolve, reject) => {
       const request = new XMLHttpRequest();
       const abort = () => request.abort();
@@ -677,19 +336,19 @@ export class ApiClient implements ControlApi {
   }
 
   finalizeArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {method: "POST", signal});
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {method: "POST", signal});
   }
 
   submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", signal});
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", signal});
   }
 
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}`, {signal});
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}`, {signal});
   }
 
   cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
       body: JSON.stringify({reason}),
       signal,
@@ -697,125 +356,34 @@ export class ApiClient implements ControlApi {
   }
 
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
   }
 
   artifactJobResultUrl(jobId: string, sha256: string): string {
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
-    return `/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
-  }
-
-  async nodeTelemetryHistory(
-    nodeId: string,
-    start: string,
-    end: string,
-    resolution: TelemetryResolution,
-    maximumPoints: number,
-    signal?: AbortSignal,
-  ): Promise<TelemetryHistory> {
-    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry", {
-      params: {
-        path: {node_id: nodeId},
-        query: {start, end, resolution, maximum_points: maximumPoints},
-      },
-      signal,
-    }));
-  }
-
-  async nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
-    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/current", {
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
-  async nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
-    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/capabilities", {
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
-  async nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
-    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/workloads", {
-      params: {path: {node_id: nodeId}, query: {run_id: runId, state}},
-      signal,
-    }));
-  }
-
-  async agents(): Promise<AgentsResponse> {
-    return resultData(await this.generated.GET("/api/v1/agents"));
-  }
-
-  async enrollments(): Promise<EnrollmentListResponse> {
-    return resultData(await this.generated.GET("/api/v1/agents/enrollments"));
-  }
-
-  async createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
-      body: {ttl_seconds: ttlSeconds, purpose: "new-node"},
-      signal,
-    }));
-  }
-
-  async createReenrollmentGrant(nodeId: string | undefined, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
-      body: {ttl_seconds: ttlSeconds, purpose: "re-enroll", ...(nodeId ? {node_id: nodeId} : {})},
-      signal,
-    }));
-  }
-
-  async revokeAgentNode(nodeId: string): Promise<void> {
-    const {response} = await this.generated.POST("/api/v1/agents/nodes/{node_id}/revoke", {
-      params: {path: {node_id: nodeId}},
-    });
-    if (!response.ok) throw new Error(`Control API returned ${response.status}`);
-  }
-
-  async previewAgentUpgrade(nodeIds: string[] | undefined, strategy: AgentUpgradeStrategy, repairManifest?: AgentRepairManifest, signal?: AbortSignal): Promise<AgentUpgradePlan> {
-    return resultData(await this.generated.POST("/api/v1/agents/upgrades/preview", {
-      body: {
-        node_ids: nodeIds,
-        ...(repairManifest ? {repair_manifest: repairManifest} : {}),
-        strategy,
-      },
-      signal,
-    }));
-  }
-
-  async applyAgentUpgrade(plan: AgentUpgradePlan, signal?: AbortSignal): Promise<AgentUpgradeApplyResponse> {
-    const body: AgentUpgradeApplyInput = {
-        node_ids: plan.node_ids,
-        ...(plan.repair_manifest ? {repair_manifest: plan.repair_manifest} : {package: plan.package}),
-        plan_digest: plan.plan_digest,
-        strategy: plan.strategy,
-    };
-    return resultData(await this.generated.POST("/api/v1/agents/upgrades", {
-      body,
-      signal,
-    }));
+    return `/api/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
   }
 
   async jobs(cursor?: string): Promise<JobsResponse> {
-    return resultData(await this.generated.GET("/api/v1/jobs", {
+    return resultData(await this.generated.GET("/api/jobs", {
       params: {query: {cursor, limit: 20}},
     }));
   }
 
   async operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse> {
-    return resultData(await this.generated.GET("/api/v1/operations", {
+    return resultData(await this.generated.GET("/api/operations", {
       params: {query: {cursor, limit: 20}}, signal,
     }));
   }
 
   async operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail> {
-    return resultData(await this.generated.GET("/api/v1/operations/{operation_id}", {
+    return resultData(await this.generated.GET("/api/operations/{operation_id}", {
       params: {path: {operation_id: operationId}}, signal,
     }));
   }
 
   async job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail> {
-    return resultData(await this.generated.GET("/api/v1/jobs/{job_id}", {
+    return resultData(await this.generated.GET("/api/jobs/{job_id}", {
       params: {
         path: {job_id: jobId},
         query: {limit: 20, operation_cursor: operationCursor, target_cursor: targetCursor},
@@ -824,14 +392,12 @@ export class ApiClient implements ControlApi {
   }
 
   async resumeJob(jobId: string): Promise<JobResumeResponse> {
-    return resultData(await this.generated.POST("/api/v1/jobs/{job_id}/resume", {
+    return resultData(await this.generated.POST("/api/jobs/{job_id}/resume", {
       params: {path: {job_id: jobId}},
     }));
   }
 
   async audit(signal?: AbortSignal): Promise<AuditResponse> {
-    return resultData(await this.generated.GET("/api/v1/audit", {signal}));
+    return resultData(await this.generated.GET("/api/audit", {signal}));
   }
-  preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
-  submit(digest: string) { return this.request<ChangeResponse>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
 }

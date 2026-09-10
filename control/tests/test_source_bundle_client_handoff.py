@@ -68,7 +68,7 @@ def test_generated_admin_upload_roundtrips_actual_canonical_bundle(tmp_path):
         assert uploaded.parsed.archive_bytes == len(bundle.archive)
         assert uploaded.parsed.files == ["Dockerfile", "empty"]
         downloaded = transport.get(
-            f"/api/v1/catalog/source-bundles/{uploaded.parsed.sha256}"
+            f"/api/catalog/source-bundles/{uploaded.parsed.sha256}"
         )
         assert downloaded.status_code == 200
         assert downloaded.content == bundle.archive

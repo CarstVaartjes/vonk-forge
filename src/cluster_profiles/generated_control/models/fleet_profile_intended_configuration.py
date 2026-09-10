@@ -30,10 +30,11 @@ class FleetProfileIntendedConfiguration:
             assignments (list['FleetProfileAssignment']):
             installation_policy (FleetProfileIntendedConfigurationInstallationPolicy):
             profile_digest (str):
-            scope (FleetProfileScope): The complete set of Sparks reconciled by a profile.
+            scope (FleetProfileScope): Frozen complete fleet boundary for a single execution plan.
 
-                Scope is deliberately independent from assignments.  A member with no
-                assignment is an intentional idle outcome when the profile is applied.
+                User profiles do not author this field.  It is captured from the enrolled
+                roster when preview/load admits an operation and is retained so a running
+                operation cannot silently expand or shrink with fleet membership changes.
      """
 
     assignments: list['FleetProfileAssignment']

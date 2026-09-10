@@ -47,9 +47,6 @@ export function useFleetStream(api: ControlApi) {
     const snapshot = await api.visualFleet(signal);
     dispatch({type: "requested-snapshot", snapshot});
   }, [api]);
-  const updateNodeProfile = useCallback((nodeId: string, displayName: string) => {
-    dispatch({type: "node-profile-updated", nodeId, displayName});
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -205,7 +202,7 @@ export function useFleetStream(api: ControlApi) {
 
     void requestSnapshot("initial");
     const source = typeof EventSource === "function"
-      ? new EventSource("/api/v1/fleet/stream")
+      ? new EventSource("/api/fleet/stream")
       : undefined;
     if (source) {
       source.addEventListener("open", onOpen);
@@ -238,5 +235,5 @@ export function useFleetStream(api: ControlApi) {
     };
   }, [api, generation]);
 
-  return {...state, now, refresh, retry, updateNodeProfile};
+  return {...state, now, refresh, retry};
 }

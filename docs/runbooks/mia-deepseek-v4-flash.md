@@ -79,11 +79,14 @@ scripts/qualify-recipe \
 
 The production Controller follows the global recipe repository's `main` branch
 through its Caddy proxy and refreshes metadata at startup and every 15 minutes.
-Select the immutable Model and Recipe revision from that refreshed metadata,
-then use Controller Run/Switch for the physical lifecycle:
+Download the reviewed recipe, then assign it to a whole-fleet profile for the
+physical lifecycle. Loading a profile also idles every unassigned Spark:
 
 ```bash
-vonkctl models run --input-file '<RUN_REQUEST_JSON>' --json
+vonkctl recipe download RECIPE
+vonkctl --profile 1 profile add RECIPE --spark SPARK_A --spark SPARK_B
+vonkctl --profile 1 profile load --dry-run --json
+vonkctl --profile 1 profile load --json
 ```
 
 The Controller resolves the digest-pinned image, verified model bytes, exact

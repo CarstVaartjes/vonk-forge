@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -71,83 +69,38 @@ IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
-    ("post", "/api/v1/agents/enrollments/grants"): "createEnrollmentGrant",
-    ("get", "/api/v1/agents/enrollments"): "listAgentEnrollments",
-    ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
-    ("get", "/api/v1/agents/upgrades/candidate"): "getAgentUpgradeCandidate",
-    ("post", "/api/v1/agents/upgrades/preview"): "previewAgentUpgrade",
-    ("post", "/api/v1/agents/upgrades"): "applyAgentUpgrade",
-    ("get", "/api/v1/fleet"): "getFleetStatus",
-    ("get", "/api/v1/deployment-provenance"): "getDeploymentProvenance",
-    ("get", "/api/v1/operations/{operation_id}/evidence"): "getOperationEvidence",
-    ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
-    ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
-    ("post", "/api/v1/fleet-profiles"): "createFleetProfile",
-    ("get", "/api/v1/fleet-profiles/{profile_id}"): "getFleetProfile",
-    ("put", "/api/v1/fleet-profiles/{profile_id}"): "updateFleetProfile",
-    ("delete", "/api/v1/fleet-profiles/{profile_id}"): "deleteFleetProfile",
-    ("post", "/api/v1/fleet-profiles/{profile_id}/preview"): "previewFleetProfile",
-    ("post", "/api/v1/fleet-profiles/{profile_id}/apply"): "applyFleetProfile",
+    ("get", "/api/fleet"): "getFleetStatus",
+    ("get", "/api/operations/{operation_id}/evidence"): "getOperationEvidence",
+    ("get", "/api/fleet/stream"): "streamFleetEvents",
     (
         "get",
-        "/api/v1/fleet-profile-applications/{application_id}",
-    ): "getFleetProfileApplication",
-    ("get", "/api/v1/library"): "listLibrary",
-    ("post", "/api/v1/recipes/job-runs"): "activateRecipeJobRun",
-    (
-        "get",
-        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "listArtifactJobsForRun",
     (
         "post",
-        "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "createArtifactJob",
-    ("get", "/api/v1/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
-    ("get", "/api/v1/artifact-jobs/{job_id}"): "getArtifactJobStatus",
-    ("put", "/api/v1/artifact-jobs/{job_id}/inputs/{name}"): "uploadArtifactJobInput",
-    ("post", "/api/v1/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
-    ("post", "/api/v1/artifact-jobs/{job_id}/submit"): "submitArtifactJob",
-    ("post", "/api/v1/artifact-jobs/{job_id}/cancel"): "cancelArtifactJob",
-    ("get", "/api/v1/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
+    ("get", "/api/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
+    ("get", "/api/artifact-jobs/{job_id}"): "getArtifactJobStatus",
+    ("put", "/api/artifact-jobs/{job_id}/inputs/{name}"): "uploadArtifactJobInput",
+    ("post", "/api/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
+    ("post", "/api/artifact-jobs/{job_id}/submit"): "submitArtifactJob",
+    ("post", "/api/artifact-jobs/{job_id}/cancel"): "cancelArtifactJob",
+    ("get", "/api/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
     (
         "get",
-        "/api/v1/artifact-jobs/{job_id}/results/{sha256}",
+        "/api/artifact-jobs/{job_id}/results/{sha256}",
     ): "downloadArtifactJobResult",
-    (
-        "get",
-        "/api/v1/library/recipes/{recipe_id}",
-    ): "getLibraryRecipe",
-    ("patch", "/api/v1/nodes/{node_id}/profile"): "updateNodeProfile",
-    (
-        "get",
-        "/api/v1/nodes/{node_id}/telemetry",
-    ): "getNodeTelemetryHistory",
-    (
-        "get",
-        "/api/v1/nodes/{node_id}/telemetry/current",
-    ): "getNodeTelemetryCurrent",
-    (
-        "get",
-        "/api/v1/nodes/{node_id}/telemetry/capabilities",
-    ): "getNodeTelemetryCapabilities",
-    (
-        "get",
-        "/api/v1/nodes/{node_id}/telemetry/workloads",
-    ): "listNodeTelemetryWorkloads",
-    ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
-    ("get", "/api/v1/agents"): "listAgents",
-    ("get", "/api/v1/authority"): "getAuthority",
-    ("post", "/api/v1/proposals"): "previewProposal",
-    ("post", "/api/v1/changes"): "submitChange",
-    ("get", "/api/v1/jobs"): "listJobs",
-    ("get", "/api/v1/operations"): "listOperations",
-    ("get", "/api/v1/audit"): "listAuditEvents",
-    ("get", "/api/v1/identity-history"): "listIdentityHistory",
-    ("get", "/api/v1/jobs/{job_id}"): "getJob",
-    ("get", "/api/v1/operations/{operation_id}"): "getOperation",
-    ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
-    ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
-    ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
+    ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
+    ("get", "/api/jobs"): "listJobs",
+    ("get", "/api/operations"): "listOperations",
+    ("get", "/api/audit"): "listAuditEvents",
+    ("get", "/api/identity-history"): "listIdentityHistory",
+    ("get", "/api/jobs/{job_id}"): "getJob",
+    ("get", "/api/operations/{operation_id}"): "getOperation",
+    ("post", "/api/jobs/{job_id}/resume"): "resumeJob",
+    ("get", "/api/jobs/{job_id}/logs"): "listJobLogs",
+    ("get", "/api/jobs/{job_id}/logs/{digest}"): "getJobLog",
 }
 
 
@@ -222,38 +175,6 @@ class HealthzResponse(StrictModel):
 
 class ReadyzResponse(StrictModel):
     status: Literal["ready"]
-
-
-class AuthorityResponse(StrictModel):
-    revision: str = Field(pattern=DIGEST_PATTERN)
-    documents: dict[str, str] = Field(max_length=256)
-    dependencies: dict[str, list[str]] = Field(max_length=256)
-
-
-class ProposalPreviewResponse(StrictModel):
-    base_revision: str = Field(pattern=DIGEST_PATTERN)
-    digest: str = Field(pattern=DIGEST_PATTERN)
-    patch: str = Field(min_length=1, max_length=16 * 1024 * 1024)
-    affected_documents: list[str] = Field(min_length=1, max_length=32)
-    validation_results: list[str] = Field(max_length=32)
-
-    @field_validator("patch")
-    @classmethod
-    def patch_is_canonical_base64(cls, value: str) -> str:
-        try:
-            decoded = base64.b64decode(value, validate=True)
-        except (ValueError, binascii.Error):
-            raise ValueError("patch must be base64") from None
-        if base64.b64encode(decoded).decode("ascii") != value:
-            raise ValueError("patch must be canonical base64")
-        return value
-
-
-class ChangeResponse(StrictModel):
-    proposal_digest: str = Field(pattern=DIGEST_PATTERN)
-    previous_revision: str = Field(pattern=DIGEST_PATTERN)
-    authority_revision: str = Field(pattern=DIGEST_PATTERN)
-    mode: Literal["database"]
 
 
 class JobResponse(StrictModel):
@@ -1654,19 +1575,15 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
     source = deepcopy(app.openapi())
     paths: dict[str, object] = {}
     browser_auth_paths = {
-        "/api/v1/auth/login",
-        "/api/v1/auth/logout",
-        "/api/v1/auth/session",
-        "/api/v1/auth/cli-token",
-        "/api/v1/fleet/stream",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/session",
+        "/api/auth/cli-token",
     }
-    includes_browser_auth = any(
-        path in source.get("paths", {}) for path in browser_auth_paths
-    )
     for path, path_item in source.get("paths", {}).items():
-        if path in {"/api/v1/healthz", "/api/v1/readyz"}:
+        if path in {"/api/healthz", "/api/readyz"}:
             continue
-        if not path.startswith("/api/v1/"):
+        if not path.startswith("/api/"):
             continue
         selected = deepcopy(path_item)
         for method, operation in selected.items():
@@ -1678,22 +1595,21 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
                 raise RuntimeError(
                     f"admin operation ID is not explicit for {method.upper()} {path}"
                 ) from error
-            if path == "/api/v1/auth/login":
+            if path == "/api/auth/login":
                 operation["security"] = []
             elif path in browser_auth_paths:
                 operation["security"] = [{"BrowserSession": []}]
             else:
-                operation["security"] = [{"BearerAuth": []}]
+                operation["security"] = [{"BearerAuth": []}, {"BrowserSession": []}]
         paths[path] = selected
     source["paths"] = paths
     components = source.setdefault("components", {})
     components["securitySchemes"] = {"BearerAuth": {"scheme": "bearer", "type": "http"}}
-    if includes_browser_auth:
-        components["securitySchemes"]["BrowserSession"] = {
-            "in": "cookie",
-            "name": "vonk_session",
-            "type": "apiKey",
-        }
+    components["securitySchemes"]["BrowserSession"] = {
+        "in": "cookie",
+        "name": "vonk_session",
+        "type": "apiKey",
+    }
 
     referenced: set[str] = set()
 

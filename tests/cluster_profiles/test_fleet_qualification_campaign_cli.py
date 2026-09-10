@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 from library_route_fixtures import _library_detail, _recipe
@@ -43,7 +44,8 @@ class _Client:
         self._details = {}
         for slug in ("a", "b", "c"):
             detail = _library_detail(_recipe(slug))
-            self._details[str(detail["summary"]["recipe_id"])] = detail
+            selector = f"vonk/{slug}"
+            self._details[selector] = detail
 
     def request(
         self,
@@ -55,7 +57,7 @@ class _Client:
         query: object = None,
     ) -> dict[str, object]:
         del payload, extra_headers, query
-        if (method, path) == ("GET", "/api/v1/fleet"):
+        if (method, path) == ("GET", "/api/fleet"):
             return {
                 "authority_revision": "a" * 40,
                 "event_cursor": 1,
@@ -71,17 +73,45 @@ class _Client:
                     for node_id in (NODE_A, NODE_B)
                 ],
             }
-        if (method, path) == ("GET", "/api/v1/library/recipes"):
+        if (method, path) == ("GET", "/api/recipe/library"):
             return {
                 "schema_version": 2,
                 "generated_at": "2026-09-07T00:00:00Z",
                 "next_cursor": None,
                 "freshness_policy": {},
-                "recipes": [item["summary"] for item in self._details.values()],
+                "facets": {"usage": [], "family": [], "version": [], "quantization": []},
+                "filters": {},
+                "recipes": [
+                    {
+                        "schema_version": 2,
+                        "document": item["detail"]["definition"],
+                        "identity": item["detail"]["recipe"],
+                        "local": {"controller": "cached"},
+                        "model_selectors": [],
+                        "resources": {},
+                        "selector": selector,
+                        "updated_at": "2026-09-07T00:00:00Z",
+                        "usage": [],
+                    }
+                    for selector, item in self._details.items()
+                ],
             }
-        prefix = "/api/v1/library/recipes/"
+        prefix = "/api/recipe/"
         if method == "GET" and path.startswith(prefix):
-            return self._details[path.removeprefix(prefix)]["detail"]
+            selector = unquote(path.removeprefix(prefix))
+            detail = self._details[selector]["detail"]
+            return {
+                "schema_version": 2,
+                "document": detail["definition"],
+                "identity": detail["recipe"],
+                "local": {"controller": "cached"},
+                "model_documents": detail["model_documents"],
+                "model_selectors": [],
+                "resources": {},
+                "selector": selector,
+                "updated_at": "2026-09-07T00:00:00Z",
+                "usage": [],
+            }
         raise AssertionError((method, path))
 
 

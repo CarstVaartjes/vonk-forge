@@ -1136,14 +1136,11 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
     )
 
 
-def test_sse_route_requires_cookie_before_header_parse_and_sets_exact_headers() -> None:
+def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     client, browser_session, bearer, stream = _browser_client()
-    route = "/api/v1/fleet/stream"
+    route = "/api/fleet/stream"
 
     assert client.get(route, headers={"last-event-id": "+1"}).status_code == 401
-    assert client.get(
-        route, headers={"authorization": f"Bearer {bearer}"}
-    ).status_code == 401
     assert client.get(route, params={"access_token": browser_session}).status_code == 401
     assert stream.calls == []
 
@@ -1165,3 +1162,11 @@ def test_sse_route_requires_cookie_before_header_parse_and_sets_exact_headers() 
         "retry: 2000\nid: 12\nevent: fleet-snapshot\ndata: {}\n\n"
     )
     assert stream.calls == [0]
+
+    client.cookies.clear()
+    bearer_response = client.get(
+        route, headers={"authorization": f"Bearer {bearer}", "last-event-id": "0"}
+    )
+    assert bearer_response.status_code == 200
+    assert bearer_response.text == response.text
+    assert stream.calls == [0, 0]

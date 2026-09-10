@@ -225,7 +225,7 @@ Expected: FAIL because the generic entity models and service do not exist.
 
 - [ ] **Step 5: Add authenticated entity API routes**
 
-Expose list/detail/draft/revise/resolve under `/api/v1/catalog/entities`. Responses include immutable revision identity and omit credentials, source-gating tokens, and secret values.
+Expose list/detail/draft/revise/resolve under `/api/catalog/entities`. Responses include immutable revision identity and omit credentials, source-gating tokens, and secret values.
 
 - [ ] **Step 6: Pass service and API tests**
 

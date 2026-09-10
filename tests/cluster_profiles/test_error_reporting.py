@@ -60,13 +60,13 @@ def test_local_io_keeps_safe_path_and_errno() -> None:
 
 
 def test_endpoint_drops_query_and_userinfo() -> None:
-    assert safe_endpoint("https://user:secret@example.test/api/v1/jobs?token=secret") == "/api/v1/jobs"
+    assert safe_endpoint("https://user:secret@example.test/api/jobs?token=secret") == "/api/jobs"
 
 
 def test_error_context_omits_unavailable_request_id() -> None:
     context = ErrorContext(
-        operation="GET /api/v1/jobs",
-        endpoint="/api/v1/jobs",
+        operation="GET /api/jobs",
+        endpoint="/api/jobs",
         code="controller.transport_timeout",
         source="transport",
         transport="timeout",
@@ -92,8 +92,8 @@ def test_http_errors_keep_status_code_and_request_id(tmp_path: Path, status: int
             {
                 "detail": "bad Bearer private-token",
                 "context": {
-                    "operation": "GET /api/v1/jobs",
-                    "endpoint": "/api/v1/jobs",
+                    "operation": "GET /api/jobs",
+                    "endpoint": "/api/jobs",
                     "http_status": status,
                     "code": code,
                     "request_id": "00000000-0000-4000-8000-000000000099",
@@ -106,7 +106,7 @@ def test_http_errors_keep_status_code_and_request_id(tmp_path: Path, status: int
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/v1/jobs?secret=private-token",
+            "https://forge.example.test/api/jobs?secret=private-token",
             status,
             "rejected",
             headers,
@@ -116,7 +116,7 @@ def test_http_errors_keep_status_code_and_request_id(tmp_path: Path, status: int
     client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
     expected = ControlUnauthorized if status == 401 else ControlForbidden
     with pytest.raises(expected) as raised:
-        client.request("GET", "/api/v1/jobs/00000000-0000-4000-8000-000000000001/logs")
+        client.request("GET", "/api/jobs/00000000-0000-4000-8000-000000000001/logs")
     assert raised.value.context is not None
     assert raised.value.context.http_status == status
     assert raised.value.context.code == code
@@ -130,7 +130,7 @@ def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
 
     client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
     with pytest.raises(ControlTransportError) as raised:
-        client.request("GET", "/api/v1/jobs")
+        client.request("GET", "/api/jobs")
     assert raised.value.context is not None
     assert raised.value.context.transport == "dns"
     assert raised.value.context.decision == "retry"

@@ -74,7 +74,7 @@ def _client(
 
 def _login(client: TestClient, password: str = ADMIN_PASSWORD):
     return client.post(
-        "/api/v1/auth/login",
+        "/api/auth/login",
         headers={"origin": ORIGIN},
         json={"subject": "admin", "password": password},
     )
@@ -86,13 +86,13 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
     schema = client.app.openapi()
     paths = schema["paths"]
     expected = {
-        "/api/v1/auth/login": {"401", "403", "422", "429"},
-        "/api/v1/auth/session": {"401"},
-        "/api/v1/auth/logout": {"401", "403"},
-        "/api/v1/auth/cli-token": {"401", "403"},
+        "/api/auth/login": {"401", "403", "422", "429"},
+        "/api/auth/session": {"401"},
+        "/api/auth/logout": {"401", "403"},
+        "/api/auth/cli-token": {"401", "403"},
     }
     for path, statuses in expected.items():
-        for method in ("post",) if path != "/api/v1/auth/session" else ("get",):
+        for method in ("post",) if path != "/api/auth/session" else ("get",):
             responses = paths[path][method]["responses"]
             assert statuses <= set(responses)
             for status_code in statuses - {"422"}:
@@ -137,8 +137,8 @@ def _chunked_asgi_login(
             "http_version": "1.1",
             "method": "POST",
             "scheme": "https",
-            "path": "/api/v1/auth/login",
-            "raw_path": b"/api/v1/auth/login",
+            "path": "/api/auth/login",
+            "raw_path": b"/api/auth/login",
             "query_string": b"",
             "headers": (
                 (b"content-type", b"application/json"),
@@ -217,7 +217,7 @@ def test_login_rejects_non_exact_or_unbounded_strict_documents(
     client, audits, _verifier = _client()
 
     response = client.post(
-        "/api/v1/auth/login", headers={"origin": ORIGIN}, json=document
+        "/api/auth/login", headers={"origin": ORIGIN}, json=document
     )
 
     assert response.status_code == 422
@@ -242,7 +242,7 @@ def test_login_rejects_duplicate_or_malformed_json_without_echoing_it(
     client, audits, _verifier = _client()
 
     response = client.post(
-        "/api/v1/auth/login",
+        "/api/auth/login",
         headers={"origin": ORIGIN, "content-type": "application/json"},
         content=document,
     )
@@ -283,7 +283,7 @@ def test_login_requires_the_exact_https_request_origin(origin: str | None) -> No
     headers = {} if origin is None else {"origin": origin}
 
     response = client.post(
-        "/api/v1/auth/login",
+        "/api/auth/login",
         headers=headers,
         json={"subject": "admin", "password": ADMIN_PASSWORD},
     )
@@ -339,7 +339,7 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     client, audits, _verifier = _client()
     assert _login(client).status_code == 200
 
-    status = client.get("/api/v1/auth/session")
+    status = client.get("/api/auth/session")
 
     assert status.status_code == 200
     assert status.json() == {
@@ -355,14 +355,14 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
         now=int(NOW.timestamp()),
     )
     bypass = client.post(
-        "/api/v1/auth/logout",
+        "/api/auth/logout",
         headers={"authorization": f"Bearer {bearer}"},
     )
     assert bypass.status_code == 403
-    assert client.get("/api/v1/auth/session").status_code == 200
+    assert client.get("/api/auth/session").status_code == 200
 
     logout = client.post(
-        "/api/v1/auth/logout",
+        "/api/auth/logout",
         headers={
             "authorization": f"Bearer {bearer}",
             "x-csrf-token": CSRF_TOKEN,
@@ -387,7 +387,7 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
         None,
         (),
     )
-    assert client.get("/api/v1/auth/session").status_code == 401
+    assert client.get("/api/auth/session").status_code == 401
 
 
 def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
@@ -396,7 +396,7 @@ def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
     assert _login(client).status_code == 200
 
     response = client.post(
-        "/api/v1/auth/cli-token",
+        "/api/auth/cli-token",
         headers={"x-csrf-token": CSRF_TOKEN},
     )
 
@@ -427,8 +427,8 @@ def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
         now=int(NOW.timestamp()),
     )
     assert client.post(
-        "/api/v1/auth/cli-token",
+        "/api/auth/cli-token",
         headers={"authorization": f"Bearer {bearer}"},
     ).status_code == 401
     assert _login(client).status_code == 200
-    assert client.post("/api/v1/auth/cli-token").status_code == 403
+    assert client.post("/api/auth/cli-token").status_code == 403

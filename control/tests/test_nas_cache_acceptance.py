@@ -180,11 +180,11 @@ def _seed_recipe_reference(
         if profile:
             session.add(
                 FleetProfile(
+                    number=1,
                     name=f"acceptance-{recipe_id[:8]}",
                     description="",
                     installation_policy="keep-cached",
                     assignments=[{"recipe_revision_id": revision_id}],
-                    scope=[],
                     labels={},
                     favorite=False,
                     created_by="acceptance",
@@ -397,20 +397,6 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
             distribution.register(wrong_set)
         assert error.value.code == "distribution.model_set_mismatch"
 
-        eviction = restarted_cache.eviction_preview(
-            target_bytes=len(model_payload + auxiliary_payload)
-        )
-        assert eviction["selected"] == []
-        assert eviction["selected_bytes"] == 0
-        assert "protected entries require separate reference removal" in eviction["blockers"]
-        with pytest.raises(ModelCacheConflict) as error:
-            restarted_cache.evict(
-                actor="acceptance",
-                request_key="00000000-0000-4000-8000-000000000102",
-                plan_digest=str(eviction["plan_digest"]),
-                target_bytes=len(model_payload + auxiliary_payload),
-            )
-        assert error.value.code == "model_cache.eviction_blocked"
         assert restarted_cache.verified_artifact_file(
             artifact_set_sha256,
             str(artifacts[0]["sha256"]),

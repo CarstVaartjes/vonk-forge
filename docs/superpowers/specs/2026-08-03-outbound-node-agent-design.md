@@ -112,7 +112,7 @@ failed verification leaves affected routes withdrawn.
 
 ## CLI and web equivalence
 
-The CLI and web UX are adapters over the same `/api/v1` resources. Routine
+The CLI and web UX are adapters over the same `/api` resources. Routine
 `vonkctl nodes status`, validation, preparation, switching, endpoint,
 deployment, agent, and update commands authenticate to the control API. They
 plan or enqueue the same jobs and expose the same authorization, audit, status,

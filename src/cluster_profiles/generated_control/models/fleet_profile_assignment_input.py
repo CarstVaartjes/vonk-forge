@@ -13,8 +13,6 @@ from typing import cast
 from typing import cast, Union
 from typing import Union
 
-if TYPE_CHECKING:
-  from ..models.fleet_profile_node import FleetProfileNode
 
 
 
@@ -26,57 +24,68 @@ T = TypeVar("T", bound="FleetProfileAssignmentInput")
 
 @_attrs_define
 class FleetProfileAssignmentInput:
-    """
+    """ Permissive autosaved recipe choice, not an execution assignment.
+
+    A logical model variant is selected by its canonical identity.  The
+    content digest is resolved from that identity for a load and is never a
+    profile-pinned execution revision.  Topology/rank validation belongs to
+    preview/load, so incomplete distributed drafts can be saved.
+
         Attributes:
-            desired_state (FleetProfileAssignmentInputDesiredState):
-            nodes (list['FleetProfileNode']):
-            recipe_revision_id (str):
-            topology_name (str):
-            alias (Union[None, Unset, str]):
+            recipe_selector (str):
+            spark_ids (list[str]):
+            assignment_name (Union[None, Unset, str]):
+            desired_state (Union[Unset, FleetProfileAssignmentInputDesiredState]):  Default: 'running'.
+            model_variant (Union[None, Unset, str]):
      """
 
-    desired_state: FleetProfileAssignmentInputDesiredState
-    nodes: list['FleetProfileNode']
-    recipe_revision_id: str
-    topology_name: str
-    alias: Union[None, Unset, str] = UNSET
+    recipe_selector: str
+    spark_ids: list[str]
+    assignment_name: Union[None, Unset, str] = UNSET
+    desired_state: Union[Unset, FleetProfileAssignmentInputDesiredState] = 'running'
+    model_variant: Union[None, Unset, str] = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_node import FleetProfileNode
-        desired_state: str = self.desired_state
+        recipe_selector = self.recipe_selector
 
-        nodes = []
-        for nodes_item_data in self.nodes:
-            nodes_item = nodes_item_data.to_dict()
-            nodes.append(nodes_item)
+        spark_ids = self.spark_ids
 
 
 
-        recipe_revision_id = self.recipe_revision_id
-
-        topology_name = self.topology_name
-
-        alias: Union[None, Unset, str]
-        if isinstance(self.alias, Unset):
-            alias = UNSET
+        assignment_name: Union[None, Unset, str]
+        if isinstance(self.assignment_name, Unset):
+            assignment_name = UNSET
         else:
-            alias = self.alias
+            assignment_name = self.assignment_name
+
+        desired_state: Union[Unset, str] = UNSET
+        if not isinstance(self.desired_state, Unset):
+            desired_state = self.desired_state
+
+
+        model_variant: Union[None, Unset, str]
+        if isinstance(self.model_variant, Unset):
+            model_variant = UNSET
+        else:
+            model_variant = self.model_variant
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "desired_state": desired_state,
-            "nodes": nodes,
-            "recipe_revision_id": recipe_revision_id,
-            "topology_name": topology_name,
+            "recipe_selector": recipe_selector,
+            "spark_ids": spark_ids,
         })
-        if alias is not UNSET:
-            field_dict["alias"] = alias
+        if assignment_name is not UNSET:
+            field_dict["assignment_name"] = assignment_name
+        if desired_state is not UNSET:
+            field_dict["desired_state"] = desired_state
+        if model_variant is not UNSET:
+            field_dict["model_variant"] = model_variant
 
         return field_dict
 
@@ -84,43 +93,48 @@ class FleetProfileAssignmentInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_node import FleetProfileNode
         d = dict(src_dict)
-        desired_state = check_fleet_profile_assignment_input_desired_state(d.pop("desired_state"))
+        recipe_selector = d.pop("recipe_selector")
+
+        spark_ids = cast(list[str], d.pop("spark_ids"))
 
 
-
-
-        nodes = []
-        _nodes = d.pop("nodes")
-        for nodes_item_data in (_nodes):
-            nodes_item = FleetProfileNode.from_dict(nodes_item_data)
-
-
-
-            nodes.append(nodes_item)
-
-
-        recipe_revision_id = d.pop("recipe_revision_id")
-
-        topology_name = d.pop("topology_name")
-
-        def _parse_alias(data: object) -> Union[None, Unset, str]:
+        def _parse_assignment_name(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(Union[None, Unset, str], data)
 
-        alias = _parse_alias(d.pop("alias", UNSET))
+        assignment_name = _parse_assignment_name(d.pop("assignment_name", UNSET))
+
+
+        _desired_state = d.pop("desired_state", UNSET)
+        desired_state: Union[Unset, FleetProfileAssignmentInputDesiredState]
+        if isinstance(_desired_state,  Unset):
+            desired_state = UNSET
+        else:
+            desired_state = check_fleet_profile_assignment_input_desired_state(_desired_state)
+
+
+
+
+        def _parse_model_variant(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        model_variant = _parse_model_variant(d.pop("model_variant", UNSET))
 
 
         fleet_profile_assignment_input = cls(
+            recipe_selector=recipe_selector,
+            spark_ids=spark_ids,
+            assignment_name=assignment_name,
             desired_state=desired_state,
-            nodes=nodes,
-            recipe_revision_id=recipe_revision_id,
-            topology_name=topology_name,
-            alias=alias,
+            model_variant=model_variant,
         )
 
         return fleet_profile_assignment_input

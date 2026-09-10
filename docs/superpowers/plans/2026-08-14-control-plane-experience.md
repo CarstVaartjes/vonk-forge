@@ -146,7 +146,7 @@ git push
 - Modify: `control/tests/test_admission_migration.py`
 
 **Interfaces:**
-- Produces: `TelemetrySampleInput`, `TelemetryRepository.record_batch(node_id, samples)`, `latest(node_ids)`, `history(node_id, start, end, maximum_points)`, and `POST /agent/v1/telemetry`.
+- Produces: `TelemetrySampleInput`, `TelemetryRepository.record_batch(node_id, samples)`, `latest(node_ids)`, `history(node_id, start, end, maximum_points)`, and `POST /agent/telemetry`.
 - Wire contract: schema version, boot ID UUID, monotonic sequence, observed time, CPU/load, memory, disk, accelerator, temperature/power, network rates, and `gap_samples`.
 
 - [ ] **Step 1: Write failing repository ordering tests**
@@ -269,7 +269,7 @@ git push
 - Modify: `control/tests/test_operation_api.py`
 
 **Interfaces:**
-- Produces: `FleetProjection.read()`, `GET /api/v1/fleet`, `GET /api/v1/nodes/{node_id}/telemetry`, and authenticated `GET /api/v1/fleet/stream` SSE.
+- Produces: `FleetProjection.read()`, `GET /api/fleet`, `GET /api/nodes/{node_id}/telemetry`, and authenticated `GET /api/fleet/stream` SSE.
 - SSE events: initial `fleet-snapshot`, then `node-telemetry`, `recipe-state`, and `operation-state`, each with numeric database event ID.
 - Durable resume: migration `0024_fleet_stream_events` adds a serialized transactional cursor/outbox. A plain sequence is not commit ordered and is not sufficient for `Last-Event-ID` replay.
 
@@ -371,7 +371,7 @@ git push
 - Create: `control/tests/test_library_api.py`
 
 **Interfaces:**
-- Produces: `GET /api/v1/library`, `GET /api/v1/library/recipes/{recipe_id}`, and placement recommendation summaries.
+- Produces: `GET /api/library`, `GET /api/library/recipes/{recipe_id}`, and placement recommendation summaries.
 - Uses: repository model definitions, local recipe revisions, `workload.family`, existing mappings/builds/installations/runs/reservations, and fresh inventory/telemetry.
 
 - [ ] **Step 1: Write failing relationship tests**

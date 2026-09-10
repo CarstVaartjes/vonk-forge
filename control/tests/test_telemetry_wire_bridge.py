@@ -122,7 +122,7 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
     assert report.samples[0].metrics.series[0].value == 25.0
 
     response = client.post(
-        "/agent/v1/telemetry",
+        "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
         json=report.document(),
     )

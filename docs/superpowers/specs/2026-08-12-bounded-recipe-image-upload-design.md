@@ -31,7 +31,7 @@ that renewal window.
 
 Keep the existing 75-second default for claims, results, inventory, metadata,
 and bounded artifact ranges. Set a one-hour total timeout only on the
-`PUT /agent/v1/recipe-builds/{build_id}/image` request. A transport failure
+`PUT /agent/recipe-builds/{build_id}/image` request. A transport failure
 still terminates promptly when the connection closes; the one-hour value is a
 hard upper bound for a connected but non-completing upload. The existing
 heartbeat task continues renewing the operation lease independently while the

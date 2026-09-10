@@ -23,7 +23,7 @@ protocol:
 The sole current agent is Rust. It neither advertises nor accepts these names.
 No other agent implementation exists in this repository. The only producer is
 the old schema-1 reconciliation graph. That graph has no enabled public creation
-route: `POST /api/v1/jobs` is hidden and disabled by default, and rejects
+route: `POST /api/jobs` is hidden and disabled by default, and rejects
 reconciliation requests even when generic jobs are enabled. Current Fleet,
 Run/Switch, and Recipe lifecycle services create the operations the Rust agent
 does accept.
@@ -162,7 +162,7 @@ old readers, records and workers as one current-only change.
 | Graph authoring and persisted barrier validation | `control/src/vonk_control/orchestration.py`: `ReconciliationOrchestrator`, graph parsing, `_IMPLEMENTED_OPERATIONS`, and `validate_persisted_resolved_plan` stop/install/gate barriers | `RunSwitchOperationService` produces a digest-bound current plan. `RecipeOperationService` rechecks that digest and locks the affected run or installation before enqueueing each current operation. |
 | Old graph scheduler and result consumer | `control/src/vonk_control/agent_reconciliation.py`: primary and compensation dispatch, evidence checks, publication ownership, cancellation, and result-driven graph advancement | `control/src/vonk_control/recipe_operation_worker.py`, `recipe_operations.py`, `run_switch_operations.py`, and `fleet_profiles.py` advance current install/start/stop and Run/Switch state. Exact recipe result consumers update `InstallationNode` and `RunNode`. |
 | Agent queue admission and claim | `control/src/vonk_control/agent_jobs.py`: seven capability sets, automatic-reclaim set, `node.probe` result conversion, reconciliation authority checks, and the `Job.reconciliation_id` target-lock branch | The generic queue, attempt fence, lease, parent aggregation, and current operation result consumers remain. Current recipe mutations lock `RecipeInstallation`/`RecipeRun`, bind `mapping_generation` and `plan_digest`, and use resource reservations. |
-| Public or internal routing | `control/src/vonk_control/api.py`: disabled `POST /api/v1/jobs`, reconciliation result binding, reconciliation authority callback, and worker-authority route installation | Keep `GET /api/v1/jobs/{id}`, progress, log, resume, and cancellation routes used by current operations. Current typed Fleet, Run/Switch, Recipe, and Agent routes remain. Remove the disabled generic POST and its request-only DTO/client registration. |
+| Public or internal routing | `control/src/vonk_control/api.py`: disabled `POST /api/jobs`, reconciliation result binding, reconciliation authority callback, and worker-authority route installation | Keep `GET /api/jobs/{id}`, progress, log, resume, and cancellation routes used by current operations. Current typed Fleet, Run/Switch, Recipe, and Agent routes remain. Remove the disabled generic POST and its request-only DTO/client registration. |
 | Old worker process | `control/src/vonk_control/worker.py`: `AgentReconciliationService` construction/tick and `HttpWorkerAuthority`; `control/src/vonk_control/worker_authority.py`: internal reconciliation authority protocol | `RecipeOperationWorker` and Controller-owned route publication advance current work. The old worker authority has no non-reconciliation caller and can be removed with its internal routes and tests. |
 | Node health projection | `agent_jobs.py`: successful `node.probe` parses memory/storage/accelerator evidence, optionally requires zero active NVIDIA compute processes, and records `Observation(kind="health")`; `dashboard.py`, `operation_api.py`, and `api.py` expose that explicit probe state | Authenticated inventory and strict telemetry own current node facts. `run_admission.py` rejects stale inventory and insufficient post-start memory. Fleet readiness comes from exact signed per-rank observations. See the explicit safety difference below. |
 | Route evidence | `agent_reconciliation.py` constructs `workload.verify` operation IDs; old `route_runtime.py` publication expects those IDs | `recipe_routes.py` validates current run/mapping/rank observations, requires every rank's `observation_endpoint_ready`, locks the singleton route owner, and calls `route_runtime.publish_compiled`. |
@@ -255,7 +255,7 @@ retired graph.
   `test_worker_authority.py`
 - Reconciliation-specific cases from
   `control/tests/test_agent_queue_reconciliation.py`
-- The hidden disabled `POST /api/v1/jobs` handler, its request-only DTO, docs,
+- The hidden disabled `POST /api/jobs` handler, its request-only DTO, docs,
   generated client operation, and tests. Retain current job reads, progress,
   logs, resume, and cancel.
 

@@ -109,7 +109,7 @@ Expected: FAIL because Caddy still serves every SNI on the published HTTPS liste
 
 - [ ] **Step 3: Refactor reusable route snippets**
 
-Keep `edge_guards` and `control_proxy`. Add a reusable human-route snippet imported only by `:8080`; it denies `/agent/v1/*`, proxies `/v1/*` to LiteLLM, `/grafana/*` to Grafana, and the fallback to control API. Move enrollment, agent, and registry sites to explicit `https://{$HOST}:{$VONK_BACKEND_PORT}` addresses.
+Keep `edge_guards` and `control_proxy`. Add a reusable human-route snippet imported only by `:8080`; it denies `/agent/*`, proxies `/v1/*` to LiteLLM, `/grafana/*` to Grafana, and the fallback to control API. Move enrollment, agent, and registry sites to explicit `https://{$HOST}:{$VONK_BACKEND_PORT}` addresses.
 
 - [ ] **Step 4: Bind only the backend port on the NAS LAN IP**
 

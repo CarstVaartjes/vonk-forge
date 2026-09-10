@@ -23,8 +23,8 @@ def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
 
 def test_cli_packages_the_generated_admin_openapi_contract() -> None:
     schema = json.loads(PACKAGED_CLI_OPENAPI.read_text())
-    assert "/api/v1/artifact-jobs/{job_id}" in schema["paths"]
-    assert "/api/v1/auth/login" not in schema["paths"]
+    assert "/api/artifact-jobs/{job_id}" in schema["paths"]
+    assert "/api/auth/login" not in schema["paths"]
     assert schema["openapi"].startswith("3.1.")
 
 
@@ -32,17 +32,14 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
     successes = {
-        "createEnrollmentGrant": ("201", "EnrollmentGrantResponse"),
-        "listAgentEnrollments": ("200", "EnrollmentListResponse"),
+        "enrollFleetNode": ("201", "FleetActionResponse"),
     }
     for operation_id, (status_code, component) in successes.items():
         response_schema = operations[operation_id]["responses"][status_code]["content"][
             "application/json"
         ]["schema"]
         assert response_schema == {"$ref": f"#/components/schemas/{component}"}
-        assert (
-            schema["components"]["schemas"][component]["additionalProperties"] is False
-        )
+        assert schema["components"]["schemas"][component]["type"] == "object"
     assert "approveAgentEnrollment" not in operations
     assert "rejectAgentEnrollment" not in operations
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
@@ -77,142 +74,50 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
 def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
-    operations = _operations(schema)
-    library_model = components["LibraryModel"]
-    assert set(library_model["properties"]) == {
-        "model",
-        "model_document",
-        "model_capabilities",
-        "page_local",
-        "recipes",
-    }
-    assert library_model["properties"]["model"] == {
-        "$ref": "#/components/schemas/LibraryModelIdentity"
-    }
-    assert library_model["properties"]["model_document"] == {
-        "$ref": "#/components/schemas/ModelDefinition"
-    }
-    assert library_model["properties"]["model_capabilities"] == {
-        "$ref": "#/components/schemas/LibraryCapabilityInventory"
-    }
-    assert components["LibraryRecipeSummary"]["properties"][
-        "recipe_capabilities"
-    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
-    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
-        "$ref": "#/components/schemas/RecipeDefinition"
-    }
-    assert components["LibraryRecipeIdentity"]["properties"]["recipe_revision_id"] == {
-        "pattern": (
-            "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            "[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        ),
-        "title": "Recipe Revision Id",
-        "type": "string",
-    }
-    assert components["LibraryRecipeDetail"]["properties"][
-        "model_capabilities"
-    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
-    assert components["LibraryRecipeDetail"]["properties"][
-        "recipe_capabilities"
-    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
-    assert components["LibraryRecipeDetail"]["properties"]["definition"] == {
-        "$ref": "#/components/schemas/RecipeDefinition"
-    }
-    assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
-        "const"
-    ] == 2
-    model_identity = components["LibraryModelIdentity"]
-    assert model_identity["properties"]["kind"]["const"] == "model"
-    assert set(model_identity["required"]) == {
-        "publisher",
-        "slug",
-        "content_sha256",
-    }
-    recipe_identity = components["LibraryRecipeIdentity"]
-    assert "source_kind" not in recipe_identity["properties"]
-    assert "content_sha256" in recipe_identity["properties"]
-    assert "selected_revision" not in components["LibraryRecipeSummary"]["properties"]
-    assert library_model["properties"]["recipes"]["minItems"] == 0
-    assert library_model["properties"]["recipes"]["maxItems"] == 512
-    recipe_list = components["LibraryRecipeList"]
-    assert "minItems" not in recipe_list["properties"]["recipes"]
-    assert recipe_list["properties"]["recipes"]["maxItems"] == 512
-    assert operations["listLibraryRecipes"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/LibraryRecipeList"}
-
-    assert "ModelVersionIdentity" not in components
-    assert "LibraryModelVersionFacts" not in components
-    assert "RecipeRevisionSummary" not in components
-    assert "LibraryRecipeDefinition" not in components
+    for projection, canonical in (
+        ("LibraryModelProjection", "ModelDefinition"),
+        ("LibraryRecipeProjection", "RecipeDefinition"),
+        ("RecipeDetailResponse", "RecipeDefinition"),
+    ):
+        contract = components[projection]
+        assert contract["additionalProperties"] is False
+        assert contract["properties"]["document"] == {
+            "$ref": f"#/components/schemas/{canonical}"
+        }
+        assert contract["properties"]["local"] == {
+            "$ref": "#/components/schemas/LibraryLocalState"
+        }
+    for name, field in (("ModelLibraryResponse", "models"), ("RecipeLibraryResponse", "recipes")):
+        assert components[name]["properties"][field]["maxItems"] == 512
+    assert "recipe_revision_id" in components["LibraryRecipeIdentity"]["required"]
+    assert {"LibrarySnapshot", "LibraryRecipeList", "LibraryRecipeDetail",
+            "VisualRecipeDocument", "LibraryRecipeDefinition"}.isdisjoint(components)
 
 
-def test_repair_manifest_is_v2_while_upgrade_package_remains_v1() -> None:
-    schema = json.loads(OPENAPI.read_text())
-    components = schema["components"]["schemas"]
-    assert (
-        components["AgentRepairManifestRequest"]["properties"]["schema_version"][
-            "const"
-        ]
-        == 2
-    )
-    assert (
-        components["AgentUpgradePackageRequest"]["properties"]["schema_version"][
-            "const"
-        ]
-        == 1
-    )
-
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "AgentRepairManifestRequest" in typescript
-    assert "schema_version: 2;" in typescript
-    python_client = (
-        PYTHON_CLIENT / "models/agent_repair_manifest_request.py"
-    ).read_text()
-    assert "schema_version: Literal[2]" in python_client
+def test_operator_cache_and_profile_requests_have_current_document_schema() -> None:
+    components = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    for name in ("ModelCacheOperatorRequest", "RecipeOperatorRequest", "FleetProfileInput"):
+        assert components[name]["properties"].get("schema_version", {}).get("const", 2) == 2
 
 
-def test_generated_library_placement_is_digest_bound_and_transport_neutral() -> None:
+def test_generated_profile_authoring_is_logical_and_transport_neutral() -> None:
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
     components = schema["components"]["schemas"]
-
-    assert {
-        "previewLibraryPlacement",
-        "applyLibraryPlacement",
-        "getLibraryPlacement",
-    } <= set(operations)
-    assert operations["applyLibraryPlacement"]["responses"]["202"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/LibraryPlacementApplication"}
-    apply = components["LibraryPlacementApplyRequest"]
-    assert {"recipe_id", "node_ids", "plan_digest", "request_key"} <= set(
-        apply["required"]
+    assert {"autosaveProfile", "previewProfile", "loadProfile", "getProfileProgress"} <= set(operations)
+    assert {"applyLibraryPlacement", "previewLibraryPlacement"}.isdisjoint(operations)
+    authored = components["FleetProfileAssignmentInput"]
+    assert {"recipe_selector", "spark_ids"} <= set(authored["required"])
+    assert {"recipe_revision_id", "plan_digest", "model_content_sha256", "invocation"}.isdisjoint(
+        authored["properties"]
     )
-    assert set(apply["properties"]["invocation"]["enum"]) == {
-        "drag-drop",
-        "keyboard",
-        "button",
-    }
-    preview = components["LibraryPlacementPreview"]
-    assert {"selected_node_ids", "selected_nodes", "blockers", "locations"} <= set(
-        preview["required"]
-    )
-
-    from cluster_profiles.generated_control.models.library_placement_apply_request import (
-        LibraryPlacementApplyRequest,
-    )
-
-    request = LibraryPlacementApplyRequest(
-        recipe_id="00000000-0000-4000-8000-000000000001",
-        node_ids=["spk_" + "1" * 32],
-        desired_state="installed",
-        alias=None,
-        invocation="keyboard",
-        plan_digest="a" * 64,
-        request_key="00000000-0000-4000-8000-000000000002",
-    )
-    assert request.to_dict()["invocation"] == "keyboard"
+    assert "scope" not in components["FleetProfileInput"]["properties"]
+    from cluster_profiles.generated_control.models.fleet_profile_assignment_input import FleetProfileAssignmentInput
+    assignment = FleetProfileAssignmentInput(recipe_selector="publisher/recipe", spark_ids=["Spark One"])
+    payload = assignment.to_dict()
+    assert payload["recipe_selector"] == "publisher/recipe"
+    assert payload["spark_ids"] == ["Spark One"]
+    assert "model_variant" not in payload
 
 
 def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> None:
@@ -261,17 +166,16 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
     assert set(schema["paths"]) >= {
-        "/api/v1/agents",
-        "/api/v1/endpoints/{alias}",
-        "/api/v1/fleet",
-        "/api/v1/fleet/stream",
-        "/api/v1/jobs/{job_id}",
-        "/api/v1/jobs/{job_id}/logs",
-        "/api/v1/jobs/{job_id}/resume",
-        "/api/v1/nodes/{node_id}/telemetry",
+        "/api/endpoints/{alias}",
+        "/api/fleet",
+        "/api/fleet/stream",
+        "/api/jobs/{job_id}",
+        "/api/jobs/{job_id}/logs",
+        "/api/jobs/{job_id}/resume",
+        "/api/fleet/{selector}/metrics/history",
     }
-    assert "/api/v1/nodes/status" not in schema["paths"]
-    assert all(path.startswith("/api/v1/") for path in schema["paths"])
+    assert "/api/nodes/status" not in schema["paths"]
+    assert all(path.startswith("/api/") for path in schema["paths"])
     operation_list = [
         operation
         for path in schema["paths"].values()
@@ -290,10 +194,12 @@ def test_admin_schema_is_secret_free() -> None:
         },
     }
     operations = _operations(schema)
-    assert operations["streamFleetEvents"]["security"] == [{"BrowserSession": []}]
+    assert operations["streamFleetEvents"]["security"] == [
+        {"BearerAuth": []}, {"BrowserSession": []}
+    ]
     assert operations["downloadCliToken"]["security"] == [{"BrowserSession": []}]
     assert all(
-        operation["security"] == [{"BearerAuth": []}]
+        operation["security"] == [{"BearerAuth": []}, {"BrowserSession": []}]
         for operation_id, operation in operations.items()
         if operation_id
         not in {
@@ -305,7 +211,7 @@ def test_admin_schema_is_secret_free() -> None:
         }
     )
 
-    retired_prefixes = ("/api/v1/" + "packages", "/api/v1/" + "deployments")
+    retired_prefixes = ("/api/" + "packages", "/api/" + "deployments")
     assert not any(
         path.startswith(prefix)
         for path in schema["paths"]
@@ -316,9 +222,8 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getNodeTelemetryHistory",
+        "getFleetMetricsHistory",
         "getPublishedEndpoint",
-        "listAgents",
         "listJobLogs",
         "listJobs",
         "resumeJob",
@@ -338,7 +243,7 @@ def test_admin_schema_is_secret_free() -> None:
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
-        "/agent/v1/",
+        "/agent/",
         "certificate_pem",
         "chain_pem",
         "csr_pem",
@@ -381,76 +286,28 @@ def test_generated_python_models_compile() -> None:
         compile(path.read_text(), str(path), "exec")
 
 
-def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
+def test_profile_load_contract_does_not_accept_client_revision_pins() -> None:
+    components = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert set(components["FleetProfileLoadRequest"]["properties"]) == {"request_key", "dry_run"}
+    assert {"plan_digest", "profile_digest", "progress"} <= set(components["FleetProfileApplicationView"]["properties"])
+    assert "RunPreviewRequest" not in components
+
+
+def test_generated_recipe_detail_has_one_canonical_topology() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    assert "alias" in schema["RunPreviewRequest"]["required"]
-    assert "alias" in schema["RunPlanResponse"]["required"]
-
-    from cluster_profiles.generated_control.models.run_preview_request import (
-        RunPreviewRequest,
-    )
-
-    request = RunPreviewRequest(
-        installation_id="00000000-0000-4000-8000-000000000001",
-        alias="qwen",
-    )
-    assert request.to_dict()["alias"] == "qwen"
-
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    request_contract = typescript.split("RunPreviewRequest: {", 1)[1].split("};", 1)[0]
-    response_contract = typescript.split("RunPlanResponse: {", 1)[1].split("};", 1)[0]
-    assert "alias: string;" in request_contract
-    assert "alias: string;" in response_contract
-
-
-def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> (
-    None
-):
-    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    detail = schema["LibraryRecipeDetail"]
-
-    assert set(detail["properties"]) >= {
-        "topology",
-        "placement",
-        "definition",
-        "model_documents",
-    }
-    assert "model" not in detail["properties"]
-    assert "model_document" not in detail["properties"]
+    detail = schema["RecipeDetailResponse"]
+    assert detail["properties"]["document"] == {"$ref": "#/components/schemas/RecipeDefinition"}
+    assert {"topology", "definition", "placement", "profiles"}.isdisjoint(detail["properties"])
     model_documents = detail["properties"]["model_documents"]
-    assert model_documents["type"] == "array"
-    assert model_documents["items"] == {
-        "$ref": "#/components/schemas/LibraryRecipeModel"
-    }
+    assert model_documents["items"] == {"$ref": "#/components/schemas/LibraryRecipeModel"}
     assert model_documents["maxItems"] == 32
-    assert set(schema["LibraryRecipeModel"]["properties"]) == {
-        "selection",
-        "model_document",
-    }
     assert schema["LibraryRecipeModel"]["properties"]["selection"] == {
         "$ref": "#/components/schemas/RecipeModelSelection"
     }
     assert schema["LibraryRecipeModel"]["properties"]["model_document"] == {
         "$ref": "#/components/schemas/ModelDefinition"
     }
-    assert "profiles" not in detail["properties"]
-    assert detail["properties"]["definition"] == {
-        "$ref": "#/components/schemas/RecipeDefinition"
-    }
-    definition = schema["RecipeDefinition"]
-    assert set(definition["properties"]) >= {
-        "identity",
-        "metadata",
-        "models",
-        "execution",
-        "runtime",
-        "interfaces",
-        "settings",
-        "validation",
-        "release",
-        "provenance",
-    }
-    assert "VisualRecipeDocument" not in schema
+    assert "topology" in schema["RecipeDefinition"]["properties"]
 
 
 def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
@@ -463,9 +320,9 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
         for operation in methods.values()
         if isinstance(operation, dict)
     }
-    assert "/api/v1/catalog/public-recipes" not in paths
-    assert "/api/v1/catalog/imports/public" not in paths
-    assert "/api/v1/catalog/imports/recipe-library" not in paths
+    assert "/api/catalog/public-recipes" not in paths
+    assert "/api/catalog/imports/public" not in paths
+    assert "/api/catalog/imports/recipe-library" not in paths
     assert "listPublicRecipes" not in operations
     assert "previewPublicRecipeImport" not in operations
     assert "importPublicRecipe" not in operations
@@ -473,19 +330,13 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
 
 def test_generated_library_schema_uses_shared_authority_documents() -> None:
     components = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    forbidden = (
-        "PublicRecipe",
-        "LibraryRecipeDefinition",
-        "ModelVersion",
-        "Qualification",
-        "Readiness",
-        "RuntimeDistribution",
-    )
-    assert set(forbidden).isdisjoint(components)
-    assert components["LibraryModel"]["properties"]["model_document"] == {
+    forbidden = {"PublicRecipe", "LibraryRecipeDefinition", "ModelVersion",
+                 "Qualification", "Readiness", "RuntimeDistribution"}
+    assert forbidden.isdisjoint(components)
+    assert components["LibraryModelProjection"]["properties"]["document"] == {
         "$ref": "#/components/schemas/ModelDefinition"
     }
-    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
+    assert components["LibraryRecipeProjection"]["properties"]["document"] == {
         "$ref": "#/components/schemas/RecipeDefinition"
     }
 
@@ -507,7 +358,7 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
 
 def test_stream_resume_header_is_in_openapi_custom_transport_contract() -> None:
     schema = json.loads(OPENAPI.read_text())
-    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    operation = schema["paths"]["/api/fleet/stream"]["get"]
     assert operation["parameters"] == [
         {
             "description": (

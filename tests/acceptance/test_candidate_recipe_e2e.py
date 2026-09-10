@@ -19,17 +19,14 @@ import tarfile
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import pytest
 
-from cluster_profiles.generated_control.models.library_recipe_detail import (
-    LibraryRecipeDetail,
-)
-from cluster_profiles.generated_control.models.library_recipe_list import (
-    LibraryRecipeList,
-)
-from cluster_profiles.generated_control.models.library_snapshot import LibrarySnapshot
+from cluster_profiles.generated_control.models.recipe_detail_response import RecipeDetailResponse
+from cluster_profiles.generated_control.models.recipe_library_response import RecipeLibraryResponse
+from cluster_profiles.generated_control.models.model_library_response import ModelLibraryResponse
 from cluster_profiles.generated_control.models.model_definition import ModelDefinition
 from cluster_profiles.generated_control.models.recipe_definition import RecipeDefinition
 
@@ -151,41 +148,6 @@ def _identity_key(value: dict[str, Any], digest: str) -> tuple[str, str, str]:
     return publisher, slug, digest
 
 
-def _recipe_summaries(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    summaries: list[dict[str, Any]] = []
-    for model in payload.get("models", []):
-        if isinstance(model, dict):
-            summaries.extend(
-                recipe for recipe in model.get("recipes", []) if isinstance(recipe, dict)
-            )
-    summaries.extend(
-        recipe
-        for recipe in payload.get("unlinked_recipes", [])
-        if isinstance(recipe, dict)
-    )
-    return summaries
-
-
-def _model_reference_keys(index: dict[str, Any]) -> set[tuple[str, str, str]]:
-    keys: set[tuple[str, str, str]] = set()
-    for row in index["recipes"]:
-        document = row.get("document")
-        if not isinstance(document, dict):
-            pytest.fail("Recipe index row has no document")
-        models = document.get("models")
-        if not isinstance(models, list):
-            pytest.fail("canonical Recipe document has no models list")
-        for selection in models:
-            if not isinstance(selection, dict) or not isinstance(selection.get("model"), dict):
-                pytest.fail("Recipe model selection is malformed")
-            model = selection["model"]
-            digest = model.get("content_sha256")
-            if not isinstance(digest, str):
-                pytest.fail("Recipe model selection has no content digest")
-            keys.add(_identity_key(model, digest))
-    return keys
-
-
 def _fetch_publication_index(
     package_index_url: str,
     timeout: float,
@@ -250,7 +212,7 @@ def test_publication_fetch_does_not_forward_controller_authorization() -> None:
         trust_env=False,
         transport=transport,
     ) as controller:
-        controller_response = controller.get("/api/v1/library")
+        controller_response = controller.get("/api/model/library")
 
     assert publication.status_code == 200
     assert controller_response.status_code == 204
@@ -304,7 +266,6 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         and isinstance(row.get("document"), dict)
         and row["document"].get("kind") == "model"
     }
-    expected_model_references = _model_reference_keys(index)
 
     with httpx.Client(
         base_url=base_url.rstrip("/"),
@@ -325,7 +286,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         assert remote_entry["package"] == entry["package"]
 
         sync = client.post(
-            "/api/v1/catalog/managed-recipes/sync",
+            "/api/catalog/managed-recipes/sync",
             json={"request_key": request_key, "expected_commit": index["source_commit"]},
         )
         assert sync.status_code == 200, sync.text[:1024]
@@ -340,101 +301,52 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         )
         assert sync_payload["problems"] == []
 
-        library_response = client.get("/api/v1/library", params={"limit": 512})
-        assert library_response.status_code == 200, library_response.text[:1024]
-        library_payload = library_response.json()
-        library = LibrarySnapshot.from_dict(library_payload)
-        assert library.schema_version == 2
+        model_response = client.get("/api/model/library", params={"limit": 512})
+        assert model_response.status_code == 200, model_response.text[:1024]
+        model_payload = model_response.json()
+        ModelLibraryResponse.from_dict(model_payload)
+        assert model_payload["next_cursor"] is None, "acceptance must inspect the whole catalog"
         actual_models = {
-            _identity_key(model["model"], model["model"]["content_sha256"]): model
-            for model in library_payload["models"]
+            _identity_key(row["document"], row["identity"]["content_sha256"]): row
+            for row in model_payload["models"]
         }
         assert set(actual_models) == set(expected_models)
-        actual_recipe_keys = {
-            _identity_key(recipe, recipe["content_sha256"])
-            for recipe in _recipe_summaries(library_payload)
-        }
-        assert actual_recipe_keys == expected_recipe_keys
-        actual_unlinked_models = {
-            key for key, model in actual_models.items() if model["recipes"] == []
-        }
-        assert actual_unlinked_models == set(expected_models) - expected_model_references
-        for key, model in actual_models.items():
-            assert model["model_document"] == expected_models[key]
-            assert model["model_document"]["files"] == expected_models[key]["files"]
-            assert model["model_document"]["capabilities"] == expected_models[key]["capabilities"]
-        LibrarySnapshot.from_dict(library_payload)
+        for key, row in actual_models.items():
+            # Compare canonical producer documents, not a second handwritten DTO.
+            assert row["document"] == expected_models[key]
 
-        recipe_list_response = client.get("/api/v1/library/recipes", params={"limit": 512})
-        assert recipe_list_response.status_code == 200, recipe_list_response.text[:1024]
-        recipe_list_payload = recipe_list_response.json()
-        recipe_list = LibraryRecipeList.from_dict(recipe_list_payload)
-        assert recipe_list.schema_version == 2
-        assert {
-            _identity_key(recipe, recipe["content_sha256"])
-            for recipe in recipe_list_payload["recipes"]
-        } == expected_recipe_keys
-        recipe_by_key = {
-            _identity_key(recipe, recipe["content_sha256"]): recipe
-            for recipe in recipe_list_payload["recipes"]
-        }
-        candidate_key = _identity_key(entry["document"], entry["content_sha256"])
-        candidate_summary = recipe_by_key[candidate_key]
-        assert candidate_summary["recipe_document"] == entry["document"]
-        assert candidate_summary["recipe_document"]["runtime"] == entry["document"]["runtime"]
-        assert candidate_summary["recipe_document"]["release"] == entry["document"]["release"]
-        assert candidate_summary["recipe_document"]["topology"] == entry["document"]["topology"]
-        assert candidate_summary["recipe_document"]["settings"] == entry["document"]["settings"]
-        assert candidate_summary["recipe_revision_id"] not in {
-            candidate_summary["recipe_id"],
-            candidate_summary["content_sha256"],
-        }
-
-        detail_response = client.get(
-            f"/api/v1/library/recipes/{candidate_summary['recipe_id']}"
+        recipe_response = client.get(
+            "/api/recipe/library", params={"limit": 512, "all_models": True}
         )
+        assert recipe_response.status_code == 200, recipe_response.text[:1024]
+        recipe_payload = recipe_response.json()
+        RecipeLibraryResponse.from_dict(recipe_payload)
+        assert recipe_payload["next_cursor"] is None, "acceptance must inspect the whole catalog"
+        recipes = {
+            _identity_key(row["document"], row["identity"]["content_sha256"]): row
+            for row in recipe_payload["recipes"]
+        }
+        assert set(recipes) == expected_recipe_keys
+        candidate_key = _identity_key(entry["document"], entry["content_sha256"])
+        candidate = recipes[candidate_key]
+        assert candidate["document"] == entry["document"]
+        identity = candidate["identity"]
+        assert identity["recipe_revision_id"] not in {
+            identity["recipe_id"], identity["content_sha256"]
+        }
+
+        detail_response = client.get("/api/recipe/" + quote(candidate["selector"], safe=""))
         assert detail_response.status_code == 200, detail_response.text[:1024]
         detail_payload = detail_response.json()
-        detail = LibraryRecipeDetail.from_dict(detail_payload)
-        assert detail.schema_version == 2
-        assert detail_payload["recipe"] == {
-            key: candidate_summary[key]
-            for key in (
-                "recipe_id",
-                "recipe_revision_id",
-                "publisher",
-                "slug",
-                "content_sha256",
-                "title",
-                "description",
-            )
-        }
-        assert detail_payload["definition"] == entry["document"]
+        RecipeDetailResponse.from_dict(detail_payload)
+        assert detail_payload["identity"] == identity
+        assert detail_payload["document"] == entry["document"]
         selections = entry["document"]["models"]
         assert [item["selection"] for item in detail_payload["model_documents"]] == selections
-        expected_model_documents = {
-            _identity_key(row["document"], row["content_sha256"]): row["document"]
-            for row in index["catalog_entities"]
-            if isinstance(row, dict)
-            and isinstance(row.get("document"), dict)
-            and row["document"].get("kind") == "model"
-        }
-        assert [
-            item["model_document"]
-            for item in detail_payload["model_documents"]
-        ] == [
-            expected_model_documents[
+        assert [item["model_document"] for item in detail_payload["model_documents"]] == [
+            expected_models[
                 _identity_key(selection["model"], selection["model"]["content_sha256"])
             ]
-            for selection in selections
-        ]
-        assert [
-            item["model_document"]["files"]
-            for item in detail_payload["model_documents"]
-        ] == [
-            expected_model_documents[
-                _identity_key(selection["model"], selection["model"]["content_sha256"])
-            ]["files"]
             for selection in selections
         ]
 
@@ -446,41 +358,29 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         "VONK_CONTROL_TOKEN_FILE": os.fspath(token_path),
     }
     listed = subprocess.run(
-        [os.fspath(cli), "--json", "library", "list", "--all"],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=cli_env,
-        timeout=timeout,
+        [os.fspath(cli), "--json", "recipe", "library", "--all-models", "--limit", "512"],
+        check=False, capture_output=True, text=True, env=cli_env, timeout=timeout,
     )
     assert listed.returncode == 0, listed.stderr[-2048:]
-    cli_snapshot_payload = json.loads(listed.stdout)
-    LibrarySnapshot.from_dict(cli_snapshot_payload)
-    cli_recipe_keys = {
-        _identity_key(recipe, recipe["content_sha256"])
-        for recipe in _recipe_summaries(cli_snapshot_payload)
-    }
-    assert cli_recipe_keys == expected_recipe_keys
+    cli_payload = json.loads(listed.stdout)
+    RecipeLibraryResponse.from_dict(cli_payload)
+    assert cli_payload["next_cursor"] is None
+    assert {
+        _identity_key(row["document"], row["identity"]["content_sha256"])
+        for row in cli_payload["recipes"]
+    } == expected_recipe_keys
     cli_candidate = next(
-        recipe
-        for recipe in _recipe_summaries(cli_snapshot_payload)
-        if recipe["content_sha256"] == entry["content_sha256"]
+        row for row in cli_payload["recipes"] if row["selector"] == candidate["selector"]
     )
-    assert cli_candidate["recipe_revision_id"] == candidate_summary["recipe_revision_id"]
-    assert cli_candidate["recipe_document"] == entry["document"]
+    assert cli_candidate["identity"] == identity
+    assert cli_candidate["document"] == entry["document"]
 
     shown = subprocess.run(
-        [os.fspath(cli), "--json", "library", "show", candidate_summary["recipe_id"]],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=cli_env,
-        timeout=timeout,
+        [os.fspath(cli), "--json", "recipe", "detail", candidate["selector"]],
+        check=False, capture_output=True, text=True, env=cli_env, timeout=timeout,
     )
     assert shown.returncode == 0, shown.stderr[-2048:]
-    cli_detail_payload = json.loads(shown.stdout)
-    LibraryRecipeDetail.from_dict(cli_detail_payload)
-    assert cli_detail_payload["recipe"]["recipe_revision_id"] == candidate_summary[
-        "recipe_revision_id"
-    ]
-    assert cli_detail_payload["definition"] == entry["document"]
+    cli_detail = json.loads(shown.stdout)
+    RecipeDetailResponse.from_dict(cli_detail)
+    assert cli_detail["identity"] == identity
+    assert cli_detail["document"] == entry["document"]

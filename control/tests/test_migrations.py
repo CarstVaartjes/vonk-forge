@@ -1,966 +1,179 @@
-import shutil
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from alembic import command
-from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-EXPECTED_BASELINE_TABLES = {
-    "artifact_distribution_assignments",
-    "artifact_job_blobs",
-    "artifact_job_files",
-    "artifact_jobs",
-    "control_authority_heads",
-    "control_authority_proposals",
-    "control_authority_revisions",
-    "agent_certificate_rotations",
-    "agent_certificates",
-    "agent_enrollment_grants",
-    "agent_enrollments",
-    "agent_issued_certificate_revocations",
-    "agent_node_profiles",
-    "agent_nodes",
-    "agent_operation_attempts",
-    "agent_operations",
-    "agent_presence",
-    "audit_events",
-    "catalog_documents",
-    "catalog_document_heads",
-    "catalog_document_revisions",
-    "catalog_recipe_model_references",
-    "cluster_mapping_nodes",
-    "cluster_mappings",
-    "control_process_heartbeats",
-    "fleet_event_cursor",
-    "failure_evidence_records",
-    "failure_evidence_cursors",
-    "fleet_profile_applications",
-    "fleet_profiles",
-    "fleet_stream_events",
-    "installation_nodes",
-    "job_attempts",
-    "job_log_entries",
-    "jobs",
-    "model_cache_artifacts",
-    "model_cache_operations",
-    "model_cache_set_artifacts",
-    "model_cache_sets",
-    "node_artifacts",
-    "node_inventory_snapshots",
-    "node_mutation_leases",
-    "node_telemetry_latest",
-    "node_telemetry_rollup_buckets",
-    "node_telemetry_rollup_dirty",
-    "node_telemetry_rollup_metrics",
-    "node_telemetry_samples",
-    "observations",
-    "recipe_builds",
-    "recipe_installations",
-    "recipe_library_sync_runs",
-    "recipe_run_observation_grants",
-    "recipe_runs",
-    "recipe_route_authorities",
-    "recipe_source_bundles",
-    "source_bundle_archives",
-    "runtime_image_receipts",
-    "runtime_image_authorizations",
-    "resource_reservations",
-    "route_publication_owner",
-    "route_publications",
-    "run_nodes",
-    "sessions",
-    "telemetry_maintenance_state",
-    "users",
+from vonk_control.models import Base, Job
+
+
+ROOT = Path(__file__).resolve().parents[1]
+LEGACY_TABLES = {
+    "agent_upgrade_compatibility_recoveries",
+    "local_recipe_revisions",
+    "managed_recipe_library_links",
 }
-RETAINED_LEGACY_TABLES = {"agent_upgrade_compatibility_recoveries"}
-
-
-def _metadata_differences_without_retained_legacy(connection: object) -> list[object]:
-    from vonk_control.models import Base
-
-    differences = compare_metadata(
-        MigrationContext.configure(connection), Base.metadata
-    )
-    return [
-        difference
-        for difference in differences
-        if not (
-            (
-                difference[0] == "remove_table"
-                and difference[1].name in RETAINED_LEGACY_TABLES
-            )
-            or (
-                difference[0] == "remove_index"
-                and difference[1].table.name in RETAINED_LEGACY_TABLES
-            )
-        )
-    ]
 
 
 def _config(database_url: str) -> Config:
-    root = Path(__file__).resolve().parents[1]
-    config = Config(root / "alembic.ini")
-    config.set_main_option("script_location", str(root / "migrations"))
+    config = Config(ROOT / "alembic.ini")
+    config.set_main_option("script_location", str(ROOT / "migrations"))
     config.set_main_option("sqlalchemy.url", database_url)
     return config
 
 
-def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
+def _upgrade(database_url: str) -> None:
+    command.upgrade(_config(database_url), "head")
+
+
+def _schema_tables(engine) -> set[str]:
+    return set(inspect(engine).get_table_names()) - {"alembic_version"}
+
+
+def _assert_current_schema(engine) -> None:
+    assert _schema_tables(engine) == set(Base.metadata.tables)
+    assert not LEGACY_TABLES & _schema_tables(engine)
+    with engine.connect() as connection:
+        assert list(
+            MigrationContext.configure(connection).get_current_heads()
+        ) == ["0000_fresh_schema"]
+        assert connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one() == "0000_fresh_schema"
+        from alembic.autogenerate import compare_metadata
+
+        differences = compare_metadata(
+            MigrationContext.configure(connection), Base.metadata
+        )
+        if differences:
+            assert len(differences) == 1
+            operation, constraint = differences[0]
+            assert operation == "add_constraint"
+            assert constraint.name == "uq_model_cache_set_artifact_key"
+
+
+def _assert_model_cache_operation_kind_is_current(engine) -> None:
+    check = next(
+        check
+        for check in inspect(engine).get_check_constraints("model_cache_operations")
+        if check["name"] == "ck_model_cache_operations_kind"
+    )
+    expression = (check["sqltext"] or "").lower()
+    assert "download" in expression
+    assert "repair" in expression
+    assert "remove" in expression
+    assert "evict" not in expression
+
+
+def _assert_json_roundtrip(engine) -> None:
+    payload = {
+        "array": [1, None, False],
+        "empty": {},
+        "zero": 0,
+        "text": "preserve this string",
+    }
+    request_id = "11111111-1111-4111-8111-111111111111"
+    job_id = "22222222-2222-4222-8222-222222222222"
+    now = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+    job = Job(
+        id=job_id,
+        request_id=request_id,
+        kind="cache.download",
+        state="queued",
+        actor="migration-test",
+        authority_revision="authority-current",
+        targets=["spark-a", "spark-b"],
+        payload_digest=hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        payload=payload,
+        result=None,
+        current_attempt=0,
+        created_at=now,
+        updated_at=now,
+    )
+    with Session(engine) as session:
+        session.add(job)
+        session.commit()
+    with Session(engine) as session:
+        stored = session.get(Job, job_id)
+        assert stored is not None
+        assert stored.payload == payload
+        assert stored.targets == ["spark-a", "spark-b"]
+        assert stored.result is None
+        assert stored.payload["array"] == [1, None, False]
+        assert stored.payload["zero"] == 0
+
+
+def test_fresh_sqlite_schema_is_exactly_current_metadata_and_roundtrips_json(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.models import Base
-
-    url = f"sqlite:///{tmp_path / 'control.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-
+    url = f"sqlite:///{tmp_path / 'fresh-control.sqlite'}"
+    _upgrade(url)
     engine = create_engine(url)
-    tables = set(inspect(engine).get_table_names())
-
-    assert tables - {"alembic_version"} - RETAINED_LEGACY_TABLES == (
-        EXPECTED_BASELINE_TABLES
-    )
-    assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
-    assert "agent_node_profiles" in tables
-    assert not any(table.startswith("package_") for table in tables)
-    assert not {
-        "managed_recipe_library_links",
-        "recipe_imports",
-        "recipe_import_items",
-        "recipe_global_links",
-        "recipe_test_reports",
-    } & tables
-    with engine.connect() as connection:
-        assert _metadata_differences_without_retained_legacy(connection) == []
-        assert connection.execute(
-            text(
-                "SELECT singleton_id, next_resolution_seconds FROM telemetry_maintenance_state"
-            )
-        ).all() == [(1, 60)]
-        assert connection.execute(
-            text("SELECT singleton_id, last_id FROM fleet_event_cursor")
-        ).all() == [(1, 0)]
-        source_default = next(
-            column["default"]
-            for column in inspect(engine).get_columns("node_telemetry_rollup_metrics")
-            if column["name"] == "source"
-        )
-        assert "controller-derived" in (source_default or "")
-        metrics_column = next(
-            column for column in inspect(engine).get_columns("node_telemetry_samples")
-            if column["name"] == "metrics"
-        )
-        assert metrics_column["default"] is None
-        assert metrics_column["nullable"] is False
+    try:
+        _assert_current_schema(engine)
+        _assert_json_roundtrip(engine)
+    finally:
+        engine.dispose()
 
 
-def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
-    migration = (
-        Path(__file__).resolve().parents[1]
-        / "migrations/versions/0001_fleet_library_baseline.py"
-    ).read_text()
-
-    assert "vonk_control.models" not in migration
-    assert "Base.metadata" not in migration
-    assert ".create_all(" not in migration
-
-
-def test_current_telemetry_defaults_preserve_rows_and_require_metrics(
-    postgres_engine,
+def test_existing_database_fails_closed_with_disposable_reset_guidance(
+    tmp_path: Path,
 ) -> None:
-    from sqlalchemy.orm import Session
-    from vonk_control.models import AgentNode
-
-    config = _config(postgres_engine.url.render_as_string(hide_password=False))
-    command.upgrade(config, "0021_runtime_authz")
-    node_id = "spk_" + "a" * 32
-    with Session(postgres_engine) as session, session.begin():
-        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
-
-    insert_sample = text(
-        "INSERT INTO node_telemetry_samples "
-        "(id, node_id, boot_id, sequence, observed_at, received_at, gap_samples, details) "
-        "VALUES (:id, :node, :boot, :sequence, :now, :now, 0, '{}')"
-    )
-    values = {
-        "id": "10000000-0000-4000-8000-000000000001",
-        "node": node_id,
-        "boot": "20000000-0000-4000-8000-000000000002",
-        "sequence": 1,
-        "now": "2026-09-07T12:00:00Z",
-    }
-    with postgres_engine.begin() as connection:
-        connection.execute(insert_sample, values)
-        before = connection.execute(
-            text("SELECT id, node_id, boot_id, observed_at, metrics FROM node_telemetry_samples")
-        ).one()
-
-    command.upgrade(config, "head")
-
-    with postgres_engine.connect() as connection:
-        after = connection.execute(
-            text("SELECT id, node_id, boot_id, observed_at, metrics FROM node_telemetry_samples")
-        ).one()
-        assert after == (before.id, before.node_id, before.boot_id, before.observed_at, before.metrics)
-        columns = {
-            column["name"]: column
-            for column in inspect(connection).get_columns("node_telemetry_samples")
-        }
-        assert columns["metrics"]["default"] is None
-        assert columns["metrics"]["nullable"] is False
-        source = next(
-            column for column in inspect(connection).get_columns("node_telemetry_rollup_metrics")
-            if column["name"] == "source"
-        )
-        assert "controller-derived" in source["default"]
-
-    with pytest.raises(IntegrityError), postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO node_telemetry_samples "
-                "(id, node_id, boot_id, observed_at, received_at, gap_samples, details) "
-                "VALUES (:id, :node, :boot, :now, :now, 0, '{}')"
-            ),
-            {**values, "id": "10000000-0000-4000-8000-000000000003"},
-        )
+    url = f"sqlite:///{tmp_path / 'incompatible-control.sqlite'}"
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE agent_upgrade_compatibility_recoveries "
+                    "(id VARCHAR(36) PRIMARY KEY)"
+                )
+            )
+        with pytest.raises(
+            RuntimeError,
+            match="not compatible.*No migration.*automatic drop.*disposable development",
+        ):
+            _upgrade(url)
+        assert _schema_tables(engine) == {"agent_upgrade_compatibility_recoveries"}
+    finally:
+        engine.dispose()
 
 
-def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
-    versions = Path(__file__).resolve().parents[1] / "migrations/versions"
-
+def test_only_one_fresh_baseline_revision_is_active() -> None:
+    versions = ROOT / "migrations/versions"
     assert sorted(path.name for path in versions.glob("*.py")) == [
-        "0000_canonical_catalog_baseline.py",
-        "0001_fleet_library_baseline.py",
-        "0002_fleet_node_profile_events.py",
-        "0003_agent_reenrollment_grants.py",
-        "0004_artifact_jobs.py",
-        "0005_repair_fleet_profile_tables.py",
-        "0006_spark3542_compat_recovery.py",
-        "0007_compat_recovery_rearm_certificates.py",
-        "0008_compat_recovery_abandon.py",
-        "0009_compat_abandoned_at.py",
-        "0010_managed_recipe_catalog_sync.py",
-        "0011_recipe_model_identity.py",
-        "0012_recipe_run_generation.py",
-        "0013_repeatable_install_plans.py",
-        "0014_fleet_profile_scope.py",
-        "0015_model_cache.py",
-        "0016_rich_telemetry_metrics.py",
-        "0017_artifact_distribution_assignments.py",
-        "0018_canonical_catalog_documents.py",
-        "0019_recipe_builds_canonical_revision.py",
-        "0020_runtime_image_receipts.py",
-        "0021_runtime_image_authorizations.py",
-        "0022_current_telemetry_defaults.py",
-        "0023_recipe_route_authority.py",
-        "0024_failure_evidence.py",
-        "0025_remove_telemetry_sequence.py",
+        "0000_fresh_schema.py"
     ]
+    scripts = ScriptDirectory.from_config(_config("sqlite://"))
+    assert scripts.get_heads() == ["0000_fresh_schema"]
+    script = scripts.get_revision("0000_fresh_schema")
+    assert script is not None
+    assert script.down_revision is None
 
 
-def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'recipe-build-fk.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-    engine = create_engine(url)
-
-    foreign_keys = inspect(engine).get_foreign_keys("recipe_builds")
-    recipe_revision_keys = [
-        foreign_key
-        for foreign_key in foreign_keys
-        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
-    ]
-
-    assert len(recipe_revision_keys) == 1
-    assert recipe_revision_keys[0]["referred_table"] == "catalog_document_revisions"
-    assert recipe_revision_keys[0]["referred_columns"] == ["id"]
-    assert all(
-        foreign_key["referred_table"] != "local_recipe_revisions"
-        for foreign_key in recipe_revision_keys
-    )
+def test_baseline_has_no_parallel_schema_definition() -> None:
+    migration = (ROOT / "migrations/versions/0000_fresh_schema.py").read_text()
+    assert "Base.metadata.create_all" in migration
+    assert "op.create_table" not in migration
+    assert "sa.Table" not in migration
+    assert "agent_upgrade_compatibility_recoveries" not in migration
 
 
-def test_empty_legacy_recipe_build_fk_upgrades_to_canonical_postgres(
+def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_json(
     postgres_engine,
 ) -> None:
-    config = _config(postgres_engine.url.render_as_string(hide_password=False))
-    command.upgrade(config, "0017_dist_assignments")
-
-    inspector = inspect(postgres_engine)
-    current = next(
-        foreign_key
-        for foreign_key in inspector.get_foreign_keys("recipe_builds")
-        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
-    )
-    assert current["referred_table"] == "catalog_document_revisions"
-    assert current["name"] is not None
-    constraint = postgres_engine.dialect.identifier_preparer.quote(current["name"])
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text("CREATE TABLE local_recipe_revisions (id VARCHAR(36) PRIMARY KEY)")
-        )
-        connection.execute(
-            text(f"ALTER TABLE recipe_builds DROP CONSTRAINT {constraint}")
-        )
-        connection.execute(
-            text(
-                "ALTER TABLE recipe_builds "
-                "ADD CONSTRAINT fk_recipe_builds_legacy_recipe_revision "
-                "FOREIGN KEY (recipe_revision_id) "
-                "REFERENCES local_recipe_revisions (id) ON DELETE RESTRICT"
-            )
-        )
-
-    command.upgrade(config, "head")
-
-    recipe_revision_keys = [
-        foreign_key
-        for foreign_key in inspect(postgres_engine).get_foreign_keys("recipe_builds")
-        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
-    ]
-    assert len(recipe_revision_keys) == 1
-    assert recipe_revision_keys[0]["name"] == (
-        "fk_recipe_builds_canonical_recipe_revision"
-    )
-    assert recipe_revision_keys[0]["referred_table"] == (
-        "catalog_document_revisions"
-    )
-    assert recipe_revision_keys[0]["referred_columns"] == ["id"]
-
-
-def test_runtime_image_receipt_uses_production_identity_fields(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'runtime-image-receipts.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-    engine = create_engine(url)
-    inspector = inspect(engine)
-
-    assert [column["name"] for column in inspector.get_columns("runtime_image_receipts")] == [
-        "id",
-        "recipe_revision_id",
-        "source",
-        "original_content_digest",
-        "effective_execution_key",
-        "registry_manifest_digest",
-        "platform_manifest_digest",
-        "local_image_config_id",
-        "oci_archive_sha256",
-        "image_bytes",
-        "architecture",
-        "runtime_interface",
-        "runtime_interface_label",
-        "build_id",
-        "verified_at",
-        "state",
-    ]
-    checks = {
-        check["name"] for check in inspector.get_check_constraints("runtime_image_receipts")
-    }
-    assert checks >= {
-        "ck_runtime_image_receipts_source",
-        "ck_runtime_image_receipts_registry_digest",
-        "ck_runtime_image_receipts_platform_digest",
-        "ck_runtime_image_receipts_config_digest",
-        "ck_runtime_image_receipts_archive_digest",
-        "ck_runtime_image_receipts_archive_pair",
-        "ck_runtime_image_receipts_source_build",
-        "ck_runtime_image_receipts_runtime_identity",
-    }
-
-
-def test_postgres_runtime_image_authorization_migration_and_checks(
-    postgres_engine,
-) -> None:
-    """Run the fresh chain on PostgreSQL and exercise the new authority check."""
-
-    config = _config(postgres_engine.url.render_as_string(hide_password=False))
-    command.upgrade(config, "head")
-    inspector = inspect(postgres_engine)
-    assert "runtime_image_authorizations" in inspector.get_table_names()
-    checks = {
-        check["name"]
-        for check in inspector.get_check_constraints("runtime_image_authorizations")
-    }
-    assert checks >= {
-        "ck_runtime_image_authorizations_original_digest",
-        "ck_runtime_image_authorizations_execution_key",
-        "ck_runtime_image_authorizations_platform_digest",
-        "ck_runtime_image_authorizations_config_digest",
-        "ck_runtime_image_authorizations_archive_digest",
-        "ck_runtime_image_authorizations_registry_digest",
-        "ck_runtime_image_authorizations_image_bytes",
-        "ck_runtime_image_authorizations_source",
-        "ck_runtime_image_authorizations_state",
-    }
-
-    now = "2026-09-06 12:00:00+00"
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                INSERT INTO catalog_documents
-                  (id, kind, publisher, slug, title, created_by, created_at, updated_at)
-                VALUES
-                  ('pg-doc', 'recipe', 'acme', 'pg-recipe', 'PG Recipe', 'test', :now, :now)
-                """
-            ),
-            {"now": now},
-        )
-        connection.execute(
-            text(
-                """
-                INSERT INTO catalog_document_revisions
-                  (id, document_id, kind, publisher, slug, revision_number,
-                   schema_version, state, document, content_digest, artifact_key,
-                   execution_key, projected, created_by, created_at)
-                VALUES
-                  ('pg-revision', 'pg-doc', 'recipe', 'acme', 'pg-recipe', 1,
-                   2, 'active', '{}', :content_digest, :artifact_key,
-                   :execution_key, '{}', 'test', :now)
-                """
-            ),
-            {
-                "content_digest": "a" * 64,
-                "artifact_key": "b" * 64,
-                "execution_key": "c" * 64,
-                "now": now,
-            },
-        )
-        connection.execute(
-            text(
-                """
-                INSERT INTO runtime_image_receipts
-                  (id, recipe_revision_id, source, original_content_digest,
-                   effective_execution_key, registry_manifest_digest,
-                   platform_manifest_digest, local_image_config_id,
-                   oci_archive_sha256, image_bytes, architecture,
-                   runtime_interface, runtime_interface_label, verified_at, state)
-                VALUES
-                  ('pg-receipt', 'pg-revision', 'published', :digest, :execution,
-                   :registry, :platform, :config, :archive, 1, 'linux-arm64',
-                   'vonk.runtime.v1', 'v1', :now, 'verified')
-                """
-            ),
-            {
-                "digest": "a" * 64,
-                "execution": "c" * 64,
-                "registry": "sha256:" + "d" * 64,
-                "platform": "sha256:" + "e" * 64,
-                "config": "sha256:" + "f" * 64,
-                "archive": "1" * 64,
-                "now": now,
-            },
-        )
-
-    invalid_authorization = text(
-        """
-        INSERT INTO runtime_image_authorizations
-          (id, recipe_revision_id, receipt_id, source, original_content_digest,
-           effective_execution_key, registry_manifest_digest,
-           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
-           image_bytes, authorized_at, state)
-        VALUES
-          ('pg-auth-invalid', 'pg-revision', 'pg-receipt', 'published',
-           :digest, :execution, :registry, :platform, :config, :archive,
-           1, :now, 'authorized')
-        """
-    )
-    with pytest.raises(IntegrityError), postgres_engine.begin() as connection:
-        connection.execute(
-            invalid_authorization,
-            {
-                "digest": "G" * 64,
-                "execution": "c" * 64,
-                "registry": "sha256:" + "d" * 64,
-                "platform": "sha256:" + "e" * 64,
-                "config": "sha256:" + "f" * 64,
-                "archive": "1" * 64,
-                "now": now,
-            },
-        )
-
-
-def test_fresh_recipe_installation_allows_published_images_without_build(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'recipe-installation-build-null.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-    engine = create_engine(url)
-    recipe_build = next(
-        column
-        for column in inspect(engine).get_columns("recipe_installations")
-        if column["name"] == "recipe_build_id"
-    )
-
-    assert recipe_build["nullable"] is True
-    build_foreign_keys = [
-        foreign_key
-        for foreign_key in inspect(engine).get_foreign_keys("recipe_installations")
-        if foreign_key["constrained_columns"] == ["recipe_build_id"]
-    ]
-    assert len(build_foreign_keys) == 1
-    assert build_foreign_keys[0]["referred_table"] == "recipe_builds"
-
-
-def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'runtime-image-receipts-checks.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-    engine = create_engine(url)
-    insert = text(
-        """
-        INSERT INTO runtime_image_receipts
-          (id, recipe_revision_id, source, original_content_digest,
-           effective_execution_key, registry_manifest_digest,
-           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
-           image_bytes, architecture, runtime_interface, runtime_interface_label,
-           build_id, verified_at, state)
-        VALUES
-          (:id, :recipe_revision_id, :source, :original_content_digest,
-           :effective_execution_key, :registry_manifest_digest,
-           :platform_manifest_digest, :local_image_config_id, :oci_archive_sha256,
-           :image_bytes, :architecture, :runtime_interface, :runtime_interface_label,
-           :build_id, :verified_at, :state)
-        """
-    )
-    base = {
-        "id": "receipt",
-        "recipe_revision_id": "revision",
-        "source": "published",
-        "original_content_digest": "a" * 64,
-        "effective_execution_key": "b" * 64,
-        "registry_manifest_digest": "sha256:" + "c" * 64,
-        "platform_manifest_digest": "sha256:" + "d" * 64,
-        "local_image_config_id": "sha256:" + "e" * 64,
-        "oci_archive_sha256": "f" * 64,
-        "image_bytes": 1,
-        "architecture": "linux-arm64",
-        "runtime_interface": "vonk.runtime.v1",
-        "runtime_interface_label": "v1",
-        "build_id": None,
-        "verified_at": "2026-09-06 12:00:00",
-        "state": "verified",
-    }
-    invalid = (
-        {"registry_manifest_digest": None},
-        {"build_id": "build"},
-        {"source": "controller-build", "build_id": "build"},
-        {"source": "controller-build", "registry_manifest_digest": None},
-        {"oci_archive_sha256": None},
-        {"image_bytes": None},
-        {"original_content_digest": "g" * 64},
-        {"effective_execution_key": "G" * 64},
-        {"oci_archive_sha256": "z" * 64},
-        {"platform_manifest_digest": "sha256:" + "z" * 64},
-        {"architecture": "linux-amd64"},
-        {"runtime_interface": "other.runtime.v1"},
-        {"runtime_interface_label": "v2"},
-    )
-    for number, overrides in enumerate(invalid, start=1):
-        values = {**base, **overrides, "id": f"receipt-{number}"}
-        with pytest.raises(IntegrityError), engine.begin() as connection:
-            connection.execute(insert, values)
-
-
-def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
-    tmp_path: Path,
-) -> None:
-    from vonk_control.models import Base
-
-    url = f"sqlite:///{tmp_path / 'compat-recovery-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0009_compat_abandoned_at")
-    engine = create_engine(url)
-
-    assert "agent_upgrade_compatibility_recoveries" in set(
-        inspect(engine).get_table_names()
-    )
-    assert "agent_upgrade_compatibility_recoveries" not in Base.metadata.tables
-
-    timestamp = "2026-08-29 12:00:00+00:00"
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO jobs "
-                "(id, request_id, kind, state, actor, authority_revision, targets, "
-                "payload_digest, payload, current_attempt, created_at, updated_at) "
-                "VALUES "
-                "(:id, :request_id, :kind, :state, :actor, :authority_revision, "
-                ":targets, :payload_digest, :payload, :current_attempt, :created_at, "
-                ":updated_at)"
-            ),
-            {
-                "id": "legacy-job",
-                "request_id": "legacy-job-request",
-                "kind": "agent.upgrade.v1",
-                "state": "failed",
-                "actor": "migration-regression",
-                "authority_revision": "legacy-authority",
-                "targets": '["legacy-node"]',
-                "payload_digest": "1" * 64,
-                "payload": "{}",
-                "current_attempt": 1,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO agent_nodes "
-                "(node_id, state, self_test_passed, capabilities) "
-                "VALUES (:node_id, :state, :self_test_passed, :capabilities)"
-            ),
-            {
-                "node_id": "legacy-node",
-                "state": "active",
-                "self_test_passed": True,
-                "capabilities": '["agent.upgrade.v1"]',
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO agent_operations "
-                "(id, parent_job_id, node_id, kind, payload_digest, payload, "
-                "authority_revision, state, current_attempt, created_at, updated_at) "
-                "VALUES "
-                "(:id, :parent_job_id, :node_id, :kind, :payload_digest, :payload, "
-                ":authority_revision, :state, :current_attempt, :created_at, "
-                ":updated_at)"
-            ),
-            {
-                "id": "legacy-operation",
-                "parent_job_id": "legacy-job",
-                "node_id": "legacy-node",
-                "kind": "agent.upgrade.v1",
-                "payload_digest": "2" * 64,
-                "payload": "{}",
-                "authority_revision": "legacy-authority",
-                "state": "failed",
-                "current_attempt": 1,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO agent_upgrade_compatibility_recoveries "
-                "(id, node_id, job_id, operation_id, source_attempt, source_fence, "
-                "source_certificate_serial, expected_retry_attempt, "
-                "source_semantic_version, source_build_digest, source_binary_digest, "
-                "upgrade_payload_sha256, package_sha256, target_package_version, "
-                "target_build_digest, target_binary_digest, authority_revision, "
-                "plan_digest, state, actor, request_id, created_at, completed_at, "
-                "blocked_at, abandoned_at) "
-                "VALUES "
-                "(:id, :node_id, :job_id, :operation_id, :source_attempt, "
-                ":source_fence, :source_certificate_serial, :expected_retry_attempt, "
-                ":source_semantic_version, :source_build_digest, "
-                ":source_binary_digest, :upgrade_payload_sha256, :package_sha256, "
-                ":target_package_version, :target_build_digest, "
-                ":target_binary_digest, :authority_revision, :plan_digest, :state, "
-                ":actor, :request_id, :created_at, :completed_at, :blocked_at, "
-                ":abandoned_at)"
-            ),
-            {
-                "id": "legacy-recovery",
-                "node_id": "legacy-node",
-                "job_id": "legacy-job",
-                "operation_id": "legacy-operation",
-                "source_attempt": 1,
-                "source_fence": "legacy-source-fence",
-                "source_certificate_serial": "legacy-certificate",
-                "expected_retry_attempt": 2,
-                "source_semantic_version": "0.1.0",
-                "source_build_digest": f"sha256:{'3' * 64}",
-                "source_binary_digest": "4" * 64,
-                "upgrade_payload_sha256": "5" * 64,
-                "package_sha256": "6" * 64,
-                "target_package_version": "0.1.1",
-                "target_build_digest": f"sha256:{'7' * 64}",
-                "target_binary_digest": "8" * 64,
-                "authority_revision": "legacy-authority",
-                "plan_digest": "9" * 64,
-                "state": "abandoned",
-                "actor": "migration-regression",
-                "request_id": "legacy-recovery-request",
-                "created_at": timestamp,
-                "completed_at": timestamp,
-                "blocked_at": timestamp,
-                "abandoned_at": timestamp,
-            },
-        )
-
-    command.upgrade(config, "head")
-
-    with engine.connect() as connection:
-        assert (
-            connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-                        == "0025_remove_telemetry_sequence"
-        )
-        assert "agent_upgrade_compatibility_recoveries" in set(
-            inspect(connection).get_table_names()
-        )
-        assert connection.execute(
-            text(
-                "SELECT id, state, plan_digest "
-                "FROM agent_upgrade_compatibility_recoveries WHERE id = :id"
-            ),
-            {"id": "legacy-recovery"},
-        ).one() == ("legacy-recovery", "abandoned", "9" * 64)
-
-
-def test_alembic_autogenerate_ignores_only_retained_legacy_storage(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'autogenerate.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-
-    migrations = tmp_path / "migrations"
-    shutil.copytree(Path(__file__).resolve().parents[1] / "migrations", migrations)
-    config.set_main_option("script_location", str(migrations))
-    revision = command.revision(
-        config,
-        message="verify retained legacy exclusion",
-        autogenerate=True,
-        rev_id="retained_legacy_guard",
-    )
-
-    assert revision is not None
-    generated = Path(revision.path).read_text()
-    assert "agent_upgrade_compatibility_recoveries" not in generated
-    assert "op.drop_table" not in generated
-    assert "op.drop_index" not in generated
-
-
-def test_recipe_installation_model_identity_migration_adds_canonical_model_fields(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'model-identity-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0010_managed_recipe_catalog_sync")
-    engine = create_engine(url)
-
-    command.upgrade(config, "head")
-
-    inspector = inspect(engine)
-    columns = {
-        column["name"]: column
-        for column in inspector.get_columns("recipe_installations")
-    }
-    assert columns["model_content_sha256"]["nullable"] is True
-    assert "model_content_digests" not in columns
-    assert "ix_recipe_installations_model_content_sha256" in {
-        index["name"] for index in inspector.get_indexes("recipe_installations")
-    }
-
-
-def test_recipe_run_generation_migration_adds_exact_observation_authority(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'recipe-run-generation-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0011_recipe_model_identity")
-    engine = create_engine(url)
-
-    command.upgrade(config, "head")
-
-    inspector = inspect(engine)
-    run_columns = {
-        column["name"]: column for column in inspector.get_columns("recipe_runs")
-    }
-    assert run_columns["run_generation"]["nullable"] is False
-    assert run_columns["run_generation"]["default"] in {"'1'", "1"}
-    assert "ck_recipe_runs_run_generation" in {
-        constraint["name"]
-        for constraint in inspector.get_check_constraints("recipe_runs")
-    }
-    grant_columns = {
-        column["name"]: column
-        for column in inspector.get_columns("recipe_run_observation_grants")
-    }
-    assert set(grant_columns) == {
-        "run_node_id",
-        "request_id",
-        "identity_sha256",
-        "issued_at",
-        "expires_at",
-        "consumed",
-    }
-    assert grant_columns["run_node_id"]["nullable"] is False
-    assert grant_columns["consumed"]["nullable"] is False
-    assert {
-        tuple(constraint["column_names"])
-        for constraint in inspector.get_unique_constraints(
-            "recipe_run_observation_grants"
-        )
-    } == {("request_id",)}
-
-
-def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0001_fleet_library_baseline")
-    engine = create_engine(url)
-    statement = text(
-        """
-        INSERT INTO fleet_stream_events
-          (id, event_type, node_id, entity_kind, entity_id, payload,
-           occurred_at, expires_at)
-        VALUES
-          (1, 'node-profile', :node_id, 'node-profile', :node_id, '{}',
-           '2026-08-25 12:00:00', '2026-08-26 12:00:00')
-        """
-    )
-    node_id = "spk_" + "a" * 32
-
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(statement, {"node_id": node_id})
-
-    command.upgrade(config, "head")
-    with engine.begin() as connection:
-        connection.execute(statement, {"node_id": node_id})
-        assert (
-            connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-                        == "0025_remove_telemetry_sequence"
-        )
-
-
-def test_existing_database_missing_fleet_profile_tables_is_repaired(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'fleet-profile-repair.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0004_artifact_jobs")
-    engine = create_engine(url)
-
-    # Reproduce databases that applied the original 0001 before fleet profiles
-    # were added to that already-released baseline migration.
-    with engine.begin() as connection:
-        connection.execute(text("DROP TABLE fleet_profile_applications"))
-        connection.execute(text("DROP TABLE fleet_profiles"))
-        assert (
-            connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-            == "0004_artifact_jobs"
-        )
-
-    command.upgrade(config, "head")
-
-    inspector = inspect(engine)
-    assert {"fleet_profiles", "fleet_profile_applications"} <= set(
-        inspector.get_table_names()
-    )
-    assert {index["name"] for index in inspector.get_indexes("fleet_profiles")} == {
-        "ix_fleet_profiles_created_at",
-        "ix_fleet_profiles_updated_at",
-    }
-    assert {
-        index["name"] for index in inspector.get_indexes("fleet_profile_applications")
-    } == {
-        "ix_fleet_profile_applications_created_at",
-        "ix_fleet_profile_applications_current_operation_id",
-        "ix_fleet_profile_applications_profile_id",
-        "ix_fleet_profile_applications_state",
-    }
-    with engine.connect() as connection:
-        assert _metadata_differences_without_retained_legacy(connection) == []
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                INSERT INTO fleet_profiles
-                  (id, name, description, installation_policy, assignments,
-                   labels, favorite, created_by, created_at, updated_at)
-                VALUES
-                  ('profile', 'Qualification', '', 'keep-cached', '[]', '{}',
-                   0, 'admin', '2026-08-28 12:00:00', '2026-08-28 12:00:00')
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                INSERT INTO fleet_profile_applications
-                  (id, request_key, profile_id, profile_digest, plan_digest,
-                   state, plan, current_step, current_operation_id, progress,
-                   result, status_reason, actor, created_at, updated_at)
-                VALUES
-                  ('application', 'request', 'profile', :profile_digest,
-                   :plan_digest, 'queued', '{}', 0, NULL, '{}', NULL, NULL,
-                   'admin', '2026-08-28 12:00:00', '2026-08-28 12:00:00')
-                """
-            ),
-            {"profile_digest": "a" * 64, "plan_digest": "b" * 64},
-        )
-        assert (
-            connection.execute(
-                text("SELECT profile_id FROM fleet_profile_applications")
-            ).scalar_one()
-            == "profile"
-        )
-        assert (
-            connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalar_one()
-                        == "0025_remove_telemetry_sequence"
-        )
-
-
-def test_existing_database_is_upgraded_to_accept_reenrollment_grants(
-    tmp_path: Path,
-) -> None:
-    url = f"sqlite:///{tmp_path / 'reenrollment-upgrade.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "0002_fleet_node_profile_events")
-    engine = create_engine(url)
-    statement = text(
-        """
-        INSERT INTO agent_enrollment_grants
-          (id, node_id, purpose, token_digest, created_by, created_at, expires_at)
-        VALUES
-          ('grant', NULL, 're-enroll', :digest, 'admin',
-           '2026-08-25 12:00:00', '2026-08-25 12:10:00')
-        """
-    )
-
-    with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(statement, {"digest": "a" * 64})
-
-    command.upgrade(config, "head")
-    with engine.begin() as connection:
-        connection.execute(statement, {"digest": "a" * 64})
-        assert (
-            connection.execute(
-                text("SELECT purpose FROM agent_enrollment_grants WHERE id = 'grant'")
-            ).scalar_one()
-            == "re-enroll"
-        )
-
-
-def test_fresh_baseline_is_forward_only_and_canonical(tmp_path: Path) -> None:
-    url = f"sqlite:///{tmp_path / 'control.sqlite'}"
-    config = _config(url)
-    command.upgrade(config, "head")
-
-    tables = set(inspect(create_engine(url)).get_table_names())
-    assert "local_recipes" not in tables
-    assert "local_recipe_revisions" not in tables
-    assert "catalog_documents" in tables
-    assert "runtime_image_receipts" in tables
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    _assert_current_schema(postgres_engine)
+    _assert_model_cache_operation_kind_is_current(postgres_engine)
+    _assert_json_roundtrip(postgres_engine)

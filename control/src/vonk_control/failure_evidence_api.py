@@ -10,7 +10,7 @@ def install_failure_evidence_routes(
     app, *, actor_dependency, service: FailureEvidenceService | None
 ):
     @app.get(
-        "/api/v1/operations/{operation_id}/evidence",
+        "/api/operations/{operation_id}/evidence",
         response_model=FailureEvidenceBundle,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getOperationEvidence",

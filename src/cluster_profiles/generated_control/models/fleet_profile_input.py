@@ -10,10 +10,10 @@ from ..models.fleet_profile_input_installation_policy import check_fleet_profile
 from ..models.fleet_profile_input_installation_policy import FleetProfileInputInstallationPolicy
 from ..types import UNSET, Unset
 from typing import cast
+from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_scope import FleetProfileScope
   from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
   from ..models.fleet_profile_input_labels import FleetProfileInputLabels
 
@@ -29,38 +29,30 @@ T = TypeVar("T", bound="FleetProfileInput")
 class FleetProfileInput:
     """
         Attributes:
-            name (str):
-            scope (FleetProfileScope): The complete set of Sparks reconciled by a profile.
-
-                Scope is deliberately independent from assignments.  A member with no
-                assignment is an intentional idle outcome when the profile is applied.
             assignments (Union[Unset, list['FleetProfileAssignmentInput']]):
             description (Union[Unset, str]):  Default: ''.
+            expected_revision (Union[None, Unset, int]):
             favorite (Union[Unset, bool]):  Default: False.
             installation_policy (Union[Unset, FleetProfileInputInstallationPolicy]):  Default: 'keep-cached'.
             labels (Union[Unset, FleetProfileInputLabels]):
+            name (Union[Unset, str]):  Default: 'Default'.
      """
 
-    name: str
-    scope: 'FleetProfileScope'
     assignments: Union[Unset, list['FleetProfileAssignmentInput']] = UNSET
     description: Union[Unset, str] = ''
+    expected_revision: Union[None, Unset, int] = UNSET
     favorite: Union[Unset, bool] = False
     installation_policy: Union[Unset, FleetProfileInputInstallationPolicy] = 'keep-cached'
     labels: Union[Unset, 'FleetProfileInputLabels'] = UNSET
+    name: Union[Unset, str] = 'Default'
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
         from ..models.fleet_profile_input_labels import FleetProfileInputLabels
-        name = self.name
-
-        scope = self.scope.to_dict()
-
         assignments: Union[Unset, list[dict[str, Any]]] = UNSET
         if not isinstance(self.assignments, Unset):
             assignments = []
@@ -71,6 +63,12 @@ class FleetProfileInput:
 
 
         description = self.description
+
+        expected_revision: Union[None, Unset, int]
+        if isinstance(self.expected_revision, Unset):
+            expected_revision = UNSET
+        else:
+            expected_revision = self.expected_revision
 
         favorite = self.favorite
 
@@ -83,23 +81,27 @@ class FleetProfileInput:
         if not isinstance(self.labels, Unset):
             labels = self.labels.to_dict()
 
+        name = self.name
+
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "name": name,
-            "scope": scope,
         })
         if assignments is not UNSET:
             field_dict["assignments"] = assignments
         if description is not UNSET:
             field_dict["description"] = description
+        if expected_revision is not UNSET:
+            field_dict["expected_revision"] = expected_revision
         if favorite is not UNSET:
             field_dict["favorite"] = favorite
         if installation_policy is not UNSET:
             field_dict["installation_policy"] = installation_policy
         if labels is not UNSET:
             field_dict["labels"] = labels
+        if name is not UNSET:
+            field_dict["name"] = name
 
         return field_dict
 
@@ -107,17 +109,9 @@ class FleetProfileInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_assignment_input import FleetProfileAssignmentInput
         from ..models.fleet_profile_input_labels import FleetProfileInputLabels
         d = dict(src_dict)
-        name = d.pop("name")
-
-        scope = FleetProfileScope.from_dict(d.pop("scope"))
-
-
-
-
         assignments = []
         _assignments = d.pop("assignments", UNSET)
         for assignments_item_data in (_assignments or []):
@@ -129,6 +123,16 @@ class FleetProfileInput:
 
 
         description = d.pop("description", UNSET)
+
+        def _parse_expected_revision(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        expected_revision = _parse_expected_revision(d.pop("expected_revision", UNSET))
+
 
         favorite = d.pop("favorite", UNSET)
 
@@ -152,14 +156,16 @@ class FleetProfileInput:
 
 
 
+        name = d.pop("name", UNSET)
+
         fleet_profile_input = cls(
-            name=name,
-            scope=scope,
             assignments=assignments,
             description=description,
+            expected_revision=expected_revision,
             favorite=favorite,
             installation_policy=installation_policy,
             labels=labels,
+            name=name,
         )
 
         return fleet_profile_input

@@ -204,7 +204,7 @@ def _telemetry_sample(
     )
 
 
-def test_fleet_event_models_match_the_0024_schema_contract() -> None:
+def test_fleet_event_models_match_the_current_schema_contract() -> None:
     cursor = models.FleetEventCursor.__table__
     events = models.FleetStreamEvent.__table__
 

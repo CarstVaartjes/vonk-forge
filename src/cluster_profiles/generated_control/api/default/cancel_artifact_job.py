@@ -30,7 +30,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/artifact-jobs/{job_id}/cancel".format(job_id=job_id,),
+        "url": "/api/artifact-jobs/{job_id}/cancel".format(job_id=job_id,),
     }
 
     _kwargs["json"] = body.to_dict()

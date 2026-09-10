@@ -26,11 +26,11 @@
 	# request on the ordinary 1 MB boundary.
 	@recipe_source_bundle_upload {
 		method PUT
-		path /api/v1/catalog/source-bundles/*
+		path /api/catalog/source-bundles/*
 	}
 	@ordinary_browser_request not {
 		method PUT
-		path /api/v1/catalog/source-bundles/*
+		path /api/catalog/source-bundles/*
 	}
 	request_body @ordinary_browser_request {
 		max_size 1MB
@@ -46,11 +46,11 @@
 	# hashes, and enforces this same 16 TiB protocol ceiling.
 	@recipe_image_upload {
 		method PUT
-		path /agent/v1/recipe-builds/*/image
+		path /agent/recipe-builds/*/image
 	}
 	@ordinary_agent_request not {
 		method PUT
-		path /agent/v1/recipe-builds/*/image
+		path /agent/recipe-builds/*/image
 	}
 	request_body @ordinary_agent_request {
 		max_size 1MB
@@ -179,7 +179,7 @@ http://:8084 {
 			respond 200
 		}
 
-		@agent_path path /agent/v1/*
+		@agent_path path /agent/*
 		handle @agent_path {
 			respond 404
 		}
@@ -233,11 +233,11 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 
 	@bootstrap {
 		method GET
-		path /agent/v1/bootstrap
+		path /agent/bootstrap
 	}
 	@enrollment {
 		method POST
-		path /agent/v1/enroll
+		path /agent/enroll
 	}
 	handle @bootstrap {
 		request_header -X-Vonk-Agent-*
@@ -267,8 +267,8 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 	}
 
 	@agent_api {
-		path /agent/v1/*
-		not path /agent/v1/enroll
+		path /agent/*
+		not path /agent/enroll
 	}
 		handle @agent_api {
 		# Remove caller-controlled identity before adding Caddy's verified values.
