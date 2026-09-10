@@ -35,6 +35,7 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     slug: recipe.identity.slug,
     title: recipe.identity.title,
     topology_name: recipe.document.topology.name,
+    model_selectors: recipe.model_selectors,
   };
 }
 

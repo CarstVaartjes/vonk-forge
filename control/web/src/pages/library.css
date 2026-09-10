@@ -3416,6 +3416,7 @@
 .library-cache-state { display: inline-block; margin-top: .55rem; color: var(--mint-strong, #a9ec7a); font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .library-cache-action [role="status"] { color: var(--text-muted, #abb5a7); font-size: .7rem; }
 .library-cache-error { color: var(--danger, #ff919d); font-size: .7rem; }
+.library-cache-missing { color: var(--warning, #f4c66b); font-size: .7rem; }
 .library-model-recipes { display: grid; gap: .2rem; margin: .6rem 0 0; padding: 0; list-style: none; grid-column: 1 / -1; }
 .library-model-recipes a { color: var(--mint-strong, #a9ec7a); font-size: .75rem; }
 .library-model-recipes span { color: var(--text-subtle, #8d9988); font-size: .7rem; }
