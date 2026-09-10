@@ -1,18 +1,13 @@
 import {useEffect, useState} from "react";
-import type {ControlApi, FleetProfile, FleetProfileApplication, FleetProfilePreview} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfilePreview} from "../api/types";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
 
-const TERMINAL_APPLICATION_STATES = new Set(["succeeded", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
-function profileStatus(preview?: FleetProfilePreview): {label: string; tone: "good" | "attention" | "danger" | "neutral"} {
-  if (!preview) return {label: "Checking current setup", tone: "neutral"};
-  if (!preview.allowed) return {label: "Needs attention", tone: "danger"};
-  if (preview.steps.length === 0) return {label: "Up to date", tone: "good"};
-  return {label: `${preview.steps.length} changes ready`, tone: "attention"};
-}
-
-function progressRecord(application: FleetProfileApplication): Record<string, unknown> {
-  return application.progress.child_progress ?? application.progress;
+function progressRecord(application: FleetProfileApplicationView): Record<string, unknown> {
+  const progress = application.progress as Record<string, unknown>;
+  const child = progress.child_progress;
+  return child && typeof child === "object" ? child as Record<string, unknown> : progress;
 }
 
 function bytes(value: unknown): string | undefined {
@@ -29,36 +24,16 @@ function bytes(value: unknown): string | undefined {
   return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function applicationPhase(application: FleetProfileApplication): string {
-  const record = progressRecord(application);
-  for (const key of ["message", "phase", "current_phase", "current_step_label"]) {
-    if (typeof record[key] === "string" && record[key]) return record[key] as string;
-  }
-  return application.status_reason || (application.state === "succeeded" ? "Profile is running" : "Switch in progress");
-}
-
-function memberProgress(application: FleetProfileApplication): Array<{completed?: string; nodeId: string; state: string; total?: string}> {
-  const members = progressRecord(application).members;
-  if (!Array.isArray(members)) return [];
-  return members.flatMap(member => {
-    if (!member || typeof member !== "object") return [];
-    const record = member as Record<string, unknown>;
-    const nodeId = typeof record.node_id === "string" ? record.node_id : undefined;
-    if (!nodeId) return [];
-    const state = typeof record.state === "string" ? record.state : "pending";
-    return [{nodeId, state, completed: bytes(record.completed_bytes), total: bytes(record.total_bytes)}];
-  });
-}
-
-function ApplicationProgress({application}: {application: FleetProfileApplication}) {
+function ApplicationProgress({application}: {application: FleetProfileApplicationView}) {
   const progress = progressRecord(application);
   const completed = bytes(progress.bytes);
   const total = bytes(progress.total_bytes);
-  const members = memberProgress(application);
-  return <section className={`fleet-profile-progress state-${application.state}`} aria-live="polite" aria-label="Profile switch progress">
-    <div className="fleet-profile-progress-heading"><div><strong>{applicationPhase(application)}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
+  const nodeIds = Array.isArray(progress.node_ids) ? progress.node_ids.filter((id): id is string => typeof id === "string") : [];
+  const phase = typeof progress.phase === "string" ? progress.phase.replaceAll("-", " ") : "Profile load";
+  return <section className={`fleet-profile-progress state-${application.state}`} aria-live="polite" aria-label="Profile load progress">
+    <div className="fleet-profile-progress-heading"><div><strong>{phase}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
     <LibraryAvailabilityProgress progress={availabilityProgress(progress)}/>
-    {members.length > 0 && <ul className="fleet-profile-progress-members" aria-label="Profile switch targets">{members.map(member => <li key={member.nodeId}><span>{member.nodeId}</span><small>{member.state}{member.completed ? ` · ${member.completed}${member.total ? ` of ${member.total}` : ""}` : ""}</small></li>)}</ul>}
+    {nodeIds.length > 0 && <ul className="fleet-profile-progress-members" aria-label="Profile load targets">{nodeIds.map(nodeId => <li key={nodeId}><span>{nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
   </section>;
 }
@@ -66,94 +41,68 @@ function ApplicationProgress({application}: {application: FleetProfileApplicatio
 /** The Fleet page keeps only a compact shortcut; the full editor lives in Library. */
 export function FleetOperatingBoard({api}: {api: ControlApi; nodes?: unknown; now?: Date; onManageNode?(nodeId: string): void}) {
   const [profiles, setProfiles] = useState<FleetProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>();
+  const [selectedNumber, setSelectedNumber] = useState<number>();
   const [preview, setPreview] = useState<FleetProfilePreview>();
-  const [application, setApplication] = useState<FleetProfileApplication>();
+  const [application, setApplication] = useState<FleetProfileApplicationView>();
   const [loading, setLoading] = useState(true);
   const [previewing, setPreviewing] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [requestKey, setRequestKey] = useState<string>();
-  const [attempt, setAttempt] = useState(0);
+  const [loadingProfile, setLoadingProfile] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    api.fleetProfiles(controller.signal).then(result => {
+    void api.profiles(controller.signal).then(result => {
       if (controller.signal.aborted) return;
       setProfiles(result.profiles);
-      setSelectedProfileId(current => current && result.profiles.some(profile => profile.id === current) ? current : result.profiles[0]?.id);
+      setSelectedNumber(current => current && result.profiles.some(profile => profile.number === current) ? current : result.profiles[0]?.number);
       setError("");
     }).catch(value => {
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Saved profiles are unavailable.");
-    }).finally(() => {
-      if (!controller.signal.aborted) setLoading(false);
-    });
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [api]);
 
   useEffect(() => {
-    if (!selectedProfileId) {
-      setPreview(undefined);
-      return;
-    }
+    if (selectedNumber === undefined) { setPreview(undefined); return; }
     const controller = new AbortController();
     setPreviewing(true);
-    api.previewFleetProfile(selectedProfileId, controller.signal).then(result => {
-      if (!controller.signal.aborted) {
-        setPreview(result);
-        setError("");
-      }
+    void api.previewProfile(selectedNumber, controller.signal).then(result => {
+      if (!controller.signal.aborted) { setPreview(result); setError(""); }
     }).catch(value => {
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "The current profile status is unavailable.");
-    }).finally(() => {
-      if (!controller.signal.aborted) setPreviewing(false);
-    });
+    }).finally(() => { if (!controller.signal.aborted) setPreviewing(false); });
     return () => controller.abort();
-  }, [api, attempt, selectedProfileId]);
+  }, [api, selectedNumber]);
 
   useEffect(() => {
-    if (!application || TERMINAL_APPLICATION_STATES.has(application.state)) return;
+    if (selectedNumber === undefined || !application || TERMINAL_STATES.has(application.state)) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void api.fleetProfileApplication(application.id, controller.signal).then(next => {
+      void api.profileProgress(selectedNumber, controller.signal).then(next => {
         if (!controller.signal.aborted) setApplication(next);
-      }).catch(value => {
-        if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Switch progress is unavailable.");
-      });
+      }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Profile load progress is unavailable."); });
     }, 1_000);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [api, application]);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [api, application, selectedNumber]);
 
-  const selectedProfile = profiles.find(profile => profile.id === selectedProfileId);
-  const status = profileStatus(preview);
+  const selectedProfile = profiles.find(profile => profile.number === selectedNumber);
 
-  async function switchProfile() {
-    if (!selectedProfile || !preview?.allowed || preview.steps.length === 0 || applying) return;
-    setApplying(true);
-    setError("");
+  async function load() {
+    if (selectedNumber === undefined || !preview?.allowed || loadingProfile) return;
+    setLoadingProfile(true); setError("");
     try {
-      const key = requestKey ?? crypto.randomUUID();
-      setRequestKey(key);
-      const next = await api.applyFleetProfile(selectedProfile.id, {plan_digest: preview.plan_digest, request_key: key});
-      setApplication(next);
-      if (next.state === "succeeded") setRequestKey(undefined);
-      if (TERMINAL_APPLICATION_STATES.has(next.state)) setAttempt(value => value + 1);
+      setApplication(await api.loadProfile(selectedNumber, {dry_run: false, request_key: crypto.randomUUID()}));
     } catch (value) {
-      setError(value instanceof Error ? value.message : "The profile switch could not be started.");
-    } finally {
-      setApplying(false);
-    }
+      setError(value instanceof Error ? value.message : "The profile could not be loaded.");
+    } finally { setLoadingProfile(false); }
   }
 
   return <section className="fleet-profile-shortcut" aria-labelledby="fleet-profile-shortcut-title">
-    <div className="fleet-profile-shortcut-copy"><span className="fleet-section-label">Active profile</span><strong id="fleet-profile-shortcut-title">{selectedProfile?.name ?? (loading ? "Loading saved profiles…" : "No active profile")}</strong>{selectedProfile?.description && <p>{selectedProfile.description}</p>}</div>
-    <div className="fleet-profile-shortcut-actions"><span className={`profile-match profile-match-${status.tone}`} role="status">{previewing ? "Checking current setup" : status.label}</span><button type="button" className="button" disabled={applying || !preview?.allowed || !preview.steps.length} onClick={() => void switchProfile()}>{applying ? "Switching…" : "Switch profile"}</button><a className="button secondary" href="/library/profiles">Manage profiles</a></div>
+    <div className="fleet-profile-shortcut-copy"><span className="fleet-section-label">Active profile</span><strong id="fleet-profile-shortcut-title">{selectedProfile ? `Profile ${selectedProfile.number} · ${selectedProfile.name}` : loading ? "Loading saved profiles…" : "No saved profile"}</strong>{selectedProfile?.description && <p>{selectedProfile.description}</p>}</div>
+    <div className="fleet-profile-shortcut-actions"><span className="profile-match profile-match-neutral" role="status">{previewing ? "Checking current setup" : preview ? (preview.allowed ? (preview.steps.length ? "Ready to load" : "Already loaded") : "Needs attention") : "Profile unavailable"}</span><button type="button" className="button" disabled={loadingProfile || !preview?.allowed} onClick={() => void load()}>{loadingProfile ? "Loading…" : "Load profile"}</button><a className="button secondary" href="/library/profiles">Manage profiles</a></div>
     {preview && !preview.allowed && preview.reasons[0] && <p className="fleet-profile-shortcut-reason"><strong>Why it is paused</strong> {preview.reasons[0].detail}</p>}
-    {error && <div className="fleet-profile-shortcut-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setAttempt(value => value + 1)}>Retry</button></div>}
+    {error && <div className="fleet-profile-shortcut-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setError("")}>Dismiss</button></div>}
     {application && <ApplicationProgress application={application}/>}
   </section>;
 }

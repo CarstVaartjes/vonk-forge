@@ -1,12 +1,9 @@
-import {useCallback, useEffect, useId, useRef, useState} from "react";
+import {useEffect, useId, useRef, useState} from "react";
 import type {MouseEvent as ReactMouseEvent} from "react";
-import type {ControlApi, LibraryOperation, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryResolution, TelemetryRuntime, TelemetrySeries, TelemetryWorkload, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
+import type {ControlApi, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryResolution, TelemetryRuntime, TelemetrySeries, TelemetryWorkload, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
 import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
 import {CopyButton} from "./copy-button";
-import {LibraryActionDialog} from "./library-action-dialog";
-import type {LibraryActionName, LibraryActionTarget} from "./library-action-types";
 import {LibraryNodeNamesProvider} from "./library-node-names";
-import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {Meter} from "./meter";
 import {Sparkline, sparklinePath, type SparklineDomain} from "./sparkline";
 import {StatusPill} from "./status-pill";
@@ -22,12 +19,6 @@ const HISTORY_RANGES: Record<HistoryRange, {hours: number; label: string; maximu
   "30d": {hours: 24 * 30, label: "30 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 30 days"},
   "90d": {hours: 24 * 90, label: "90 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 90 days"},
   "1y": {hours: 24 * 365, label: "1 year", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 1 year"},
-};
-
-const LIFECYCLE_PREVIEW_POLICY = {
-  inventory_fresh_seconds: 300,
-  telemetry_delayed_seconds: 20,
-  telemetry_live_seconds: 6,
 };
 
 function boundedError(value: unknown): string {
@@ -234,18 +225,14 @@ export function NodeDetail({
   api,
   node,
   now,
-  onBusyChange,
   onClose,
-  onLifecycleRefresh,
   onReenroll,
   onUpgrade,
 }: {
   api: ControlApi;
   node: VisualFleetNode;
   now: Date;
-  onBusyChange?(busy: boolean): void;
   onClose(): void;
-  onLifecycleRefresh?(signal: AbortSignal): Promise<void>;
   onReenroll?(event: ReactMouseEvent<HTMLButtonElement>): void;
   onUpgrade?(event: ReactMouseEvent<HTMLButtonElement>): void;
 }) {
@@ -258,9 +245,6 @@ export function NodeDetail({
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [retryRevision, setRetryRevision] = useState(0);
-  const [reviewTarget, setReviewTarget] = useState<LibraryActionTarget>();
-  const [operation, setOperation] = useState<LibraryOperation>();
-  const [operationName, setOperationName] = useState<LibraryActionName>("Stop");
   const [richCurrent, setRichCurrent] = useState<TelemetryCurrentResponse>();
   const [richCapabilities, setRichCapabilities] = useState<TelemetryCapabilitiesResponse>();
   const [richWorkloads, setRichWorkloads] = useState<TelemetryWorkloadsResponse>();
@@ -268,7 +252,6 @@ export function NodeDetail({
   const [richError, setRichError] = useState("");
   const [richRetry, setRichRetry] = useState(0);
   const [telemetryPaused, setTelemetryPaused] = useState(false);
-  const lifecycleTrigger = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const root = detailRoot.current;
@@ -350,28 +333,6 @@ export function NodeDetail({
     const identity = performanceIdentity(history, node, spec);
     return identity ? [{identity, spec}] : [];
   });
-  const lifecycleBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
-  const refreshLifecycle = useCallback(async (signal: AbortSignal) => {
-    try {
-      await onLifecycleRefresh?.(signal);
-    } catch {
-      // The durable operation remains authoritative; the Fleet stream also reconciles it.
-    }
-  }, [onLifecycleRefresh]);
-  const openLifecycleReview = useCallback((target: LibraryActionTarget, trigger: HTMLButtonElement) => {
-    lifecycleTrigger.current = trigger;
-    setReviewTarget(target);
-  }, []);
-  const closeLifecycleReview = useCallback(() => {
-    setReviewTarget(undefined);
-    const returnTo = lifecycleTrigger.current;
-    queueMicrotask(() => returnTo?.focus());
-  }, []);
-  const onLifecycleApplied = useCallback((next: LibraryOperation, action: LibraryActionName) => {
-    setOperationName(action);
-    setOperation(next);
-  }, []);
-  const blockingRuns = (installationId: string) => node.loaded.filter(run => run.installation_id === installationId && run.run_state !== "stopped");
 
   function exportTelemetry() {
     const payload = {node_id: node.id, current: richCurrent ?? null, capabilities: richCapabilities?.capabilities ?? [], workloads: richWorkloads ?? null, history: history ?? null};
@@ -387,19 +348,6 @@ export function NodeDetail({
     link.download = `${node.id}-telemetry.json`;
     link.click();
     urlFactory.revokeObjectURL?.(objectUrl);
-  }
-
-  function stopButton(run: VisualFleetNode["loaded"][number]) {
-    if (run.run_state === "stopped") return null;
-    const destination = run.member_node_ids.length === 1 ? "this Spark" : `${run.member_node_ids.length} Sparks`;
-    return <button type="button" className="button secondary node-lifecycle-button" aria-label={`Stop ${run.title} on ${destination}`} disabled={lifecycleBlocked} onClick={event => openLifecycleReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Stop on {destination}</button>;
-  }
-
-  function removeControl(installation: VisualFleetNode["installed"][number]) {
-    const runs = blockingRuns(installation.installation_id);
-    if (runs.length > 0) return <small className="node-lifecycle-note">Stop {runs.length === 1 ? "the active run" : `all ${runs.length} active runs`} before removing this recipe from {installation.member_node_ids.length === 1 ? "this Spark" : `all ${installation.member_node_ids.length} Sparks`}.</small>;
-    const destination = installation.member_node_ids.length === 1 ? "this Spark" : `${installation.member_node_ids.length} Sparks`;
-    return <button type="button" className="button secondary node-lifecycle-button" aria-label={`Remove ${installation.title} from ${destination}`} disabled={lifecycleBlocked} onClick={event => openLifecycleReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Remove from {destination}</button>;
   }
 
   return <LibraryNodeNamesProvider names={{[node.id]: name}}><aside ref={detailRoot} className="node-detail" role="complementary" aria-labelledby={headingId}>
@@ -430,13 +378,12 @@ export function NodeDetail({
     </section>
 
     <section aria-labelledby={`${headingId}-recipes`}>
-      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Stop or remove what is here, or choose a model and exact recipe to download to the Controller.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Download to NAS</a></div>
-      {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={refreshLifecycle} operation={operation}/>}
+      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Fleet detail reports the observed runtime state. Use a numbered Profile to preview and load a Recipe on the current fleet.</p></div><a className="button" href="/library/profiles">Open Profiles</a></div>
       <div className="detail-recipe-columns">
-        <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span>{stopButton(run)}</li>)}</ul>}</section>
-        <section aria-label={`Installed recipes in ${name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span>{removeControl(item)}</li>)}</ul>}</section>
-        <section aria-label={`Installation state in ${name} details`}><h5>Installation state</h5>{installationStates.length === 0 ? <p>No incomplete installation states</p> : <ul>{installationStates.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span>{item.group_state !== "uninstalled" && removeControl(item)}</li>)}</ul>}</section>
-        <section aria-label={`Run state in ${name} details`}><h5>Run state</h5>{runStates.length === 0 ? <p>No inactive or degraded run states</p> : <ul>{runStates.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span>{stopButton(run)}</li>)}</ul>}</section>
+        <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installed recipes in ${name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installation state in ${name} details`}><h5>Installation state</h5>{installationStates.length === 0 ? <p>No incomplete installation states</p> : <ul>{installationStates.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.topology_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Run state in ${name} details`}><h5>Run state</h5>{runStates.length === 0 ? <p>No inactive or degraded run states</p> : <ul>{runStates.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
       </div>
     </section>
 
@@ -478,15 +425,5 @@ export function NodeDetail({
         <div><dt>Reported GPU memory</dt><dd>{formatBytes(node.telemetry?.sample.gpu_memory_free_bytes ?? node.inventory?.gpu_memory_free_bytes)} available / {formatBytes(node.telemetry?.sample.gpu_memory_total_bytes ?? node.inventory?.gpu_memory_total_bytes)}</dd></div>
       </dl>
     </details>
-    {reviewTarget && <LibraryActionDialog
-      alias={node.loaded.find(run => run.run_id === ("runId" in reviewTarget ? reviewTarget.runId : ""))?.alias ?? "model"}
-      api={api}
-      onApplied={onLifecycleApplied}
-      onBusyChange={onBusyChange}
-      onClose={closeLifecycleReview}
-      onRefresh={refreshLifecycle}
-      policy={LIFECYCLE_PREVIEW_POLICY}
-      target={reviewTarget}
-    />}
   </aside></LibraryNodeNamesProvider>;
 }

@@ -2,9 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {CacheEntryResponse, ControlApi, LibraryModel, ModelCacheOperationResponse, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
-import {modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord} from "./library-workcell";
-import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 import {availabilityFailure, availabilityRetryable, LibraryAvailabilityFeedback} from "./library-availability-feedback";
 import {LibraryRequestError} from "./library-request-error";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
@@ -129,7 +127,7 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
         return <article className="library-cache-row" key={entry.key}>
           <div><h3>{entry.model.model_document.identity.model.title}</h3><p>{entry.model.model_document.identity.version} · {entry.model.model_document.identity.variant} · {entry.model.model.publisher}/{entry.model.model.slug} · {entry.recipeCount ? `${entry.recipeCount} Recipe${entry.recipeCount === 1 ? "" : "s"}` : "No Recipe linked"}</p><span className={`library-cache-status state-${entry.status}`}>{entry.status}</span></div>
           <dl><div><dt>Files</dt><dd>{entry.files.length}</dd></div><div><dt>Complete bytes</dt><dd>{formatBytes(entry.expectedBytes)}</dd></div><div><dt>Verified</dt><dd>{formatBytes(entry.verifiedBytes)}</dd></div></dl>
-          {activeForEntry && operation && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/>}<span className="library-cache-actions"><button type="button" className="button" disabled={activeForEntry || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : retryForEntry ? "Retry cache operation" : activeForEntry ? "Downloading to NAS…" : "Download to NAS"}</button>{entry.status === "cached" && <a className="button secondary" href={`/library?view=models&model=${encodeURIComponent(modelKey(entry.model.model))}`} onClick={event => onNavigate(event, `/library?view=models&model=${encodeURIComponent(modelKey(entry.model.model))}`)}>Review Model removal in Models</a>}</span>
+          {activeForEntry && operation && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress.measurement)}/>}<span className="library-cache-actions"><button type="button" className="button" disabled={activeForEntry || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : retryForEntry ? "Retry cache operation" : activeForEntry ? "Downloading to NAS…" : "Download to NAS"}</button>{entry.status === "cached" && <small>Running Spark copies are retained independently of this NAS cache.</small>}</span>
           <details><summary>Show all files</summary><ul>{entry.files.map(file => <li key={file.id}><span>{file.path}</span><small>{formatBytes(file.size_bytes)} · sha256:{file.sha256.slice(0, 12)}…</small></li>)}</ul></details>
         </article>;
       })}

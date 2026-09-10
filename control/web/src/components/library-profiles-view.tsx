@@ -1,18 +1,6 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {
-  ControlApi,
-  FleetProfile,
-  FleetProfileApplyInput,
-  FleetProfileCaptureInput,
-  FleetProfileDuplicateInput,
-  FleetProfileInput,
-  FleetProfileApplication,
-  FleetProfilePreview,
-  FleetProfileStatus,
-  VisualFleetNode,
-  VisualFleetSnapshot,
-} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
 import {nodeDisplayName} from "../lib/fleet";
 import type {LibraryRecipeRecord} from "./library-workcell";
 
@@ -20,641 +8,225 @@ type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type AssignmentInput = NonNullable<FleetProfileInput["assignments"]>[number];
 type AssignmentDraft = {
   key: string;
-  recipeId: string;
-  recipeTitle: string;
-  modelTitle: string;
-  recipeRevisionId: string;
-  topologyName: string;
+  recipeSelector: string;
+  assignmentName: string;
+  modelVariant: string;
   desiredState: AssignmentInput["desired_state"];
-  alias: string;
-  nodes: AssignmentInput["nodes"];
+  sparkIds: string[];
 };
 type ProfileDraft = {
-  id?: string;
+  number?: number;
+  revision?: number;
   name: string;
   description: string;
   favorite: boolean;
   installationPolicy: FleetProfileInput["installation_policy"];
-  scopeNodeIds: string[];
+  labels: FleetProfileInput["labels"];
   assignments: AssignmentDraft[];
 };
+type FleetEntry = {id: string; name: string; state: string};
 
-const TERMINAL_APPLICATION_STATES = new Set(["succeeded", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
-function copyAssignment(assignment: FleetProfile["assignments"][number], index: number): AssignmentDraft {
-  return {
-    key: `assignment-${assignment.id}-${index}`,
-    recipeId: assignment.recipe_id,
-    recipeTitle: assignment.recipe_title,
-    modelTitle: assignment.model_title ?? "",
-    recipeRevisionId: assignment.recipe_revision_id,
-    topologyName: assignment.topology_name,
-    desiredState: assignment.desired_state,
-    alias: assignment.alias ?? "",
-    nodes: assignment.nodes.map(node => ({...node})),
-  };
+function stringField(value: unknown, key: string): string {
+  if (!value || typeof value !== "object") return "";
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : "";
+}
+
+function profileAssignments(profile: FleetProfile): AssignmentDraft[] {
+  return profile.assignments.map((assignment, index) => ({
+    key: `${assignment.selector}-${index}`,
+    recipeSelector: assignment.recipe_selector,
+    assignmentName: assignment.selector,
+    modelVariant: stringField(assignment.model, "variant"),
+    desiredState: assignment.observed_state.toLocaleLowerCase().includes("installed") ? "installed" : "running",
+    sparkIds: [...assignment.spark_ids].sort(),
+  }));
 }
 
 function draftFromProfile(profile: FleetProfile): ProfileDraft {
-  const scopeNodeIds = [...profile.scope.node_ids];
   return {
-    id: profile.id,
+    number: profile.number,
+    revision: profile.revision,
     name: profile.name,
     description: profile.description,
     favorite: profile.favorite,
     installationPolicy: profile.installation_policy,
-    scopeNodeIds,
-    assignments: profile.assignments.map(copyAssignment),
+    labels: profile.labels,
+    assignments: profileAssignments(profile),
   };
 }
 
-function blankDraft(fleet?: VisualFleetSnapshot): ProfileDraft {
-  return {
-    name: "New fleet profile",
-    description: "A complete desired setup for the selected Sparks.",
-    favorite: false,
-    installationPolicy: "keep-cached",
-    scopeNodeIds: fleet?.nodes.map(node => node.id) ?? [],
-    assignments: [],
-  };
+function blankDraft(): ProfileDraft {
+  return {name: "New fleet profile", description: "A complete desired setup for the fleet.", favorite: false, installationPolicy: "keep-cached", labels: {}, assignments: []};
 }
 
-function profileInput(draft: ProfileDraft): FleetProfileInput {
-  return {
+function fleetEntries(profile: FleetProfile | undefined, fleet: VisualFleetSnapshot | undefined): FleetEntry[] {
+  if (profile) return (profile.fleet ?? []).flatMap(item => {
+    const id = stringField(item, "selector");
+    if (!id) return [];
+    return [{id, name: stringField(item, "display_name") || id, state: stringField(item, "state") || "Unknown"}];
+  });
+  return fleet?.nodes.map(node => ({id: node.id, name: nodeDisplayName(node), state: "Observed"})) ?? [];
+}
+
+function inputFromDraft(draft: ProfileDraft): FleetProfileInput {
+  const input: FleetProfileInput = {
     name: draft.name.trim(),
     description: draft.description.trim(),
     installation_policy: draft.installationPolicy,
+    labels: draft.labels,
     favorite: draft.favorite,
-    labels: {},
-    scope: {node_ids: [...new Set(draft.scopeNodeIds)].sort()},
     assignments: draft.assignments.map(assignment => ({
-      recipe_revision_id: assignment.recipeRevisionId,
-      topology_name: assignment.topologyName,
+      recipe_selector: assignment.recipeSelector.trim(),
+      spark_ids: [...new Set(assignment.sparkIds)].sort(),
+      assignment_name: assignment.assignmentName.trim() || undefined,
+      model_variant: assignment.modelVariant.trim() || undefined,
       desired_state: assignment.desiredState,
-      alias: assignment.desiredState === "running" ? assignment.alias.trim() || null : null,
-      nodes: assignment.nodes,
     })),
   };
+  if (draft.revision !== undefined) input.expected_revision = draft.revision;
+  return input;
 }
 
-function roleList(record: LibraryRecipeRecord): string[] {
-  const roles = record.recipe?.recipe_document.topology.roles ?? [];
-  return roles.flatMap(role => Array.from({length: role.count}, () => role.name));
+function applicationProgressRecord(application: FleetProfileApplicationView): Record<string, unknown> {
+  const progress = application.progress as Record<string, unknown>;
+  const child = progress.child_progress;
+  return child && typeof child === "object" ? child as Record<string, unknown> : progress;
 }
 
-function addAssignment(record: LibraryRecipeRecord, draft: ProfileDraft, fleet?: VisualFleetSnapshot): ProfileDraft {
-  const recipe = record.recipe;
-  const recipeRevisionId = recipe?.recipe_revision_id;
-  if (!recipe || !recipe.recipe_document || !recipeRevisionId) return draft;
-  const roles = roleList(record);
-  if (roles.length === 0) return draft;
-  const available = draft.scopeNodeIds.length > 0 ? draft.scopeNodeIds : (fleet?.nodes.map(node => node.id) ?? []);
-  const nodeIds = available.slice(0, roles.length);
-  const nodes = nodeIds.map((nodeId, index) => ({node_id: nodeId, rank: index, role: roles[index] ?? `rank-${index}`, endpoint_owner: index === 0}));
-  const assignment: AssignmentDraft = {
-    key: `assignment-new-${crypto.randomUUID()}`,
-    recipeId: recipe.recipe_id,
-    recipeTitle: record.title,
-    modelTitle: record.modelTitle,
-    recipeRevisionId,
-    topologyName: recipe.recipe_document.topology.name,
-    desiredState: "running",
-    alias: recipe.slug,
-    nodes,
-  };
-  return {...draft, assignments: [...draft.assignments, assignment]};
-}
-
-function currentWork(node: VisualFleetNode): string {
-  const running = (node.loaded ?? []).map(run => run.title || run.alias);
-  if (running.length > 0) return running.join(" · ");
-  const installed = (node.installed ?? []).map(item => item.title);
-  return installed.length > 0 ? `${installed.join(" · ")} · installed` : "Idle";
-}
-
-function desiredWork(nodeId: string, draft: ProfileDraft): string {
-  const assignments = draft.assignments.filter(assignment => assignment.nodes.some(node => node.node_id === nodeId));
-  if (assignments.length === 0) return "Idle by intent";
-  return assignments.map(assignment => assignment.desiredState === "running" ? assignment.recipeTitle : `${assignment.recipeTitle} · installed`).join(" · ");
-}
-
-function applicationLabel(application: FleetProfileApplication): string {
-  if (application.state === "succeeded") return "Profile matched";
-  if (application.state === "failed" || application.state === "cancelled") return "Switch needs attention";
-  if (application.state === "waiting-for-operator") return "Switch waiting for operator";
-  return "Switch in progress";
-}
-
-function applicationProgressLabel(application: FleetProfileApplication, nodeNames: Record<string, string>): string {
-  const progress = profileProgressRecord(application);
-  const names = progress?.node_ids?.map(id => nodeNames[id] ?? id).join(", ");
-  const phase = progress?.phase;
-  if (phase === "container-build") return "Building container";
-  if (phase === "container-download") return "Downloading container";
-  if (phase === "model-download") return "Downloading model";
-  if (phase === "target-copy" || phase === "transfer") return names ? `Copying to ${names}` : "Copying to Sparks";
-  if (phase === "runtime-install") return "Loading container";
-  if (phase === "prepare") return "Preparing assets";
-  if (phase === "start") return "Starting";
-  if (phase === "stop") return "Stopping";
-  if (phase === "verify" || phase === "final_verify" || phase === "final-verify") return "Checking running state";
-  if (application.status_reason && application.state === "failed") return application.status_reason;
-  return application.progress.current_label ?? (application.state === "queued" ? "Checking current setup" : applicationLabel(application));
-}
-
-function profileProgressRecord(application: FleetProfileApplication) {
-  return application.progress.child_progress ?? application.progress.switch_adapter?.child_progress;
-}
-
-function profileBytes(value: unknown): string | undefined {
+function formatBytes(value: unknown): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
   if (value < 1024) return `${Math.round(value)} B`;
   const units = ["KiB", "MiB", "GiB", "TiB"];
   let amount = value;
   let unit = "B";
-  for (const next of units) {
-    amount /= 1024;
-    unit = next;
-    if (amount < 1024) break;
-  }
+  for (const next of units) { amount /= 1024; unit = next; if (amount < 1024) break; }
   return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function ProfileApplicationProgress({application, nodeNames, onRetry, retrying}: {application: FleetProfileApplication; nodeNames: Record<string, string>; onRetry(): void; retrying: boolean}) {
-  const progress = profileProgressRecord(application);
-  const completed = profileBytes(progress?.bytes);
-  const total = profileBytes(progress?.total_bytes);
-  const value = progress?.total_bytes != null && progress.total_bytes > 0 && progress.bytes != null
-    ? Math.min(100, Math.max(0, progress.bytes / progress.total_bytes * 100)) : undefined;
-  const members = progress?.node_ids ?? [];
-  return <section className={`library-profile-application state-${application.state}`} aria-live="polite" aria-label="Profile switch progress">
-    <div className="library-profile-application-heading"><div><strong>{applicationProgressLabel(application, nodeNames)}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
-    <div className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
-    {members.length > 0 && <ul className="library-profile-application-members" aria-label="Profile switch targets">{members.map(nodeId => <li key={nodeId}><span>{nodeNames[nodeId] ?? nodeId}</span><small>Participating</small></li>)}</ul>}
+function ProfileProgress({application}: {application: FleetProfileApplicationView}) {
+  const progress = applicationProgressRecord(application);
+  const completed = formatBytes(progress.bytes);
+  const total = formatBytes(progress.total_bytes);
+  const value = typeof progress.bytes === "number" && typeof progress.total_bytes === "number" && progress.total_bytes > 0 ? Math.min(100, Math.max(0, progress.bytes / progress.total_bytes * 100)) : undefined;
+  const phase = typeof progress.phase === "string" ? progress.phase.replaceAll("-", " ") : "Profile load";
+  const nodeIds = Array.isArray(progress.node_ids) ? progress.node_ids.filter((id): id is string => typeof id === "string") : [];
+  return <section className={`library-profile-application state-${application.state}`} aria-live="polite" aria-label="Profile load progress">
+    <div className="library-profile-application-heading"><div><strong>{phase}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
+    <div className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile load progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
+    {nodeIds.length > 0 && <ul className="library-profile-application-members" aria-label="Profile load targets">{nodeIds.map(nodeId => <li key={nodeId}><span>{nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
-    {["failed", "waiting-for-operator"].includes(application.state) && <button type="button" className="button secondary" onClick={onRetry} disabled={retrying}>{retrying ? "Retrying remaining work…" : "Retry remaining work"}</button>}
   </section>;
 }
 
-const PROFILE_CONFIRMATION_REASON_CODES = new Set([
-  "profile.scope_changed",
-  "profile.distributed_cross_scope",
-  "profile.shared_installation_scope",
-  "profile.preparation_scope_mismatch",
-  "profile.unresolved_conflict",
-  "profile.choice_required",
-]);
-
-function planNeedsConfirmation(preview: FleetProfilePreview): boolean {
-  if (!preview.allowed) return true;
-  if (preview.summary.uninstalls > 0) return true;
-  return preview.reasons.some(reason => PROFILE_CONFIRMATION_REASON_CODES.has(reason.code));
-}
-
-function confirmationActionLabel(preview: FleetProfilePreview): string {
-  return preview.summary.uninstalls > 0 ? "Review cleanup" : "Review effects";
-}
-
-function reasonLabel(code: string): string {
-  return code.split(".").at(-1)?.replaceAll("_", " ") ?? code;
-}
-
-function profileStatusLabel(status: FleetProfileStatus): string {
-  if (status.matched) return "Up to date";
-  if (status.drifted) return "Needs update";
-  if (status.state === "blocked") return "Needs attention";
-  if (status.state === "partially-applied") return "Partially applied";
-  return "Not active everywhere";
-}
-
-export function LibraryProfilesView({api, entries, fleet, initialCreate = false, initialProfileId, onBusyChange, onNavigate}: {
-  api: ControlApi;
-  entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
-  initialCreate?: boolean;
-  initialProfileId?: string;
-  onBusyChange?(busy: boolean): void;
-  onNavigate: Navigate;
-}) {
-  const profileApi = api;
+export function LibraryProfilesView({api, entries, fleet, initialCreate = false, onBusyChange, onNavigate}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; initialCreate?: boolean; onBusyChange?(busy: boolean): void; onNavigate: Navigate}) {
   const [profiles, setProfiles] = useState<FleetProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>();
+  const [selectedNumber, setSelectedNumber] = useState<number>();
   const [draft, setDraft] = useState<ProfileDraft>();
   const [editing, setEditing] = useState(initialCreate);
-  const [savedDraftKey, setSavedDraftKey] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [preview, setPreview] = useState<FleetProfilePreview>();
+  const [application, setApplication] = useState<FleetProfileApplicationView>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [preview, setPreview] = useState<FleetProfilePreview>();
-  const [previewing, setPreviewing] = useState(false);
-  const [profilesAttempt, setProfilesAttempt] = useState(0);
-  const [previewAttempt, setPreviewAttempt] = useState(0);
-  const [confirmationRequired, setConfirmationRequired] = useState(false);
-  const [application, setApplication] = useState<FleetProfileApplication>();
-  const [applying, setApplying] = useState(false);
-  const [recipeToAdd, setRecipeToAdd] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [scopeContractAvailable, setScopeContractAvailable] = useState(true);
-  const [profileStatus, setProfileStatus] = useState<FleetProfileStatus>();
-  const [statusAttempt, setStatusAttempt] = useState(0);
-  const [retryRequest, setRetryRequest] = useState<{applicationId: string; key: string}>();
-  const [requestKey, setRequestKey] = useState<string>();
+
+  const selectedProfile = profiles.find(profile => profile.number === selectedNumber);
+  const availableFleet = useMemo(() => fleetEntries(selectedProfile, fleet), [fleet, selectedProfile]);
+  const matchingEntries = useMemo(() => entries.filter(entry => entry.recipe), [entries]);
+  const draftValid = Boolean(draft?.name.trim()) && (draft?.assignments.every(assignment => assignment.recipeSelector.trim() && assignment.sparkIds.length > 0) ?? false);
+  const applicationRunning = Boolean(application && !TERMINAL_STATES.has(application.state));
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setError("");
-    void profileApi.fleetProfiles(controller.signal)
-      .then(result => {
-        if (controller.signal.aborted) return;
-        const resultHasScope = result.profiles.length === 0
-          ? true
-          : result.profiles.every(profile => Array.isArray(profile.scope.node_ids));
-        setScopeContractAvailable(resultHasScope);
-        setProfiles(result.profiles);
-        const requested = initialProfileId && result.profiles.some(profile => profile.id === initialProfileId) ? initialProfileId : result.profiles[0]?.id;
-        if (initialCreate) {
-          setSelectedProfileId(undefined);
-          setDraft(blankDraft(fleet));
-          setSavedDraftKey("");
-          setEditing(true);
-        } else if (requested) {
-          const selected = result.profiles.find(profile => profile.id === requested);
-          setSelectedProfileId(requested);
-          if (selected) {
-            const next = draftFromProfile(selected);
-            setDraft(next);
-            setSavedDraftKey(JSON.stringify(next));
-            setEditing(false);
-          }
-        } else {
-          setSelectedProfileId(undefined);
-          setDraft(undefined);
-          setSavedDraftKey("");
-          setEditing(false);
-        }
-      })
-      .catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Saved profiles are unavailable."); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    void api.profiles(controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      setProfiles([...result.profiles].sort((left, right) => left.number - right.number));
+      setSelectedNumber(current => current && result.profiles.some(profile => profile.number === current) ? current : result.profiles[0]?.number);
+      if (!initialCreate && result.profiles[0] && !draft) { setDraft(draftFromProfile(result.profiles[0])); setEditing(false); }
+      setError("");
+    }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Saved profiles are unavailable."); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [api, fleet, initialCreate, initialProfileId, profilesAttempt]);
-
-  const matchingEntries = useMemo(() => entries.filter(entry => Boolean(entry.recipe?.recipe_document && entry.recipe.recipe_revision_id)), [entries]);
-  const draftDirty = Boolean(draft && JSON.stringify(draft) !== savedDraftKey);
-  const draftValid = Boolean(draft && draft.name.trim() && draft.scopeNodeIds.length > 0 && draft.assignments.every(assignment => assignment.nodes.length > 0));
-  const selectedProfile = profiles.find(profile => profile.id === selectedProfileId);
-  const assignedNodeIds = new Set(draft?.assignments.flatMap(assignment => assignment.nodes.map(node => node.node_id)) ?? []);
-  const applicationRunning = Boolean(application && !TERMINAL_APPLICATION_STATES.has(application.state));
+  }, [api, initialCreate]);
 
   useEffect(() => {
-    if (!selectedProfileId || !scopeContractAvailable) {
-      setProfileStatus(undefined);
-      return;
-    }
+    if (selectedNumber === undefined || editing) { setPreview(undefined); return; }
     const controller = new AbortController();
-    void profileApi.fleetProfileStatus(selectedProfileId, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setProfileStatus(value); })
-      .catch(() => { if (!controller.signal.aborted) setProfileStatus(undefined); });
+    void api.previewProfile(selectedNumber, controller.signal).then(result => { if (!controller.signal.aborted) setPreview(result); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "The profile preview is unavailable."); });
     return () => controller.abort();
-  }, [api, scopeContractAvailable, selectedProfileId, statusAttempt]);
+  }, [api, editing, selectedNumber]);
 
   useEffect(() => {
-    onBusyChange?.(applicationRunning || applying);
-    return () => onBusyChange?.(false);
-  }, [applicationRunning, applying, onBusyChange]);
-
-  useEffect(() => {
-    if (!selectedProfileId || draftDirty) {
-      setPreview(undefined);
-      return;
-    }
+    if (selectedNumber === undefined || !application || TERMINAL_STATES.has(application.state)) return;
     const controller = new AbortController();
-    setPreviewing(true);
-    setError("");
-    void profileApi.previewFleetProfile(selectedProfileId, controller.signal)
-        .then(result => { if (!controller.signal.aborted) { setPreview(result); setConfirmationRequired(false); } })
-      .catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "The profile preview is unavailable."); })
-      .finally(() => { if (!controller.signal.aborted) setPreviewing(false); });
-    return () => controller.abort();
-  }, [api, draftDirty, previewAttempt, selectedProfileId]);
-
-  useEffect(() => {
-    if (!application || TERMINAL_APPLICATION_STATES.has(application.state)) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void profileApi.fleetProfileApplication(application.id, controller.signal).then(next => {
-        if (controller.signal.aborted) return;
-        setApplication(next);
-      }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Switch progress is unavailable."); });
-    }, 1000);
+    const timer = window.setTimeout(() => { void api.profileProgress(selectedNumber, controller.signal).then(next => { if (!controller.signal.aborted) setApplication(next); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Profile load progress is unavailable."); }); }, 1_000);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [api, application]);
+  }, [api, application, selectedNumber]);
 
-  useEffect(() => {
-    if (!application || !TERMINAL_APPLICATION_STATES.has(application.state)) return;
-    setStatusAttempt(value => value + 1);
-    setPreviewAttempt(value => value + 1);
-    setNotice(application.state === "succeeded" ? "Profile switch completed." : "");
-  }, [application?.id, application?.state]);
+  useEffect(() => { onBusyChange?.(saving || loadingProfile || applicationRunning); return () => onBusyChange?.(false); }, [applicationRunning, loadingProfile, onBusyChange, saving]);
 
   function selectProfile(profile: FleetProfile) {
-    const next = draftFromProfile(profile);
-    setSelectedProfileId(profile.id);
-    setDraft(next);
-    setEditing(false);
-    setSavedDraftKey(JSON.stringify(next));
-    setPreview(undefined);
-    setConfirmationRequired(false);
-    setApplication(undefined);
-    setRequestKey(undefined);
-    setProfileStatus(undefined);
-    setRecipeToAdd("");
-    setConfirmDelete(false);
-    setNotice("");
+    setSelectedNumber(profile.number); setDraft(draftFromProfile(profile)); setEditing(false); setPreview(undefined); setApplication(undefined); setNotice("");
   }
 
-  function startNew() {
-    setSelectedProfileId(undefined);
-    setDraft(blankDraft(fleet));
-    setEditing(true);
-    setSavedDraftKey("");
-    setPreview(undefined);
-    setApplication(undefined);
-    setRequestKey(undefined);
-    setProfileStatus(undefined);
-    setConfirmationRequired(false);
-    setRecipeToAdd("");
-    setNotice("Draft profile created. Saving does not change the running fleet.");
-  }
-
-  async function duplicate() {
-    if (!draft) return;
-    setError("");
-    if (draft.id) {
-      setApplying(true);
-      try {
-        const result = await profileApi.duplicateFleetProfile(draft.id, {name: `${draft.name} copy`});
-        setProfiles(current => [...current.filter(profile => profile.id !== result.id), result].sort((left, right) => Number(right.favorite) - Number(left.favorite) || left.name.localeCompare(right.name)));
-        setSelectedProfileId(result.id);
-        const next = draftFromProfile(result);
-        setDraft(next);
-        setEditing(true);
-        setSavedDraftKey(JSON.stringify(next));
-        setPreview(undefined);
-        setApplication(undefined);
-        setRequestKey(undefined);
-        setProfileStatus(undefined);
-        setConfirmationRequired(false);
-        setNotice("Profile duplicated. Review the Sparks and placements before switching.");
-      } catch (value) {
-        setError(value instanceof Error ? value.message.slice(0, 256) : "The profile could not be duplicated.");
-      } finally {
-        setApplying(false);
-      }
-      return;
-    }
-    setSelectedProfileId(undefined);
-    setDraft({...draft, id: undefined, name: `${draft.name} copy`, favorite: false, assignments: draft.assignments.map((assignment, index) => ({...assignment, key: `duplicate-${index}-${assignment.key}`}))});
-    setEditing(true);
-    setSavedDraftKey("");
-    setPreview(undefined);
-    setApplication(undefined);
-    setRequestKey(undefined);
-    setConfirmationRequired(false);
-    setNotice("Duplicate draft ready. Review the exact scope and assignments before saving.");
-  }
-
-  function updateDraft(next: Partial<ProfileDraft>) {
-    setDraft(current => current ? {...current, ...next} : current);
-    setNotice("");
-  }
-
-  function toggleScope(nodeId: string) {
-    if (!draft) return;
-    const next = draft.scopeNodeIds.includes(nodeId)
-      ? draft.scopeNodeIds.filter(id => id !== nodeId)
-      : [...draft.scopeNodeIds, nodeId];
-    updateDraft({scopeNodeIds: next});
-  }
-
-  function updateAssignment(key: string, next: Partial<AssignmentDraft>) {
-    if (!draft) return;
-    updateDraft({assignments: draft.assignments.map(assignment => assignment.key === key ? {...assignment, ...next} : assignment)});
-  }
-
-  function updateAssignmentNodes(key: string, nodeIds: string[]) {
-    if (!draft) return;
-    const assignment = draft.assignments.find(item => item.key === key);
+  function startNew() { setSelectedNumber(undefined); setDraft(blankDraft()); setEditing(true); setPreview(undefined); setApplication(undefined); setNotice("Draft profile created. Saving does not change the running fleet."); }
+  function updateDraft(next: Partial<ProfileDraft>) { setDraft(current => current ? {...current, ...next} : current); setNotice(""); }
+  function updateAssignment(key: string, next: Partial<AssignmentDraft>) { if (draft) updateDraft({assignments: draft.assignments.map(item => item.key === key ? {...item, ...next} : item)}); }
+  function toggleSpark(key: string, sparkId: string) {
+    const assignment = draft?.assignments.find(item => item.key === key);
     if (!assignment) return;
-    const nodes = nodeIds.map((nodeId, index) => {
-      const previous = assignment.nodes[index];
-      return {node_id: nodeId, rank: index, role: previous?.role ?? (index === 0 ? "leader" : "worker"), endpoint_owner: index === 0};
-    });
-    updateAssignment(key, {nodes});
+    const sparkIds = assignment.sparkIds.includes(sparkId) ? assignment.sparkIds.filter(id => id !== sparkId) : [...assignment.sparkIds, sparkId];
+    updateAssignment(key, {sparkIds});
   }
-
-  function addSelectedRecipe() {
-    if (!draft || !recipeToAdd) return;
-    const record = matchingEntries.find(entry => entry.key === recipeToAdd);
-    if (!record) return;
-    setDraft(addAssignment(record, draft, fleet));
-    setRecipeToAdd("");
-    setNotice("Placement added. Save the profile to check the complete Spark group.");
-  }
-
-  async function captureCurrent() {
-    setError("");
-    setApplying(true);
-    try {
-      const result = await profileApi.captureCurrentFleetProfile({
-        name: draft?.name.trim() || "Captured Fleet setup",
-        description: draft?.description.trim() || "Captured current Fleet setup",
-        installation_policy: draft?.installationPolicy ?? "keep-cached",
-        favorite: draft?.favorite ?? false,
-      });
-      setProfiles(current => [...current.filter(profile => profile.id !== result.id), result].sort((left, right) => Number(right.favorite) - Number(left.favorite) || left.name.localeCompare(right.name)));
-      setSelectedProfileId(result.id);
-      const next = draftFromProfile(result);
-      setDraft(next);
-      setEditing(false);
-      setSavedDraftKey(JSON.stringify(next));
-      setPreview(undefined);
-      setConfirmationRequired(false);
-      setRequestKey(undefined);
-      setProfileStatus(undefined);
-      setNotice("The current setup was saved as a profile. Switch to it when you are ready.");
-    } catch (value) {
-      setError(value instanceof Error ? value.message.slice(0, 256) : "The current setup could not be captured.");
-    } finally {
-      setApplying(false);
-    }
+  function addRecipe() {
+    const record = matchingEntries[0];
+    if (!draft || !record?.recipe) return;
+    const count = record.recipe.recipe_document.topology.node_count;
+    const sparkIds = availableFleet.slice(0, count).map(item => item.id);
+    const assignment: AssignmentDraft = {key: `assignment-${crypto.randomUUID()}`, recipeSelector: record.recipe.slug, assignmentName: record.recipe.slug, modelVariant: record.modelDocument?.identity.variant ?? "", desiredState: "running", sparkIds};
+    updateDraft({assignments: [...draft.assignments, assignment]});
   }
 
   async function saveDraft() {
-    if (!draft || !draftValid || applying) return;
-    setError("");
-    setNotice("");
-    setApplying(true);
+    if (!draft || !draftValid || saving) return;
+    setSaving(true); setError("");
     try {
-      const input = profileInput(draft);
-      const result = draft.id
-        ? await profileApi.updateFleetProfile(draft.id, input)
-        : await profileApi.createFleetProfile(input);
-      setProfiles(current => [...current.filter(profile => profile.id !== result.id), result].sort((left, right) => Number(right.favorite) - Number(left.favorite) || left.name.localeCompare(right.name)));
-      setSelectedProfileId(result.id);
-      const next = draftFromProfile(result);
-      setDraft(next);
-      setEditing(false);
-      setSavedDraftKey(JSON.stringify(next));
-      setPreview(undefined);
-      setPreviewAttempt(value => value + 1);
-      setRequestKey(undefined);
-      setProfileStatus(undefined);
-      setNotice(`${result.name} saved. Current runs remain unchanged until you switch the profile.`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message.slice(0, 256) : "The profile could not be saved.");
-    } finally {
-      setApplying(false);
-    }
+      const number = draft.number ?? Math.max(0, ...profiles.map(profile => profile.number)) + 1;
+      const result = await api.autosaveProfile(number, inputFromDraft(draft));
+      setProfiles(current => [...current.filter(profile => profile.number !== result.number), result].sort((left, right) => left.number - right.number));
+      setSelectedNumber(result.number); setDraft(draftFromProfile(result)); setEditing(false); setPreview(undefined); setNotice(`Profile ${result.number} · ${result.name} saved. Current runs remain unchanged until load.`);
+    } catch (value) { setError(value instanceof Error ? value.message : "The profile could not be saved."); }
+    finally { setSaving(false); }
   }
 
-  async function deleteSelected() {
-    if (!selectedProfileId) return;
-    setError("");
-    setApplying(true);
-    try {
-      await profileApi.deleteFleetProfile(selectedProfileId);
-      const remaining = profiles.filter(profile => profile.id !== selectedProfileId);
-      setProfiles(remaining);
-      setConfirmDelete(false);
-      setSelectedProfileId(remaining[0]?.id);
-      const next = remaining[0] ? draftFromProfile(remaining[0]) : blankDraft(fleet);
-      setDraft(remaining[0] ? next : undefined);
-      setEditing(false);
-      setSavedDraftKey(remaining[0] ? JSON.stringify(next) : "");
-      setPreview(undefined);
-      setRequestKey(undefined);
-      setProfileStatus(undefined);
-      setNotice("Profile deleted. Cached artifacts and Spark installations were not removed.");
-    } catch (value) {
-      setError(value instanceof Error ? value.message.slice(0, 256) : "The profile could not be deleted.");
-    } finally {
-      setApplying(false);
-    }
+  async function load() {
+    if (selectedNumber === undefined || !preview?.allowed || loadingProfile) return;
+    setLoadingProfile(true); setError("");
+    try { setApplication(await api.loadProfile(selectedNumber, {dry_run: false, request_key: crypto.randomUUID()})); }
+    catch (value) { setError(value instanceof Error ? value.message : "The profile could not be loaded."); }
+    finally { setLoadingProfile(false); }
   }
 
-  async function applySwitch(plan: FleetProfilePreview = preview as FleetProfilePreview) {
-    if (!selectedProfileId || !plan || !plan.allowed || !plan.steps.length || applying) return;
-    setApplying(true);
-    setError("");
-    try {
-      const key = requestKey ?? crypto.randomUUID();
-      setRequestKey(key);
-      const applyInput: FleetProfileApplyInput = {plan_digest: plan.plan_digest, request_key: key};
-      const next = await profileApi.applyFleetProfile(selectedProfileId, applyInput);
-      setApplication(next);
-      if (next.state === "succeeded") setRequestKey(undefined);
-    } catch (value) {
-      setError(value instanceof Error ? value.message.slice(0, 256) : "The profile switch could not be started.");
-      setNotice("The switch request may have been accepted. Recheck profile status before retrying; the same request key will be reused.");
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  async function retryApplication() {
-    if (!application || applying || !["failed", "waiting-for-operator"].includes(application.state)) return;
-    const key = retryRequest?.applicationId === application.id ? retryRequest.key : crypto.randomUUID();
-    setRetryRequest({applicationId: application.id, key});
-    setApplying(true);
-    setError("");
-    setNotice("");
-    try {
-      const next = await profileApi.retryFleetProfileApplication(application.id, {request_key: key});
-      setApplication(next);
-      setRetryRequest(undefined);
-      setNotice("Remaining profile work is being rechecked against the current fleet.");
-      setStatusAttempt(value => value + 1);
-    } catch (value) {
-      setError(value instanceof Error ? value.message.slice(0, 256) : "Remaining profile work could not be retried.");
-      setNotice("Retry again to check the same request. Completed work remains recorded.");
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  async function switchProfile() {
-    if (!selectedProfileId || draftDirty || applying) return;
-    setError("");
-    let plan = preview;
-    if (!plan) {
-      const controller = new AbortController();
-      setPreviewing(true);
-      try {
-        plan = await profileApi.previewFleetProfile(selectedProfileId, controller.signal);
-        setPreview(plan);
-      } catch (value) {
-        setError(value instanceof Error ? value.message.slice(0, 256) : "The current setup could not be checked.");
-      } finally {
-        setPreviewing(false);
-      }
-    }
-    if (!plan) return;
-    if (!plan.allowed || planNeedsConfirmation(plan)) {
-      setConfirmationRequired(true);
-      return;
-    }
-    if (plan.steps.length === 0) {
-      setNotice("This profile already matches the observed fleet. No switch was dispatched.");
-      return;
-    }
-    await applySwitch(plan);
-  }
-
-  if (!scopeContractAvailable) return <section className="library-profile-view library-unavailable" aria-labelledby="library-profiles-heading"><header className="library-subview-heading"><div><h2 id="library-profiles-heading">Profiles</h2><p>Create and review complete setups across the enrolled Sparks.</p></div><a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a model</a></header><div className="library-cache-notice" role="status"><div><strong>Complete Spark scope is unavailable</strong><p>This Controller did not report which Sparks belong to each profile. Refresh after the profile service is updated.</p></div><span>Profile details unavailable</span></div>{error && <div className="library-cache-state is-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setProfilesAttempt(value => value + 1)}>Retry profiles</button></div>}</section>;
-
+  const names = Object.fromEntries(availableFleet.map(item => [item.id, item.name]));
   return <section className="library-profile-view" aria-labelledby="library-profiles-heading">
-    <>
-      <header className="library-subview-heading">
-        <div><h2 id="library-profiles-heading">Profiles</h2><p>Save a complete setup, then switch the selected Sparks with one action. Missing model and runtime assets are fetched and verified as needed.</p></div>
-        <div className="library-profile-header-actions"><button type="button" className="button secondary" onClick={startNew}>Create profile</button><a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a model</a></div>
-      </header>
-      {error && <p className="library-profile-plain-error" role="alert">{error}</p>}
-      {loading && <p className="library-cache-state" role="status">Loading saved profiles…</p>}
-      {notice && <div className="library-profile-notice" role="status">{notice}</div>}
-      {profileStatus && <section className={`library-profile-status state-${profileStatus.state}`} aria-live="polite">
-        <div className="library-profile-status-summary"><strong>Profile status: {profileStatusLabel(profileStatus)}</strong><span>{profileStatus.matched ? "The Sparks match this profile." : profileStatus.drifted ? "Some Sparks differ from this profile." : "This profile is not active on every Spark."}</span></div>
-        <span className="library-profile-status-scope">{profileStatus.scope.idle_node_ids?.length ?? 0} idle by choice · {profileStatus.scope.node_ids.length} Sparks in scope</span>
-        {profileStatus.reasons.length > 0 && <details className="library-profile-status-details"><summary>Attention details</summary><ul>{profileStatus.reasons.map(reason => <li key={`${reason.code}:${reason.detail}`}><strong>{reasonLabel(reason.code)}</strong><span>{reason.detail}</span></li>)}</ul></details>}
-        <button type="button" className="button secondary" onClick={() => setStatusAttempt(value => value + 1)}>Refresh status</button>
-      </section>}
-      {application && <ProfileApplicationProgress application={application} nodeNames={Object.fromEntries(fleet?.nodes.map(node => [node.id, nodeDisplayName(node)]) ?? [])} retrying={applying} onRetry={() => void retryApplication()}/>}
-      <div className="library-profile-layout">
-        <aside className="library-profile-list" aria-label="Saved profiles">
-          <div className="library-profile-list-heading"><strong>Saved profiles</strong><span>{profiles.length}</span></div>
-          {profiles.map(profile => <button key={profile.id} type="button" className={profile.id === selectedProfileId ? "is-selected" : undefined} aria-pressed={profile.id === selectedProfileId} onClick={() => selectProfile(profile)}><span>{profile.name}</span><small>{profile.assignments.length} placement{profile.assignments.length === 1 ? "" : "s"} · {profile.installation_policy === "exact" ? "Exact" : "Keep cached"}</small></button>)}
-          {profiles.length === 0 && <div className="library-profile-list-empty"><strong>No saved profiles</strong><p>Create one here or choose a model and save its exact placement.</p></div>}
-          <button type="button" className="library-profile-create-link" onClick={startNew}>+ New profile</button>
-        </aside>
-        {draft && editing && <div className="library-profile-editor">
-          <header className="library-profile-editor-heading"><div><span>{draft.id ? "Edit saved profile" : "New profile draft"}</span><h3>{draft.name || "Unnamed profile"}</h3></div><div className="library-profile-editor-actions">{draft.id && <button type="button" className="button secondary" onClick={duplicate}>Duplicate</button>}{draft.id && <button type="button" className="button secondary" onClick={() => setConfirmDelete(true)} disabled={applying}>Delete</button>}</div></header>
-          {confirmDelete && draft.id && <div className="library-profile-delete-confirm" role="alert"><div><strong>Delete {draft.name}?</strong><p>This removes the saved desired state. Cached NAS artifacts and Spark installations remain untouched.</p></div><div><button type="button" className="button secondary" onClick={() => setConfirmDelete(false)}>Keep profile</button><button type="button" className="button danger" onClick={() => void deleteSelected()}>Delete profile</button></div></div>}
-          <div className="library-profile-fields"><label><span>Profile name</span><input value={draft.name} maxLength={80} onChange={event => updateDraft({name: event.target.value})}/></label><label><span>Retention</span><select value={draft.installationPolicy} onChange={event => updateDraft({installationPolicy: event.target.value as FleetProfileInput["installation_policy"]})}><option value="keep-cached">Keep cached artifacts</option><option value="exact">Remove unlisted installations on cleanup</option></select><small className="library-profile-field-note">Keep cached is the one-click switch path. Cleanup always asks before removing an installation.</small></label><label className="library-profile-wide"><span>Purpose</span><textarea value={draft.description} maxLength={512} rows={2} onChange={event => updateDraft({description: event.target.value})}/></label><label className="library-profile-favorite"><input type="checkbox" checked={draft.favorite} onChange={event => updateDraft({favorite: event.target.checked})}/><span>Pin this profile for quick switching</span></label></div>
-          <section className="library-profile-scope" aria-labelledby="profile-scope-heading"><div className="library-profile-section-heading"><div><h4 id="profile-scope-heading">Fleet scope</h4><p>Every selected Spark gets an explicit outcome. A selected Spark without a placement stays idle by intent.</p></div><span>{draft.scopeNodeIds.length} of {fleet?.nodes.length ?? 0} selected</span></div><div className="library-profile-scope-actions"><button type="button" className="button secondary" onClick={() => updateDraft({scopeNodeIds: fleet?.nodes.map(node => node.id) ?? []})}>Select all Sparks</button><button type="button" className="button secondary" onClick={() => updateDraft({scopeNodeIds: []})}>Clear scope</button><button type="button" className="button secondary" onClick={captureCurrent}>Capture current setup</button></div><div className="library-profile-scope-list" role="group" aria-labelledby="profile-scope-heading" aria-invalid={draft.scopeNodeIds.length === 0} aria-describedby={draft.scopeNodeIds.length === 0 ? "profile-scope-error" : undefined}>{fleet?.nodes.map(node => <label key={node.id} className={draft.scopeNodeIds.includes(node.id) ? "is-selected" : undefined}><input type="checkbox" checked={draft.scopeNodeIds.includes(node.id)} aria-describedby={draft.scopeNodeIds.length === 0 ? "profile-scope-error" : undefined} onChange={() => toggleScope(node.id)}/><span><strong>{nodeDisplayName(node)}</strong><small>{assignedNodeIds.has(node.id) ? "Assigned workload" : draft.scopeNodeIds.includes(node.id) ? "Idle by intent" : "Outside profile scope"}</small></span></label>)}{!fleet && <p role="status">Spark membership is not available yet. You can draft assignments and recheck scope before saving.</p>}{fleet && fleet.nodes.length === 0 && <p>No Sparks are enrolled. Enroll a Spark before saving a profile.</p>}</div>{draft.scopeNodeIds.length === 0 && <p id="profile-scope-error" className="library-profile-field-error" role="status">Select at least one Spark in Fleet scope before saving. Placements can stay empty for an idle profile.</p>}</section>
-          <section className="library-profile-assignments" aria-labelledby="profile-assignments-heading"><div className="library-profile-section-heading"><div><h4 id="profile-assignments-heading">Desired placements</h4><p>Recipe revisions stay pinned. The same revision may appear on more than one complete Spark group.</p></div><span>{draft.assignments.length} placement{draft.assignments.length === 1 ? "" : "s"}</span></div><div className="library-profile-add-row"><label><span>Add exact recipe</span><select aria-label="Add exact recipe" value={recipeToAdd} onChange={event => setRecipeToAdd(event.target.value)}><option value="">Choose a resolved recipe…</option>{matchingEntries.map(entry => <option key={entry.key} value={entry.key}>{entry.title} · {entry.modelTitle}</option>)}</select></label><button type="button" className="button secondary" disabled={!recipeToAdd} onClick={addSelectedRecipe}>Add placement</button></div>{draft.assignments.length === 0 && <div className="library-profile-empty-assignments"><strong>All scoped Sparks are idle</strong><p>Add an exact recipe or capture the current setup. An empty profile is a deliberate desired state.</p></div>}<div className="library-profile-assignment-list">{draft.assignments.map((assignment, index) => <article key={assignment.key} className="library-profile-assignment"><header><div><strong>{assignment.recipeTitle}</strong><small>{assignment.modelTitle || "Model metadata not reported"} · {assignment.topologyName} · revision {assignment.recipeRevisionId.slice(0, 12)}…</small></div><button type="button" className="button secondary" onClick={() => updateDraft({assignments: draft.assignments.filter(item => item.key !== assignment.key)})}>Remove placement</button></header><div className="library-profile-assignment-fields"><label><span>Desired state</span><select value={assignment.desiredState} onChange={event => updateAssignment(assignment.key, {desiredState: event.target.value as AssignmentInput["desired_state"]})}><option value="running">Running</option><option value="installed">Installed and ready</option></select></label><label><span>Endpoint alias</span><input value={assignment.alias} disabled={assignment.desiredState !== "running"} onChange={event => updateAssignment(assignment.key, {alias: event.target.value})}/></label><fieldset aria-invalid={assignment.nodes.length === 0} aria-describedby={assignment.nodes.length === 0 ? `${assignment.key}-ranks-error` : undefined}><legend>Spark ranks</legend>{fleet?.nodes.map(node => <label key={node.id}><input type="checkbox" checked={assignment.nodes.some(item => item.node_id === node.id)} aria-describedby={assignment.nodes.length === 0 ? `${assignment.key}-ranks-error` : undefined} onChange={event => { const next = assignment.nodes.map(item => item.node_id); const nodeIds = event.target.checked ? [...next, node.id] : next.filter(id => id !== node.id); updateAssignmentNodes(assignment.key, nodeIds); }}/><span>{nodeDisplayName(node)}</span></label>)}{assignment.nodes.length === 0 && <p id={`${assignment.key}-ranks-error`} className="library-profile-field-error" role="status">Select the Sparks for this placement before saving, or remove the placement to leave them idle.</p>}</fieldset></div><p className="library-profile-assignment-note">Rank order: {assignment.nodes.length ? assignment.nodes.map(node => `${node.rank} ${node.role} · ${fleet?.nodes.find(item => item.id === node.node_id) ? nodeDisplayName(fleet.nodes.find(item => item.id === node.node_id)!) : node.node_id}`).join(" → ") : "No ranks"}</p><small className="library-profile-assignment-index">Placement {index + 1}</small></article>)}</div></section>
-          <footer className="library-profile-editor-footer"><span>{draftDirty ? "Unsaved draft" : draft.id ? "Saved profile" : "Draft only"} · changes never stop current runs while editing</span><button type="button" className="button" disabled={!draftValid || applying || !draftDirty} onClick={() => void saveDraft()}>{applying ? "Saving…" : draft.id ? "Save profile" : "Create profile"}</button></footer>
-          {selectedProfile && <section className="library-profile-switch-panel" aria-label="Profile switch"><header><div><span>{previewing ? "Checking current setup" : applicationRunning ? "Switch in progress" : "Switch profile"}</span><h4>{preview ? (preview.allowed ? (preview.steps.length > 0 ? "Ready to switch" : "Already up to date") : "Switch needs attention") : draftDirty ? "Save changes before switching" : "Checking current setup"}</h4></div><div className="library-profile-switch-actions"><button type="button" className="button secondary" disabled={draftDirty || previewing || applying} onClick={() => setPreviewAttempt(value => value + 1)}>Refresh status</button><button type="button" className="button" disabled={draftDirty || previewing || applying || applicationRunning} onClick={() => void switchProfile()}>{applying ? "Starting switch…" : applicationRunning ? "Switching…" : preview && !preview.allowed ? "Switch unavailable" : preview && planNeedsConfirmation(preview) && !confirmationRequired ? confirmationActionLabel(preview) : confirmationRequired ? "Confirm switch" : "Switch profile"}</button></div></header>{preview && <div className="library-profile-preview-summary"><span>{preview.allowed ? (preview.steps.length > 0 ? "Missing files are fetched and verified as needed" : "No changes required") : "Some Sparks need attention before switching"}</span>{preview.steps.length > 0 && <span>{preview.summary.stops} stop · {preview.summary.starts} start · {preview.summary.installs} install</span>}</div>}{preview && preview.reasons.length > 0 && <details className="library-profile-inline-findings" open={confirmationRequired || !preview.allowed}><summary>{preview.allowed && planNeedsConfirmation(preview) ? preview.summary.uninstalls > 0 ? "Cleanup needs confirmation" : "Effects need your choice" : "Details"}</summary><ul className="library-profile-preview-reasons">{preview.reasons.map(reason => <li key={`${reason.code}:${reason.detail}`} className={`reason-${reason.severity}`}><strong>{reasonLabel(reason.code)}</strong><span>{reason.detail}</span></li>)}</ul>{confirmationRequired && preview.allowed && <button type="button" className="button" disabled={applying || applicationRunning} onClick={() => void applySwitch(preview)}>Confirm switch</button>}</details>}</section>}
-        </div>}
-        {draft && !editing && selectedProfile && <section className="library-profile-saved" aria-label={`${selectedProfile.name} saved profile`}>
-          <header><div><span>Saved profile</span><h3>{selectedProfile.name}</h3><p>{selectedProfile.description || "No description"}</p></div><button type="button" className="button secondary" onClick={() => setEditing(true)}>Edit profile</button></header>
-          <dl><div><dt>Sparks in scope</dt><dd>{selectedProfile.scope.node_ids.length}</dd></div><div><dt>Placements</dt><dd>{selectedProfile.assignments.length}</dd></div><div><dt>Cache policy</dt><dd>{selectedProfile.installation_policy === "exact" ? "Exact" : "Keep cached"}</dd></div></dl>
-          <div className="library-profile-saved-work"><strong>Saved setup</strong><ul>{selectedProfile.assignments.map(assignment => <li key={assignment.id}><span>{assignment.model_title || assignment.recipe_title}</span><small>{assignment.recipe_title} · {assignment.nodes.length} {assignment.nodes.length === 1 ? "Spark" : "Sparks"} · {assignment.desired_state}</small></li>)}{selectedProfile.assignments.length === 0 && <li><span>Idle profile</span><small>Every Spark in scope stays idle.</small></li>}</ul></div>
-          <div className="library-profile-saved-switch"><div><span>{previewing ? "Checking current setup" : applicationRunning ? "Switch in progress" : "Switch profile"}</span><strong>{applicationRunning ? "Applying this setup" : preview ? (preview.allowed ? (preview.steps.length ? "Ready to switch" : "Already up to date") : "Switch needs attention") : "Checking current setup"}</strong></div><button type="button" className="button" disabled={previewing || applying || applicationRunning || !preview?.allowed || !preview.steps.length} onClick={() => void switchProfile()}>{applying ? "Switching…" : applicationRunning ? "Switching…" : preview && planNeedsConfirmation(preview) && !confirmationRequired ? confirmationActionLabel(preview) : confirmationRequired ? "Confirm switch" : "Switch profile"}</button></div>
-          {preview && confirmationRequired && preview.allowed && planNeedsConfirmation(preview) && <div className="library-profile-confirmation" role="alert"><strong>{preview.summary.uninstalls > 0 ? "Cleanup requires confirmation" : "This switch needs confirmation"}</strong><p>{preview.summary.uninstalls > 0 ? "The selected profile would remove an installation outside its desired setup. Cached artifacts remain available." : "The Controller reported effects outside the normal selected profile scope."}</p><button type="button" className="button" disabled={applying || applicationRunning} onClick={() => void applySwitch(preview)}>Confirm switch</button></div>}
-          {preview && !preview.allowed && preview.reasons[0] && <p className="library-profile-plain-error" role="alert">{preview.reasons[0].detail}</p>}
-        </section>}
-      </div>
-      {!draft && !loading && <div className="library-profile-empty-editor"><h3>Select a saved profile</h3><p>Or create a new profile to describe the complete desired fleet setup.</p><button type="button" className="button" onClick={startNew}>Create profile</button></div>}
-    </>
+    <header className="library-subview-heading"><div><h2 id="library-profiles-heading">Profiles</h2><p>Save recipe choices for the whole fleet, then load the selected numbered profile when ready. The latest compatible cached recipes are resolved on load.</p></div><div className="library-profile-header-actions"><button type="button" className="button secondary" onClick={startNew}>Create profile</button><a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a model</a></div></header>
+    {error && <p className="library-profile-plain-error" role="alert">{error}</p>}
+    {loading && <p className="library-cache-state" role="status">Loading saved profiles…</p>}
+    {notice && <div className="library-profile-notice" role="status">{notice}</div>}
+    {selectedProfile && !editing && <section className="library-profile-status state-read" aria-live="polite"><div className="library-profile-status-summary"><strong>Profile {selectedProfile.number} · {selectedProfile.name}</strong><span>{selectedProfile.status.replaceAll("-", " ")} · revision {selectedProfile.revision}</span></div><span className="library-profile-status-scope">{(selectedProfile.fleet ?? []).length} Sparks · loaded revision {selectedProfile.loaded_revision ?? "none"}</span>{(selectedProfile.warnings ?? []).length > 0 && <ul>{(selectedProfile.warnings ?? []).map(warning => <li key={warning}>{warning}</li>)}</ul>}<button type="button" className="button secondary" onClick={() => setEditing(true)}>Edit profile</button></section>}
+    {application && <ProfileProgress application={application}/>}
+    <div className="library-profile-layout">
+      <aside className="library-profile-list" aria-label="Saved profiles"><div className="library-profile-list-heading"><strong>Saved profiles</strong><span>{profiles.length}</span></div>{profiles.map(profile => <button key={profile.number} type="button" className={profile.number === selectedNumber ? "is-selected" : undefined} aria-pressed={profile.number === selectedNumber} onClick={() => selectProfile(profile)}><span>Profile {profile.number} · {profile.name}</span><small>{profile.assignments.length} assignment{profile.assignments.length === 1 ? "" : "s"} · {profile.status.replaceAll("-", " ")}</small></button>)}{profiles.length === 0 && <div className="library-profile-list-empty"><strong>No saved profiles</strong><p>Create a numbered profile to describe the desired fleet setup.</p></div>}<button type="button" className="library-profile-create-link" onClick={startNew}>+ New profile</button></aside>
+      {draft && editing && <div className="library-profile-editor"><header className="library-profile-editor-heading"><div><span>{draft.number ? `Edit profile ${draft.number}` : "New numbered profile"}</span><h3>{draft.name || "Unnamed profile"}</h3></div></header><div className="library-profile-fields"><label><span>Profile name</span><input value={draft.name} maxLength={120} onChange={event => updateDraft({name: event.target.value})}/></label><label><span>Retention</span><select value={draft.installationPolicy} onChange={event => updateDraft({installationPolicy: event.target.value as FleetProfileInput["installation_policy"]})}><option value="keep-cached">Keep cached artifacts</option><option value="exact">Exact desired state</option></select></label><label className="library-profile-wide"><span>Purpose</span><textarea value={draft.description} maxLength={1000} rows={2} onChange={event => updateDraft({description: event.target.value})}/></label><label className="library-profile-favorite"><input type="checkbox" checked={draft.favorite} onChange={event => updateDraft({favorite: event.target.checked})}/><span>Favorite profile</span></label></div>
+        <section className="library-profile-scope" aria-labelledby="profile-fleet-heading"><div className="library-profile-section-heading"><div><h4 id="profile-fleet-heading">Fleet and assignments</h4><p>Every enrolled Spark is in the profile view. Sparks without an assignment become idle when the profile loads.</p></div><span>{availableFleet.length} Sparks</span></div><div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">{availableFleet.map(item => <div key={item.id} role="listitem"><strong>{item.name}</strong><small>{item.state}</small></div>)}{availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}</div></section>
+        <section className="library-profile-assignments" aria-label="Profile assignments"><header><h4>Recipe assignments</h4><button type="button" className="button secondary" onClick={addRecipe} disabled={matchingEntries.length === 0 || availableFleet.length === 0}>Add available Recipe</button></header>{draft.assignments.map(assignment => <article key={assignment.key} className="library-profile-assignment"><label><span>Recipe selector</span><input value={assignment.recipeSelector} onChange={event => updateAssignment(assignment.key, {recipeSelector: event.target.value})}/></label><label><span>Assignment name</span><input value={assignment.assignmentName} onChange={event => updateAssignment(assignment.key, {assignmentName: event.target.value})}/></label><label><span>Model variant</span><input value={assignment.modelVariant} onChange={event => updateAssignment(assignment.key, {modelVariant: event.target.value})}/></label><label><span>Desired state</span><select value={assignment.desiredState} onChange={event => updateAssignment(assignment.key, {desiredState: event.target.value as AssignmentInput["desired_state"]})}><option value="running">Running</option><option value="installed">Installed</option></select></label><fieldset><legend>Assigned Sparks</legend>{availableFleet.map(item => <label key={item.id}><input type="checkbox" checked={assignment.sparkIds.includes(item.id)} onChange={() => toggleSpark(assignment.key, item.id)}/><span>{names[item.id] ?? item.id}</span></label>)}</fieldset><button type="button" className="button danger" onClick={() => updateDraft({assignments: draft.assignments.filter(item => item.key !== assignment.key)})}>Remove assignment</button></article>)}{draft.assignments.length === 0 && <p>All Sparks will be idle when this profile loads.</p>}</section>
+        <footer className="library-profile-editor-footer"><button type="button" className="button secondary" onClick={() => { if (selectedProfile) { setDraft(draftFromProfile(selectedProfile)); setEditing(false); } else setDraft(undefined); }}>Cancel</button><button type="button" className="button" disabled={!draftValid || saving} onClick={() => void saveDraft()}>{saving ? "Saving profile…" : draft.number ? "Save profile" : "Create profile"}</button></footer></div>}
+      {selectedProfile && !editing && <section className="library-profile-saved" aria-label={`Profile ${selectedProfile.number} saved profile`}><header><div><span>Saved profile</span><h3>{selectedProfile.name}</h3></div><div><button type="button" className="button secondary" onClick={() => setEditing(true)}>Edit profile</button><button type="button" className="button" disabled={loadingProfile || applicationRunning || !preview?.allowed} onClick={() => void load()}>{loadingProfile ? "Loading…" : "Load profile"}</button></div></header><dl><div><dt>Number</dt><dd>{selectedProfile.number}</dd></div><div><dt>Revision</dt><dd>{selectedProfile.revision}</dd></div><div><dt>Cache</dt><dd>{selectedProfile.cache_summary?.state ? String(selectedProfile.cache_summary.state) : "Latest compatible cached recipes"}</dd></div></dl><ul>{selectedProfile.assignments.map(assignment => <li key={assignment.selector}><strong>{assignment.display_name}</strong><span>{assignment.recipe_selector} · {assignment.spark_ids.map(id => names[id] ?? id).join(" + ")} · {assignment.observed_state}</span></li>)}{selectedProfile.assignments.length === 0 && <li><strong>Idle fleet</strong><span>No assignments; every Spark becomes idle on load.</span></li>}</ul>{preview && !preview.allowed && preview.reasons[0] && <p className="library-profile-plain-error" role="alert">{preview.reasons[0].detail}</p>}{(selectedProfile.next_actions ?? []).length > 0 && <p>{(selectedProfile.next_actions ?? []).join(" · ")}</p>}</section>}
+      {!draft && !loading && <div className="library-profile-empty-editor"><h3>Select or create a profile</h3><button type="button" className="button" onClick={startNew}>Create profile</button></div>}
+    </div>
   </section>;
 }

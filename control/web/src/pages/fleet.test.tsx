@@ -66,7 +66,7 @@ function control(
     visualFleet,
     nodeTelemetryHistory: history,
     updateNodeProfile,
-    fleetProfiles: async () => ({profiles: []}),
+    profiles: async () => ({profiles: []}),
   } as unknown as ControlApi;
 }
 

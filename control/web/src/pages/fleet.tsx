@@ -1,7 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {KeyboardEvent as ReactKeyboardEvent} from "react";
 import type {ControlApi, EnrollmentGrantResponse, TelemetryHistory, VisualFleetNode} from "../api/types";
-import {DeploymentProvenanceView} from "../components/deployment-provenance-view";
 import {CopyButton} from "../components/copy-button";
 import {AgentUpgradeDialog} from "../components/agent-upgrade-dialog";
 import {FleetCompactView, FleetTopologyView} from "../components/fleet-views";
@@ -256,7 +255,6 @@ function SparkOnboarding({api, mode, nodeId, onBusyChange, onClose}: {api: Contr
 
 export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(busy: boolean): void}) {
   const fleet = useFleetStream(api);
-  const [showProvenance, setShowProvenance] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [editingNodeId, setEditingNodeId] = useState<string>();
   const [onboarding, setOnboarding] = useState(false);
@@ -427,7 +425,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
       </section>}
 
       <div className="fleet-command-actions">
-        <button className="button secondary" type="button" aria-expanded={showProvenance} onClick={() => setShowProvenance(value => !value)}>Deployment evidence</button>
         <a className="button" href="/library">Run model</a>
         <a className="button secondary" href="/library/profiles">Switch profile</a>
         {fleet.snapshot && <details className="fleet-controls-menu">
@@ -459,7 +456,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
         <button type="button" className="button fleet-add-button" aria-label="Add Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("new-node"); setOnboarding(true); }}>+ Spark</button>
       </div>
     </header>
-    {showProvenance && <DeploymentProvenanceView api={api}/>}
     {onboarding && <SparkOnboarding api={api} mode={onboardingMode} nodeId={reenrollNodeId} onBusyChange={onBusyChange} onClose={closeOnboarding}/>}
     {editingNode && <NodeProfileDialog api={api} node={editingNode} onClose={closeEditor} onSaved={displayName => fleet.updateNodeProfile(editingNode.id, displayName)}/>}
     {upgradeTarget && <AgentUpgradeDialog api={api} node={upgradeTarget === "fleet" ? undefined : upgradeTarget} onBusyChange={onBusyChange} onClose={closeUpgrade}/>}
@@ -519,7 +515,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
           node={selectedNode}
           now={fleet.now}
           onClose={closeDetail}
-          onLifecycleRefresh={fleet.refresh}
           onBusyChange={onBusyChange}
           onReenroll={event => {
             onboardingTrigger.current = event.currentTarget;

@@ -35,11 +35,11 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, 
   }
   if (subview === "cache") return <LibraryCacheView api={api} entries={records} modelInventory={snapshot.models} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate} path={path}/>;
   if (subview === "profiles") return <LibraryProfilesView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>;
-  if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onBusyChange={onBusyChange} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} onRefresh={onRefresh} path={path} query={query}/>;
+  if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} path={path} query={query}/>;
   if (route.kind === "recipe") {
     if (detailLoading) return <section className="library-detail-state" role="status">Loading the exact Recipe detail…</section>;
     if (detailError) return <section className="library-detail-state is-error" role="alert"><p>{detailError}</p><button type="button" className="button secondary" onClick={onRetryDetail}>Retry Recipe detail</button></section>;
-    if (detail) return <LibraryRecipeAuthority api={api} detail={detail} snapshot={snapshot} onRefresh={onRefresh} onBusyChange={onBusyChange}/>;
+    if (detail) return <LibraryRecipeAuthority api={api} detail={detail} onBusyChange={onBusyChange}/>;
     return <section className="library-detail-state" role="status">Recipe detail is not available.</section>;
   }
   return <LibraryWorkcell api={api} detail={detail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} filters={filters ?? EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={updateFilters} onNavigate={onNavigate} onQueryChange={onQueryChange} onRefresh={onRefresh} onRetryDetail={onRetryDetail} query={query} route={route} snapshot={snapshot}/>;

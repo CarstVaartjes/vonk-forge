@@ -1,15 +1,13 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
 import type {ControlApi, LibraryModel, LibrarySnapshot, ModelCacheUpdateResponse, VisualFleetSnapshot} from "../api/types";
-import {formatBytes, nodeDisplayName} from "../lib/fleet";
+import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey} from "../lib/library-route";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
 import {filterLibraryRecipeRecords} from "./library-workcell";
 import {aggregateCacheEntries, LibraryModelDownloadAction, loadModelCacheInventory} from "./library-cache-view";
-import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 
-export function LibraryModelsView({api, entries, filters, fleet, modelInventory, onBusyChange, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, onRefresh, path, query}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; filters: LibraryWorkcellFilters; modelInventory?: LibrarySnapshot["models"]; onBusyChange?(busy: boolean): void; onFiltersChange(filters: LibraryWorkcellFilters): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; onRefresh?: (signal: AbortSignal) => Promise<void>; path: string; query: string}) {
-  const [deleteModel, setDeleteModel] = useState<LibraryModel>();
+export function LibraryModelsView({api, entries, filters, modelInventory, onFiltersChange, onNavigate, onNavigatePath, onQueryChange, path, query}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; filters: LibraryWorkcellFilters; modelInventory?: LibrarySnapshot["models"]; onFiltersChange(filters: LibraryWorkcellFilters): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; path: string; query: string}) {
   const [cacheInventory, setCacheInventory] = useState<{entries: import("../api/types").CacheEntryResponse[]}>();
   const [cacheAttempt, setCacheAttempt] = useState(0);
   const [cacheLoading, setCacheLoading] = useState(true);
@@ -24,7 +22,6 @@ export function LibraryModelsView({api, entries, filters, fleet, modelInventory,
   useEffect(() => { if (!api.modelCacheInventory) { setCacheLoading(false); setCacheError("NAS cache API unavailable"); return; } const controller = new AbortController(); setCacheLoading(true); setCacheError(""); void loadModelCacheInventory(api, controller.signal).then(value => { if (!controller.signal.aborted) setCacheInventory(value); }).catch(value => { if (!controller.signal.aborted) setCacheError(value instanceof Error ? value.message : "NAS cache inventory unavailable"); }).finally(() => { if (!controller.signal.aborted) setCacheLoading(false); }); return () => controller.abort(); }, [api, cacheAttempt]);
   useEffect(() => { if (!api.modelCacheUpdates) return; const controller = new AbortController(); setUpdatesError(""); setUpdatesLoading(true); void api.modelCacheUpdates(controller.signal, updatesAttempt > 0).then(value => { if (!controller.signal.aborted) setUpdates(value.updates); }).catch(value => { if (!controller.signal.aborted) setUpdatesError(value instanceof Error ? value.message : "Model update discovery unavailable"); }).finally(() => { if (!controller.signal.aborted) setUpdatesLoading(false); }); return () => controller.abort(); }, [api, updatesAttempt]);
   const cacheByModel = useMemo(() => new Map(aggregateCacheEntries(models, cacheInventory).map(entry => [entry.key, entry])), [cacheInventory, models]);
-  const nodeNames = Object.fromEntries((fleet?.nodes ?? []).map(node => [node.id, nodeDisplayName(node)]));
   function updateModel(value: string) {
     onFiltersChange({...filters, model: value});
     if (onNavigatePath) { const url = new URL(path, location.origin); if (value) url.searchParams.set("model", value); else url.searchParams.delete("model"); onNavigatePath(`${url.pathname}${url.search}`, true); }
@@ -50,12 +47,11 @@ export function LibraryModelsView({api, entries, filters, fleet, modelInventory,
           {!!update?.upstream_revisions?.length && <div className="library-model-update" role="status">{update.upstream_revisions.map(revision => <p key={revision.repository}><strong>{revision.repository}: </strong>{revision.status === "update-available" ? "New upstream version. Update the model in the catalog to download this version." : revision.status === "check-failed" ? "Could not check upstream. Try Check for updates again." : "Up to date with upstream."}</p>)}</div>}
           <dl><div><dt>Files</dt><dd>{model.model_document.files.length}</dd></div><div><dt>Bytes</dt><dd>{formatBytes(bytes)}</dd></div><div><dt>Recipes</dt><dd>{modelRecords.length || "No Recipe"}</dd></div></dl>
           <LibraryModelDownloadAction api={api} model={model} modelAccessUrl={model.model_document.provenance.source_url} onComplete={() => setCacheAttempt(value => value + 1)}/>
-          <button type="button" className="button secondary" onClick={() => setDeleteModel(model)}>Review Model removal</button>
         </div>;
       })}
       {visible.length === 0 && <p className="library-empty-state">No Models match the current filters.</p>}
     </div>
-    {deleteModel && <LibraryModelDeletionDialog api={api} modelTitle={titleFor(deleteModel)} modelContentSha256={deleteModel.model.content_sha256} nodeNames={nodeNames} onBusyChange={onBusyChange} onClose={() => setDeleteModel(undefined)} onRefresh={onRefresh ?? (async () => undefined)}/>}</section>
+    </section>
 }
 
 function candidateLabel(candidate: Record<string, unknown>): string {

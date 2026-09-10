@@ -1,5 +1,5 @@
 import {AuthenticationRequired} from "../auth";
-import type {AgentRepairManifest, AgentUpgradePlan, FleetProfileApplication, LibraryPlacementApplication, OperationDetail, RunSwitchPreviewRequest} from "./types";
+import type {AgentRepairManifest, AgentUpgradePlan, FleetProfileInput, OperationDetail} from "./types";
 import {ApiClient} from "./client";
 
 const REPAIR_NODE = `spk_${"a".repeat(32)}`;
@@ -43,60 +43,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("uses canonical Activity and linked application retry endpoints with stable request keys", async () => {
+it("uses the numbered operator Profile routes with one typed load request", async () => {
   const requests: Request[] = [];
-  const oldId = "11111111-1111-4111-8111-111111111111";
-  const newId = "22222222-2222-4222-8222-222222222222";
   const requestKey = "33333333-3333-4333-8333-333333333333";
-  const operation = {
-    schema_version: 2, id: oldId, parent_id: null, node_ids: [REPAIR_NODE],
-    kind: "fleet-profile.apply", state: "failed", attempt: 1,
-    created_at: "2026-09-07T12:00:00Z", updated_at: "2026-09-07T12:01:00Z",
-    failure: {error_code: "fleet_profile_application_failed", summary: "Profile application failed", detail: "Spark is offline", retryable: true, uncertain: false},
-    recovery: {actions: ["inspect", "retry"], uncertain: false, explanation: null},
-  } satisfies OperationDetail;
-  const common = {
-    id: newId, retry_of_application_id: oldId, attempt: 2, state: "queued" as const,
-    plan_digest: "a".repeat(64), current_step: 0, total_steps: 1,
-    current_operation_id: null, status_reason: null, result: null,
-    progress: {attempt: 2, retry_of_application_id: oldId, completed_steps: 0, total_steps: 1},
-    created_at: "2026-09-07T12:02:00Z", updated_at: "2026-09-07T12:02:00Z",
-  };
-  const profileRetry = {
-    ...common, schema_version: 2, profile_id: requestKey, profile_digest: "b".repeat(64),
-  } satisfies FleetProfileApplication;
-  const placementRetry = {
-    ...common, schema_version: 1, recipe_id: requestKey, recipe_revision_id: oldId,
-    selected_node_ids: [REPAIR_NODE], desired_state: "running", alias: "chat",
-    locations: {installation_ids: [], run_ids: [], installed: false, running: false},
-  } satisfies LibraryPlacementApplication;
+  const profile = {schema_version: 2, id: "11111111-1111-4111-8111-111111111111", number: 2, revision: 3, name: "Coding", description: "", installation_policy: "keep-cached", labels: {}, favorite: true, assignments: [], fleet: [], status: "draft", loaded_revision: null, cache_summary: {}, warnings: [], next_actions: [], profile_digest: "b".repeat(64), created_by: "admin", created_at: "2026-09-07T12:00:00Z", updated_at: "2026-09-07T12:00:00Z"};
+  const application = {schema_version: 2, id: "22222222-2222-4222-8222-222222222222", profile_id: profile.id, profile_digest: profile.profile_digest, plan_digest: "a".repeat(64), attempt: 1, retry_of_application_id: null, state: "queued", current_step: 0, total_steps: 1, current_operation_id: null, status_reason: null, progress: {attempt: 1, retry_of_application_id: null, completed_steps: 0, total_steps: 1}, result: null, created_at: profile.created_at, updated_at: profile.updated_at};
+  const input = {name: "Coding", description: "", installation_policy: "keep-cached", labels: {}, favorite: true, expected_revision: 3, assignments: []} satisfies FleetProfileInput;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const request = input as Request;
     requests.push(request);
     const path = new URL(request.url).pathname;
-    const result = path.endsWith("/retry")
-      ? path.includes("/placements/") ? placementRetry : profileRetry
-      : path.endsWith("/operations")
-        ? {schema_version: 2, operations: [operation], next_cursor: null, total: 1}
-        : operation;
+  const result = path === "/api/profile" ? {schema_version: 2, generated_at: profile.created_at, profiles: [profile]} : path.endsWith("/progress") || path.endsWith("/load") ? application : path.endsWith("/preview") ? {schema_version: 2, profile_id: profile.id, profile_digest: profile.profile_digest, profile_name: profile.name, plan_digest: "c".repeat(64), generated_at: profile.created_at, allowed: true, assignments: [], reasons: [], scope: {}, steps: [], summary: {}} : profile;
     return new Response(JSON.stringify(result), {headers: {"Content-Type": "application/json"}});
   });
   const api = new ApiClient();
-  expect((await api.operations("next-page")).operations[0]?.failure).toEqual(operation.failure);
-  expect((await api.operation(oldId)).id).toBe(oldId);
-  expect((await api.retryFleetProfileApplication(oldId, {request_key: requestKey})).id).toBe(newId);
-  const abort = new AbortController();
-  expect((await api.retryLibraryPlacement(oldId, {request_key: requestKey}, abort.signal)).retry_of_application_id).toBe(oldId);
+  expect((await api.profiles()).profiles[0]?.number).toBe(2);
+  expect((await api.profile(2)).number).toBe(2);
+  expect((await api.autosaveProfile(2, input)).revision).toBe(3);
+  expect((await api.previewProfile(2)).profile_id).toBe(profile.id);
+  expect((await api.loadProfile(2, {dry_run: false, request_key: requestKey})).id).toBe(application.id);
+  expect((await api.profileProgress(2)).id).toBe(application.id);
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/operations"],
-    ["GET", `/api/operations/${oldId}`],
-    ["POST", `/api/fleet-profile-applications/${oldId}/retry`],
-    ["POST", `/api/library/placements/${oldId}/retry`],
+    ["GET", "/api/profile"],
+    ["GET", "/api/profile/2"],
+    ["PUT", "/api/profile/2"],
+    ["POST", "/api/profile/2/preview"],
+    ["POST", "/api/profile/2/load"],
+    ["GET", "/api/profile/2/progress"],
   ]);
-  expect(new URL(requests[0]!.url).searchParams.get("cursor")).toBe("next-page");
-  for (const request of requests.slice(2)) expect(await request.clone().json()).toEqual({request_key: requestKey});
-  abort.abort();
-  expect(requests[3]!.signal.aborted).toBe(true);
+  expect(await requests[2]!.clone().json()).toEqual(input);
+  expect(await requests[3]!.clone().text()).toBe("");
+  expect(await requests[4]!.clone().json()).toEqual({dry_run: false, request_key: requestKey});
 });
 
 it("formats FastAPI validation details with dotted locations and messages", async () => {
@@ -173,7 +150,7 @@ it("loads the current Fleet snapshot endpoint for browser Fleet data", async () 
   expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
 });
 
-it("uses distinct digest-bound Library action operations", async () => {
+it("uses only current Library read and job surfaces", async () => {
   // Break caught: the visual Library falls back to retired evidence routes,
   // action apply bypasses its server preview digest, or one selected owner is
   // replaced by a browser-invented group.
@@ -197,72 +174,28 @@ it("uses distinct digest-bound Library action operations", async () => {
 
   await api.librarySnapshot("cursor-1");
   await api.libraryRecipe("recipe/one");
-  await api.previewLibraryBuild({recipe_revision_id: "revision-1", builder_node_id: "node-a"}, controller.signal);
-  await api.applyLibraryBuild({recipe_revision_id: "revision-1", builder_node_id: "node-a", build_input_sha256: "build-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
-  await api.applyLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryImageDistribution({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2});
-  await api.applyLibraryImageDistribution({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2, plan_digest: "distribution-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
-  await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryLoad({installation_id: "installation-1", alias: "chat"});
-  await api.applyLibraryLoad({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryStop("run-1");
-  await api.applyLibraryStop("run-1", {plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.previewLibraryUninstall("installation-1");
-  await api.applyLibraryUninstall("installation-1", {plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  await api.libraryOperation("operation-1", controller.signal);
-  await api.retryLibraryOperation("operation-1");
-  await api.libraryRunStatus("run-1");
   await api.libraryJobProgress("job-1", controller.signal);
   controller.abort();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["GET", "/api/library"],
     ["GET", "/api/library/recipes/recipe%2Fone"],
-    ["POST", "/api/recipes/build-plans/preview"],
-    ["POST", "/api/recipes/builds"],
-    ["POST", "/api/recipes/mapping-plans/preview"],
-    ["POST", "/api/recipes/mappings"],
-    ["POST", "/api/recipes/image-distribution-plans/preview"],
-    ["POST", "/api/recipes/image-distributions"],
-    ["POST", "/api/recipes/install-plans/preview"],
-    ["POST", "/api/recipes/installations"],
-    ["POST", "/api/recipes/run-plans/preview"],
-    ["POST", "/api/recipes/runs"],
-    ["POST", "/api/recipes/stop-plans/preview"],
-    ["POST", "/api/recipes/runs/run-1/stop"],
-    ["POST", "/api/recipes/uninstall-plans/preview"],
-    ["POST", "/api/recipes/installations/installation-1/uninstall"],
-    ["GET", "/api/recipes/operations/operation-1"],
-    ["POST", "/api/recipes/operations/operation-1/retry"],
-    ["GET", "/api/recipes/runs/run-1"],
     ["GET", "/api/jobs/job-1"],
   ]);
   expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
-  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", builder_node_id: "node-a", build_input_sha256: "build-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[5].clone().json()).toEqual({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[7].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", mapping_generation: 2, plan_digest: "distribution-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[9].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[10].clone().json()).toEqual({installation_id: "installation-1", alias: "chat"});
-  expect(await requests[11].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[13].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
-  expect(await requests[15].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(requests[2].signal.aborted).toBe(true);
-  expect(requests[16].signal.aborted).toBe(true);
 });
 
-it("uses the generated deployment and explicit upstream-check operations", async () => {
+it("uses the generated model update operation with an explicit upstream check", async () => {
   const urls: URL[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     urls.push(new URL((input as Request).url));
     return new Response("{}", {headers: {"Content-Type": "application/json"}});
   });
   const api = new ApiClient();
-  await api.deploymentProvenance();
   await api.modelCacheUpdates(undefined, true);
-  expect(urls[0].pathname).toBe("/api/deployment-provenance");
-  expect(urls[1].searchParams.get("check_upstream")).toBe("true");
+  expect(urls[0].pathname).toBe("/api/model-cache/updates");
+  expect(urls[0].searchParams.get("check_upstream")).toBe("true");
 });
 
 it("requests bounded node telemetry history through the generated operation", async () => {
@@ -297,24 +230,10 @@ it("requests bounded node telemetry history through the generated operation", as
   });
 });
 
-it("binds the one-click run switch, NAS cache, and rich telemetry routes", async () => {
-  // Break caught: a primary Run action falls back to the retired lifecycle
-  // routes, cache actions lose their digest/key contract, or telemetry reads
-  // silently use the old aggregate endpoint.
+it("binds NAS cache and rich telemetry routes", async () => {
   const requests: Request[] = [];
-  const modelDigest = "a".repeat(64);
   const artifactDigest = "b".repeat(64);
   const requestKey = "00000000-0000-4000-8000-000000000401";
-  const runInput: RunSwitchPreviewRequest = {
-    schema_version: 2,
-    model_content_sha256: modelDigest,
-    recipe_revision_id: "revision-run",
-    spark_group: {nodes: [{node_id: "spark-a", rank: 0, role: "leader", endpoint_owner: true}, {node_id: "spark-b", rank: 1, role: "worker", endpoint_owner: false}]},
-    alias: "chat",
-    action: "run",
-    retention: "retain-cached",
-    invocation: {origin: "web.library"},
-  };
   const response = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request.clone());
@@ -323,9 +242,6 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   vi.stubGlobal("fetch", response);
 
   const api = new ApiClient();
-  await api.previewRecipeRunSwitch(runInput);
-  await api.applyRecipeRunSwitch({...runInput, plan_digest: "run-plan", request_key: requestKey});
-  await api.getRecipeRunSwitchOperation("run-operation");
   await api.modelCacheInventory("cache-cursor");
   await api.modelCacheEntry(artifactDigest);
   await api.previewModelCacheDownload({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first"});
@@ -347,9 +263,6 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["POST", "/api/recipes/run-switch-plans/preview"],
-    ["POST", "/api/recipes/run-switches"],
-    ["GET", "/api/recipes/run-switches/run-operation"],
     ["GET", "/api/model-cache"],
     ["GET", `/api/model-cache/entries/${artifactDigest}`],
     ["POST", "/api/model-cache/download-preview"],
@@ -370,53 +283,13 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
     ["GET", "/api/nodes/spark-a/telemetry/capabilities"],
     ["GET", "/api/nodes/spark-a/telemetry/workloads"],
   ]);
-  expect(Object.fromEntries(new URL(requests[3]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
-  expect(Object.fromEntries(new URL(requests[12]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
-  expect(Object.fromEntries(new URL(requests[21]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
-  expect(await requests[0]!.clone().json()).toEqual(runInput);
-  expect(await requests[1]!.clone().json()).toEqual({...runInput, plan_digest: "run-plan", request_key: requestKey});
-  expect(await requests[6]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
-  expect(await requests[8]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
-  expect(Object.fromEntries(new URL(requests[16]!.url).searchParams)).toEqual({cursor: "recipe-cursor", limit: "100", recipe_revision_id: "recipe-revision-1", state: "running"});
-  expect(requests.slice(0, 2).every(request => request.headers.get("Content-Type"))).toBe(true);
-});
-
-it("uses the durable retry endpoints for Run and NAS cache operations", async () => {
-  const requests: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    requests.push(request.clone());
-    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: 202});
-  });
-  const api = new ApiClient();
-  const runKey = "00000000-0000-4000-8000-000000000402";
-  const cacheKey = "00000000-0000-4000-8000-000000000403";
-
-  await api.retryRecipeRunSwitch("run-operation", {schema_version: 2, request_key: runKey});
-  await api.retryModelCacheOperation("cache-operation", {schema_version: 2, request_key: cacheKey});
-  await api.retryRecipeAvailability("recipe-operation", {request_key: cacheKey});
-
-  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["POST", "/api/recipes/run-switches/run-operation/retry"],
-    ["POST", "/api/model-cache/operations/cache-operation/retry"],
-    ["POST", "/api/library/recipe-image-availability/recipe-operation/retry"],
-  ]);
-  expect(await requests[0]!.clone().json()).toEqual({schema_version: 2, request_key: runKey});
-  expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});
-});
-
-it("cancels a pending rollout with the exact typed request and retry identity", async () => {
-  const requests: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    requests.push(request.clone());
-    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: 202});
-  });
-  const input = {schema_version: 2 as const, request_key: "00000000-0000-4000-8000-000000000405", reason: "Change of plan"};
-  await new ApiClient().cancelRecipeRunSwitchOperation("run-operation", input);
-  expect(new URL(requests[0]!.url).pathname).toBe("/api/recipes/run-switches/run-operation/cancel");
-  expect(requests[0]!.method).toBe("POST");
-  expect(await requests[0]!.json()).toEqual(input);
+  expect(Object.fromEntries(new URL(requests[0]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[9]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[18]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
+  expect(await requests[3]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
+  expect(await requests[5]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  expect(Object.fromEntries(new URL(requests[13]!.url).searchParams)).toEqual({cursor: "recipe-cursor", limit: "100", recipe_revision_id: "recipe-revision-1", state: "running"});
+  expect(requests.slice(2, 6).every(request => request.headers.get("Content-Type"))).toBe(true);
 });
 
 it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
@@ -475,8 +348,8 @@ it("uses the durable artifact-job routes and preserves raw upload authority", as
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["GET", "/api/artifact-jobs/capabilities"],
-    ["GET", "/api/recipes/runs/run-1/artifact-jobs"],
-    ["POST", "/api/recipes/runs/run-1/artifact-jobs"],
+    ["GET", "/api/recipe/runs/run-1/artifact-jobs"],
+    ["POST", "/api/recipe/runs/run-1/artifact-jobs"],
     ["PUT", "/api/artifact-jobs/job-1/inputs/prompt.txt"],
     ["POST", "/api/artifact-jobs/job-1/finalize"],
     ["POST", "/api/artifact-jobs/job-1/submit"],
@@ -681,83 +554,6 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
   ]) {
     expect(name in api).toBe(false);
   }
-});
-
-it("previews, applies, and reads one durable atomic Library placement", async () => {
-  document.cookie = "vonk_csrf=placement-csrf; path=/";
-  const recipeId = "00000000-0000-4000-8000-000000000201";
-  const revisionId = "00000000-0000-4000-8000-000000000202";
-  const placementId = "00000000-0000-4000-8000-000000000203";
-  const requestKey = "00000000-0000-4000-8000-000000000204";
-  const nodeIds = [`spk_${"a".repeat(32)}`, `spk_${"b".repeat(32)}`];
-  const intent = {alias: null, desired_state: "installed" as const, invocation: "drag-drop" as const, node_ids: nodeIds, recipe_id: recipeId};
-  const preview = {
-    schema_version: 1, generated_at: "2026-09-01T12:00:00Z", recipe_id: recipeId, recipe_revision_id: revisionId,
-    recipe_title: "Tiny model", topology_name: "pair", desired_state: "installed", alias: null, invocation: "drag-drop",
-    selected_node_ids: nodeIds, selected_nodes: [], allowed: true, steps: [], blockers: [], warnings: [],
-    locations: {installation_ids: [], run_ids: [], installed: false, running: false}, plan_digest: "d".repeat(64),
-  };
-  const application = {
-    schema_version: 1, id: placementId, state: "queued", recipe_id: recipeId, recipe_revision_id: revisionId,
-    selected_node_ids: nodeIds, desired_state: "installed", alias: null, plan_digest: preview.plan_digest,
-    current_step: 0, total_steps: 0, current_operation_id: null, status_reason: null, progress: {}, locations: preview.locations,
-    created_at: "2026-09-01T12:00:00Z", updated_at: "2026-09-01T12:00:00Z",
-  };
-  const captured: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    captured.push(request.clone());
-    const body = request.url.endsWith("/preview") ? preview : application;
-    return new Response(JSON.stringify(body), {headers: {"Content-Type": "application/json"}, status: request.method === "POST" && !request.url.endsWith("/preview") ? 202 : 200});
-  });
-
-  const api = new ApiClient();
-  expect(await api.previewLibraryPlacement(intent)).toEqual(preview);
-  expect(await api.applyLibraryPlacement({...intent, plan_digest: preview.plan_digest, request_key: requestKey})).toEqual(application);
-  expect(await api.libraryPlacement(placementId)).toEqual(application);
-
-  expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
-    ["/api/library/placements/preview", "POST"],
-    ["/api/library/placements", "POST"],
-    [`/api/library/placements/${placementId}`, "GET"],
-  ]);
-  expect(await captured[0]!.json()).toEqual(intent);
-  expect(await captured[1]!.json()).toEqual({...intent, plan_digest: preview.plan_digest, request_key: requestKey});
-  expect(captured[0]!.headers.get("X-CSRF-Token")).toBe("placement-csrf");
-  expect(captured[1]!.headers.get("X-CSRF-Token")).toBe("placement-csrf");
-});
-
-it("previews and applies one digest-bound fleet-wide model deletion", async () => {
-  document.cookie = "vonk_csrf=model-delete-csrf; path=/";
-  const modelDigest = "e".repeat(64);
-  const requestKey = "00000000-0000-4000-8000-000000000205";
-  const plan = {
-    active_run_count: 0, active_runs: [], allowed: true, blockers: [], bytes_removed: 120 * 1024 ** 3,
-    installations: [{installation_id: "installation-chat", installed_bytes: 120 * 1024 ** 3, node_ids: ["node-alpha", "node-beta"], recipe_content_sha256: "a".repeat(64), recipe_id: "recipe-chat", recipe_revision_id: "revision-chat"}],
-    model_title: "Qwen 3 BF16", model_content_sha256: modelDigest,
-    nodes: [{installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-alpha", recipe_ids: ["recipe-chat"]}, {installation_ids: ["installation-chat"], installed_bytes: 60 * 1024 ** 3, node_id: "node-beta", recipe_ids: ["recipe-chat"]}],
-    plan_digest: "model-delete-plan", shared_cache_policy: "retain-shared-download-cache", warnings: [],
-  };
-  const operation = {id: "operation-model-delete", kind: "model-delete", owner_id: modelDigest, state: "queued", plan_digest: plan.plan_digest, nodes: ["node-alpha", "node-beta"], result: null};
-  const captured: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    captured.push(request.clone());
-    return new Response(JSON.stringify(request.url.endsWith("/preview") ? plan : operation), {headers: {"Content-Type": "application/json"}, status: request.url.endsWith("/preview") ? 200 : 202});
-  });
-
-  const api = new ApiClient();
-  expect(await api.previewLibraryModelDeletion(modelDigest)).toEqual(plan);
-  expect(await api.deleteLibraryModel(modelDigest, {plan_digest: plan.plan_digest, request_key: requestKey})).toEqual(operation);
-
-  expect(captured.map(request => [new URL(request.url).pathname, request.method])).toEqual([
-    ["/api/library/model-deletion-plans/preview", "POST"],
-    [`/api/library/models/${modelDigest}/delete`, "POST"],
-  ]);
-  expect(await captured[0]!.json()).toEqual({model_content_sha256: modelDigest});
-  expect(await captured[1]!.json()).toEqual({plan_digest: plan.plan_digest, request_key: requestKey});
-  expect(captured[0]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");
-  expect(captured[1]!.headers.get("X-CSRF-Token")).toBe("model-delete-csrf");
 });
 
 it("previews and applies an exact repair manifest through browser CSRF auth", async () => {

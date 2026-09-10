@@ -12,25 +12,15 @@ import type {
   AgentsResponse,
   AuditResponse,
   ControlApi,
-  DeploymentProvenance,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetNodeIdentity,
-  FleetProfile,
-  FleetProfileApplication,
-  FleetProfileApplyInput,
-  FleetProfileRetryInput,
-  FleetProfileCaptureInput,
-  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
-  FleetProfileStatus,
-  RunSwitchApplyRequest,
-  RunSwitchCancelRequest,
-  RunSwitchOperation,
-  RunSwitchPlan,
-  RunSwitchPreviewRequest,
+  FleetProfile,
+  FleetProfileApplicationView,
+  FleetProfileLoadInput,
   CacheEntryResponse,
   ModelCacheDownloadInput,
   ModelCacheDownloadPreviewInput,
@@ -51,8 +41,6 @@ import type {
   RecipeImageAvailabilityInput,
   RecipeImageAvailabilityList,
   RecipeImageAvailabilityOperation,
-  RecipeImageAvailabilityRetryInput,
-  RunSwitchRetryInput,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -68,20 +56,6 @@ import type {
   TelemetryResolution,
   VisualFleetSnapshot,
   NodeProfileUpdate,
-  LibraryBuildApplyInput,
-  LibraryBuildPreviewInput,
-  LibraryImageDistributionApplyInput,
-  LibraryImageDistributionPreviewInput,
-  LibraryInstallApplyInput,
-  LibraryInstallPreviewInput,
-  LibraryLoadApplyInput,
-  LibraryLoadPreviewInput,
-  LibraryPlacementApplyInput,
-  LibraryPlacementPreviewInput,
-  LibraryMappingApplyInput,
-  LibraryMappingPreviewInput,
-  LibraryStopApplyInput,
-  LibraryUninstallApplyInput,
   ArtifactJob,
   ArtifactJobCapabilities,
   ArtifactJobCreateInput,
@@ -259,111 +233,44 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/fleet", {signal}));
   }
 
-  async fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList> {
-    return resultData(await this.generated.GET("/api/fleet-profiles", {signal}));
+  async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
+    return resultData(await this.generated.GET("/api/profile", {signal}));
   }
 
-  async fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.GET("/api/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
+  async profile(number: number, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.GET("/api/profile/{number}", {
+      params: {path: {number}},
       signal,
     }));
   }
 
-  async createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/fleet-profiles", {body: input, signal}));
-  }
-
-  async updateFleetProfile(profileId: string, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.PUT("/api/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
+  async autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.PUT("/api/profile/{number}", {
+      params: {path: {number}},
       body: input,
       signal,
     }));
   }
 
-  async deleteFleetProfile(profileId: string, signal?: AbortSignal): Promise<void> {
-    const {response} = await this.generated.DELETE("/api/fleet-profiles/{profile_id}", {
-      params: {path: {profile_id: profileId}},
-      signal,
-    });
-    if (!response.ok) throw new ApiError(response.status, `Control API returned ${response.status}`);
-  }
-
-  async previewFleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfilePreview> {
-    return resultData(await this.generated.POST("/api/fleet-profiles/{profile_id}/preview", {
-      params: {path: {profile_id: profileId}},
-      body: {},
+  async previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview> {
+    return resultData(await this.generated.POST("/api/profile/{number}/preview", {
+      params: {path: {number}},
       signal,
     }));
   }
 
-  async captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/fleet-profiles/capture-current", {body: input, signal}));
-  }
-
-  async duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile> {
-    return resultData(await this.generated.POST("/api/fleet-profiles/{profile_id}/duplicate", {
-      params: {path: {profile_id: profileId}},
+  async loadProfile(number: number, input: FleetProfileLoadInput = {dry_run: false}, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.POST("/api/profile/{number}/load", {
+      params: {path: {number}},
       body: input,
       signal,
     }));
   }
 
-  async fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus> {
-    return resultData(await this.generated.GET("/api/fleet-profiles/{profile_id}/status", {
-      params: {path: {profile_id: profileId}},
+  async profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.GET("/api/profile/{number}/progress", {
+      params: {path: {number}},
       signal,
-    }));
-  }
-
-  async applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.POST("/api/fleet-profiles/{profile_id}/apply", {
-      params: {path: {profile_id: profileId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.GET("/api/fleet-profile-applications/{application_id}", {
-      params: {path: {application_id: applicationId}},
-      signal,
-    }));
-  }
-
-  async retryFleetProfileApplication(applicationId: string, input: FleetProfileRetryInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return resultData(await this.generated.POST("/api/fleet-profile-applications/{application_id}/retry", {
-      params: {path: {application_id: applicationId}}, body: input, signal,
-    }));
-  }
-
-  async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
-    return resultData(await this.generated.POST("/api/recipes/run-switch-plans/preview", {body: input, signal}));
-  }
-
-  async applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/recipes/run-switches", {body: input, signal}));
-  }
-
-  async getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.GET("/api/recipes/run-switches/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/recipes/run-switches/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async cancelRecipeRunSwitchOperation(operationId: string, input: RunSwitchCancelRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return resultData(await this.generated.POST("/api/recipes/run-switches/{operation_id}/cancel", {
-      params: {path: {operation_id: operationId}}, body: input, signal,
     }));
   }
 
@@ -400,10 +307,6 @@ export class ApiClient implements ControlApi {
 
   async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
     return resultData(await this.generated.POST("/api/model-cache/evict", {body: input, signal}));
-  }
-
-  async deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance> {
-    return resultData(await this.generated.GET("/api/deployment-provenance", {signal}));
   }
 
   async modelCacheUpdates(signal?: AbortSignal, checkUpstream = false): Promise<ModelCacheUpdatesResponse> {
@@ -485,140 +388,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/library/placements/preview", {body: input, signal}));
-  }
-
-  async applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/library/placements", {body: input, signal}));
-  }
-
-  async libraryPlacement(placementId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/library/placements/{placement_id}", {
-      params: {path: {placement_id: placementId}},
-      signal,
-    }));
-  }
-
-  async retryLibraryPlacement(placementId: string, input: FleetProfileRetryInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/library/placements/{placement_id}/retry", {
-      params: {path: {placement_id: placementId}}, body: input, signal,
-    }));
-  }
-
-  async previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/library/model-deletion-plans/preview", {
-      body: {model_content_sha256: modelContentSha256},
-      signal,
-    }));
-  }
-
-  async deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/library/models/{model_content_sha256}/delete", {
-      params: {path: {model_content_sha256: modelContentSha256}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/build-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryBuild(input: LibraryBuildApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/builds", {body: input, signal}));
-  }
-
-  async previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/mapping-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryMapping(input: LibraryMappingApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/mappings", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryImageDistribution(input: LibraryImageDistributionPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/image-distribution-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryImageDistribution(input: LibraryImageDistributionApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/image-distributions", {body: input, signal}));
-  }
-
-  async previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/install-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryInstall(input: LibraryInstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/installations", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryLoad(input: LibraryLoadPreviewInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/run-plans/preview", {body: input, signal}));
-  }
-
-  async applyLibraryLoad(input: LibraryLoadApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/runs", {
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryStop(runId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/stop-plans/preview", {body: {run_id: runId}, signal}));
-  }
-
-  async applyLibraryStop(runId: string, input: LibraryStopApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/runs/{run_id}/stop", {
-      params: {path: {run_id: runId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async previewLibraryUninstall(installationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/uninstall-plans/preview", {
-      body: {installation_id: installationId},
-      signal,
-    }));
-  }
-
-  async applyLibraryUninstall(installationId: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/installations/{installation_id}/uninstall", {
-      params: {path: {installation_id: installationId}},
-      body: input,
-      signal,
-    }));
-  }
-
-  async libraryOperation(operationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/recipes/operations/{operation_id}", {
-      params: {path: {operation_id: operationId}},
-      signal,
-    }));
-  }
-
-  async retryLibraryOperation(operationId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/recipes/operations/{operation_id}/retry", {
-      params: {path: {operation_id: operationId}},
-      body: {request_key: crypto.randomUUID()},
-      signal,
-    }));
-  }
-
-  async libraryRunStatus(runId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/recipes/runs/{run_id}", {
-      params: {path: {run_id: runId}},
-      signal,
-    }));
-  }
-
   async libraryJobProgress(jobId: string, signal?: AbortSignal) {
     return resultData(await this.generated.GET("/api/jobs/{job_id}", {
       params: {path: {job_id: jobId}, query: {}},
@@ -627,7 +396,7 @@ export class ApiClient implements ControlApi {
   }
 
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList> {
-    return this.request(`/api/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
+    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
   }
 
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
@@ -635,7 +404,7 @@ export class ApiClient implements ControlApi {
   }
 
   createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/recipes/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
+    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
       body: JSON.stringify(input),
       signal,

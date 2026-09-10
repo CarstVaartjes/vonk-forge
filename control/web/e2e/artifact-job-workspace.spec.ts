@@ -99,7 +99,7 @@ async function installArtifactFixture(page: Page) {
       transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]},
       storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 768 * 1024 ** 2, remaining_bytes: 3.25 * 1024 ** 3},
     }});
-    if (path === `/api/recipes/runs/${runId}/artifact-jobs`) {
+    if (path === `/api/recipe/runs/${runId}/artifact-jobs`) {
       const jobs = state.mode === "empty" ? [] : state.mode === "failed"
         ? [artifactJob("00000000-0000-4000-8000-000000000024", "failed", "2026-08-28T12:08:00Z")]
         : normalJobs;
