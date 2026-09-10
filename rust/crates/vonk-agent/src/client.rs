@@ -2287,7 +2287,12 @@ mod tests {
                     stream.write_all(&manifest).unwrap();
                     continue;
                 }
-                let object_digest = target.split('/').nth(5).unwrap().split('?').next().unwrap();
+                let object_digest = target
+                    .strip_prefix("/agent/distribution/objects/")
+                    .unwrap()
+                    .split('?')
+                    .next()
+                    .unwrap();
                 let body = objects
                     .iter()
                     .find(|(digest, _)| digest == object_digest)

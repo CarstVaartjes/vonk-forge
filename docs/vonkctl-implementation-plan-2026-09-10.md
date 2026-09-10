@@ -89,4 +89,8 @@ Use task-specific writable uv caches and the sibling recipe contract package. Ru
 
 - Latest main fetched and isolated at `ff6abaa5`.
 - Initial API inventory and concrete authoring/eviction mismatches recorded above.
-- Worker dispatch follows this plan; final integration and evidence remain pending.
+- Four Luna/high workers dispatched: A CLI, B profiles, C cache lifecycle, D Fleet/library API.
+- Integration commit `903d3c37` removes owned API/agent version prefixes across 246 tracked files; no old `/api/v1` or `/agent/v1` references remain at this stage. External inference paths and protocol identifiers are retained.
+- Prefix-change checks: 42 schema-completeness/client-request tests passed; another 184 auth/agent/healthcheck/generated-client tests passed. Regenerating OpenAPI with `--schema-only` produced no diff. All 29 native agent client tests passed under OrbStack Linux/Rust 1.97.1 after replacing an old positional test-server path parser with an explicit prefix parser. Native macOS compilation encountered existing Linux-only helper filesystem APIs, so Linux was used. These checks validate the prefix change, not yet the new CLI/profile/cache implementation.
+- OrbStack verified as `orbstack`, operating system `OrbStack`, architecture `aarch64`.
+- Final worker integration and full acceptance evidence remain pending.
