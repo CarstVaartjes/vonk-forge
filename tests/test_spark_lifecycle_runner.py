@@ -188,6 +188,58 @@ def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
             lifecycle._synthetic_device_fixture(platform)
 
 
+def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
+    lifecycle = _module()
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath("package.tar.gz"),
+        package_bytes=b"package",
+        source_commit="a" * 40,
+        publisher="vonk-forge-test",
+        slug="synthetic-canary",
+        recipe_content_sha256="b" * 64,
+        model_content_sha256="c" * 64,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path, kwargs))
+            if method == "POST" and path == "/api/catalog/managed-recipes/sync":
+                return 200, {
+                    "state": "current",
+                    "commit": fixture.source_commit,
+                    "total_count": 1,
+                    "processed_count": 1,
+                    "imported_count": 1,
+                    "unchanged_count": 0,
+                    "problems": [],
+                }
+            if method == "GET" and path == "/api/recipe/library":
+                return 200, {"recipes": []}
+            raise AssertionError((method, path, payload, kwargs))
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    run.browser = object()
+    run.synthetic_canary_fixture = fixture
+    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(str(error))
+
+    with pytest.raises(lifecycle.LifecycleError, match="exact synthetic canary Recipe"):
+        run._run_synthetic_canary("spk_" + "1" * 32)
+
+    assert calls[1] == (
+        "GET",
+        "/api/recipe/library",
+        {"query": {"all_models": "true"}},
+    )
+
+
 def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
     tmp_path: Path,
 ) -> None:
