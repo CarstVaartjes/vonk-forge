@@ -555,7 +555,6 @@ def _model(
             {
                 "schema_version": 2,
                 "request_key": _request_key(args, factory),
-                "yes": args.yes,
             },
         )
         return _follow_mutation(client, "model", result, args)
@@ -618,7 +617,6 @@ def _recipe(
                 "schema_version": 2,
                 "request_key": _request_key(args, factory),
                 "with_model": args.with_model and not args.keep_model,
-                "yes": args.yes,
             },
         )
         return _follow_mutation(client, "recipe", result, args)

@@ -103,7 +103,7 @@ class FakeClient:
             uuid.UUID(payload["request_key"])
         elif selector_path is not None and selector_path.group(2) in {"download", "remove"}:
             assert isinstance(payload, dict)
-            assert set(payload) <= {"schema_version", "request_key", "yes", "with_model"}
+            assert set(payload) <= {"schema_version", "request_key", "with_model"}
             assert payload["schema_version"] == 2
             uuid.UUID(payload["request_key"])
             if selector_path.group(1) == "model":
@@ -275,7 +275,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert client.calls[0][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "yes": True,
     }
     assert run(
         ("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client
