@@ -382,6 +382,7 @@ def setup_services(
     engine=None,
     create_schema: bool = True,
     route_withdrawer=None,
+    distributed_start_timeout_seconds: int = 60,
 ):
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
@@ -759,6 +760,7 @@ def setup_services(
         agent_jobs=queue,
         clock=lambda: NOW,
         route_withdrawer=route_withdrawer,
+        distributed_start_timeout_seconds=distributed_start_timeout_seconds,
     )
     record_passing_preflight(sessions, NOW)
     return sessions, service, queue, mapping_id, build_id, node_ids
@@ -1366,14 +1368,16 @@ def test_failed_start_phase_never_enqueues_dependent_role(tmp_path: Path) -> Non
     "start_order",
     (("worker", "entrypoint"), ("entrypoint", "worker")),
 )
+@pytest.mark.parametrize("startup_budget", [60, 1800])
 def test_distributed_start_launches_all_ranks_then_checks_collective(
-    tmp_path: Path, start_order: tuple[str, ...]
+    tmp_path: Path, start_order: tuple[str, ...], startup_budget: int
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
         nodes=2,
         distributed_lifecycle=True,
         start_order=start_order,
+        distributed_start_timeout_seconds=startup_budget,
     )
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="p" * 36
@@ -1413,6 +1417,9 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
         )
         assert job.payload["start_deadline"] == deadline
 
+    assert deadline == (NOW + timedelta(seconds=startup_budget)).isoformat()
+    if startup_budget > 60:
+        service._clock = lambda: NOW + timedelta(seconds=120)
     first_by_role = {item.payload["role"]: item for item in launches}
     for role in start_order:
         launch = first_by_role[role]
@@ -1742,11 +1749,16 @@ def test_collective_readiness_starts_distinct_observation_grace(
         )
 
 
+@pytest.mark.parametrize("startup_budget", [60, 1800])
 def test_distributed_start_deadline_is_enforced_before_phase_advance(
     tmp_path: Path,
+    startup_budget: int,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=startup_budget,
     )
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="v" * 36
@@ -1767,12 +1779,12 @@ def test_distributed_start_deadline_is_enforced_before_phase_advance(
         assert len(launches) == 2
         assert all(
             launch.payload["start_deadline"]
-            == (NOW + timedelta(seconds=60)).isoformat()
+            == (NOW + timedelta(seconds=startup_budget)).isoformat()
             for launch in launches
         )
         launch = launches[0]
 
-    service._clock = lambda: NOW + timedelta(seconds=60)
+    service._clock = lambda: NOW + timedelta(seconds=startup_budget)
     service.record_node_result(
         start.id,
         launch.node_id,

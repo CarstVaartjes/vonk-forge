@@ -246,9 +246,16 @@ class RecipeOperationService:
         builds: RecipeBuildService | None = None,
         mappings: ClusterMappingService | None = None,
         run_health_maximum_age_seconds: int = 300,
+        distributed_start_timeout_seconds: int = 60,
     ) -> None:
         if not 1 <= run_health_maximum_age_seconds <= 300:
             raise ValueError("recipe run health age is invalid")
+        if (
+            type(distributed_start_timeout_seconds) is not int
+            or not 60 <= distributed_start_timeout_seconds <= 3600
+        ):
+            raise ValueError("distributed start timeout is invalid")
+        self._distributed_start_timeout_seconds = distributed_start_timeout_seconds
         self._sessions = sessions
         self._install_admission = install_admission
         self._run_admission = run_admission
@@ -988,7 +995,11 @@ class RecipeOperationService:
                 and distributed_readiness is not None
             )
             start_deadline = (
-                _distributed_start_deadline(revision.document, now=now)
+                _distributed_start_deadline(
+                    revision.document,
+                    now=now,
+                    timeout_seconds=self._distributed_start_timeout_seconds,
+                )
                 if two_phase_start
                 else None
             )
@@ -3102,14 +3113,14 @@ def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]
 
 
 def _distributed_start_deadline(
-    document: Mapping[str, object], *, now: datetime
+    document: Mapping[str, object], *, now: datetime, timeout_seconds: int
 ) -> str:
     readiness = _canonical_distributed_readiness(document)
     if readiness is None:
         raise RecipeOperationConflict("distributed readiness policy is unavailable")
-    timeout = readiness["timeout_seconds"]
-    assert type(timeout) is int
-    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+    # Initial loading/JIT has a separate operator budget from rank-loss recovery.
+    # Persist one immutable deadline; lease renewal must never extend it.
+    return (_aware(now) + timedelta(seconds=timeout_seconds)).isoformat()
 
 
 def _canonical_distributed_readiness(

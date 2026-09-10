@@ -10,6 +10,8 @@ class DistributedLifecycleError(RuntimeError):
     pass
 
 
+# Recovery readiness budget. Initial admission supplies its separate bounded
+# operator startup deadline; this field is not a recipe-authored startup limit.
 DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS = 60
 
 

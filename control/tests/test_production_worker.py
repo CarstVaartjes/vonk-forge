@@ -126,6 +126,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         worker_id="control-worker-test",
+        distributed_start_timeout_seconds=1800,
         artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
         artifact_job_storage_max_bytes=16 * 1024**3,
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
@@ -136,6 +137,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
 
+    assert worker._recipes._run_switches._lifecycle._distributed_start_timeout_seconds == 1800
     assert not hasattr(worker, "_updates")
     assert not hasattr(worker, "_packages")
     assert not hasattr(worker, "_validation")

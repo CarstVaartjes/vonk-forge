@@ -127,3 +127,14 @@ Operators may maintain a private or forked recipe library. It must pass the
 same independent validator and use schema-2 Model/Recipe documents with one
 self-contained package per recipe. A custom package cannot replace a harness
 implementation or weaken the runtime security and evidence contract.
+
+### Distributed cold-start budget
+
+Set `VONK_DISTRIBUTED_START_TIMEOUT_SECONDS` on both the Controller API and
+worker when a distributed model needs more than the default 60 seconds to load
+weights or compile kernels. Values must be between 60 and 3600 seconds; for
+example, 1800 allows a bounded 30-minute cold start. This sets one immutable
+deadline when the run is admitted, covering rank launch and collective readiness.
+Changing the setting affects newly admitted runs only. It does not extend active
+deadlines, publish an unready endpoint, or change rank-loss recovery and stop
+timeouts. Native agents continue enforcing the signed operation's deadline.
