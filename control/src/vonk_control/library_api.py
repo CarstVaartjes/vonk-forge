@@ -141,7 +141,7 @@ def install_library_routes(
     def recipe_library(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
-        model: Annotated[str | None, Query(max_length=256)] = None,
+        model: Annotated[list[str] | None, Query(max_length=64)] = None,
         all_models: Annotated[bool, Query()] = False,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
         publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
@@ -154,7 +154,7 @@ def install_library_routes(
     ) -> RecipeLibraryResponse:
         try:
             return library().recipe_library(
-                limit=limit, cursor=cursor, model_selector=model,
+                limit=limit, cursor=cursor, model_selectors=model or [],
                 all_models=all_models, usage=usage or [], publisher=publisher or [],
                 alignment=alignment or [], sparks=sparks or [], search=search,
                 updated_since=updated_since, sort=sort,

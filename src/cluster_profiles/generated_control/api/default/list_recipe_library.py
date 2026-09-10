@@ -25,7 +25,7 @@ def _get_kwargs(
     *,
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, str] = UNSET,
+    model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
@@ -51,9 +51,13 @@ def _get_kwargs(
         json_cursor = cursor
     params["cursor"] = json_cursor
 
-    json_model: Union[None, Unset, str]
+    json_model: Union[None, Unset, list[str]]
     if isinstance(model, Unset):
         json_model = UNSET
+    elif isinstance(model, list):
+        json_model = model
+
+
     else:
         json_model = model
     params["model"] = json_model
@@ -190,7 +194,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, str] = UNSET,
+    model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
@@ -206,7 +210,7 @@ def sync_detailed(
     Args:
         limit (Union[Unset, int]):  Default: 100.
         cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, str]):
+        model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
@@ -251,7 +255,7 @@ def sync(
     client: AuthenticatedClient,
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, str] = UNSET,
+    model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
@@ -267,7 +271,7 @@ def sync(
     Args:
         limit (Union[Unset, int]):  Default: 100.
         cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, str]):
+        model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
@@ -307,7 +311,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, str] = UNSET,
+    model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
@@ -323,7 +327,7 @@ async def asyncio_detailed(
     Args:
         limit (Union[Unset, int]):  Default: 100.
         cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, str]):
+        model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
@@ -368,7 +372,7 @@ async def asyncio(
     client: AuthenticatedClient,
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, str] = UNSET,
+    model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
@@ -384,7 +388,7 @@ async def asyncio(
     Args:
         limit (Union[Unset, int]):  Default: 100.
         cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, str]):
+        model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):

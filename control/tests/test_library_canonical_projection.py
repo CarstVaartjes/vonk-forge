@@ -196,6 +196,30 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert by_sparks
     assert {item.node_count for item in by_sparks} == {sparks}
 
+    # Several model selectors are a union. A repeated query parameter used to
+    # reach a single-value parameter, so every selector but the last was lost.
+    selectors = sorted({model.selector for model in model_page.models})
+    first, second = selectors[0], selectors[1]
+    one = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[first]
+        ).recipes
+    }
+    two = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[second]
+        ).recipes
+    }
+    both = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[first, second]
+        ).recipes
+    }
+    assert both == one | two
+
     app = FastAPI()
     install_library_routes(
         app,

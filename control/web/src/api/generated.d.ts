@@ -9451,7 +9451,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string | null;
-                model?: string | null;
+                model?: string[] | null;
                 all_models?: boolean;
                 usage?: string[] | null;
                 publisher?: string[] | null;

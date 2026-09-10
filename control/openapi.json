@@ -22840,8 +22840,11 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 256,
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
                 },
                 {
                   "type": "null"

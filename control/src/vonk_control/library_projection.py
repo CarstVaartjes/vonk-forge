@@ -757,7 +757,7 @@ class LibraryProjection:
         *,
         limit: int = 100,
         cursor: str | None = None,
-        model_selector: str | None = None,
+        model_selectors: Sequence[str] = (),
         all_models: bool = False,
         usage: Sequence[str] = (),
         publisher: Sequence[str] = (),
@@ -794,13 +794,22 @@ class LibraryProjection:
         ]
         selected_keys: set[tuple[str, str, str]] | None = None
         local_recipe_digests: set[str] = set()
-        if model_selector and not all_models:
-            selected = self._resolve_selector(
-                model_entries, model_selector,
-                lambda item: (item.identity.publisher, item.identity.slug),
-            )
-            assert isinstance(selected, LibraryModelProjection)
-            selected_keys = {(selected.identity.publisher, selected.identity.slug, selected.identity.content_sha256)}
+        if model_selectors and not all_models:
+            # Every requested selector must resolve; the union is the scope.
+            selected_keys = set()
+            for selector in model_selectors:
+                selected = self._resolve_selector(
+                    model_entries, selector,
+                    lambda item: (item.identity.publisher, item.identity.slug),
+                )
+                assert isinstance(selected, LibraryModelProjection)
+                selected_keys.add(
+                    (
+                        selected.identity.publisher,
+                        selected.identity.slug,
+                        selected.identity.content_sha256,
+                    )
+                )
         elif not all_models:
             selected_keys = {
                 (item.identity.publisher, item.identity.slug, item.identity.content_sha256)
@@ -844,7 +853,7 @@ class LibraryProjection:
             "s": sort,
             "f": _filter_digest(
                 {
-                    "model": model_selector,
+                    "model": list(model_selectors),
                     "all_models": all_models,
                     "usage": list(usage),
                     "publisher": list(publisher),
@@ -876,7 +885,7 @@ class LibraryProjection:
             generated_at=_utc(self._clock()), recipes=page,
             facets=self._recipe_facet_values(model_entries, entries), next_cursor=next_cursor,
             filters={
-                "model": model_selector, "all_models": all_models, "usage": list(usage),
+                "model": list(model_selectors), "all_models": all_models, "usage": list(usage),
                 "publisher": list(publisher), "alignment": list(alignment),
                 "sparks": [str(value) for value in sparks],
                 "search": search,
