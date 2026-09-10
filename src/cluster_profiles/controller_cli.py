@@ -82,14 +82,22 @@ def _detail_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--capabilities", action="store_true")
 
 
+def _watch_controls(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--timeout-seconds", type=int, default=30)
+    parser.add_argument("--interval-seconds", type=float, default=1.0)
+
+
 def _action_flags(
     parser: argparse.ArgumentParser,
     *,
     destructive: bool = False,
     recipe_remove: bool = False,
+    followable: bool = False,
 ) -> None:
     parser.add_argument("--request-key")
-    parser.add_argument("--detach", action="store_true")
+    if followable:
+        parser.add_argument("--detach", action="store_true")
+        _watch_controls(parser)
     if destructive:
         parser.add_argument("--yes", action="store_true")
     if recipe_remove:
@@ -110,6 +118,7 @@ def add_controller_commands(
     """Register only Fleet, Model, Recipe and Profile command namespaces."""
     fleet = commands.add_parser("fleet", help="Show and operate enrolled Sparks")
     fleet.add_argument("--watch", action="store_true")
+    _watch_controls(fleet)
     fleet.add_argument("--search", default="")
     fleet.add_argument("--health", action="append", choices=FLEET_HEALTH, default=[])
     fleet.add_argument("--warnings-only", action="store_true")
@@ -121,6 +130,7 @@ def add_controller_commands(
     _selector(detail, "selector", help="Exact Spark selector or friendly name")
     _detail_filters(detail)
     detail.add_argument("--watch", action="store_true")
+    _watch_controls(detail)
     detail.add_argument("--technical", action="store_true")
     _add_output(detail)
     rename = fleet_actions.add_parser("rename", help="Change a Spark friendly name")
@@ -156,10 +166,12 @@ def add_controller_commands(
     loginfo.add_argument("--recipe")
     loginfo.add_argument("--source", choices=("client", "monitor", "runtime"))
     loginfo.add_argument("--follow", action="store_true")
+    _watch_controls(loginfo)
     _add_output(loginfo)
 
     model = commands.add_parser("model", help="Browse and manage model cache")
     model.add_argument("--watch", action="store_true")
+    _watch_controls(model)
     _add_output(model)
     model_actions = model.add_subparsers(dest="model_action", parser_class=type(model))
     model_library = model_actions.add_parser("library", help="List published model variants")
@@ -168,19 +180,21 @@ def add_controller_commands(
     model_detail = model_actions.add_parser("detail", help="Show an exact model variant")
     _selector(model_detail, "selector", help="Exact model selector or friendly name")
     model_detail.add_argument("--watch", action="store_true")
+    _watch_controls(model_detail)
     model_detail.add_argument("--technical", action="store_true")
     _add_output(model_detail)
     model_download = model_actions.add_parser("download", help="Cache a model variant")
     _selector(model_download, "selector", help="Exact model selector or friendly name")
-    _action_flags(model_download)
+    _action_flags(model_download, followable=True)
     model_remove = model_actions.add_parser(
         "remove", help="Cancel/remove Controller model cache"
     )
     _selector(model_remove, "selector", help="Exact model selector or friendly name")
-    _action_flags(model_remove, destructive=True)
+    _action_flags(model_remove, destructive=True, followable=True)
 
     recipe = commands.add_parser("recipe", help="Browse and manage runnable recipes")
     recipe.add_argument("--watch", action="store_true")
+    _watch_controls(recipe)
     _add_output(recipe)
     recipe_actions = recipe.add_subparsers(dest="recipe_action", parser_class=type(recipe))
     recipe_library = recipe_actions.add_parser("library", help="List compatible recipes")
@@ -191,24 +205,27 @@ def add_controller_commands(
     recipe_detail = recipe_actions.add_parser("detail", help="Show an exact recipe")
     _selector(recipe_detail, "selector", help="Exact recipe selector or friendly name")
     recipe_detail.add_argument("--watch", action="store_true")
+    _watch_controls(recipe_detail)
     recipe_detail.add_argument("--technical", action="store_true")
     _add_output(recipe_detail)
     recipe_download = recipe_actions.add_parser(
         "download", help="Cache a recipe and missing model"
     )
     _selector(recipe_download, "selector", help="Exact recipe selector or friendly name")
-    _action_flags(recipe_download)
+    _action_flags(recipe_download, followable=True)
     recipe_update = recipe_actions.add_parser(
         "update", help="List or refresh cached recipe updates"
     )
     recipe_update.add_argument("selector", nargs="?")
     recipe_update.add_argument("--all", action="store_true")
-    _action_flags(recipe_update)
+    _action_flags(recipe_update, followable=True)
     recipe_remove = recipe_actions.add_parser(
         "remove", help="Cancel/remove Controller recipe cache"
     )
     _selector(recipe_remove, "selector", help="Exact recipe selector or friendly name")
-    _action_flags(recipe_remove, destructive=True, recipe_remove=True)
+    _action_flags(
+        recipe_remove, destructive=True, recipe_remove=True, followable=True
+    )
 
     profile = commands.add_parser("profile", help="Edit and load a whole-fleet profile")
     _add_output(profile)
@@ -238,6 +255,7 @@ def add_controller_commands(
     profile_load.add_argument("--dry-run", action="store_true")
     profile_load.add_argument("--request-key")
     profile_load.add_argument("--detach", action="store_true")
+    _watch_controls(profile_load)
     _add_output(profile_load)
     profile_progress = profile_actions.add_parser(
         "progress", help="Show the latest profile load"
@@ -253,6 +271,130 @@ def _profile_number(args: argparse.Namespace) -> int:
     if type(number) is not int or number < 1:
         raise ValueError("--profile must be a positive stable profile number")
     return number
+
+
+_TERMINAL_STATES = {
+    "succeeded",
+    "completed",
+    "failed",
+    "partial",
+    "cancelled",
+    "blocked",
+    "rejected",
+}
+
+
+def _state(value: Mapping[str, object]) -> str:
+    for key in ("state", "status", "outcome"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            return candidate.casefold()
+    operation = value.get("operation")
+    if isinstance(operation, Mapping):
+        return _state(operation)
+    return ""
+
+
+def _watch_callback(args: argparse.Namespace) -> Callable[[Mapping[str, object]], None] | None:
+    callback = getattr(args, "_watch_callback", None)
+    return callback if callable(callback) else None
+
+
+def _bounded_timeout(args: argparse.Namespace) -> float:
+    return max(0.0, min(float(getattr(args, "timeout_seconds", 30)), 300.0))
+
+
+def _bounded_interval(args: argparse.Namespace) -> float:
+    return max(0.01, min(float(getattr(args, "interval_seconds", 1.0)), 30.0))
+
+
+def _poll_path(
+    client: ControllerClient,
+    path: str,
+    initial: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    query: Mapping[str, object] | None = None,
+    until_state: bool = True,
+) -> dict[str, object]:
+    """Observe a bounded durable snapshot, retaining the last truthful value."""
+    callback = _watch_callback(args)
+    current = initial
+    deadline = time.monotonic() + _bounded_timeout(args)
+    while True:
+        if callback is not None:
+            callback(current)
+        if until_state and _state(current) in _TERMINAL_STATES:
+            return current
+        if time.monotonic() >= deadline:
+            return {**current, "timed_out": True}
+        time.sleep(_bounded_interval(args))
+        current = client.request("GET", path, query=query)
+
+
+def _follow_mutation(
+    client: ControllerClient,
+    noun: str,
+    result: dict[str, object],
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    """Follow a model/recipe mutation through its noun-owned operation view."""
+    if getattr(args, "detach", False):
+        return result
+    operation_id = result.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id:
+        return result
+    path = f"/api/{noun}/operations/{_quoted(operation_id)}"
+    return _poll_path(client, path, result, args)
+
+
+def _watch_resource(
+    client: ControllerClient,
+    path: str,
+    result: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    query: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    if not getattr(args, "watch", False):
+        return result
+    return _poll_path(client, path, result, args, query=query)
+
+
+def _follow_loginfo(
+    client: ControllerClient,
+    path: str,
+    result: dict[str, object],
+    args: argparse.Namespace,
+    query: Mapping[str, object],
+) -> dict[str, object]:
+    if not getattr(args, "follow", False):
+        return result
+    current = result
+    callback = _watch_callback(args)
+    deadline = time.monotonic() + _bounded_timeout(args)
+    while True:
+        if callback is not None:
+            callback(current)
+        state = _state(current)
+        if current.get("complete") is True or current.get("closed") is True or state in _TERMINAL_STATES:
+            return current
+        if time.monotonic() >= deadline:
+            return {**current, "timed_out": True}
+        time.sleep(_bounded_interval(args))
+        current = client.request("GET", path, query=query)
+
+
+def result_exit_code(result: Mapping[str, object]) -> int:
+    """Map durable operation outcomes to shell semantics."""
+    if result.get("timed_out") is True:
+        return 2
+    state = _state(result)
+    if state == "partial":
+        return 1
+    if state in {"failed", "blocked", "cancelled", "rejected"}:
+        return 2
+    return 0
 
 
 def _overview(
@@ -284,10 +426,10 @@ def _fleet(
 ) -> dict[str, object]:
     action = getattr(args, "fleet_action", None)
     if action is None:
-        return _overview(client, "fleet", args)
+        return _watch_resource(client, "/api/fleet", _overview(client, "fleet", args), args)
     selector = getattr(args, "selector", None)
     if action == "detail":
-        return client.request(
+        result = client.request(
             "GET",
             f"/api/fleet/{_quoted(selector)}",
             query=_query(
@@ -300,6 +442,9 @@ def _fleet(
                 technical=args.technical,
             )
             or None,
+        )
+        return _watch_resource(
+            client, f"/api/fleet/{_quoted(selector)}", result, args
         )
     if action == "rename":
         return client.request(
@@ -336,18 +481,16 @@ def _fleet(
             },
         )
     if action == "loginfo":
-        return client.request(
-            "GET",
-            f"/api/fleet/{_quoted(selector)}/loginfo",
-            query=_query(
-                since=args.since,
-                lines=args.lines,
-                recipe=args.recipe,
-                source=args.source,
-                follow=args.follow,
-            )
-            or None,
+        path = f"/api/fleet/{_quoted(selector)}/loginfo"
+        query = _query(
+            since=args.since,
+            lines=args.lines,
+            recipe=args.recipe,
+            source=args.source,
+            follow=args.follow,
         )
+        result = client.request("GET", path, query=query or None)
+        return _follow_loginfo(client, path, result, args, query)
     raise ValueError(f"unsupported fleet action: {action}")
 
 
@@ -378,19 +521,23 @@ def _model(
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
     if action is None:
-        return _overview(client, "model", args)
+        return _watch_resource(client, "/api/model", _overview(client, "model", args), args)
     if action == "library":
         return client.request(
             "GET", "/api/model/library", query=_library_query(args, recipe=False) or None
         )
     if action == "detail":
-        return client.request(
+        result = client.request(
             "GET",
             f"/api/model/{_quoted(args.selector)}",
             query=_query(technical=args.technical) or None,
         )
+        return _watch_resource(
+            client, f"/api/model/{_quoted(args.selector)}", result, args,
+            query=_query(technical=args.technical) or None,
+        )
     if action == "download":
-        return client.request(
+        result = client.request(
             "POST",
             f"/api/model/{_quoted(args.selector)}/download",
             {
@@ -398,8 +545,11 @@ def _model(
                 "request_key": _request_key(args, factory),
             },
         )
+        return _follow_mutation(client, "model", result, args)
     if action == "remove":
-        return client.request(
+        if not args.yes:
+            raise ValueError("model remove requires --yes in noninteractive mode")
+        result = client.request(
             "POST",
             f"/api/model/{_quoted(args.selector)}/remove",
             {
@@ -408,6 +558,7 @@ def _model(
                 "yes": args.yes,
             },
         )
+        return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")
 
 
@@ -418,19 +569,23 @@ def _recipe(
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
     if action is None:
-        return _overview(client, "recipe", args)
+        return _watch_resource(client, "/api/recipe", _overview(client, "recipe", args), args)
     if action == "library":
         return client.request(
             "GET", "/api/recipe/library", query=_library_query(args, recipe=True) or None
         )
     if action == "detail":
-        return client.request(
+        result = client.request(
             "GET",
             f"/api/recipe/{_quoted(args.selector)}",
             query=_query(technical=args.technical) or None,
         )
+        return _watch_resource(
+            client, f"/api/recipe/{_quoted(args.selector)}", result, args,
+            query=_query(technical=args.technical) or None,
+        )
     if action == "download":
-        return client.request(
+        result = client.request(
             "POST",
             f"/api/recipe/{_quoted(args.selector)}/download",
             {
@@ -438,8 +593,9 @@ def _recipe(
                 "request_key": _request_key(args, factory),
             },
         )
+        return _follow_mutation(client, "recipe", result, args)
     if action == "update":
-        return client.request(
+        result = client.request(
             "POST",
             "/api/recipe/update",
             {
@@ -449,8 +605,13 @@ def _recipe(
                 "all": args.all,
             },
         )
+        return _follow_mutation(client, "recipe", result, args)
     if action == "remove":
-        return client.request(
+        if not args.yes:
+            raise ValueError("recipe remove requires --yes in noninteractive mode")
+        if not (args.with_model or args.keep_model):
+            raise ValueError("recipe remove requires --with-model or --keep-model")
+        result = client.request(
             "POST",
             f"/api/recipe/{_quoted(args.selector)}/remove",
             {
@@ -460,6 +621,7 @@ def _recipe(
                 "yes": args.yes,
             },
         )
+        return _follow_mutation(client, "recipe", result, args)
     raise ValueError(f"unsupported recipe action: {action}")
 
 
@@ -522,18 +684,10 @@ def _profile(
         return client.request("GET", "/api/profile")
     if action == "progress":
         path = f"/api/profile/{number}/progress"
+        result = client.request("GET", path)
         if not args.follow:
-            return client.request("GET", path)
-        deadline = time.monotonic() + max(0, min(args.timeout_seconds, 300))
-        while True:
-            result = client.request("GET", path)
-            state = str(result.get("state", "")).casefold()
-            terminal = {"succeeded", "completed", "failed", "cancelled", "partial", "blocked"}
-            if state in terminal or time.monotonic() >= deadline:
-                if time.monotonic() >= deadline and state not in terminal:
-                    return {**result, "timed_out": True}
-                return result
-            time.sleep(max(0.1, min(args.interval_seconds, 30.0)))
+            return result
+        return _poll_path(client, path, result, args)
     if action in {"name", "add", "remove"}:
         current = client.request("GET", f"/api/profile/{number}")
         assignments = _authoring_assignments(current)
@@ -604,11 +758,14 @@ def _profile(
     if action == "load":
         if args.dry_run:
             return client.request("POST", f"/api/profile/{number}/preview", {})
-        return client.request(
+        result = client.request(
             "POST",
             f"/api/profile/{number}/load",
             {"request_key": _request_key(args, factory)},
         )
+        if args.detach or not isinstance(result.get("operation_id"), str):
+            return result
+        return _poll_path(client, f"/api/profile/{number}/progress", result, args)
     raise ValueError(f"unsupported profile action: {action}")
 
 

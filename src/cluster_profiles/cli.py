@@ -17,7 +17,7 @@ from .control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
-from .controller_cli import add_controller_commands, run_controller
+from .controller_cli import add_controller_commands, result_exit_code, run_controller
 
 _MAX_TEXT_CHARS = 1_024
 _MAX_COLLECTION_ITEMS = 1_024
@@ -164,13 +164,29 @@ def main(
 
     try:
         client = control_client or ControlClient.from_environment()
+        watch_rendered = False
+
+        def render_watch(observed: Mapping[str, object]) -> None:
+            nonlocal watch_rendered
+            if sys.stdout.isatty():
+                print("\033[2J\033[H", end="")
+            render_payload(
+                _sanitize(observed),
+                getattr(args, "command", None) or "profile",
+                wide=getattr(args, "wide", False),
+            )
+            watch_rendered = True
+
+        if not args.global_json and not getattr(args, "json", False):
+            args._watch_callback = render_watch
         result = run_controller(
             args,
             client,  # type: ignore[arg-type]
             request_id_factory or (lambda: str(uuid.uuid4())),
         )
-        _emit(result, args)
-        return 0
+        if not watch_rendered or args.global_json or getattr(args, "json", False):
+            _emit(result, args)
+        return result_exit_code(result)
     except (
         ControlClientError,
         OSError,

@@ -31,6 +31,7 @@ class FakeClient:
         selector_path = re.fullmatch(
             r"/api/(model|recipe)/[^/]+(?:/(download|remove))?", path
         )
+        operation_path = re.fullmatch(r"/api/(model|recipe)/operations/[^/]+", path)
         known_get = {
             "/api/fleet",
             "/api/model",
@@ -39,9 +40,18 @@ class FakeClient:
             "/api/recipe/library",
             "/api/profile",
         }
-        known = path in known_get or profile_path is not None or selector_path is not None
+        known = (
+            path in known_get
+            or profile_path is not None
+            or selector_path is not None
+            or operation_path is not None
+        )
         known = known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
-        known = known or path in {"/api/fleet/enroll", "/api/fleet/upgrade"}
+        known = known or path in {
+            "/api/fleet/enroll",
+            "/api/fleet/upgrade",
+            "/api/recipe/update",
+        }
         known = known or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path) is not None
         if not known:
             raise AssertionError(f"CLI emitted retired or invented route: {method} {path}")
@@ -62,6 +72,8 @@ class FakeClient:
                 }
             elif selector_path is not None and selector_path.group(2) is None:
                 assert query is None or set(query) <= {"technical"}
+            elif operation_path is not None:
+                assert query is None
             else:
                 assert query is None
             return
@@ -232,7 +244,7 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
             },
         }
     )
-    status, payload = run(("model", "detail", "qwen", "--watch", "--technical", "--json"), detail)
+    status, payload = run(("model", "detail", "qwen", "--technical", "--json"), detail)
     assert status == 0 and payload["technical"]["artifact_set_sha256"] == "digest"
     assert detail.calls[0][3] == {"technical": True}
     output = StringIO()
@@ -253,9 +265,13 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "state": "accepted",
                 "operation_id": "op-2",
             },
+            ("GET", "/api/recipe/operations/op-2"): {
+                "state": "succeeded",
+                "operation_id": "op-2",
+            },
         }
     )
-    assert run(("model", "remove", "qwen", "--yes", "--json"), client)[0] == 0
+    assert run(("model", "remove", "qwen", "--yes", "--json"), client)[0] == 2
     assert client.calls[0][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
@@ -333,10 +349,14 @@ def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
                 "state": "accepted",
                 "operation_id": "load-1",
             },
+            ("GET", "/api/profile/1/progress"): {
+                "state": "succeeded",
+                "operation_id": "load-1",
+            },
         }
     )
     assert run(("profile", "load", "--dry-run", "--json"), client)[1]["state"] == "blocked"
-    assert run(("profile", "load", "--json"), client)[1]["state"] == "accepted"
+    assert run(("profile", "load", "--json"), client)[1]["state"] == "succeeded"
     assert client.calls[1][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111"
     }
@@ -545,3 +565,92 @@ def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -
     text = output.getvalue()
     assert "MODEL" in text and "USE qwen-3.8-nvfp4" in text
     assert "Qwen 3.8" in text
+
+
+def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "accepted",
+                "operation_id": "download-1",
+            },
+            ("GET", "/api/model/operations/download-1"): [
+                {"state": "running", "operation_id": "download-1"},
+                {"state": "succeeded", "operation_id": "download-1"},
+            ],
+        }
+    )
+    status, payload = run(
+        ("model", "download", "qwen", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+    assert status == 0 and payload["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/model/qwen/download",
+        "/api/model/operations/download-1",
+        "/api/model/operations/download-1",
+    ]
+
+
+def test_detach_returns_acceptance_without_observing_operation() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/recipe/qwen-code/download"): {
+                "state": "accepted",
+                "operation_id": "download-2",
+            }
+        }
+    )
+    status, payload = run(
+        ("recipe", "download", "qwen-code", "--detach", "--json"), client
+    )
+    assert status == 0 and payload["state"] == "accepted"
+    assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
+
+
+def test_watch_repaints_detail_and_stops_on_terminal_snapshot() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/model/qwen"): [
+                {"state": "running", "phase": "copying"},
+                {"state": "succeeded", "phase": "ready"},
+            ]
+        }
+    )
+    output = StringIO()
+    with redirect_stdout(output):
+        status = cli.main(
+            (
+                "model",
+                "detail",
+                "qwen",
+                "--watch",
+                "--interval-seconds",
+                "0.01",
+            ),
+            control_client=client,
+        )
+    assert status == 0
+    assert len(client.calls) == 2
+    assert output.getvalue().count("state") >= 2
+
+
+def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
+    model = FakeClient({})
+    status, payload = run(("model", "remove", "qwen", "--json"), model)
+    assert status == 2 and "requires --yes" in payload["error"]
+    assert model.calls == []
+
+    recipe = FakeClient({})
+    status, payload = run(
+        ("recipe", "remove", "qwen-code", "--yes", "--json"), recipe
+    )
+    assert status == 2 and "--with-model or --keep-model" in payload["error"]
+    assert recipe.calls == []
+
+
+def test_terminal_partial_and_failure_states_have_nonzero_exit_codes() -> None:
+    partial = FakeClient({("POST", "/api/model/qwen/download"): {"state": "partial"}})
+    failed = FakeClient({("POST", "/api/model/qwen/download"): {"state": "failed"}})
+    assert run(("model", "download", "qwen", "--json"), partial)[0] == 1
+    assert run(("model", "download", "qwen", "--json"), failed)[0] == 2
