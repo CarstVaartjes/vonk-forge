@@ -15,6 +15,7 @@ from vonk_control.fleet_profile_contract import (
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     AgentNode,
+    AgentNodeProfile,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -67,6 +68,20 @@ def _seed(sessions: sessionmaker) -> None:
                     last_seen_at=NOW,
                 )
                 for node_id in (NODE_1, NODE_2)
+            ]
+        )
+        session.add_all(
+            [
+                AgentNodeProfile(
+                    node_id=NODE_1,
+                    display_name="Spark One",
+                    hostname="spark-one",
+                ),
+                AgentNodeProfile(
+                    node_id=NODE_2,
+                    display_name="Spark Two",
+                    hostname="spark-two",
+                ),
             ]
         )
         session.add_all(
@@ -217,8 +232,8 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
     )
     assert created.number == 2
     assert created.fleet == [
-        {"selector": NODE_1, "display_name": NODE_1, "state": "Idle"},
-        {"selector": NODE_2, "display_name": NODE_2, "state": "Idle"},
+        {"selector": NODE_1, "display_name": "Spark One", "state": "Idle"},
+        {"selector": NODE_2, "display_name": "Spark Two", "state": "Idle"},
     ]
 
     changed = service.update_number(
@@ -243,13 +258,34 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
 def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     sessions = _sessions()
     _seed(sessions)
+    newer_revision_id = "00000000-0000-4000-8000-000000000022"
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert current is not None
+        session.add(
+            CatalogDocumentRevision(
+                id=newer_revision_id,
+                document_id=RECIPE_DOCUMENT_ID,
+                kind="recipe",
+                publisher=current.publisher,
+                slug=current.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=current.document,
+                content_digest="d" * 64,
+                execution_key="c" * 64,
+                created_by="test",
+                created_at=datetime(2026, 9, 6, tzinfo=UTC),
+            )
+        )
     calls: list[dict[str, object]] = []
 
     def resolve(**kwargs: object) -> dict[str, object]:
         calls.append(kwargs)
         return {
             "schema_version": 2,
-            "recipe": {"revision_id": RECIPE_REVISION_ID, "cached": True},
+            "recipe": {"recipe_revision_id": RECIPE_REVISION_ID, "cached": True},
             "model": {"cached": True, "variant": "fp16"},
             "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
             "blockers": [],
@@ -269,6 +305,18 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         ),
         actor="test",
     )
-    assert calls == [{"recipe_revision_id": RECIPE_REVISION_ID, "model_variant": "fp16"}]
+    assert calls == [{"recipe_identity": RECIPE_DOCUMENT_ID, "model_variant": "fp16"}]
     assert profile.assignments[0].recipe["state"] == "Cached"
     assert profile.assignments[0].model["state"] == "Cached"
+    preview = service.preview(profile.id)
+    assert preview.assignments[0].recipe_revision_id == RECIPE_REVISION_ID
+    application = service.load(
+        profile.number,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000097",
+    )
+    assert application.progress.intended_profile is not None
+    assert (
+        application.progress.intended_profile.assignments[0].recipe_revision_id
+        == RECIPE_REVISION_ID
+    )

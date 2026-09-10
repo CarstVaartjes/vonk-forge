@@ -97,32 +97,6 @@ class FleetProfileAssignmentInput(_StrictModel):
         return self
 
 
-class FleetProfileExecutionAssignmentInput(_StrictModel):
-    """Strict direct-placement input before it becomes an execution snapshot."""
-
-    recipe_revision_id: UuidId
-    topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    desired_state: Literal["installed", "running"]
-    alias: Alias | None = None
-    nodes: list[FleetProfileNode] = Field(min_length=1, max_length=32)
-
-    @model_validator(mode="after")
-    def validate_execution_input(self) -> FleetProfileExecutionAssignmentInput:
-        node_ids = [node.node_id for node in self.nodes]
-        ranks = [node.rank for node in self.nodes]
-        if len(node_ids) != len(set(node_ids)):
-            raise ValueError("profile assignment node IDs must be unique")
-        if sorted(ranks) != list(range(len(ranks))):
-            raise ValueError("profile assignment ranks must be contiguous from zero")
-        if sum(node.endpoint_owner for node in self.nodes) != 1:
-            raise ValueError("profile assignment must have exactly one endpoint owner")
-        if self.desired_state == "running" and self.alias is None:
-            raise ValueError("running profile assignments require an endpoint alias")
-        if self.desired_state == "installed" and self.alias is not None:
-            raise ValueError("installed-only profile assignments cannot declare an endpoint alias")
-        return self
-
-
 class StoredFleetProfileAssignment(_StrictModel):
     """Resolved assignment retained in an immutable execution snapshot."""
 
@@ -456,20 +430,6 @@ class FleetProfileAssignmentContext(_StrictModel):
     installation_id: UuidId | None = None
 
 
-class FleetProfileLibraryPlacementContext(_StrictModel):
-    """Identity binding retained for replay of a direct Library placement."""
-
-    recipe_id: UuidId
-    recipe_revision_id: UuidId
-    selected_node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    desired_state: Literal["installed", "running"]
-    alias: Alias | None = None
-    profile_plan_digest: Digest
-    installation_ids: list[UuidId] = Field(default_factory=list, max_length=16)
-    run_ids: list[UuidId] = Field(default_factory=list, max_length=16)
-    plan_digest: Digest
-
-
 FleetProfileChildResult = (
     FleetProfileSwitchChildResult
     | FleetProfileSwitchAdapterResult
@@ -500,7 +460,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
-    operation_kind: Literal["fleet-profile.apply", "fleet-profile.prepare"] | None = None
+    operation_kind: Literal["fleet-profile.apply"] | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
     current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
@@ -509,7 +469,6 @@ class FleetProfileApplicationProgress(_StrictModel):
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
     assignments: dict[UuidId, FleetProfileAssignmentContext] = Field(default_factory=dict)
-    library_placement: FleetProfileLibraryPlacementContext | None = None
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
@@ -583,19 +542,6 @@ class FleetProfilePreview(_StrictModel):
     plan_digest: Digest
 
 
-class FleetProfileApplyRequest(_StrictModel):
-    plan_digest: Digest
-    request_key: UuidId
-
-
-class FleetProfileRetryRequest(_StrictModel):
-    request_key: UuidId
-
-
-class FleetProfilePreviewRequest(_StrictModel):
-    """Explicit empty body keeps CSRF-protected preview calls typed."""
-
-
 class FleetProfileLoadRequest(_StrictModel):
     dry_run: bool = False
     request_key: UuidId | None = None
@@ -638,82 +584,29 @@ class FleetProfileApplicationView(_StrictModel):
         return self
 
 
-class FleetProfileStatusView(_StrictModel):
-    schema_version: Literal[2] = 2
-    profile_id: UuidId
-    profile_digest: Digest
-    state: Literal[
-        "draft",
-        "needs-preparation",
-        "ready",
-        "matched",
-        "switching",
-        "partially-applied",
-        "blocked",
-        "drifted",
-    ]
-    matched: bool
-    drifted: bool
-    scope: FleetProfileScopePreview
-    reasons: list[FleetProfileReason] = Field(max_length=128)
-    generated_at: datetime
-
-
-class FleetProfileDuplicateInput(_StrictModel):
-    name: Name
-    description: Description | None = None
-
-
-class FleetProfilePrepareRequest(_StrictModel):
-    plan_digest: Digest
-    request_key: UuidId
-
-
-class FleetProfilePreparePreviewRequest(_StrictModel):
-    """Explicit empty body for the digest-bound preparation preview."""
-
-
-class FleetProfileCaptureInput(_StrictModel):
-    name: Name
-    description: Description = "Captured current Fleet setup"
-    installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
-    labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
-    favorite: bool = False
-
-
 __all__ = [
     "FleetProfileApplicationProgress",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
-    "FleetProfileApplyRequest",
     "FleetProfileAssignment",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentView",
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
-    "FleetProfileCaptureInput",
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
-    "FleetProfileDuplicateInput",
-    "FleetProfileExecutionAssignmentInput",
     "FleetProfileInput",
     "FleetProfileIntendedConfiguration",
-    "FleetProfileLibraryPlacementContext",
     "FleetProfileList",
     "FleetProfileLoadRequest",
     "FleetProfileNode",
     "FleetProfilePlanStep",
     "FleetProfilePlanSummary",
-    "FleetProfilePreparePreviewRequest",
-    "FleetProfilePrepareRequest",
     "FleetProfilePreview",
-    "FleetProfilePreviewRequest",
     "FleetProfileReason",
-    "FleetProfileRetryRequest",
     "FleetProfileScope",
     "FleetProfileScopePreview",
-    "FleetProfileStatusView",
     "FleetProfileStepResult",
     "FleetProfileSwitchAdapter",
     "FleetProfileSwitchAdapterResult",
