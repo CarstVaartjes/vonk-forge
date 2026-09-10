@@ -30,6 +30,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
+    build_production_fleet_profile_service,
 )
 from vonk_control.models import (
     AgentNode,
@@ -2275,3 +2276,120 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
         FleetProfileConflict, match="persisted Fleet profile choices are invalid"
     ):
         service.get(created.id)
+
+
+def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:
+    """A plan that must prepare assets is blocked when they cannot be attested.
+
+    ``AGENTS.md`` requires missing model or recipe-image assets to be actionable
+    blockers, so a profile that still has to place its exact assets must not be
+    admitted while the Controller cannot project that evidence.
+    """
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+
+    def _unavailable(_session, _assignment, _node_ids):
+        raise ValueError(
+            "The Run/Switch authority cannot attest exact model and OCI "
+            "preparation evidence (run-switch.install-preparation-unavailable)."
+        )
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, preparation_provider=_unavailable
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+
+    preview = service.preview(profile.id)
+
+    assert preview.allowed is False
+    assert preview.preparations == []
+    reason = next(
+        reason
+        for reason in preview.reasons
+        if reason.code == "profile.preparation_unavailable"
+    )
+    assert reason.severity == "error"
+    assert "cannot attest" in reason.detail
+    with pytest.raises(FleetProfileConflict, match="preview is blocked"):
+        service.apply(
+            profile.id,
+            plan_digest=preview.plan_digest,
+            request_key=_uuid(41),
+            actor="admin",
+        )
+
+
+def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
+    tmp_path: Path,
+) -> None:
+    """Regression: the production composition must project real preparation.
+
+    Production binds ``RunSwitchFleetProfileAdapter.preparation`` as the
+    service's preparation provider.  When that binding is missing the preview
+    reported ``allowed`` with an empty ``preparations`` list, which is the
+    defect the Spark acceptance canary surfaced.
+    """
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions,
+        clock=lifecycle._clock,
+        run_switch_operations=run_switch,
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Preview preparation",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "preview-preparation",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+
+    preview = service.preview(profile.id)
+
+    assert preview.allowed is True
+    assert len(preview.preparations) == 1
+    preparation = preview.preparations[0].preparation
+    assert tuple(preparation.target_node_ids) == tuple(sorted(nodes))
+    assert preparation.model.artifact_set_sha256
+    assert preparation.model.model_content_sha256
+    assert preparation.runtime_image.image_digest.startswith("sha256:")
+    assert preparation.runtime_image.oci_layout_sha256
+    assert not any(
+        reason.code == "profile.preparation_unavailable" for reason in preview.reasons
+    )
