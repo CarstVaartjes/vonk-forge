@@ -1554,7 +1554,7 @@ class ServiceSmokeAdapter:
     def run(
         self, client: ControllerClient, alias: str, preview: Mapping[str, object]
     ) -> Mapping[str, object]:
-        endpoint = client.request("GET", f"/api/v1/endpoints/{_quote(alias)}")
+        endpoint = client.request("GET", f"/api/endpoints/{_quote(alias)}")
         base = endpoint.get("api_base")
         if not isinstance(base, str):
             raise QualificationError("published endpoint API base is invalid")

@@ -2,7 +2,7 @@
 
 > This runbook describes the retired per-recipe qualification operator. It is
 > retained only as history and is not an executable procedure. Do not invoke
-> its lifecycle commands or restore its `/api/v1/library` and `/api/v1/recipes`
+> its retired lifecycle commands or restore the removed legacy library routes
 > routes. Current recipe availability is owned by `/api/recipe`; fleet
 > execution is owned by one explicitly selected numbered `/api/profile/{number}`
 > autosave/preview/load/progress workflow, with artifact jobs under
