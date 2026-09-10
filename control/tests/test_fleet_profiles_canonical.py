@@ -4,10 +4,14 @@ import json
 from datetime import UTC, datetime
 from importlib.resources import files
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     AgentNode,
@@ -200,3 +204,71 @@ def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() 
     ]
     assert "scope" not in document
     assert "recipe_revision_id" not in document["assignments"][0]
+
+
+def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.update_number(
+        2,
+        FleetProfileInput(name="Second", assignments=[]),
+        actor="test",
+    )
+    assert created.number == 2
+    assert created.fleet == [
+        {"selector": NODE_1, "display_name": NODE_1, "state": "Idle"},
+        {"selector": NODE_2, "display_name": NODE_2, "state": "Idle"},
+    ]
+
+    changed = service.update_number(
+        2,
+        FleetProfileInput(name="Second", expected_revision=1, assignments=[]),
+        actor="test",
+    )
+    assert changed.revision == 2
+    with pytest.raises(Exception, match="revision conflict"):
+        service.update_number(
+            2,
+            FleetProfileInput(name="Stale", expected_revision=1, assignments=[]),
+            actor="other",
+        )
+
+    application = service.load(2, actor="test", request_key="00000000-0000-4000-8000-000000000099")
+    assert application.state == "succeeded"
+    assert application.progress.intended_profile is not None
+    assert application.progress.intended_profile.scope.node_ids == [NODE_1, NODE_2]
+
+
+def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    calls: list[dict[str, object]] = []
+
+    def resolve(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return {
+            "schema_version": 2,
+            "recipe": {"revision_id": RECIPE_REVISION_ID, "cached": True},
+            "model": {"cached": True, "variant": "fp16"},
+            "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
+            "blockers": [],
+        }
+
+    service = FleetProfileService(sessions, clock=lambda: NOW, cache_resolver=resolve)
+    profile = service.create(
+        FleetProfileInput(
+            name="Cached",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="synthetic-tiny-image",
+                    spark_ids=[NODE_1],
+                    model_variant="fp16",
+                )
+            ],
+        ),
+        actor="test",
+    )
+    assert calls == [{"recipe_revision_id": RECIPE_REVISION_ID, "model_variant": "fp16"}]
+    assert profile.assignments[0].recipe["state"] == "Cached"
+    assert profile.assignments[0].model["state"] == "Cached"

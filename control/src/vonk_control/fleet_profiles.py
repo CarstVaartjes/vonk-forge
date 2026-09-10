@@ -1982,7 +1982,21 @@ class FleetProfileService:
                     )
                 return self._application_view(existing)
             intended_view = self._view(session, profile)
-            intended = FleetProfileIntendedConfiguration.model_validate(intended_view.model_dump(include={"profile_digest", "installation_policy", "scope", "assignments"}))
+            frozen_assignments = self._execution_assignments(session, profile)
+            frozen_nodes = tuple(
+                node.node_id
+                for node in session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.revoked_at.is_(None))
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            intended = FleetProfileIntendedConfiguration(
+                profile_digest=intended_view.profile_digest,
+                installation_policy=profile.installation_policy,
+                scope=FleetProfileScope(node_ids=list(frozen_nodes)),
+                assignments=list(frozen_assignments),
+            )
             if intended.profile_digest != preview.profile_digest:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
             attempt = 1
