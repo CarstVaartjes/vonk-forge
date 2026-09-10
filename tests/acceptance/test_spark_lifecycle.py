@@ -1958,7 +1958,7 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary catalog sync is incomplete")
             _, listed_payload = self.control.request(
-                "GET", "/api/recipe/library"
+                "GET", "/api/recipe/library", query={"all_models": "true"}
             )
             listed = require_object(listed_payload, "synthetic canary Library")
             recipes = listed.get("recipes")
