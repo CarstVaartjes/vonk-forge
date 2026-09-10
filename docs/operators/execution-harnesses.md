@@ -19,12 +19,14 @@ serving fixtures.
 
 The production Controller follows the canonical global recipe repository's
 `main` branch through the Caddy proxy. It refreshes catalog metadata at startup
-and every 15 minutes as an automatic, read-only operation. When applying a
-changed revision, the Controller eagerly fetches its exact immutable recipe
-package and source bundle and stores them as read-only execution cache entries.
-The selected revision, package SHA-256, source-bundle digest, and operation plan
-remain immutable execution receipts, never local recipe authority. Model bytes
-and runtime images remain persistent local caches.
+and every 15 minutes as an automatic, read-only operation. The trusted
+Controller/NAS cache is the preparation authority for the exact model artifact
+set and recipe image required by a profile. An explicit Prepare cache operation
+fetches or builds missing exact assets and verifies them there; profile choices
+and apply require the complete cached pair. The selected revision, package
+SHA-256, source-bundle digest, and operation plan remain immutable execution
+receipts, never local recipe authority. Spark-local model bytes and imported
+images are derived execution caches.
 
 The platform compiler turns that package into a shell-free
 `CompiledExecutionPlan`. Engine adapters enforce platform-owned invariants and
@@ -66,13 +68,23 @@ of container execution.
 Physical lifecycle work uses `vonkctl recipe download`, profile assignments,
 and `vonkctl profile load`. A profile always covers the entire fleet; unassigned
 Sparks idle when it is loaded. The Controller
-binds the selected automatically refreshed recipe revision and Spark group to
-fresh certificate-bound inventory, capacity, fabric, model and image bytes,
-operation phases, per-rank receipts, and route state. Applying a changed
-revision first fills the read-only execution cache with the exact package and
-source bundle. After the route is active, execute the Recipe's declared HTTP
+binds the selected cached recipe revision and Spark group to fresh
+certificate-bound inventory, capacity, fabric, exact model and image
+identities, operation phases, per-rank receipts, and route state. Run/apply
+never silently prepares missing assets: an incomplete Controller/NAS cache
+blocks the operation with named reasons and offers Prepare cache. Once the
+cache gate succeeds, the Controller distributes the exact assets to all
+selected Sparks in parallel, skips verified local copies, safely stops and
+replaces conflicting workloads, and reports durable per-Spark progress and
+readiness. After the route is active, execute the Recipe's declared HTTP
 serving checks with `scripts/qualify-recipe --serving-url URL --evidence-ledger
 PATH` and retain that bounded result separately.
+
+Spark-local copies are derived execution caches only. They do not authorize
+profile choices, pin NAS objects, or provide a fallback source for missing
+Controller/NAS assets. NAS garbage collection removes only unreferenced local
+model objects; it does not use Spark-local copies to retain or restore NAS
+authority.
 
 Keep structural, container, Controller operation, and physical Spark evidence
 as separate gates. State names without an image digest, artifact-set digest,

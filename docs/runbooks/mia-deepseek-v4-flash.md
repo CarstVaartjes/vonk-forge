@@ -79,27 +79,43 @@ scripts/qualify-recipe \
 
 The production Controller follows the global recipe repository's `main` branch
 through its Caddy proxy and refreshes metadata at startup and every 15 minutes.
-Download the reviewed recipe, then assign it to a whole-fleet profile for the
-physical lifecycle. Loading a profile also idles every unassigned Spark:
+Resolve the reviewed recipe to the exact pinned model snapshot, complete model
+file manifest, recipe revision, source bundle, runtime distribution and image
+digest listed above. A selector is only a lookup; it must not float to a newer
+revision or substitute the text-only DeepSeek recipe. The Controller/NAS cache
+is the trusted preparation authority. A Spark-local copy never makes one of
+these canonical assets available for profile authoring or apply.
+
+Assign the exact recipe to a whole-fleet profile, then prepare its cache before
+applying it. Preparation is a separate durable operation. If the model or
+recipe image is missing or not fully verified, preparation names that asset and
+the reason; apply remains blocked and never fetches an upstream asset as a
+hidden prerequisite:
 
 ```bash
-vonkctl recipe download RECIPE
 vonkctl --profile 1 profile add RECIPE --spark SPARK_A --spark SPARK_B
-vonkctl --profile 1 profile load --dry-run --json
-vonkctl --profile 1 profile load --json
+vonkctl --profile 1 profile prepare-cache --json
+vonkctl --profile 1 profile apply --json
+vonkctl --profile 1 profile progress --follow --json
 ```
 
-The Controller resolves the digest-pinned image, verified model bytes, exact
-recipe revision, and selected Spark group; previews the operation; then runs
-the build, distribution, install, start, and route phases. Applying a changed
-revision eagerly fetches its exact immutable recipe package and source bundle
-into the read-only execution cache. Retain the recipe revision, package and
-source-bundle digests, operation ID, plan digest, per-rank receipts, route
-state, recovery transitions, and cleanup result. Run the Recipe's declared
-serving checks against the active endpoint with `scripts/qualify-recipe
---serving-url URL --evidence-ledger PATH` and retain that bounded result with
-the structural output. Do not record a container-qualified gate until the
-production materializer exists and the container path completes successfully.
+Preparation verifies the exact model file set and image identity in the
+Controller/NAS cache. Once ready, apply distributes those exact assets to both
+Sparks in parallel, verifies each destination, and skips an asset already
+verified locally on that target. It then stops and safely replaces only the
+conflicting workloads in the requested profile scope before starting the
+two-rank gang. Persist the recipe revision, model and image digests, operation
+ID, plan digest, per-Spark transfer and phase receipts, route state, recovery
+transitions, and cleanup result. Progress is durable across refreshes and
+restarts; a partial result identifies the affected Spark and the actual
+workload state. The route is published only after rank-specific readiness and
+the endpoint checks succeed.
+
+Run the Recipe's declared serving checks against the active endpoint with
+`scripts/qualify-recipe --serving-url URL --evidence-ledger PATH` and retain
+that bounded result with the structural output. Do not record a
+container-qualified gate until the production materializer exists and the
+container path completes successfully.
 
 ## Failure, recovery, and cleanup
 
@@ -109,9 +125,13 @@ then start the endpoint owner. The route is republished only when both ranks
 provide fresh healthy start evidence and invocation succeeds again.
 
 A failed installation is retried through one exact retry of the stored plan.
-That retry preserves the same installation identity and immutable model and
-image caches. It never re-plans against mutable inventory and never deletes
-shared content to hide a failure. A second failure requires operator diagnosis.
+That retry preserves the same installation identity and immutable Controller/
+NAS model and image caches, completed transfers, and verified Spark-local
+copies. It never re-plans against mutable inventory, recovers from a Spark
+copy, or deletes shared content to hide a failure. A second failure requires
+operator diagnosis. NAS cleanup may remove only unreferenced local model-cache
+objects; saved profiles, active workloads, and preparation operations keep
+their referenced objects.
 
 Qualification evidence is non-secret canonical JSON, written atomically with
 mode `0600`. Retain it with the exact recipe and environment inventory. Do not

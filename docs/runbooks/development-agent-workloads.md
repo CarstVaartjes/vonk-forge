@@ -55,10 +55,12 @@ the intended topology:
 1. Confirm Fleet inventory is fresh and the planned resource reservation fits.
 2. Select an immutable canonical Model and Recipe revision from the Controller's
    automatically refreshed global repository metadata.
-3. Preview installation and placement on the selected Spark set.
-4. Install and require exact build, transfer, image-load, and runtime evidence.
-5. Start the recipe and require route publication only after the workload is
-   ready.
+3. Prepare the exact model artifact set and required runtime image in the
+   trusted Controller/NAS cache. Missing or unverified assets are named as
+   blockers; preparation is explicit and apply never downloads them silently.
+4. Apply the complete profile to the selected Spark set and require exact
+   cache, transfer, image-load, and runtime evidence.
+5. Require route publication only after the workload reports serving readiness.
 6. Send a bounded inference request through the normal private Tailscale URL.
 7. Stop the run and require route withdrawal.
 8. Uninstall and confirm the recipe-owned runtime resources are gone while
@@ -75,22 +77,26 @@ global repository metadata that the Controller refreshes at startup and every
 15 minutes through its Caddy proxy. Container qualification remains unavailable
 until the production `CompiledExecutionPlan` materializer is linked; do not
 treat the current `environment-limited` result as a pass. Execute the physical
-lifecycle through a numbered whole-fleet profile. Loading it idles unassigned
-Sparks, so review the entire profile before loading:
+lifecycle through a numbered whole-fleet profile. Prepare the profile cache,
+then apply it; unassigned Sparks in the explicit profile scope become idle:
 
 ```sh
-vonkctl recipe download RECIPE
 vonkctl --profile 1 profile add RECIPE --spark SPARK
-vonkctl --profile 1 profile load --dry-run --json
-vonkctl --profile 1 profile load --json
+vonkctl --profile 1 profile prepare-cache --json
+vonkctl --profile 1 profile apply --json
+vonkctl --profile 1 profile progress --follow --json
 ```
 
-The resulting Controller operation is the authority for preparation, install,
-start, route, stop, and cleanup progress. Applying a changed revision eagerly
-fetches its immutable recipe package and source bundle into read-only execution
-cache; retain their exact revision and digests with the operation receipt. Model
-and image bytes remain persistent local caches. Once the route is active, run
-the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
+The resulting Controller operations are authoritative for exact model and
+recipe-image preparation, parallel distribution to every selected Spark,
+verification, safe replacement of conflicting workloads, start, route,
+stop, and cleanup. A verified local model or image copy is skipped on that
+Spark; it is never used as profile authority or as a source for another
+target. Retain the canonical model/revision/image identities and digests with
+the operation receipt. Progress is durable per Spark and includes transfer
+phase, replacement state, and serving readiness; apply reports partial state
+truthfully and never treats enqueueing as success. Once the route is active,
+run the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
 --serving-url URL --evidence-ledger PATH` and retain the bounded serving result
 separately.
 
@@ -103,6 +109,12 @@ candidate from Fleet (or `vonkctl fleet upgrade`) with the one-at-a-time
 strategy; the controller verifies the canary before it queues the next Spark,
 and no SSH is required. Rerun the development Spark command only for a local
 package repair, fresh installation, or controller-authorized re-enrollment.
+
+Profile retry resumes the durable operation and reuses verified NAS and
+Spark-local copies. It does not silently change the pinned recipe/model/image,
+restore from a Spark copy, or delete referenced NAS cache objects. NAS garbage
+collection removes only local model-cache entries no longer referenced by a
+saved profile, active workload, or preparation operation.
 
 If this pre-release deployment is intentionally disposable, a full Compose
 volume reset is permitted only as an explicit fresh-install acceptance step.

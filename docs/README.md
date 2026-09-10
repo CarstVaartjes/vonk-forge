@@ -26,20 +26,30 @@ require routine SSH.
 flowchart LR
     Public[Public website and recipe library<br/>documentation, signed artifacts, metadata]
     Control[Local controller<br/>PostgreSQL, policy, identity, secrets]
-    Spark[DGX Spark agents<br/>cache, runtime, telemetry]
+    Spark[DGX Spark agents<br/>derived execution cache, runtime, telemetry]
 
     Public -->|verify and import| Control
     Control -->|previewed operations| Spark
 ```
 
 - Local PostgreSQL owns recipes, installations, placements, runs, profiles, and
-  audit state. It remains usable without a hosted catalog or Git remote.
+  audit state. The trusted Controller/NAS cache owns the exact verified model
+  artifact sets and recipe images used by profile choices and apply. It remains
+  usable without a hosted catalog or Git remote.
 - The public recipe library contains immutable metadata and deterministic source
   contexts—not images, weights, credentials, or fleet state.
 - Caddy is the private local ingress. Tailscale is the default remote-access
   boundary. Spark agents use enrolled identity and outbound connections.
-- Recipe containers and model weights run and remain on Spark-local infrastructure,
-  not on `vonkforge.ai` or Cloudflare Pages.
+- Recipe containers and model weights run on Spark-local infrastructure, but
+  Spark-local copies are derived execution caches: they do not authorize
+  profile choices or pin NAS objects. They are not stored on `vonkforge.ai` or
+  Cloudflare Pages.
+- Profile choices and apply require complete, cached, exact model and
+  recipe-image assets in the Controller/NAS cache. Missing assets block apply
+  and offer **Prepare cache**. Once ready, apply distributes the exact assets
+  to selected Sparks in parallel, skips verified local copies, safely replaces
+  workloads, and reports per-Spark progress and readiness. NAS garbage
+  collection removes only unreferenced local model objects.
 
 ## Operator guides
 

@@ -1,5 +1,7 @@
 # Launch implementation and evidence
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Updated 2026-09-07. The current integration branch is
 `codex/launch-run-operation-repair`, based on remote main `cb6edee0`.
 [PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614) carries the combined

@@ -1,5 +1,7 @@
 # API and project-goal review
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Reviewed on 7 September 2026 against the contract-gap-closure integration.
 This is a source review; it does not establish deployment or physical Spark acceptance.
 
