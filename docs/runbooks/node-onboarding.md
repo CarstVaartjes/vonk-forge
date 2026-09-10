@@ -47,3 +47,17 @@ credential files, edit `setup-state`, or manually restart the service.
 If readiness fails after certificate replacement, rerun the command: the setup
 marker remains in recovery state and the installer repairs the service without
 asking for another pairing token.
+
+## Forensic identity evidence
+
+When rotation replaces a non-selected credential generation with different
+material, the agent retains the replaced directory under the private
+`credentials/retired-generations/` directory. These archives are never selected
+as an active or staged identity, retain the credential directory/file permissions
+(`0700`/`0600`), and are limited to the four most recent replacements. Older
+archives are pruned automatically when a new replacement is recorded.
+
+The archives contain sensitive key and certificate material. Collect them only
+through the existing protected diagnostic and backup process; never copy an
+archive back into the active credential namespace or treat it as a usable
+identity.

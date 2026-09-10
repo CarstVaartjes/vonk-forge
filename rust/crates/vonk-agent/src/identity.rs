@@ -15,6 +15,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
 
+const MAX_RETIRED_GENERATIONS: usize = 4;
+
 #[derive(Debug, Error)]
 pub enum IdentityError {
     #[error("identity storage failed")]
@@ -269,6 +271,7 @@ pub fn stage_identity(root: &Path, material: &IdentityMaterial) -> Result<(), Id
         if !matches {
             let archive = replacement_archive_path(root, material.generation)?;
             fs::rename(&destination, archive)?;
+            prune_retired_generations(root)?;
         }
     }
     if !destination.try_exists()? {
@@ -307,8 +310,11 @@ fn flat_generation(root: &Path) -> Result<Option<u64>, IdentityError> {
 }
 
 fn replacement_archive_path(root: &Path, generation: u64) -> Result<PathBuf, IdentityError> {
+    let retired = root.join("retired-generations");
+    ensure_private_directory(&retired)?;
     let base = format!(
-        "replaced-generation-{generation:020}-{}",
+        "identity-{}-{generation:020}-{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
         std::process::id()
     );
     for suffix in 0..1000_u16 {
@@ -317,12 +323,34 @@ fn replacement_archive_path(root: &Path, generation: u64) -> Result<PathBuf, Ide
         } else {
             format!("{base}-{suffix}")
         };
-        let path = root.join(name);
+        let path = retired.join(name);
         if !path.try_exists()? {
             return Ok(path);
         }
     }
     Err(std::io::Error::other("identity replacement archive is exhausted").into())
+}
+
+fn prune_retired_generations(root: &Path) -> Result<(), IdentityError> {
+    let retired = root.join("retired-generations");
+    let mut archives = Vec::new();
+    for entry in fs::read_dir(&retired)? {
+        let entry = entry?;
+        if !entry.file_name().to_string_lossy().starts_with("identity-") {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other("retired identity archive is unsafe").into());
+        }
+        archives.push(entry.path());
+    }
+    archives.sort();
+    while archives.len() > MAX_RETIRED_GENERATIONS {
+        fs::remove_dir_all(archives.remove(0))?;
+    }
+    File::open(retired)?.sync_all()?;
+    Ok(())
 }
 
 pub fn publish_staged(root: &Path, generation: u64) -> Result<(), IdentityError> {
@@ -661,16 +689,22 @@ mod tests {
 
         let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
         assert_eq!(fs::read(paths.certificate).unwrap(), vec![b'n', b'c']);
-        assert!(fs::read_dir(&root).unwrap().flatten().any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("replaced-generation-00000000000000000002-")
-        }));
+        assert!(
+            fs::read_dir(root.join("retired-generations"))
+                .unwrap()
+                .flatten()
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("-00000000000000000002-")
+                        && entry.file_name().to_string_lossy().starts_with("identity-")
+                })
+        );
     }
 
     #[test]
-    fn successful_publish_cleans_replaced_and_old_generation_directories() {
+    fn successful_publish_cleans_old_generation_but_retains_replacement_evidence() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("credentials");
         stage_identity(&root, &material(2, b'o')).unwrap();
@@ -680,11 +714,56 @@ mod tests {
 
         assert!(root.join(generation_name(3)).is_dir());
         assert!(!root.join(generation_name(2)).exists());
-        assert!(!fs::read_dir(&root).unwrap().flatten().any(|entry| {
-            entry
+        let retired = root.join("retired-generations");
+        let archive = fs::read_dir(retired)
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path();
+        assert!(
+            archive
                 .file_name()
+                .unwrap()
                 .to_string_lossy()
-                .starts_with("replaced-generation-")
+                .starts_with("identity-")
+        );
+        assert_eq!(
+            fs::read(archive.join("certificate.pem")).unwrap(),
+            vec![b'o', b'c']
+        );
+        assert_eq!(
+            fs::metadata(&archive).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(archive.join("private-key.pem"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn retired_replacement_evidence_is_bounded() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        stage_identity(&root, &material(2, b'a')).unwrap();
+        for marker in b'b'..=b'g' {
+            stage_identity(&root, &material(2, marker)).unwrap();
+        }
+
+        let archives: Vec<_> = fs::read_dir(root.join("retired-generations"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(archives.len(), MAX_RETIRED_GENERATIONS);
+        assert!(archives.iter().all(|entry| {
+            entry.file_name().to_string_lossy().starts_with("identity-")
+                && entry.path().is_dir()
+                && fs::metadata(entry.path()).unwrap().permissions().mode() & 0o777 == 0o700
         }));
     }
 
