@@ -109,6 +109,44 @@ def _library(kind: str) -> dict[str, Any]:
     }
 
 
+def _fleet() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "event_cursor": 0,
+        "generated_at": NOW,
+        "authority_revision": "a" * 64,
+        "nodes": [
+            {
+                "id": SPARK,
+                "display_name": "Atlas",
+                "hostname": "atlas",
+                "lifecycle": "active",
+                "labels": {},
+                "connection": {
+                    "agent_state": "active",
+                    "certificate_state": "valid",
+                    "online_state": "online",
+                    "offline_reason": None,
+                    "last_seen_at": NOW,
+                    "last_seen_age_seconds": 0,
+                },
+                "inventory": None,
+                "telemetry": None,
+                "installed": [],
+                "loaded": [],
+                "reservations": {
+                    "disk_bytes": 0,
+                    "unified_memory_bytes": 0,
+                    "host_memory_bytes": 0,
+                    "gpu_memory_bytes": 0,
+                    "port_count": 0,
+                },
+                "warnings": [],
+            }
+        ],
+    }
+
+
 def _route_template(path: str) -> str:
     for pattern, template in (
         (r"^/api/model/operations/[^/]+$", "/api/model/operations/{operation_id}"),
@@ -185,6 +223,11 @@ def _app() -> FastAPI:
     def recipe_library(request: Request) -> dict[str, Any]:
         _auth(request)
         return _library("recipes")
+
+    @app.get("/api/fleet")
+    def fleet(request: Request) -> dict[str, Any]:
+        _auth(request)
+        return _fleet()
 
     @app.post("/api/model/{selector}/download", status_code=202)
     def model_download(
