@@ -583,6 +583,7 @@ def build_recipe_image_availability(
                 step="build",
             )
         return dict(operation.result) | {
+            "state": operation.state,
             "build_id": operation.owner_id,
             "build_input_sha256": build_input_sha256,
             "builder_node_id": builder_node_id,
