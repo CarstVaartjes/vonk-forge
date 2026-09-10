@@ -2481,7 +2481,7 @@ def install_agent_routes(
         components = document.setdefault("components", {}).setdefault("schemas", {})
         components.update(request_schema.pop("$defs", {}))
         components[EnrollmentSubmitRequest.__name__] = request_schema
-        document["paths"]["/agent/v1/enroll"]["post"]["requestBody"] = {
+        document["paths"]["/agent/enroll"]["post"]["requestBody"] = {
             "required": True,
             "content": {
                 "application/json": {
