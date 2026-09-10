@@ -234,7 +234,6 @@ class ModelCacheOperatorRequest(StrictModel):
 
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
-    force: bool = False
     with_model: bool = False
 
 

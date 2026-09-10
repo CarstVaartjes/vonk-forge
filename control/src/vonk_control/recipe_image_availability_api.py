@@ -126,7 +126,6 @@ class RecipeOperatorRequest(StrictJSONModel):
 
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
-    force: bool = False
     with_model: bool = False
 
 
@@ -357,7 +356,7 @@ def install_recipe_operator_routes(
                 selector,
                 actor=actor.subject,
                 request_id=body.request_key,
-                force=body.force,
+                force=True,
             ))
         except HTTPException:
             raise

@@ -8183,11 +8183,6 @@
         "additionalProperties": false,
         "description": "Body shared by the singular operator model actions.",
         "properties": {
-          "force": {
-            "default": false,
-            "title": "Force",
-            "type": "boolean"
-          },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Request Key",
@@ -12751,11 +12746,6 @@
       "RecipeOperatorRequest": {
         "additionalProperties": false,
         "properties": {
-          "force": {
-            "default": false,
-            "title": "Force",
-            "type": "boolean"
-          },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Request Key",

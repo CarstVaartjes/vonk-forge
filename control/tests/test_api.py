@@ -189,8 +189,9 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
     client, headers, _, _ = _client("viewer")
 
     response = client.post(
-        "/api/model-cache/operations/00000000-0000-4000-8000-000000000001/cancel",
+        "/api/profile/1/load",
         headers=headers,
+        json={},
     )
 
     assert response.status_code == 403

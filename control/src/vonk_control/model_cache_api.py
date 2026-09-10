@@ -165,7 +165,7 @@ def install_model_operator_routes(
                 selector,
                 actor=actor.subject,
                 request_key=body.request_key,
-                force=body.force,
+                force=True,
             )
             audit(request, actor, "model.download", selector, operation.id)
             return _model_operator_response(operation, action="download", selector=selector)
