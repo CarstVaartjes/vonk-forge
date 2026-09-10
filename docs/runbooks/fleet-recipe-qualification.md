@@ -1,4 +1,13 @@
-# Fleet recipe qualification
+# Fleet recipe qualification (historical, retired)
+
+> This runbook describes the retired per-recipe qualification operator. It is
+> retained only as history and is not an executable procedure. Do not invoke
+> its lifecycle commands or restore its `/api/v1/library` and `/api/v1/recipes`
+> routes. Current recipe availability is owned by `/api/recipe`; fleet
+> execution is owned by one explicitly selected numbered `/api/profile/{number}`
+> autosave/preview/load/progress workflow, with artifact jobs under
+> `/api/recipe/runs/{run_id}/artifact-jobs` and `/api/artifact-jobs` child
+> operations.
 
 `vonk-fleet-qualify` inventories the reviewed public catalog and qualifies every
 supported recipe against the actual enrolled fleet. It talks only to the

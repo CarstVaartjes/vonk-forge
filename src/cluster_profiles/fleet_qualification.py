@@ -18,11 +18,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from .generated_control.models.library_recipe_detail import LibraryRecipeDetail
-from .generated_control.models.library_recipe_list import LibraryRecipeList
 from .generated_control.models.library_recipe_model import LibraryRecipeModel
 from .generated_control.models.model_definition import ModelDefinition
+from .generated_control.models.recipe_detail_response import RecipeDetailResponse
 from .generated_control.models.recipe_definition import RecipeDefinition
+from .generated_control.models.recipe_image_availability_response import (
+    RecipeImageAvailabilityResponse,
+)
+from .generated_control.models.recipe_library_response import RecipeLibraryResponse
 from .generated_control.types import Unset
 from .qualification_fixtures import (
     FixtureError,
@@ -667,15 +670,15 @@ def _library_recipe_rows(
     """Read the complete current Library catalog and its canonical details."""
 
     cursor: str | None = None
-    pages: list[LibraryRecipeList] = []
+    pages: list[RecipeLibraryResponse] = []
     seen_cursors: set[str] = set()
     for _ in range(128):
         query: dict[str, object] = {"limit": 512}
         if cursor is not None:
             query["cursor"] = cursor
         try:
-            page = LibraryRecipeList.from_dict(
-                client.request("GET", "/api/library/recipes", query=query)
+            page = RecipeLibraryResponse.from_dict(
+                client.request("GET", "/api/recipe/library", query=query)
             )
         except (KeyError, TypeError, ValueError) as error:
             raise QualificationError("current Library recipe list is invalid") from error
@@ -693,15 +696,15 @@ def _library_recipe_rows(
     rows: list[_CurrentRecipe] = []
     for page in pages:
         for summary in page.recipes:
-            recipe_id = summary.recipe_id
-            revision_id = summary.recipe_revision_id
-            digest = summary.content_sha256
+            recipe_id = summary.identity.recipe_id
+            revision_id = summary.identity.recipe_revision_id
+            digest = summary.identity.content_sha256
             detail, definition, model_documents = _parse_library_detail(
                 client.request(
-                    "GET", f"/api/library/recipes/{_quote(recipe_id)}"
+                    "GET", f"/api/recipe/{_quote(summary.selector)}"
                 )
             )
-            identity = detail.recipe
+            identity = detail.identity
             if (
                 identity.recipe_id != recipe_id
                 or identity.recipe_revision_id != revision_id
@@ -737,10 +740,10 @@ def _library_recipe_rows(
 
 def _parse_library_detail(
     value: Mapping[str, object],
-) -> tuple[LibraryRecipeDetail, RecipeDefinition, tuple[ModelDefinition, ...]]:
+) -> tuple[RecipeDetailResponse, RecipeDefinition, tuple[LibraryRecipeModel, ...]]:
     try:
-        detail = LibraryRecipeDetail.from_dict(value)
-        definition = detail.definition
+        detail = RecipeDetailResponse.from_dict(value)
+        definition = detail.document
         model_documents = tuple(detail.model_documents)
     except (KeyError, TypeError, ValueError) as error:
         raise QualificationError("current Library recipe detail is invalid") from error
@@ -1011,41 +1014,7 @@ def build_plan(
                 "planned_actions": (
                     []
                     if blockers
-                    else [
-                        "placement-preview",
-                        "mapping",
-                        "build",
-                        "image-distribution",
-                        "install-preview",
-                        "install",
-                        "run-preview",
-                        "run",
-                        "smoke-preview",
-                        "smoke",
-                        *(
-                            []
-                            if options.cleanup == "none"
-                            else [
-                                "stop-preview",
-                                "stop",
-                                "warm-redeploy-preview",
-                                "warm-redeploy",
-                                "warm-redeploy-smoke",
-                                "warm-redeploy-stop-preview",
-                                "warm-redeploy-stop",
-                                *(
-                                    ["retain-installation"]
-                                    if options.cleanup == "stop"
-                                    else []
-                                ),
-                            ]
-                        ),
-                        *(
-                            ["uninstall-preview", "uninstall"]
-                            if options.cleanup == "uninstall"
-                            else []
-                        ),
-                    ]
+                    else ["profile-qualification-handoff"]
                 ),
             }
         )
@@ -1195,7 +1164,7 @@ class OperationMonitor:
         deadline = self.clock() + self.options.operation_timeout_seconds
         while True:
             value = self.client.request(
-                "GET", f"/api/recipes/operations/{_quote(operation_id)}"
+                "GET", f"/api/recipe/operations/{_quote(operation_id)}"
             )
             state = value.get("state")
             if state in _TERMINAL_OPERATION_STATES:
@@ -1223,7 +1192,6 @@ class OperationMonitor:
                 )
                 raise QualificationError(f"{recipe} {step} operation timed out")
             self.sleeper(self.options.poll_interval_seconds)
-
 
 class ArtifactJobSmokeAdapter:
     """Run exact digest-bound fixtures through the durable artifact-job lifecycle."""
@@ -1357,7 +1325,7 @@ class ArtifactJobSmokeAdapter:
         else:
             created = client.request(
                 "POST",
-                f"/api/recipes/runs/{_quote(run_id)}/artifact-jobs",
+                f"/api/recipe/runs/{_quote(run_id)}/artifact-jobs",
                 {
                     "interface": recipe.interface,
                     "parameters": recipe.parameters,
@@ -1586,7 +1554,7 @@ class ServiceSmokeAdapter:
     def run(
         self, client: ControllerClient, alias: str, preview: Mapping[str, object]
     ) -> Mapping[str, object]:
-        endpoint = client.request("GET", f"/api/endpoints/{_quote(alias)}")
+        endpoint = client.request("GET", f"/api/v1/endpoints/{_quote(alias)}")
         base = endpoint.get("api_base")
         if not isinstance(base, str):
             raise QualificationError("published endpoint API base is invalid")
@@ -1709,6 +1677,7 @@ class QualificationRunner:
         self._capacity_execution_order: list[str] = []
         self._preflight_blocked: set[str] = set()
         self._preflight_failed: set[str] = set()
+        self._profile_application: Mapping[str, object] | None = None
 
     def _node_allowed(self, node_id: object) -> bool:
         return isinstance(node_id, str) and (
@@ -1819,10 +1788,10 @@ class QualificationRunner:
             )
         _detail, _definition, _models = _parse_library_detail(
             self.client.request(
-                "GET", f"/api/library/recipes/{_quote(recipe_id)}"
+                "GET", f"/api/recipe/{_quote(key)}"
             )
         )
-        identity = _detail.recipe
+        identity = _detail.identity
         if (
             identity.recipe_revision_id != revision_id
             or identity.content_sha256 != item.get("content_sha256")
@@ -1900,10 +1869,10 @@ class QualificationRunner:
             try:
                 recipe_id, revision_id = self._resolve_current_recipe(digest, item)
                 detail = self.client.request(
-                    "GET", f"/api/library/recipes/{_quote(recipe_id)}"
+                    "GET", f"/api/recipe/{_quote(key)}"
                 )
                 parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
-                selected_revision = parsed_detail.recipe
+                selected_revision = parsed_detail.identity
                 if (
                     selected_revision.recipe_revision_id != revision_id
                     or selected_revision.content_sha256
@@ -2990,6 +2959,7 @@ class QualificationRunner:
             intent_options.get("cleanup") != self.options.cleanup
             or intent_options.get("selected_recipes")
             != sorted(self.options.selected_recipes)
+            or intent_options.get("profile_number") != self.options.profile_number
             or intent_options.get("allowed_node_ids", [])
             != sorted(self.options.allowed_node_ids)
         ):
@@ -3162,48 +3132,78 @@ class QualificationRunner:
     def _global_installation_inventory(
         self, campaign_rows: list[dict[str, object]]
     ) -> dict[str, object]:
-        summaries: list[Mapping[str, object]] = []
+        """Report active local placements from the canonical recipe projection."""
+
+        evidence_by_revision = {
+            (row.get("recipe_id"), row.get("recipe_revision_id")): row
+            for row in campaign_rows
+            if isinstance(row.get("recipe_id"), str)
+            and isinstance(row.get("recipe_revision_id"), str)
+        }
+        installations: list[dict[str, object]] = []
         errors: list[dict[str, str]] = []
         cursor: str | None = None
         seen_cursors: set[str] = set()
-        for _ in range(1_000):
-            query: dict[str, object] = {"limit": 100}
+        for _ in range(128):
+            query: dict[str, object] = {"limit": 512}
             if cursor is not None:
                 query["cursor"] = cursor
             try:
-                snapshot = self.client.request("GET", "/api/library", query=query)
-            except Exception as error:  # noqa: BLE001 - record bounded inventory gaps
+                page = RecipeLibraryResponse.from_dict(
+                    self.client.request("GET", "/api/recipe", query=query)
+                )
+            except (KeyError, TypeError, ValueError) as error:
                 errors.append(
                     {
-                        "scope": "library",
+                        "scope": "recipe",
                         "error": str(error)[:256],
                         "error_type": type(error).__name__,
                     }
                 )
                 break
-            models = snapshot.get("models")
-            if isinstance(models, list):
-                for raw_model in models:
-                    if not isinstance(raw_model, Mapping):
-                        continue
-                    recipes = raw_model.get("recipes")
-                    if isinstance(recipes, list):
-                        summaries.extend(
-                            recipe for recipe in recipes if isinstance(recipe, Mapping)
-                        )
-            unlinked = snapshot.get("unlinked_recipes")
-            if isinstance(unlinked, list):
-                summaries.extend(
-                    recipe for recipe in unlinked if isinstance(recipe, Mapping)
+            for projection in page.recipes:
+                running_on = projection.local.running_on
+                node_ids = (
+                    list(running_on)
+                    if isinstance(running_on, list)
+                    else []
                 )
-            next_cursor = snapshot.get("next_cursor")
+                if not node_ids:
+                    continue
+                identity = projection.identity
+                evidence = evidence_by_revision.get(
+                    (identity.recipe_id, identity.recipe_revision_id)
+                )
+                installations.append(
+                    {
+                        "installation_id": None,
+                        "recipe_id": identity.recipe_id,
+                        "recipe_selector": projection.selector,
+                        "recipe_slug": identity.slug,
+                        "recipe_revision_id": identity.recipe_revision_id,
+                        "selected_recipe_revision_id": identity.recipe_revision_id,
+                        "selected_revision_match": True,
+                        "state": "running",
+                        "node_ids": node_ids,
+                        "retained": True,
+                        "deployability": (
+                            evidence.get("deployability", "retained-unqualified")
+                            if evidence is not None
+                            else "retained-unqualified"
+                        ),
+                        "campaign_recipe": evidence.get("recipe")
+                        if evidence is not None
+                        else None,
+                    }
+                )
+            next_cursor = page.next_cursor
             if next_cursor is None:
                 break
-            if not isinstance(next_cursor, str) or next_cursor in seen_cursors:
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
                 errors.append(
                     {
-                        "scope": "library",
-                        "error": "library pagination cursor is invalid",
+                        "scope": "recipe",
+                        "error": "recipe pagination cursor is invalid",
                         "error_type": "QualificationError",
                     }
                 )
@@ -3213,105 +3213,17 @@ class QualificationRunner:
         else:
             errors.append(
                 {
-                    "scope": "library",
-                    "error": "library pagination exceeded its bound",
+                    "scope": "recipe",
+                    "error": "recipe pagination exceeded its bound",
                     "error_type": "QualificationError",
                 }
             )
-
-        evidence_by_revision = {
-            (row.get("recipe_id"), row.get("recipe_revision_id")): row
-            for row in campaign_rows
-            if isinstance(row.get("recipe_id"), str)
-            and isinstance(row.get("recipe_revision_id"), str)
-        }
-        installations: list[dict[str, object]] = []
-        seen_installations: set[str] = set()
-        for summary in summaries:
-            recipe_id = summary.get("recipe_id")
-            if not isinstance(recipe_id, str):
-                continue
-            selected = summary.get("selected_revision")
-            selected_id = selected.get("id") if isinstance(selected, Mapping) else None
-            raw_installations = summary.get("installations")
-            installation_rows = (
-                [item for item in raw_installations if isinstance(item, Mapping)]
-                if isinstance(raw_installations, list)
-                else []
-            )
-            if summary.get("installation_total_count", 0):
-                try:
-                    detail = self.client.request(
-                        "GET", f"/api/library/recipes/{_quote(recipe_id)}"
-                    )
-                    operational = detail.get("operational_state")
-                    detailed = (
-                        operational.get("installations")
-                        if isinstance(operational, Mapping)
-                        else None
-                    )
-                    if isinstance(detailed, list):
-                        installation_rows = [
-                            item for item in detailed if isinstance(item, Mapping)
-                        ]
-                except Exception as error:  # noqa: BLE001 - continue complete inventory
-                    errors.append(
-                        {
-                            "scope": f"recipe:{recipe_id}",
-                            "error": str(error)[:256],
-                            "error_type": type(error).__name__,
-                        }
-                    )
-            for installation in installation_rows:
-                installation_id = installation.get("installation_id")
-                revision_id = installation.get("recipe_revision_id")
-                state = installation.get("state")
-                if (
-                    not isinstance(installation_id, str)
-                    or installation_id in seen_installations
-                ):
-                    continue
-                seen_installations.add(installation_id)
-                evidence = evidence_by_revision.get((recipe_id, revision_id))
-                retained = state != "uninstalled"
-                if not retained:
-                    deployability = "uninstalled"
-                elif revision_id != selected_id:
-                    deployability = "stale-revision-retained"
-                elif evidence is not None:
-                    deployability = evidence.get(
-                        "deployability", "retained-unqualified"
-                    )
-                elif state == "installed":
-                    deployability = "retained-unqualified"
-                else:
-                    deployability = f"retained-{state or 'unknown'}"
-                installations.append(
-                    {
-                        "installation_id": installation_id,
-                        "recipe_id": recipe_id,
-                        "recipe_slug": summary.get("slug"),
-                        "recipe_revision_id": revision_id,
-                        "selected_recipe_revision_id": selected_id,
-                        "selected_revision_match": revision_id == selected_id,
-                        "state": state,
-                        "node_ids": installation.get("node_ids", []),
-                        "retained": retained,
-                        "deployability": deployability,
-                        "campaign_recipe": evidence.get("recipe")
-                        if evidence is not None
-                        else None,
-                    }
-                )
-        installations.sort(key=lambda item: str(item["installation_id"]))
         return {
-            "complete": not errors
-            and not any(
-                summary.get("installations_truncated") is True for summary in summaries
-            ),
+            "complete": not errors,
             "installations": installations,
             "errors": errors,
         }
+
 
     def _residency_inventory(
         self, digest: str, plan: Mapping[str, object]
@@ -3395,7 +3307,7 @@ class QualificationRunner:
             if isinstance(recipe_id, str):
                 try:
                     detail = self.client.request(
-                        "GET", f"/api/library/recipes/{_quote(recipe_id)}"
+                        "GET", f"/api/recipe/{_quote(str(recipe_id))}"
                     )
                     candidate = detail.get("operational_state")
                     if isinstance(candidate, Mapping):
@@ -3625,591 +3537,8 @@ class QualificationRunner:
             raise QualificationError(f"{key} retained installation does not fit")
 
     def _apply_recipe(self, digest: str, item: Mapping[str, object]) -> None:
-        key = str(item["key"])
-        prepared = self._prepared.get(key)
-        if prepared is None:
-            recipe_id, revision_id = self._resolve_current_recipe(digest, item)
-        else:
-            recipe_id, revision_id, _ = prepared
-        detail = self.client.request(
-            "GET", f"/api/library/recipes/{_quote(recipe_id)}"
-        )
-        parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
-        selected_revision = parsed_detail.recipe
-        if (
-            selected_revision.recipe_revision_id != revision_id
-            or selected_revision.content_sha256 != item.get("content_sha256")
-        ):
-            raise QualificationError(
-                f"{key} selected revision changed after campaign planning"
-            )
-        restrictions = legal_blockers(
-            detail_definition,
-            self.options.jurisdiction,
-            model_documents=detail_models,
-        )
-        if restrictions:
-            self.ledger.append(
-                "recipe.blocked",
-                plan_digest=digest,
-                recipe=key,
-                payload={"blockers": [item.as_dict() for item in restrictions]},
-            )
-            raise QualificationError(f"{key} is denied by model license policy")
-        selected = self._select_placement(digest, key, detail, item)
-        node_ids = selected.get("node_ids")
-        if not isinstance(node_ids, list) or len(node_ids) != item.get("node_count"):
-            raise QualificationError(f"{key} placement node identities are invalid")
-        if not all(self._node_allowed(node_id) for node_id in node_ids):
-            raise QualificationError(
-                f"{key} placement escaped the campaign node allowlist"
-            )
-
-        mapping_id = selected.get("mapping_id")
-        if not isinstance(mapping_id, str):
-            mapping_preview = self.client.request(
-                "POST",
-                "/api/recipes/mapping-plans/preview",
-                {
-                    "recipe_revision_id": revision_id,
-                    "node_ids": node_ids,
-                    "parameters": {},
-                },
-            )
-            self._record_preview(digest, key, "mapping", mapping_preview)
-            mapping = self.client.request(
-                "POST",
-                "/api/recipes/mappings",
-                {
-                    "recipe_revision_id": revision_id,
-                    "node_ids": node_ids,
-                    "parameters": {},
-                    "placement_digest": mapping_preview["placement_digest"],
-                    "request_key": _request_key(digest, key, "mapping"),
-                },
-            )
-            mapping_id = mapping.get("mapping_id")
-            if not isinstance(mapping_id, str):
-                raise QualificationError(f"{key} mapping ID is invalid")
-            self.ledger.append(
-                "step.completed",
-                plan_digest=digest,
-                recipe=key,
-                payload={"step": "mapping", "result": mapping},
-            )
-
-        build_id = selected.get("recipe_build_id")
-        if not isinstance(build_id, str):
-            source = self.client.request(
-                "POST",
-                "/api/recipes/source-checks",
-                {"recipe_revision_id": revision_id},
-            )
-            if source.get("passed") is not True:
-                raise QualificationError(f"{key} build source policy failed")
-            build_preview = self.client.request(
-                "POST",
-                "/api/recipes/build-plans/preview",
-                {"recipe_revision_id": revision_id, "builder_node_id": node_ids[0]},
-            )
-            self._record_preview(digest, key, "build", build_preview)
-            operation = self._operation(
-                digest,
-                key,
-                "build",
-                "/api/recipes/builds",
-                {
-                    "recipe_revision_id": revision_id,
-                    "builder_node_id": node_ids[0],
-                    "build_input_sha256": build_preview["build_input_sha256"],
-                    "request_key": _request_key(digest, key, "build"),
-                },
-            )
-            build_id = operation.get("owner_id")
-            if not isinstance(build_id, str):
-                raise QualificationError(f"{key} build identity is invalid")
-
-        mapping_generation: object = None
-        operational = detail.get("operational_state")
-        mappings = (
-            operational.get("mappings") if isinstance(operational, Mapping) else None
-        )
-        if isinstance(mappings, list):
-            for mapping in mappings:
-                if (
-                    isinstance(mapping, Mapping)
-                    and mapping.get("mapping_id") == mapping_id
-                ):
-                    mapping_generation = mapping.get("generation")
-                    break
-        if not isinstance(mapping_generation, int):
-            previews = _payloads(
-                self.ledger.recipe_records(digest, key), "step.previewed"
-            )
-            for payload in reversed(previews):
-                preview = payload.get("preview")
-                if payload.get("step") == "mapping" and isinstance(preview, Mapping):
-                    mapping_generation = preview.get("generation")
-                    break
-        if not isinstance(mapping_generation, int) or mapping_generation < 1:
-            raise QualificationError(f"{key} mapping generation is unavailable")
-        distribution_preview = self.client.request(
-            "POST",
-            "/api/recipes/image-distribution-plans/preview",
-            {
-                "recipe_build_id": build_id,
-                "mapping_id": mapping_id,
-                "mapping_generation": mapping_generation,
-            },
-        )
-        self._record_preview(digest, key, "image-distribution", distribution_preview)
-        self._operation(
-            digest,
-            key,
-            "image-distribution",
-            "/api/recipes/image-distributions",
-            {
-                "recipe_build_id": build_id,
-                "mapping_id": mapping_id,
-                "mapping_generation": mapping_generation,
-                "plan_digest": distribution_preview["plan_digest"],
-                "request_key": _request_key(digest, key, "image-distribution"),
-            },
-        )
-
-        completed_install = self._completed_operation(digest, key, "install")
-        if completed_install is not None:
-            owned_installation = True
-            installation_id = completed_install.get("owner_id")
-            if not isinstance(installation_id, str):
-                raise QualificationError(f"{key} completed installation is invalid")
-        else:
-            installation_ids = selected.get("installation_ids")
-            installation_id = (
-                installation_ids[0]
-                if isinstance(installation_ids, list)
-                and installation_ids
-                and isinstance(installation_ids[0], str)
-                else None
-            )
-            owned_installation = installation_id is None
-        if installation_id is None:
-            self._prove_storage_capacity(digest, key, item, node_ids)
-            install_preview = self.client.request(
-                "POST",
-                "/api/recipes/install-plans/preview",
-                {"mapping_id": mapping_id, "recipe_build_id": build_id},
-            )
-            self._record_preview(digest, key, "install", install_preview)
-            if install_preview.get("allowed") is not True:
-                self.ledger.append(
-                    "recipe.blocked",
-                    plan_digest=digest,
-                    recipe=key,
-                    payload={
-                        "blockers": [
-                            {
-                                "classification": "resource",
-                                "code": "install.preview_blocked",
-                                "detail": "The fresh controller install preview denied this exact placement.",
-                                "preview": install_preview,
-                            }
-                        ]
-                    },
-                )
-                raise QualificationError(f"{key} install preview is blocked")
-            operation = self._operation(
-                digest,
-                key,
-                "install",
-                "/api/recipes/installations",
-                {
-                    "mapping_id": mapping_id,
-                    "recipe_build_id": build_id,
-                    "plan_digest": install_preview["plan_digest"],
-                    "request_key": _request_key(digest, key, "install"),
-                },
-            )
-            installation_id = operation.get("owner_id")
-            if not isinstance(installation_id, str):
-                raise QualificationError(f"{key} installation identity is invalid")
-
-        definition = detail.get("definition")
-        interfaces = (
-            definition.get("interfaces") if isinstance(definition, Mapping) else []
-        )
-        interface_rows = interfaces if isinstance(interfaces, list) else []
-        is_job = any(
-            isinstance(interface, Mapping) and interface.get("adapter") in _JOB_ADAPTERS
-            for interface in interface_rows
-        )
-        alias = "qual-" + hashlib.sha256(key.encode()).hexdigest()[:16]
-        run_step = "activate-job-run" if is_job else "run"
-        operation = self._completed_operation(digest, key, run_step)
-        if operation is None:
-            run_preview = self.client.request(
-                "POST",
-                "/api/recipes/run-plans/preview",
-                {"installation_id": installation_id, "alias": alias},
-            )
-            self._record_preview(digest, key, "run", run_preview)
-            if run_preview.get("allowed") is not True:
-                self.ledger.append(
-                    "recipe.blocked",
-                    plan_digest=digest,
-                    recipe=key,
-                    payload={
-                        "blockers": [
-                            {
-                                "classification": "resource",
-                                "code": "run.preview_blocked",
-                                "detail": "The fresh controller run preview denied activation.",
-                                "preview": run_preview,
-                            }
-                        ]
-                    },
-                )
-                raise QualificationError(f"{key} run preview is blocked")
-            operation = self._operation(
-                digest,
-                key,
-                run_step,
-                "/api/recipes/job-runs" if is_job else "/api/recipes/runs",
-                {
-                    "installation_id": installation_id,
-                    "alias": alias,
-                    "plan_digest": run_preview["plan_digest"],
-                    "request_key": _request_key(digest, key, run_step),
-                },
-            )
-        run_id = operation.get("owner_id")
-        if not isinstance(run_id, str):
-            raise QualificationError(f"{key} run identity is invalid")
-
-        smoke_error: Exception | None = None
-        completed_smoke = _latest_step(
-            self.ledger.recipe_records(digest, key), "step.completed", "smoke"
-        )
-        if completed_smoke is None:
-            try:
-                smoke = (
-                    self.artifact_smoke.preview(
-                        detail,
-                        recipe_key=key,
-                        recipe_content_sha256=str(item.get("content_sha256")),
-                    )
-                    if is_job
-                    else self.service_smoke.preview(
-                        detail,
-                        alias,
-                        recipe_key=key,
-                        recipe_content_sha256=str(item.get("content_sha256")),
-                    )
-                )
-                self._record_preview(digest, key, "smoke", smoke)
-                if is_job:
-                    if smoke.get("available") is not True:
-                        blocker = smoke.get("blocker")
-                        self.ledger.append(
-                            "recipe.blocked",
-                            plan_digest=digest,
-                            recipe=key,
-                            payload={
-                                "blockers": [blocker]
-                                if isinstance(blocker, Mapping)
-                                else []
-                            },
-                        )
-                        smoke_error = QualificationError(
-                            f"{key} artifact-job smoke is not available"
-                        )
-                    else:
-                        smoke_result = self.artifact_smoke.run(
-                            self.client,
-                            run_id,
-                            smoke,
-                            ledger=self.ledger,
-                            plan_digest=digest,
-                            recipe_key=key,
-                            timeout_seconds=self.options.operation_timeout_seconds,
-                            poll_interval_seconds=self.options.poll_interval_seconds,
-                        )
-                else:
-                    if smoke.get("available") is not True:
-                        blocker = smoke.get("blocker")
-                        self.ledger.append(
-                            "recipe.blocked",
-                            plan_digest=digest,
-                            recipe=key,
-                            payload={
-                                "blockers": [blocker]
-                                if isinstance(blocker, Mapping)
-                                else []
-                            },
-                        )
-                        smoke_error = QualificationError(
-                            f"{key} service smoke is not available"
-                        )
-                    else:
-                        smoke_result = self.service_smoke.run(self.client, alias, smoke)
-                if smoke_error is None:
-                    self.ledger.append(
-                        "step.completed",
-                        plan_digest=digest,
-                        recipe=key,
-                        payload={"step": "smoke", "result": dict(smoke_result)},
-                    )
-            except Exception as error:  # noqa: BLE001 - release runtime after any smoke fault
-                smoke_error = error
-
-        stop_error: Exception | None = None
-        if (
-            self.options.cleanup in {"stop", "uninstall"}
-            and self._completed_operation(digest, key, "stop") is None
-        ):
-            try:
-                stop_preview = self.client.request(
-                    "POST", "/api/recipes/stop-plans/preview", {"run_id": run_id}
-                )
-                self._record_preview(digest, key, "stop", stop_preview)
-                self._operation(
-                    digest,
-                    key,
-                    "stop",
-                    f"/api/recipes/runs/{_quote(run_id)}/stop",
-                    {
-                        "plan_digest": stop_preview["plan_digest"],
-                        "request_key": _request_key(digest, key, "stop"),
-                    },
-                )
-                self.ledger.append(
-                    "cleanup.released",
-                    plan_digest=digest,
-                    recipe=key,
-                    payload={"step": "stop", "run_id": run_id},
-                )
-            except Exception as error:  # noqa: BLE001 - preserve primary smoke failure
-                stop_error = error
-                self.ledger.append(
-                    "cleanup.release-failed",
-                    plan_digest=digest,
-                    recipe=key,
-                    payload={
-                        "step": "stop",
-                        "run_id": run_id,
-                        "error": str(error)[:512],
-                        "original_error": str(smoke_error)[:512]
-                        if smoke_error is not None
-                        else None,
-                    },
-                )
-        if smoke_error is not None:
-            raise smoke_error
-        if stop_error is not None:
-            raise stop_error
-        if self.options.cleanup in {"stop", "uninstall"}:
-            redeploy_id: str | None = None
-            redeploy_error: Exception | None = None
-            cleanup_error: Exception | None = None
-            try:
-                redeploy = self._completed_operation(digest, key, "warm-redeploy")
-                if redeploy is None:
-                    redeploy_preview = self.client.request(
-                        "POST",
-                        "/api/recipes/run-plans/preview",
-                        {"installation_id": installation_id, "alias": alias},
-                    )
-                    self._record_preview(digest, key, "warm-redeploy", redeploy_preview)
-                    if redeploy_preview.get("allowed") is not True:
-                        raise QualificationError(
-                            f"{key} warm-cache redeploy is blocked"
-                        )
-                    redeploy = self._operation(
-                        digest,
-                        key,
-                        "warm-redeploy",
-                        "/api/recipes/job-runs"
-                        if is_job
-                        else "/api/recipes/runs",
-                        {
-                            "installation_id": installation_id,
-                            "alias": alias,
-                            "plan_digest": redeploy_preview["plan_digest"],
-                            "request_key": _request_key(digest, key, "warm-redeploy"),
-                        },
-                    )
-                owner_id = redeploy.get("owner_id")
-                if not isinstance(owner_id, str):
-                    raise QualificationError(
-                        f"{key} warm-cache run identity is invalid"
-                    )
-                redeploy_id = owner_id
-                completed_redeploy_smoke = _latest_step(
-                    self.ledger.recipe_records(digest, key),
-                    "step.completed",
-                    "warm-redeploy-smoke",
-                )
-                if completed_redeploy_smoke is None:
-                    redeploy_smoke = (
-                        self.artifact_smoke.preview(
-                            detail,
-                            recipe_key=key,
-                            recipe_content_sha256=str(item.get("content_sha256")),
-                        )
-                        if is_job
-                        else self.service_smoke.preview(
-                            detail,
-                            alias,
-                            recipe_key=key,
-                            recipe_content_sha256=str(item.get("content_sha256")),
-                        )
-                    )
-                    self._record_preview(
-                        digest, key, "warm-redeploy-smoke", redeploy_smoke
-                    )
-                    if redeploy_smoke.get("available") is not True:
-                        raise QualificationError(
-                            f"{key} warm-cache smoke contract is unavailable"
-                        )
-                    redeploy_result = (
-                        self.artifact_smoke.run(
-                            self.client,
-                            redeploy_id,
-                            redeploy_smoke,
-                            ledger=self.ledger,
-                            plan_digest=digest,
-                            recipe_key=key,
-                            timeout_seconds=self.options.operation_timeout_seconds,
-                            poll_interval_seconds=self.options.poll_interval_seconds,
-                            event_prefix="artifact-job.redeploy",
-                        )
-                        if is_job
-                        else self.service_smoke.run(self.client, alias, redeploy_smoke)
-                    )
-                    self.ledger.append(
-                        "step.completed",
-                        plan_digest=digest,
-                        recipe=key,
-                        payload={
-                            "step": "warm-redeploy-smoke",
-                            "result": dict(redeploy_result),
-                        },
-                    )
-            except Exception as error:  # noqa: BLE001 - always execute warm release
-                redeploy_error = error
-            finally:
-                if redeploy_id is not None:
-                    try:
-                        if (
-                            self._completed_operation(digest, key, "warm-redeploy-stop")
-                            is None
-                        ):
-                            redeploy_stop_preview = self.client.request(
-                                "POST",
-                                "/api/recipes/stop-plans/preview",
-                                {"run_id": redeploy_id},
-                            )
-                            self._record_preview(
-                                digest,
-                                key,
-                                "warm-redeploy-stop",
-                                redeploy_stop_preview,
-                            )
-                            self._operation(
-                                digest,
-                                key,
-                                "warm-redeploy-stop",
-                                f"/api/recipes/runs/{_quote(redeploy_id)}/stop",
-                                {
-                                    "plan_digest": redeploy_stop_preview["plan_digest"],
-                                    "request_key": _request_key(
-                                        digest, key, "warm-redeploy-stop"
-                                    ),
-                                },
-                            )
-                        self.ledger.append(
-                            "cleanup.released",
-                            plan_digest=digest,
-                            recipe=key,
-                            payload={
-                                "step": "warm-redeploy-stop",
-                                "run_id": redeploy_id,
-                            },
-                        )
-                    except Exception as error:  # noqa: BLE001 - ledger cleanup failure
-                        cleanup_error = error
-                        self.ledger.append(
-                            "cleanup.release-failed",
-                            plan_digest=digest,
-                            recipe=key,
-                            payload={
-                                "step": "warm-redeploy-stop",
-                                "run_id": redeploy_id,
-                                "error": str(error)[:512],
-                                "original_error": str(redeploy_error)[:512]
-                                if redeploy_error is not None
-                                else None,
-                            },
-                        )
-            if redeploy_error is not None:
-                raise redeploy_error
-            if cleanup_error is not None:
-                raise cleanup_error
-        if self.options.cleanup == "uninstall":
-            if not owned_installation:
-                self.ledger.append(
-                    "cleanup.skipped",
-                    plan_digest=digest,
-                    recipe=key,
-                    payload={
-                        "step": "uninstall",
-                        "installation_id": installation_id,
-                        "reason": "preexisting installation is not runner-owned",
-                    },
-                )
-            elif self._completed_operation(digest, key, "uninstall") is None:
-                uninstall_preview = self.client.request(
-                    "POST",
-                    "/api/recipes/uninstall-plans/preview",
-                    {"installation_id": installation_id},
-                )
-                self._record_preview(digest, key, "uninstall", uninstall_preview)
-                self._operation(
-                    digest,
-                    key,
-                    "uninstall",
-                    f"/api/recipes/installations/{_quote(installation_id)}/uninstall",
-                    {
-                        "plan_digest": uninstall_preview["plan_digest"],
-                        "request_key": _request_key(digest, key, "uninstall"),
-                    },
-                )
-        elif self.options.cleanup == "stop":
-            self.ledger.append(
-                "cleanup.retained",
-                plan_digest=digest,
-                recipe=key,
-                payload={
-                    "installation_id": installation_id,
-                    "owned_by_runner": owned_installation,
-                    "state": "installed-runtime-stopped",
-                    "reason": "default cache-retention policy",
-                },
-            )
-        if smoke_error is not None:
-            raise smoke_error
-        self.ledger.append(
-            "recipe.succeeded",
-            plan_digest=digest,
-            recipe=key,
-            payload={
-                "recipe_id": recipe_id,
-                "recipe_revision_id": revision_id,
-                "recipe_content_sha256": item.get("content_sha256"),
-                "mapping_id": mapping_id,
-                "recipe_build_id": build_id,
-                "installation_id": installation_id,
-                "run_id": run_id,
-                "node_ids": node_ids,
-            },
+        del digest, item
+        raise QualificationError(
+            "legacy per-recipe qualification lifecycle was retired; "
+            "use one explicitly selected whole-fleet profile preview/load operation"
         )
