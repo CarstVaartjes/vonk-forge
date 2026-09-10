@@ -810,6 +810,7 @@ def test_installer_error_survives_bounded_controller_diagnostics(
 def test_profile_application_failure_is_typed_and_redacts_provider_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
@@ -829,6 +830,7 @@ def test_profile_application_failure_is_typed_and_redacts_provider_secret(
 def test_profile_failure_cannot_erase_failure_or_service_journals(
     tmp_path: Path,
 ) -> None:
+    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
@@ -988,6 +990,7 @@ def test_running_channel_alias_must_match_the_candidate(
 
 
 def test_preflight_failure_reports_only_projected_receipt_comparison_fields() -> None:
+    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
@@ -1034,6 +1037,7 @@ def test_profile_run_switch_receipt_is_required_for_successful_execution() -> No
 
 
 def test_recipe_download_consumes_typed_terminal_receipt() -> None:
+    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
     from vonk_control.recipe_image_availability_api import (
@@ -1095,6 +1099,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
 
 
 def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
+    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
     lifecycle = _module()
     pending = _failed_profile_application("pending")
     pending["state"] = "queued"
