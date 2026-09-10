@@ -533,22 +533,35 @@ it("uses exact browser-auth documents and the CSRF cookie for server logout", as
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/v1/auth/logout") return new Response(null, {status: 204});
+    if (path === "/api/v1/auth/cli-token") {
+      return new Response("signed-cli-token\n", {status: 200, headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Vonk-Token-Expires-At": "2026-09-12T09:30:00Z",
+      }});
+    }
     return new Response(JSON.stringify({subject: "admin", role: "administrator", expires_at: "2026-08-13T21:30:00Z"}), {headers: {"Content-Type": "application/json"}, status: 200});
   });
+  const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:vonkctl-token");
+  const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
   const api = new ApiClient();
 
   expect(await api.session()).toEqual({subject: "admin", role: "administrator", expires_at: "2026-08-13T21:30:00Z"});
   await api.login("admin", "synthetic-test-password");
+  expect(await api.downloadCliToken()).toEqual({expiresAt: "2026-09-12T09:30:00Z"});
   await api.logout();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["GET", "/api/v1/auth/session"],
     ["POST", "/api/v1/auth/login"],
+    ["POST", "/api/v1/auth/cli-token"],
     ["POST", "/api/v1/auth/logout"],
   ]);
   expect(await requests[1].clone().json()).toEqual({subject: "admin", password: "synthetic-test-password"});
   expect(requests[2].headers.get("X-CSRF-Token")).toBe("synthetic-csrf-value");
+  expect(requests[3].headers.get("X-CSRF-Token")).toBe("synthetic-csrf-value");
   expect(requests.every(request => request.credentials === "same-origin")).toBe(true);
+  expect(createObjectURL).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:vonkctl-token"));
 });
 
 it("throws and emits one centralized authentication signal for an API 401", async () => {

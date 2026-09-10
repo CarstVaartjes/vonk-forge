@@ -847,7 +847,14 @@ def create_app(
     if browser_auth is not None:
         from .auth_api import install_auth_routes
 
-        install_auth_routes(app, browser_auth, audits, authenticated_actor)
+        install_auth_routes(
+            app,
+            browser_auth,
+            audits,
+            authenticated_actor,
+            tokens=tokens,
+            now=now,
+        )
 
     install_catalog_routes(
         app,

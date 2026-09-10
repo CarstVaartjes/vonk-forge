@@ -1,6 +1,7 @@
 import type {components} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
+export type CliTokenDownload = {expiresAt: string};
 export type DeploymentProvenance = components["schemas"]["DeploymentProvenance"];
 export type FleetTelemetryDetails = components["schemas"]["TelemetryPoint"]["details"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
@@ -201,6 +202,7 @@ export interface LibraryApi {
   artifactJobResultUrl(jobId: string, sha256: string): string;
 }
 export interface ControlApi extends LibraryApi {
+  downloadCliToken(): Promise<CliTokenDownload>;
   deploymentProvenance(signal?: AbortSignal): Promise<DeploymentProvenance>;
   fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;
   fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile>;

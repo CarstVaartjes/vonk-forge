@@ -113,6 +113,7 @@ export function App({api}: {api: ControlApi}) {
     navigationLocked={navigationLocked}
     onNavigate={navigate}
     operator={auth ? {
+      onDownloadCliToken: () => api.downloadCliToken(),
       logoutError: auth.logoutError,
       loggingOut: auth.loggingOut,
       onLogout: () => requestNavigation(() => { void auth.logout(); }),

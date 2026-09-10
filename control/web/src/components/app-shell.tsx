@@ -6,6 +6,7 @@ import {FleetIcon, LibraryIcon} from "./icons";
 export type AppRoute = "fleet" | "library" | "activity";
 
 type Operator = {
+  onDownloadCliToken(): Promise<{expiresAt: string}>;
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;

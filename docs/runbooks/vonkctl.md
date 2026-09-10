@@ -25,6 +25,22 @@ During repository development, `uv run --frozen vonkctl ...` uses the checkout
 directly instead. Add `--json` before or after the selected leaf command for
 machine-readable output.
 
+When using the browser, sign in to the Controller and open the operator menu
+under your user name. Choose **Download CLI token** (it appears before
+Activity). The browser downloads a `vonkctl-token` file without rendering the
+credential in the page. Store that file privately, then point the CLI at it:
+
+```bash
+export VONK_CONTROL_URL=https://forge.example.test
+export VONK_CONTROL_TOKEN_FILE="$HOME/Downloads/vonkctl-token"
+chmod 600 "$VONK_CONTROL_TOKEN_FILE"
+vonkctl models discover --all --json
+```
+
+The download requires the active browser session and its CSRF protection. The
+administrator bearer token expires after 30 days; download a new file from the
+operator menu when it expires.
+
 ## Fleet
 
 The Fleet command exposes the browser's search, health, warning, sort,

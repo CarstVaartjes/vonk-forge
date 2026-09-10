@@ -29597,6 +29597,62 @@
         "summary": "Audit View"
       }
     },
+    "/api/v1/auth/cli-token": {
+      "post": {
+        "operationId": "downloadCliToken",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A short-lived administrator bearer token download"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Cli Token",
+        "x-vonk-request-body": "none",
+        "x-vonk-streaming-transport": true
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "loginBrowser",

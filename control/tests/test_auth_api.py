@@ -89,6 +89,7 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
         "/api/v1/auth/login": {"401", "403", "422", "429"},
         "/api/v1/auth/session": {"401"},
         "/api/v1/auth/logout": {"401", "403"},
+        "/api/v1/auth/cli-token": {"401", "403"},
     }
     for path, statuses in expected.items():
         for method in ("post",) if path != "/api/v1/auth/session" else ("get",):
@@ -387,3 +388,47 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
         (),
     )
     assert client.get("/api/v1/auth/session").status_code == 401
+
+
+def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
+    """The account menu can mint a file without exposing a token in JSON or URLs."""
+    client, audits, _verifier = _client()
+    assert _login(client).status_code == 200
+
+    response = client.post(
+        "/api/v1/auth/cli-token",
+        headers={"x-csrf-token": CSRF_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.headers["content-disposition"] == 'attachment; filename="vonkctl-token"'
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-vonk-token-expires-at"] == "2026-09-12T09:30:00Z"
+    token = response.text.strip()
+    assert token
+    assert TokenCodec(b"test-token-signing-key-for-auth-api").verify(
+        token, now=int(NOW.timestamp())
+    ) == Actor("admin", "administrator")
+    event = audits.for_request(response.headers["x-request-id"])
+    assert (event.actor, event.action, event.authority_revision, event.targets) == (
+        "admin",
+        "auth.cli_token.issued",
+        None,
+        (),
+    )
+
+
+def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
+    client, _audits, _verifier = _client()
+    bearer = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
+        Actor("admin", "administrator"),
+        ttl_seconds=60,
+        now=int(NOW.timestamp()),
+    )
+    assert client.post(
+        "/api/v1/auth/cli-token",
+        headers={"authorization": f"Bearer {bearer}"},
+    ).status_code == 401
+    assert _login(client).status_code == 200
+    assert client.post("/api/v1/auth/cli-token").status_code == 403

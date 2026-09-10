@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
-from typing import Annotated, Any, Literal, Protocol
+from datetime import UTC, datetime
+from typing import Annotated, Any, Callable, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from .audit import AuditRecord
-from .auth import Actor
+from .auth import Actor, TokenCodec
 from .browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,
@@ -19,6 +19,7 @@ from .browser_auth import (
 )
 
 _COOKIE_MAX_AGE = 43_200
+_CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _SESSION_COOKIE = "vonk_session"
 _CSRF_COOKIE = "vonk_csrf"
 
@@ -60,6 +61,8 @@ def install_auth_routes(
     service: BrowserAuthService,
     audits: AuditSink,
     actor_dependency: Any,
+    tokens: TokenCodec,
+    now: Callable[[], int],
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 
@@ -68,6 +71,7 @@ def install_auth_routes(
             ("post", "/api/v1/auth/login"): "loginBrowser",
             ("get", "/api/v1/auth/session"): "getBrowserSession",
             ("post", "/api/v1/auth/logout"): "logoutBrowser",
+            ("post", "/api/v1/auth/cli-token"): "downloadCliToken",
         }
     )
     authenticated = actor_dependency
@@ -178,3 +182,53 @@ def install_auth_routes(
             samesite="strict",
         )
         audit(request, identity.actor.subject, "auth.logout")
+
+    @app.post(
+        "/api/v1/auth/cli-token",
+        response_class=Response,
+        response_model=None,
+        responses={
+            **bounded_error_responses(401, 403),
+            200: {
+                "description": "A short-lived administrator bearer token download",
+                "content": {
+                    "text/plain": {
+                        "schema": {"type": "string", "format": "binary"}
+                    }
+                },
+            },
+        },
+        operation_id="downloadCliToken",
+        openapi_extra={
+            "x-vonk-request-body": "none",
+            # The token is returned as exact bytes and downloaded by the
+            # browser transport; it is never reconstructed as JSON.
+            "x-vonk-streaming-transport": True,
+        },
+    )
+    def cli_token(
+        request: Request,
+        _authenticated_actor: Actor = authenticated,
+    ) -> Response:
+        # This endpoint is deliberately browser-session-only. The general
+        # actor dependency enforces CSRF for cookie mutations; resolving the
+        # cookie again prevents a bearer caller from minting another bearer.
+        identity = cookie_identity(request)
+        issued_at = now()
+        token = tokens.issue(
+            identity.actor,
+            ttl_seconds=_CLI_TOKEN_TTL_SECONDS,
+            now=issued_at,
+        )
+        expires_at = datetime.fromtimestamp(
+            issued_at + _CLI_TOKEN_TTL_SECONDS, tz=UTC
+        ).isoformat().replace("+00:00", "Z")
+        audit(request, identity.actor.subject, "auth.cli_token.issued")
+        return Response(
+            content=f"{token}\n",
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": 'attachment; filename="vonkctl-token"',
+                "X-Vonk-Token-Expires-At": expires_at,
+            },
+        )

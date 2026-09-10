@@ -2,6 +2,7 @@ import {useEffect, useId, useRef, useState} from "react";
 import type {KeyboardEvent, MouseEvent as ReactMouseEvent} from "react";
 
 type AdminMenuProps = {
+  onDownloadCliToken(): Promise<{expiresAt: string}>;
   logoutError: string;
   loggingOut: boolean;
   navigationLocked?: boolean;
@@ -12,6 +13,7 @@ type AdminMenuProps = {
 };
 
 export function AdminMenu({
+  onDownloadCliToken,
   logoutError,
   loggingOut,
   navigationLocked = false,
@@ -21,6 +23,7 @@ export function AdminMenu({
   subject,
 }: AdminMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [cliTokenState, setCliTokenState] = useState<"idle" | "downloading" | "downloaded" | "error">("idle");
   const menuId = useId();
   const menu = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -57,6 +60,16 @@ export function AdminMenu({
     items[next]?.focus();
   }
 
+  async function downloadCliToken(): Promise<void> {
+    setCliTokenState("downloading");
+    try {
+      await onDownloadCliToken();
+      setCliTokenState("downloaded");
+    } catch {
+      setCliTokenState("error");
+    }
+  }
+
   return <section className="operator-identity" aria-label="Authenticated operator">
     <button
       ref={trigger}
@@ -77,6 +90,9 @@ export function AdminMenu({
       <span className="operator-disclosure-indicator" aria-hidden="true">⌄</span>
     </button>
     {menuOpen && <div ref={menu} id={menuId} role="group" aria-label="Operator actions" className="admin-menu-panel" onKeyDown={handleMenuKeyDown}>
+      <button type="button" className="secondary-button" disabled={navigationLocked || cliTokenState === "downloading"} onClick={() => void downloadCliToken()}>{cliTokenState === "downloading" ? "Preparing CLI token…" : "Download CLI token"}</button>
+      {cliTokenState === "downloaded" && <p className="admin-menu-status" role="status">CLI token downloaded. Keep the file private.</p>}
+      {cliTokenState === "error" && <p className="admin-menu-status is-error" role="alert">The CLI token could not be downloaded. Try again.</p>}
       <a href="/activity" className="secondary-button" aria-disabled={navigationLocked || undefined} tabIndex={navigationLocked ? -1 : undefined} onClick={event => {
         if (navigationLocked) {
           event.preventDefault();
