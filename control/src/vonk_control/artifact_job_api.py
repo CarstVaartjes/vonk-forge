@@ -80,7 +80,7 @@ def install_artifact_job_routes(
         return _service(service).capabilities()
 
     @app.get(
-        "/api/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
         response_model=ArtifactJobListResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="listArtifactJobsForRun",
@@ -98,7 +98,7 @@ def install_artifact_job_routes(
             ) from None
 
     @app.post(
-        "/api/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
         response_model=ArtifactJobResponse,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,

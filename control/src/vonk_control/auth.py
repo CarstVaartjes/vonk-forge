@@ -103,7 +103,7 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/recipes/run-switch-stops"): frozenset({"administrator"}),
     ("POST", "/api/recipes/job-runs"): frozenset({"administrator"}),
-    ("POST", "/api/recipes/runs/{run_id}/artifact-jobs"): frozenset(
+    ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset(
         {"operator", "administrator"}
     ),
     ("PUT", "/api/artifact-jobs/{job_id}/inputs/{name}"): frozenset(
@@ -135,7 +135,7 @@ MUTATION_ROLES = {
     ("POST", "/api/model-cache/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),
-    ("POST", "/api/recipes/runs/{run_id}/stop"): frozenset({"administrator"}),
+    ("POST", "/api/recipe/runs/{run_id}/stop"): frozenset({"administrator"}),
     ("POST", "/api/recipes/installations/{installation_id}/uninstall"): frozenset(
         {"administrator"}
     ),

@@ -83,11 +83,11 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/recipes/job-runs"): "activateRecipeJobRun",
     (
         "get",
-        "/api/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "listArtifactJobsForRun",
     (
         "post",
-        "/api/recipes/runs/{run_id}/artifact-jobs",
+        "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "createArtifactJob",
     ("get", "/api/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
     ("get", "/api/artifact-jobs/{job_id}"): "getArtifactJobStatus",

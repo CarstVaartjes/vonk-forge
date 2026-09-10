@@ -265,13 +265,13 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
     assert accepted.parameters == {"future_argument": {"enabled": True}}
 
     unknown_field = client.post(
-        f"/api/recipes/runs/{JOB_ID}/artifact-jobs",
+        f"/api/recipe/runs/{JOB_ID}/artifact-jobs",
         json={**body, "unexpected": True},
     )
     assert unknown_field.status_code == 422
 
     coerced_scalar = client.post(
-        f"/api/recipes/runs/{JOB_ID}/artifact-jobs",
+        f"/api/recipe/runs/{JOB_ID}/artifact-jobs",
         json={**body, "timeout_seconds": "60"},
     )
     assert coerced_scalar.status_code == 422
