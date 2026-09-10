@@ -463,15 +463,15 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 
     forbidden_paths = {
-        "/api/v1/catalog/entities",
-        "/api/v1/catalog/entities/{entity_id}",
-        "/api/v1/catalog/entities/{entity_id}/draft",
-        "/api/v1/catalog/entities/{entity_id}/resolve",
-        "/api/v1/catalog/recipes",
-        "/api/v1/catalog/recipes/{recipe_id}",
-        "/api/v1/catalog/imports/global",
-        "/api/v1/catalog/imports/recipe-library",
-        "/api/v1/catalog/imports/public",
+        "/api/catalog/entities",
+        "/api/catalog/entities/{entity_id}",
+        "/api/catalog/entities/{entity_id}/draft",
+        "/api/catalog/entities/{entity_id}/resolve",
+        "/api/catalog/recipes",
+        "/api/catalog/recipes/{recipe_id}",
+        "/api/catalog/imports/global",
+        "/api/catalog/imports/recipe-library",
+        "/api/catalog/imports/public",
     }
     assert not forbidden_paths.intersection(
         path for _method, path in CATALOG_OPERATION_IDS

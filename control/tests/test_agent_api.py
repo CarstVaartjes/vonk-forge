@@ -1401,7 +1401,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         ) as async_client:
 
             async def health_request():
-                response = await async_client.get("/api/v1/healthz")
+                response = await async_client.get("/api/healthz")
                 health_completed.set()
                 return response
 
