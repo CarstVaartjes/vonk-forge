@@ -29,7 +29,11 @@ vonk-cluster-profiles = { path = ".." }
 vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", branch = "main", subdirectory = "contracts" }
 
 [dependency-groups]
-dev = ["openapi-python-client==0.26.2", "pytest==9.1.1"]
+dev = [
+    "openapi-python-client==0.26.2",
+    "pytest==9.1.1",
+    "pytest-xdist==3.8.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -46,3 +50,6 @@ artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "lane: requires Docker, PostgreSQL, cargo or a Linux host tool; excluded from the fast tier",
+]

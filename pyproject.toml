@@ -45,3 +45,6 @@ extend-exclude = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+markers = [
+    "lane: requires Docker, PostgreSQL, cargo or a Linux host tool; excluded from the fast tier",
+]

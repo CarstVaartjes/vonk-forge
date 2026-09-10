@@ -6,6 +6,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -139,3 +140,40 @@ def postgres_engine(postgres_server_engine: Engine) -> Iterator[Engine]:
         engine.dispose()
         with postgres_server_engine.connect() as connection:
             connection.exec_driver_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
+
+
+# Test-lane taxonomy.
+#
+# The fast tier runs only tests that need nothing beyond the Python
+# environment.  Anything that starts Docker, creates a PostgreSQL cluster,
+# builds a Rust probe or drives a Linux host tool is tagged ``lane`` and runs
+# in the container or designated CI lane instead.  Tagging derives from what a
+# test actually requests, so new tests are classified without further edits.
+
+_DOCKER_MODULES = frozenset(
+    {
+        "security/test_agent_protocol.py",
+        "security/test_no_routine_ssh.py",
+        "test_runtime_init.py",
+        "test_step_ca.py",
+    }
+)
+_POSTGRES_FIXTURES = frozenset({"postgres_engine", "postgres_server_engine"})
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Tag every test that cannot run in the fast, hermetic tier."""
+
+    root = Path(__file__).resolve().parent
+    for item in items:
+        path = Path(str(item.fspath)).resolve()
+        try:
+            relative = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if (
+            relative in _DOCKER_MODULES
+            or path.name.endswith("_wire_bridge.py")
+            or _POSTGRES_FIXTURES.intersection(item.fixturenames)
+        ):
+            item.add_marker(pytest.mark.lane)
