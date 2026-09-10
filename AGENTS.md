@@ -28,18 +28,47 @@ Use a writable, task-specific uv cache. From `/opt/vonk-forge`:
 
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache \
-  uv run --frozen pytest -q
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . pytest -q
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   uv run --project control --frozen --with-editable . pytest -q control/tests
 UV_CACHE_DIR=/private/tmp/vonk-forge-compose-cache \
   uv run --frozen pytest -q deploy/compose/tests
-UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run --frozen pytest -q \
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . pytest -q \
     tests/test_fresh_nas_acceptance.py \
     tests/test_spark_lifecycle_runner.py \
-    tests/test_installer_publication_workflow.py
+    tests/scripts/test_install_release_publication.py
 ```
+
+Run the root `tests/` suite through the control project, exactly as CI does.
+The root project is the `vonk-cluster-profiles` package and its lint tooling;
+it deliberately has no dependency on `pydantic`, `vonk_control`, or the recipe
+contracts package, so a bare `uv run pytest` from the root environment cannot
+import what the acceptance and contract tests need.
+
+`VONK_RECIPE_LIBRARY_ROOT` is a path to the sibling recipe-library checkout, not
+a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
+library through it and fail at collection when it is unset, so export it before
+running the root or control suites.
+
+The native Rust agent and its wire contract build only for Linux. The
+`control/tests/*_wire_bridge.py` suites consume probes produced by
+`scripts/tests/run_agent_wire_contracts.py`; on macOS `cargo build` fails on
+platform-gated code such as `rustix::fs::openat2`, so run those suites in the
+Linux/OrbStack or designated CI lane instead of reading the failure as a
+regression.
+
+Lint the whole repository from the root project, which pins the ruff version
+declared by `[tool.ruff] required-version`:
+
+```bash
+UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache uv run --frozen ruff check .
+```
+
+`control/.venv` cannot satisfy that pin because `openapi-python-client` requires
+`ruff<0.14`; always lint through the root project. CI runs the same version via
+`uvx --from ruff==0.16.1 ruff check .`.
 
 When acceptance inputs are available, run the actual harness through the same
 OrbStack Docker context, not only its unit tests:
