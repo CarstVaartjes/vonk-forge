@@ -621,6 +621,7 @@ def install_operator_projection_routes(
 
     @app.post(
         "/api/fleet/{selector}/re-enroll",
+        openapi_extra={"x-vonk-request-body": "none"},
         response_model=FleetActionResponse,
         responses=bounded_error_responses(401, 403, 404, 422, 503),
         operation_id="reenrollFleetNode",
@@ -648,6 +649,7 @@ def install_operator_projection_routes(
 
     @app.post(
         "/api/fleet/{selector}/remove",
+        openapi_extra={"x-vonk-request-body": "none"},
         response_model=FleetActionResponse,
         responses=bounded_error_responses(401, 403, 404, 503),
         operation_id="removeFleetNode",

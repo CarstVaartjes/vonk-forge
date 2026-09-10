@@ -34,7 +34,6 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
@@ -66,26 +65,24 @@ from .catalog_service import CatalogError, CatalogService
 from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
 from .deployment_provenance import DeploymentProvenanceService
-from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
-    FleetNodeIdentity,
     FleetSnapshot,
-    TelemetryCapabilitiesResponse,
-    TelemetryCurrentResponse,
-    TelemetryHistoryResponse,
-    TelemetryWorkloadsResponse,
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
-from .library_api import install_library_routes
+from .operator_projection_api import (
+    FleetOperatorServices,
+    build_fleet_operator_services,
+    install_operator_projection_routes,
+)
 from .metrics import MetricsRegistry
 from .model_cache_api import (
-    install_model_cache_routes,
+    install_model_operator_routes,
     register_model_cache_operation_provider,
 )
 from .operation_api import (
@@ -123,7 +120,6 @@ from .recipe_packages import RecipePackageClient
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .strict_json import ControllerAPIRoute
-from .telemetry import TelemetryResolution
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -485,22 +481,13 @@ def refresh_fleet_metrics(
     metrics.update_fleet(fleet_snapshot)
 
 
-class NodeProfileUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-    display_name: str = Field(
-        min_length=1,
-        max_length=80,
-        pattern=r"^[^\x00-\x1f\x7f]+$",
-    )
-
-
 def create_app(
     *,
     jobs: JobQueue,
     tokens: TokenCodec,
     audits: AuditSink,
     fleet_projection: Any | None = None,
-    deployment_provenance: DeploymentProvenanceService | None = None,
+    fleet_services: FleetOperatorServices | None = None,
     failure_evidence: FailureEvidenceService | None = None,
     fleet_stream: Any | None = None,
     library_projection: Any | None = None,
@@ -818,21 +805,11 @@ def create_app(
         service=catalog,
         managed_sync=managed_catalog_sync,
     )
-    install_library_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        projection=library_projection,
-    )
     install_fleet_profile_routes(
         app,
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         audits=audits,
-    )
-    install_deployment_provenance_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        provenance=deployment_provenance,
     )
     install_failure_evidence_routes(
         app,
@@ -844,20 +821,19 @@ def create_app(
         actor_dependency=authenticated_actor,
         service=artifact_jobs,
     )
-    install_model_cache_routes(
+    install_model_operator_routes(
         app,
         actor_dependency=authenticated_actor,
         service=model_cache,
         audits=audits,
-        cursors=cursor_codec,
     )
-    from .recipe_image_availability_api import install_recipe_image_availability_routes
+    from .recipe_image_availability_api import install_recipe_operator_routes
 
-    install_recipe_image_availability_routes(
+    install_recipe_operator_routes(
         app,
         actor_dependency=authenticated_actor,
         service=recipe_image_availability,
-        cursor_codec=cursor_codec,
+        audits=audits,
     )
 
     @app.get("/api/healthz", response_model=HealthzResponse)
@@ -886,22 +862,6 @@ def create_app(
             metrics.render(),
             media_type="application/openmetrics-text; version=1.0.0; charset=utf-8",
         )
-
-    @app.get(
-        "/api/fleet",
-        response_model=FleetSnapshot,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getFleetStatus",
-    )
-    def fleet_view(_actor: Actor = authenticated_actor) -> FleetSnapshot:
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            return fleet_projection.read()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="Fleet projection unavailable"
-            ) from None
 
     @app.get(
         "/api/fleet/stream",
@@ -949,203 +909,15 @@ def create_app(
             },
         )
 
-    @app.patch(
-        "/api/nodes/{node_id}/profile",
-        response_model=FleetNodeIdentity,
-        responses=bounded_error_responses(401, 403, 404, 422, 503),
-        operation_id="updateNodeProfile",
+    # Register literal stream/progress/artifact paths before selector routes.
+    install_operator_projection_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        fleet_projection=fleet_projection,
+        library_projection=library_projection,
+        fleet_services=fleet_services,
+        audits=audits,
     )
-    def update_node_profile(
-        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
-        body: NodeProfileUpdateRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> FleetNodeIdentity:
-        route = "/api/nodes/{node_id}/profile"
-        require_mutation_role(authenticated, route, "PATCH")
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            identity = fleet_projection.update_display_name(node_id, body.display_name)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet node not found"
-            ) from None
-        except (OSError, RuntimeError, SQLAlchemyError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Fleet profile update unavailable"
-            ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "fleet.node.rename",
-                None,
-                (node_id,),
-            )
-        )
-        return identity
-
-    @app.get(
-        "/api/nodes/{node_id}/telemetry",
-        response_model=TelemetryHistoryResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getNodeTelemetryHistory",
-    )
-    def node_telemetry_history(
-        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
-        start: Annotated[datetime, Query()],
-        end: Annotated[datetime, Query()],
-        resolution: Annotated[TelemetryResolution, Query()],
-        maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated_actor,
-    ) -> TelemetryHistoryResponse:
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            filters = {
-                name: value
-                for name, value in {
-                    "key": key,
-                    "device_id": device_id,
-                    "interface_name": interface_name,
-                    "run_id": run_id,
-                }.items()
-                if value is not None
-            }
-            return fleet_projection.telemetry_history(
-                node_id,
-                start=start,
-                end=end,
-                maximum_points=maximum_points,
-                resolution=resolution,
-                **filters,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Fleet node not found"
-            ) from None
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Telemetry history unavailable"
-            ) from None
-
-    @app.get(
-        "/api/nodes/{node_id}/telemetry/current",
-        response_model=TelemetryCurrentResponse,
-        responses=bounded_error_responses(401, 404, 503),
-        operation_id="getNodeTelemetryCurrent",
-    )
-    def node_telemetry_current(
-        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated_actor,
-    ) -> TelemetryCurrentResponse:
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            filters = {
-                name: value
-                for name, value in {
-                    "key": key,
-                    "device_id": device_id,
-                    "interface_name": interface_name,
-                    "run_id": run_id,
-                }.items()
-                if value is not None
-            }
-            return fleet_projection.telemetry_current(node_id, **filters)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Telemetry sample not found"
-            ) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Telemetry unavailable"
-            ) from None
-
-    @app.get(
-        "/api/nodes/{node_id}/telemetry/capabilities",
-        response_model=TelemetryCapabilitiesResponse,
-        responses=bounded_error_responses(401, 404, 503),
-        operation_id="getNodeTelemetryCapabilities",
-    )
-    def node_telemetry_capabilities(
-        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated_actor,
-    ) -> TelemetryCapabilitiesResponse:
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            filters = {
-                name: value
-                for name, value in {
-                    "key": key,
-                    "device_id": device_id,
-                    "interface_name": interface_name,
-                    "run_id": run_id,
-                }.items()
-                if value is not None
-            }
-            return fleet_projection.telemetry_capabilities(node_id, **filters)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Telemetry sample not found"
-            ) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Telemetry unavailable"
-            ) from None
-
-    @app.get(
-        "/api/nodes/{node_id}/telemetry/workloads",
-        response_model=TelemetryWorkloadsResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="listNodeTelemetryWorkloads",
-    )
-    def node_telemetry_workloads(
-        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
-        _actor: Actor = authenticated_actor,
-    ) -> TelemetryWorkloadsResponse:
-        if fleet_projection is None:
-            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
-        try:
-            return fleet_projection.telemetry_workloads(
-                node_id,
-                run_id=run_id,
-                state=state,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Telemetry sample not found"
-            ) from None
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        except (OSError, RuntimeError, TypeError):
-            raise HTTPException(
-                status_code=503, detail="Telemetry unavailable"
-            ) from None
 
     @app.get(
         "/api/endpoints/{alias}",
@@ -1780,6 +1552,7 @@ def production_app() -> FastAPI:
         clock=clock,
         recipe_operations=recipe_operations,
         switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch_operations),
+        cache_resolver=model_cache.resolve_latest_cached,
     )
     agent_upgrades = AgentUpgradeService(
         sessions,
@@ -1890,7 +1663,13 @@ def production_app() -> FastAPI:
         run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
-        deployment_provenance=DeploymentProvenanceService(sessions),
+        fleet_services=build_fleet_operator_services(
+            agent_services=(agent_services if settings.agent_runtime == "enabled" else None),
+            upgrades=agent_upgrades,
+            sessions=sessions,
+            job_logs=DatabaseJobLogStore(sessions, clock=clock),
+            provenance=DeploymentProvenanceService(sessions),
+        ),
         failure_evidence=FailureEvidenceService(sessions),
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,

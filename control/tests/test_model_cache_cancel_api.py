@@ -99,5 +99,5 @@ def test_model_operator_routes_have_one_current_namespace():
     assert "/api/model/{selector}/download" in paths
     assert "/api/model/{selector}/remove" in paths
     assert paths["/api/model/operations/{operation_id}"]["get"]["operationId"] == "getModelOperation"
-    assert not any(path.startswith("/api/") for path in paths)
+    assert all(path.startswith("/api/model/") for path in paths)
     assert not any(path.startswith("/api/model-cache") for path in paths)

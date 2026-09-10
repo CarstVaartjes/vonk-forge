@@ -7,9 +7,12 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.operation_response import OperationResponse
+from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.recipe_image_availability_response import RecipeImageAvailabilityResponse
+from ...models.recipe_operator_response import RecipeOperatorResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
+from typing import cast, Union
 
 
 
@@ -25,7 +28,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/recipes/operations/{operation_id}".format(operation_id=operation_id,),
+        "url": "/api/recipe/operations/{operation_id}".format(operation_id=operation_id,),
     }
 
 
@@ -33,13 +36,44 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[OperationResponse, RequestValidationProblem]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     if response.status_code == 200:
-        response_200 = OperationResponse.from_dict(response.json())
+        def _parse_response_200(data: object) -> Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_200_type_0 = RecipeImageAvailabilityResponse.from_dict(data)
 
 
+
+                return response_200_type_0
+            except: # noqa: E722
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_200_type_1 = RecipeOperatorResponse.from_dict(data)
+
+
+
+            return response_200_type_1
+
+        response_200 = _parse_response_200(response.json())
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 404:
+        response_404 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
 
     if response.status_code == 422:
         response_422 = RequestValidationProblem.from_dict(response.json())
@@ -48,13 +82,20 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_422
 
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[OperationResponse, RequestValidationProblem]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -68,8 +109,10 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[OperationResponse, RequestValidationProblem]]:
+) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     """ Get Operation
+
+     Observe a submitted recipe mutation; any authenticated actor may read it.
 
     Args:
         operation_id (str):
@@ -79,7 +122,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[OperationResponse, RequestValidationProblem]]
+        Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]
      """
 
 
@@ -99,8 +142,10 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[OperationResponse, RequestValidationProblem]]:
+) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     """ Get Operation
+
+     Observe a submitted recipe mutation; any authenticated actor may read it.
 
     Args:
         operation_id (str):
@@ -110,7 +155,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[OperationResponse, RequestValidationProblem]
+        Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]
      """
 
 
@@ -125,8 +170,10 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[OperationResponse, RequestValidationProblem]]:
+) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     """ Get Operation
+
+     Observe a submitted recipe mutation; any authenticated actor may read it.
 
     Args:
         operation_id (str):
@@ -136,7 +183,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[OperationResponse, RequestValidationProblem]]
+        Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]
      """
 
 
@@ -156,8 +203,10 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[OperationResponse, RequestValidationProblem]]:
+) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]]:
     """ Get Operation
+
+     Observe a submitted recipe mutation; any authenticated actor may read it.
 
     Args:
         operation_id (str):
@@ -167,7 +216,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[OperationResponse, RequestValidationProblem]
+        Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse']]
      """
 
 

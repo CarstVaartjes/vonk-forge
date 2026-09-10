@@ -8,11 +8,10 @@ from ..types import UNSET, Unset
 
 from ..models.fleet_profile_application_progress_child_source_type_0 import check_fleet_profile_application_progress_child_source_type_0
 from ..models.fleet_profile_application_progress_child_source_type_0 import FleetProfileApplicationProgressChildSourceType0
-from ..models.fleet_profile_application_progress_operation_kind_type_0 import check_fleet_profile_application_progress_operation_kind_type_0
-from ..models.fleet_profile_application_progress_operation_kind_type_0 import FleetProfileApplicationProgressOperationKindType0
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Literal, cast
 from typing import Union
 
 if TYPE_CHECKING:
@@ -20,7 +19,6 @@ if TYPE_CHECKING:
   from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
   from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
   from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-  from ..models.fleet_profile_library_placement_context import FleetProfileLibraryPlacementContext
   from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
 
 
@@ -43,8 +41,7 @@ class FleetProfileApplicationProgress:
             completed_steps (Union[Unset, int]):  Default: 0.
             current_label (Union[None, Unset, str]):
             intended_profile (Union['FleetProfileIntendedConfiguration', None, Unset]):
-            library_placement (Union['FleetProfileLibraryPlacementContext', None, Unset]):
-            operation_kind (Union[FleetProfileApplicationProgressOperationKindType0, None, Unset]):
+            operation_kind (Union[Literal['fleet-profile.apply'], None, Unset]):
             retry_of_application_id (Union[None, Unset, str]):
             step_results (Union[Unset, FleetProfileApplicationProgressStepResults]):
             switch_adapter (Union['FleetProfileSwitchAdapterState', None, Unset]):
@@ -58,8 +55,7 @@ class FleetProfileApplicationProgress:
     completed_steps: Union[Unset, int] = 0
     current_label: Union[None, Unset, str] = UNSET
     intended_profile: Union['FleetProfileIntendedConfiguration', None, Unset] = UNSET
-    library_placement: Union['FleetProfileLibraryPlacementContext', None, Unset] = UNSET
-    operation_kind: Union[FleetProfileApplicationProgressOperationKindType0, None, Unset] = UNSET
+    operation_kind: Union[Literal['fleet-profile.apply'], None, Unset] = UNSET
     retry_of_application_id: Union[None, Unset, str] = UNSET
     step_results: Union[Unset, 'FleetProfileApplicationProgressStepResults'] = UNSET
     switch_adapter: Union['FleetProfileSwitchAdapterState', None, Unset] = UNSET
@@ -74,7 +70,6 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-        from ..models.fleet_profile_library_placement_context import FleetProfileLibraryPlacementContext
         from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
         assignments: Union[Unset, dict[str, Any]] = UNSET
         if not isinstance(self.assignments, Unset):
@@ -114,19 +109,9 @@ class FleetProfileApplicationProgress:
         else:
             intended_profile = self.intended_profile
 
-        library_placement: Union[None, Unset, dict[str, Any]]
-        if isinstance(self.library_placement, Unset):
-            library_placement = UNSET
-        elif isinstance(self.library_placement, FleetProfileLibraryPlacementContext):
-            library_placement = self.library_placement.to_dict()
-        else:
-            library_placement = self.library_placement
-
-        operation_kind: Union[None, Unset, str]
+        operation_kind: Union[Literal['fleet-profile.apply'], None, Unset]
         if isinstance(self.operation_kind, Unset):
             operation_kind = UNSET
-        elif isinstance(self.operation_kind, str):
-            operation_kind = self.operation_kind
         else:
             operation_kind = self.operation_kind
 
@@ -169,8 +154,6 @@ class FleetProfileApplicationProgress:
             field_dict["current_label"] = current_label
         if intended_profile is not UNSET:
             field_dict["intended_profile"] = intended_profile
-        if library_placement is not UNSET:
-            field_dict["library_placement"] = library_placement
         if operation_kind is not UNSET:
             field_dict["operation_kind"] = operation_kind
         if retry_of_application_id is not UNSET:
@@ -192,7 +175,6 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-        from ..models.fleet_profile_library_placement_context import FleetProfileLibraryPlacementContext
         from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
         d = dict(src_dict)
         _assignments = d.pop("assignments", UNSET)
@@ -279,42 +261,16 @@ class FleetProfileApplicationProgress:
         intended_profile = _parse_intended_profile(d.pop("intended_profile", UNSET))
 
 
-        def _parse_library_placement(data: object) -> Union['FleetProfileLibraryPlacementContext', None, Unset]:
+        def _parse_operation_kind(data: object) -> Union[Literal['fleet-profile.apply'], None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                library_placement_type_0 = FleetProfileLibraryPlacementContext.from_dict(data)
-
-
-
-                return library_placement_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['FleetProfileLibraryPlacementContext', None, Unset], data)
-
-        library_placement = _parse_library_placement(d.pop("library_placement", UNSET))
-
-
-        def _parse_operation_kind(data: object) -> Union[FleetProfileApplicationProgressOperationKindType0, None, Unset]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, str):
-                    raise TypeError()
-                operation_kind_type_0 = check_fleet_profile_application_progress_operation_kind_type_0(data)
-
-
-
-                return operation_kind_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union[FleetProfileApplicationProgressOperationKindType0, None, Unset], data)
+            operation_kind_type_0 = cast(Literal['fleet-profile.apply'] , data)
+            if operation_kind_type_0 != 'fleet-profile.apply':
+                raise ValueError(f"operation_kind_type_0 must match const 'fleet-profile.apply', got '{operation_kind_type_0}'")
+            return operation_kind_type_0
+            return cast(Union[Literal['fleet-profile.apply'], None, Unset], data)
 
         operation_kind = _parse_operation_kind(d.pop("operation_kind", UNSET))
 
@@ -369,7 +325,6 @@ class FleetProfileApplicationProgress:
             completed_steps=completed_steps,
             current_label=current_label,
             intended_profile=intended_profile,
-            library_placement=library_placement,
             operation_kind=operation_kind,
             retry_of_application_id=retry_of_application_id,
             step_results=step_results,
