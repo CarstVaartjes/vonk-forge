@@ -1980,15 +1980,17 @@ class SparkLifecycle:
             identity = summary["identity"]
             recipe_id = identity.get("recipe_id")
             revision_id = identity.get("recipe_revision_id")
+            recipe_selector = summary.get("selector")
             if (
                 not isinstance(recipe_id, str)
                 or UUID.fullmatch(recipe_id) is None
                 or not isinstance(revision_id, str)
                 or UUID.fullmatch(revision_id) is None
+                or recipe_selector != f"{fixture.publisher}/{fixture.slug}"
             ):
                 raise LifecycleError("synthetic canary Recipe identity is invalid")
             _, detail_payload = self.control.request(
-                "GET", f"/api/recipe/{recipe_id}"
+                "GET", f"/api/recipe/{recipe_selector}"
             )
             detail = require_object(detail_payload, "synthetic canary Recipe detail")
             detail_identity = detail.get("identity")
@@ -2015,7 +2017,7 @@ class SparkLifecycle:
                 )
             _, download_payload = self.control.request(
                 "POST",
-                f"/api/recipe/{recipe_id}/download",
+                f"/api/recipe/{recipe_selector}/download",
                 {
                     "schema_version": 2,
                     "request_key": self._canary_request_key(
@@ -2055,7 +2057,7 @@ class SparkLifecycle:
                 "favorite": False,
                 "assignments": [
                     {
-                        "recipe_selector": recipe_id,
+                        "recipe_selector": recipe_selector,
                         "spark_ids": [node_id],
                         "assignment_name": fixture.slug,
                         "desired_state": "running",
