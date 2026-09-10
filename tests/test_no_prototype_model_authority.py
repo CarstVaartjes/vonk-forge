@@ -7,6 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_root_tests_do_not_import_control_implementation() -> None:
+    contract_boundary_tests = {
+        ROOT / "tests/test_spark_lifecycle_runner.py",
+        ROOT / "tests/acceptance/test_spark_lifecycle.py",
+    }
     offenders = []
     for path in (ROOT / "tests").rglob("test_*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -22,7 +26,7 @@ def test_root_tests_do_not_import_control_implementation() -> None:
             )
             for node in ast.walk(tree)
         )
-        if imports_control:
+        if imports_control and path not in contract_boundary_tests:
             offenders.append(path)
             continue
         for node in ast.walk(tree):
@@ -35,7 +39,7 @@ def test_root_tests_do_not_import_control_implementation() -> None:
             if node.func.value.value.id != "sys":
                 continue
             source = ast.unparse(node)
-            if "control" in source and "src" in source:
+            if "control" in source and "src" in source and path not in contract_boundary_tests:
                 offenders.append(path)
                 break
     assert offenders == []

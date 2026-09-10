@@ -32,9 +32,9 @@ use crate::{
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
-    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult,
-    RecipeOperationRequest, RecipeStartPhase, RecipeStartRequest, RecipeStopResult,
-    RecipeUninstallResult, canonical_json, hex_sha256,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
+    RecipeStartPhase, RecipeStartRequest, RecipeStopResult, RecipeUninstallResult, canonical_json,
+    hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -3224,14 +3224,16 @@ mod tests {
             node_id: NODE_ID.to_owned(),
             operation: "recipe.uninstall".parse().unwrap(),
             operation_id: Uuid::new_v4(),
-            payload_digest: hex_sha256(&canonical_json(&serde_json::json!({
-                "schema_version": 1,
-                "installation_id": installation_id,
-                "recipe_content_sha256": recipe_content_sha256,
-                "cleanup_model_content_sha256": model_content_sha256,
-                "plan_digest": "b".repeat(64),
-            }))
-            .unwrap()),
+            payload_digest: hex_sha256(
+                &canonical_json(&serde_json::json!({
+                    "schema_version": 1,
+                    "installation_id": installation_id,
+                    "recipe_content_sha256": recipe_content_sha256,
+                    "cleanup_model_content_sha256": model_content_sha256,
+                    "plan_digest": "b".repeat(64),
+                }))
+                .unwrap(),
+            ),
             payload: serde_json::from_value(serde_json::json!({
                 "schema_version": 1,
                 "installation_id": installation_id,

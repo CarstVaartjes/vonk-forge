@@ -977,7 +977,7 @@ export interface components {
          * AgentOperation
          * @enum {string}
          */
-        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.model-uninstall.v1";
+        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall";
         /** AgentOperationChange */
         AgentOperationChange: {
             /** Entity Id */

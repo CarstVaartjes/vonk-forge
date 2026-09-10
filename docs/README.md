@@ -48,7 +48,6 @@ flowchart LR
 - [Tailscale ingress and fresh-install preflight](runbooks/tailscale.md)
 - [Controller operations](runbooks/control-plane-operations.md)
 - [`vonkctl` controller CLI](runbooks/vonkctl.md)
-- [Fleet recipe qualification](runbooks/fleet-recipe-qualification.md)
 - [PostgreSQL authority administration](runbooks/authority-administration.md)
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Agent installation and enrollment](operations/install-vonk-agent.md)

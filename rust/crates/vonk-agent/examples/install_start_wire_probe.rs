@@ -16,8 +16,8 @@ use std::{
 use vonk_agent::{
     compiled_oci::CompiledOciPaths,
     executor::{
-        recipe_install_success_body, recipe_start_success_body,
-        recipe_stop_success_body, recipe_uninstall_success_body, runtime_arguments_for_plan,
+        recipe_install_success_body, recipe_start_success_body, recipe_stop_success_body,
+        recipe_uninstall_success_body, runtime_arguments_for_plan,
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
 };
@@ -85,13 +85,16 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
     let result = match request {
         RecipeOperationRequest::Install(request) => {
-            request.compiled_execution_plan.validate()
+            request
+                .compiled_execution_plan
+                .validate()
                 .map_err(|_| "compiled execution plan is invalid".to_owned())?;
             recipe_install_success_body(request.expected_bytes)
         }
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
-            spec.validate().map_err(|_| "compiled execution plan is invalid".to_owned())?;
+            spec.validate()
+                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
             let plan = runtime_plan(&request, &spec)?;
             let runtime_arguments = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success_body(
@@ -104,12 +107,10 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         }
         RecipeOperationRequest::Stop(_request) => recipe_stop_success_body(),
         RecipeOperationRequest::Uninstall(_request) => recipe_uninstall_success_body(0),
-        _ => {
-            return Err(
-                "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
-                    .to_owned(),
-            )
-        }
+        _ => return Err(
+            "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
+                .to_owned(),
+        ),
     };
     let message = AgentResult {
         attempt: claim.attempt,
