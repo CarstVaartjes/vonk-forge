@@ -10,6 +10,7 @@ from ..types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, Union, cast
+from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class ModelDetailResponse:
             usage (list[str]):
             variant (str):
             version (str):
+            alignment (Union[Unset, list[str]]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
@@ -55,6 +57,7 @@ class ModelDetailResponse:
     usage: list[str]
     variant: str
     version: str
+    alignment: Union[Unset, list[str]] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -90,6 +93,12 @@ class ModelDetailResponse:
 
         version = self.version
 
+        alignment: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.alignment, Unset):
+            alignment = self.alignment
+
+
+
         schema_version = self.schema_version
 
 
@@ -108,6 +117,8 @@ class ModelDetailResponse:
             "variant": variant,
             "version": version,
         })
+        if alignment is not UNSET:
+            field_dict["alignment"] = alignment
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -160,6 +171,9 @@ class ModelDetailResponse:
 
         version = d.pop("version")
 
+        alignment = cast(list[str], d.pop("alignment", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -176,6 +190,7 @@ class ModelDetailResponse:
             usage=usage,
             variant=variant,
             version=version,
+            alignment=alignment,
             schema_version=schema_version,
         )
 

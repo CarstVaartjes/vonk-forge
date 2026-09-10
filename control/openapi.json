@@ -6585,6 +6585,16 @@
       "LibraryFacetValues": {
         "additionalProperties": false,
         "properties": {
+          "alignment": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Alignment",
+            "type": "array"
+          },
           "family": {
             "items": {
               "maxLength": 128,
@@ -6595,6 +6605,16 @@
             "title": "Family",
             "type": "array"
           },
+          "publisher": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 512,
+            "title": "Publisher",
+            "type": "array"
+          },
           "quantization": {
             "items": {
               "maxLength": 64,
@@ -6603,6 +6623,14 @@
             },
             "maxItems": 512,
             "title": "Quantization",
+            "type": "array"
+          },
+          "sparks": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 64,
+            "title": "Sparks",
             "type": "array"
           },
           "usage": {
@@ -6783,6 +6811,16 @@
         "additionalProperties": false,
         "description": "One exact canonical model variant with operator-facing projections.",
         "properties": {
+          "alignment": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Alignment",
+            "type": "array"
+          },
           "document": {
             "$ref": "#/components/schemas/ModelDefinition"
           },
@@ -6938,6 +6976,19 @@
         "additionalProperties": false,
         "description": "One exact canonical recipe and its model/resource/local projections.",
         "properties": {
+          "alignment": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment"
+          },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
           },
@@ -6957,6 +7008,11 @@
             "minItems": 1,
             "title": "Model Selectors",
             "type": "array"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
           },
           "resources": {
             "$ref": "#/components/schemas/LibraryResourceProjection"
@@ -6997,7 +7053,8 @@
           "usage",
           "resources",
           "local",
-          "updated_at"
+          "updated_at",
+          "node_count"
         ],
         "title": "LibraryRecipeProjection",
         "type": "object"
@@ -8047,6 +8104,16 @@
       "ModelDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "alignment": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Alignment",
+            "type": "array"
+          },
           "document": {
             "$ref": "#/components/schemas/ModelDefinition"
           },
@@ -10477,6 +10544,19 @@
       "RecipeDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "alignment": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alignment"
+          },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
           },
@@ -10504,6 +10584,11 @@
             "minItems": 1,
             "title": "Model Selectors",
             "type": "array"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
           },
           "resources": {
             "$ref": "#/components/schemas/LibraryResourceProjection"
@@ -10545,6 +10630,7 @@
           "resources",
           "local",
           "updated_at",
+          "node_count",
           "model_documents"
         ],
         "title": "RecipeDetailResponse",
@@ -21351,6 +21437,46 @@
           },
           {
             "in": "query",
+            "name": "publisher",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Publisher"
+            }
+          },
+          {
+            "in": "query",
+            "name": "alignment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Alignment"
+            }
+          },
+          {
+            "in": "query",
             "name": "search",
             "required": false,
             "schema": {
@@ -22752,6 +22878,66 @@
                 }
               ],
               "title": "Usage"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publisher",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Publisher"
+            }
+          },
+          {
+            "in": "query",
+            "name": "alignment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Alignment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sparks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sparks"
             }
           },
           {

@@ -452,6 +452,7 @@ class LibraryProjection:
         revision: CatalogDocumentRevision,
         document: ModelDefinition,
         snapshot: Mapping[str, Mapping[str, object]],
+        alignment: Sequence[str] = (),
     ) -> LibraryModelProjection:
         return LibraryModelProjection(
             selector=self.selector(document.identity.publisher, document.identity.slug),
@@ -467,6 +468,7 @@ class LibraryProjection:
                 revision.content_digest, kind="model", snapshot=snapshot
             ),
             updated_at=_utc(revision.created_at),
+            alignment=sorted(set(alignment)),
         )
 
     def _recipe_projection(
@@ -506,7 +508,27 @@ class LibraryProjection:
                 revision.content_digest, kind="recipe", snapshot=snapshot
             ),
             updated_at=_utc(revision.created_at),
+            alignment=document.metadata.alignment,
+            node_count=document.topology.node_count,
         )
+
+    @staticmethod
+    def _alignment_by_model(
+        recipe_rows: Sequence[CatalogDocumentRevision],
+    ) -> dict[tuple[str, str], set[str]]:
+        """Map each model publisher/slug to the alignments of recipes serving it."""
+
+        alignments: dict[tuple[str, str], set[str]] = {}
+        for row in recipe_rows:
+            document = _canonical_recipe(row)
+            alignment = document.metadata.alignment
+            if alignment is None:
+                continue
+            for selection in document.models:
+                alignments.setdefault(
+                    (selection.model.publisher, selection.model.slug), set()
+                ).add(alignment)
+        return alignments
 
     def _catalog_documents(
         self,
@@ -556,6 +578,32 @@ class LibraryProjection:
             family=sorted({model.family for model in models}),
             version=sorted({model.version for model in models}),
             quantization=sorted({model.quantization for model in models}),
+            publisher=sorted({model.identity.publisher for model in models}),
+            alignment=sorted({value for model in models for value in model.alignment}),
+        )
+
+    def _recipe_facet_values(
+        self,
+        models: Sequence[LibraryModelProjection],
+        recipes: Sequence[LibraryRecipeProjection],
+    ) -> LibraryFacetValues:
+        """Recipe facets combine the model vocabulary with recipe-only facts."""
+
+        model_facets = self._facet_values(models)
+        return LibraryFacetValues(
+            usage=model_facets.usage,
+            family=model_facets.family,
+            version=model_facets.version,
+            quantization=model_facets.quantization,
+            publisher=sorted(
+                {recipe.identity.publisher for recipe in recipes}
+                | set(model_facets.publisher)
+            ),
+            alignment=sorted(
+                {recipe.alignment for recipe in recipes if recipe.alignment}
+                | set(model_facets.alignment)
+            ),
+            sparks=sorted({recipe.node_count for recipe in recipes}),
         )
 
     def models(
@@ -567,6 +615,8 @@ class LibraryProjection:
         family: Sequence[str] = (),
         version: Sequence[str] = (),
         quantization: Sequence[str] = (),
+        publisher: Sequence[str] = (),
+        alignment: Sequence[str] = (),
         search: str | None = None,
         updated_since: datetime | None = None,
         sort: str = "updated",
@@ -577,9 +627,19 @@ class LibraryProjection:
         if sort not in {"updated", "name"}:
             raise ValueError("model library sort is invalid")
         snapshot = self._local_state_snapshot()
-        model_rows, _ = self._documents_for_snapshot(snapshot)
+        model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+        alignment_by_model = self._alignment_by_model(recipe_rows)
         entries = [
-            self._model_projection(row, _canonical_model(row), snapshot)
+            self._model_projection(
+                row,
+                model := _canonical_model(row),
+                snapshot,
+                alignment=sorted(
+                    alignment_by_model.get(
+                        (model.identity.publisher, model.identity.slug), ()
+                    )
+                ),
+            )
             for row in model_rows
         ]
         if local_only:
@@ -596,6 +656,8 @@ class LibraryProjection:
             and self._matches_any([item.family], family)
             and self._matches_any([item.version], version)
             and self._matches_any([item.quantization], quantization)
+            and self._matches_any([item.identity.publisher], publisher)
+            and self._matches_any(item.alignment, alignment)
             and (
                 wanted_search is None
                 or wanted_search in item.selector.casefold()
@@ -615,6 +677,8 @@ class LibraryProjection:
                     "family": list(family),
                     "version": list(version),
                     "quantization": list(quantization),
+                    "publisher": list(publisher),
+                    "alignment": list(alignment),
                     "search": search,
                     "updated_since": None
                     if updated_since is None
@@ -647,7 +711,8 @@ class LibraryProjection:
             facets=self._facet_values(entries), next_cursor=next_cursor,
             filters={
                 "usage": list(usage), "family": list(family), "version": list(version),
-                "quantization": list(quantization), "search": search,
+                "quantization": list(quantization), "publisher": list(publisher),
+                "alignment": list(alignment), "search": search,
                 "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
                 "sort": sort, "local_only": local_only,
             }, freshness_policy=self._freshness,
@@ -665,9 +730,19 @@ class LibraryProjection:
 
     def model_detail(self, selector: str) -> ModelDetailResponse:
         snapshot = self._local_state_snapshot()
-        model_rows, _ = self._documents_for_snapshot(snapshot)
+        model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
+        alignment_by_model = self._alignment_by_model(recipe_rows)
         entries = [
-            self._model_projection(row, _canonical_model(row), snapshot)
+            self._model_projection(
+                row,
+                model := _canonical_model(row),
+                snapshot,
+                alignment=sorted(
+                    alignment_by_model.get(
+                        (model.identity.publisher, model.identity.slug), ()
+                    )
+                ),
+            )
             for row in model_rows
         ]
         entry = self._resolve_selector(
@@ -685,6 +760,9 @@ class LibraryProjection:
         model_selector: str | None = None,
         all_models: bool = False,
         usage: Sequence[str] = (),
+        publisher: Sequence[str] = (),
+        alignment: Sequence[str] = (),
+        sparks: Sequence[int] = (),
         search: str | None = None,
         updated_since: datetime | None = None,
         sort: str = "updated",
@@ -700,8 +778,18 @@ class LibraryProjection:
             (model.identity.publisher, model.identity.slug, row.content_digest): model
             for row, model in zip(model_rows, models, strict=True)
         }
+        alignment_by_model = self._alignment_by_model(recipe_rows)
         model_entries = [
-            self._model_projection(row, model, snapshot)
+            self._model_projection(
+                row,
+                model,
+                snapshot,
+                alignment=sorted(
+                    alignment_by_model.get(
+                        (model.identity.publisher, model.identity.slug), ()
+                    )
+                ),
+            )
             for row, model in zip(model_rows, models, strict=True)
         ]
         selected_keys: set[tuple[str, str, str]] | None = None
@@ -736,6 +824,11 @@ class LibraryProjection:
                 )
             )
             and self._matches_any(item.usage, usage)
+            and self._matches_any([item.identity.publisher], publisher)
+            and self._matches_any(
+                [item.alignment] if item.alignment else [], alignment
+            )
+            and (not sparks or item.node_count in sparks)
             and (
                 wanted_search is None
                 or wanted_search in item.selector.casefold()
@@ -754,6 +847,9 @@ class LibraryProjection:
                     "model": model_selector,
                     "all_models": all_models,
                     "usage": list(usage),
+                    "publisher": list(publisher),
+                    "alignment": list(alignment),
+                    "sparks": list(sparks),
                     "search": search,
                     "updated_since": None
                     if updated_since is None
@@ -778,9 +874,11 @@ class LibraryProjection:
             )
         return RecipeLibraryResponse(
             generated_at=_utc(self._clock()), recipes=page,
-            facets=self._facet_values(model_entries), next_cursor=next_cursor,
+            facets=self._recipe_facet_values(model_entries, entries), next_cursor=next_cursor,
             filters={
                 "model": model_selector, "all_models": all_models, "usage": list(usage),
+                "publisher": list(publisher), "alignment": list(alignment),
+                "sparks": [str(value) for value in sparks],
                 "search": search,
                 "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
                 "sort": sort,

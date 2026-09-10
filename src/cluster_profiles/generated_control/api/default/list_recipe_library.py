@@ -28,6 +28,9 @@ def _get_kwargs(
     model: Union[None, Unset, str] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
+    sparks: Union[None, Unset, list[int]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
@@ -67,6 +70,39 @@ def _get_kwargs(
     else:
         json_usage = usage
     params["usage"] = json_usage
+
+    json_publisher: Union[None, Unset, list[str]]
+    if isinstance(publisher, Unset):
+        json_publisher = UNSET
+    elif isinstance(publisher, list):
+        json_publisher = publisher
+
+
+    else:
+        json_publisher = publisher
+    params["publisher"] = json_publisher
+
+    json_alignment: Union[None, Unset, list[str]]
+    if isinstance(alignment, Unset):
+        json_alignment = UNSET
+    elif isinstance(alignment, list):
+        json_alignment = alignment
+
+
+    else:
+        json_alignment = alignment
+    params["alignment"] = json_alignment
+
+    json_sparks: Union[None, Unset, list[int]]
+    if isinstance(sparks, Unset):
+        json_sparks = UNSET
+    elif isinstance(sparks, list):
+        json_sparks = sparks
+
+
+    else:
+        json_sparks = sparks
+    params["sparks"] = json_sparks
 
     json_search: Union[None, Unset, str]
     if isinstance(search, Unset):
@@ -157,6 +193,9 @@ def sync_detailed(
     model: Union[None, Unset, str] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
+    sparks: Union[None, Unset, list[int]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
@@ -170,6 +209,9 @@ def sync_detailed(
         model (Union[None, Unset, str]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
+        sparks (Union[None, Unset, list[int]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
@@ -189,6 +231,9 @@ cursor=cursor,
 model=model,
 all_models=all_models,
 usage=usage,
+publisher=publisher,
+alignment=alignment,
+sparks=sparks,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -209,6 +254,9 @@ def sync(
     model: Union[None, Unset, str] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
+    sparks: Union[None, Unset, list[int]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
@@ -222,6 +270,9 @@ def sync(
         model (Union[None, Unset, str]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
+        sparks (Union[None, Unset, list[int]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
@@ -242,6 +293,9 @@ cursor=cursor,
 model=model,
 all_models=all_models,
 usage=usage,
+publisher=publisher,
+alignment=alignment,
+sparks=sparks,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -256,6 +310,9 @@ async def asyncio_detailed(
     model: Union[None, Unset, str] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
+    sparks: Union[None, Unset, list[int]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
@@ -269,6 +326,9 @@ async def asyncio_detailed(
         model (Union[None, Unset, str]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
+        sparks (Union[None, Unset, list[int]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
@@ -288,6 +348,9 @@ cursor=cursor,
 model=model,
 all_models=all_models,
 usage=usage,
+publisher=publisher,
+alignment=alignment,
+sparks=sparks,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -308,6 +371,9 @@ async def asyncio(
     model: Union[None, Unset, str] = UNSET,
     all_models: Union[Unset, bool] = False,
     usage: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
+    sparks: Union[None, Unset, list[int]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
@@ -321,6 +387,9 @@ async def asyncio(
         model (Union[None, Unset, str]):
         all_models (Union[Unset, bool]):  Default: False.
         usage (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
+        sparks (Union[None, Unset, list[int]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
@@ -341,6 +410,9 @@ cursor=cursor,
 model=model,
 all_models=all_models,
 usage=usage,
+publisher=publisher,
+alignment=alignment,
+sparks=sparks,
 search=search,
 updated_since=updated_since,
 sort=sort,
