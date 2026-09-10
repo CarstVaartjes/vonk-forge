@@ -263,6 +263,16 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     assert run._fleet_snapshot() == expected_payload
 
 
+def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
+    source = ENTRY_POINT.read_text(encoding="utf-8")
+    start = source.index('f"/api/recipe/{recipe_selector}/download"')
+    end = source.index("download = self._await_recipe_download", start)
+    request = source[start:end]
+
+    assert '"with_model": True' in request
+    assert '"force":' not in request
+
+
 def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
     tmp_path: Path,
 ) -> None:

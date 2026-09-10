@@ -2023,7 +2023,6 @@ class SparkLifecycle:
                     "request_key": self._canary_request_key(
                         fixture, node_id, "recipe-download"
                     ),
-                    "force": False,
                     "with_model": True,
                 },
                 allowed=(200, 201, 202),
