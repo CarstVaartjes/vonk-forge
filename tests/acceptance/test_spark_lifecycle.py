@@ -1828,7 +1828,9 @@ class SparkLifecycle:
         )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
-        from cluster_profiles.generated_control.models.enrollment_grant_response import EnrollmentGrantResponse
+        from cluster_profiles.generated_control.models.enrollment_grant_response import (
+            EnrollmentGrantResponse,
+        )
 
         assert self.control is not None
         try:
@@ -2305,7 +2307,9 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.recipe_image_availability_api import RecipeImageAvailabilityResponse
+        from vonk_control.recipe_image_availability_api import (
+            RecipeImageAvailabilityResponse,
+        )
 
         try:
             typed = RecipeImageAvailabilityResponse.model_validate_json(_canonical(operation))
@@ -2785,6 +2789,8 @@ class SparkLifecycle:
                 inventory = agent.get("inventory")
                 if not isinstance(inventory, dict) or inventory.get("freshness") not in {"fresh", "stale"}:
                     agent_mismatches.append("inventory")
+                elif "recipe.build.v1" not in inventory.get("capabilities", []):
+                    agent_mismatches.append("recipe_builder_capability")
                 if agent_mismatches:
                     raise LifecycleError(
                         "controller direct-agent identity is invalid: "
