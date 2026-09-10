@@ -291,7 +291,7 @@ def test_generated_python_models_compile() -> None:
 def test_profile_load_contract_does_not_accept_client_revision_pins() -> None:
     components = json.loads(OPENAPI.read_text())["components"]["schemas"]
     assert set(components["FleetProfileLoadRequest"]["properties"]) == {"request_key", "dry_run"}
-    assert {"plan_digest", "scope", "assignments"} <= set(components["FleetProfileApplicationView"]["properties"])
+    assert {"plan_digest", "profile_digest", "progress"} <= set(components["FleetProfileApplicationView"]["properties"])
     assert "RunPreviewRequest" not in components
 
 
