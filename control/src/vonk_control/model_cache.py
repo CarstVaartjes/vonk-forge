@@ -46,6 +46,7 @@ from .model_cache_contract import (
     ModelCacheOperationResult,
     ModelCacheRepairCheckpoint,
     ModelCacheTransfer,
+    UUID_PATTERN,
     parse_model_cache_payload,
     parse_model_cache_result,
 )
@@ -60,6 +61,8 @@ from .models import (
     ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
+    RuntimeImageAuthorization,
+    RuntimeImageReceipt as RuntimeImageReceiptRow,
 )
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
@@ -68,6 +71,7 @@ from .strict_json import serialize_json_value
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
 _DIGEST_LENGTH = 64
+_DIGEST_PATTERN = r"[0-9a-f]{64}"
 _MAX_ARTIFACTS = 1024
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
@@ -927,7 +931,7 @@ def _revision_identity(row: CatalogDocumentRevision | None) -> dict[str, object]
 
 
 class ModelCacheService:
-    """Resolve, download, verify, repair and evict NAS model artifact sets."""
+    """Resolve, download, verify, repair and remove NAS model artifacts."""
 
     def __init__(
         self,
@@ -1140,6 +1144,451 @@ class ModelCacheService:
         _validate_manifest(manifest)
         return manifest
 
+    def _resolve_model_selector(self, selector: str) -> str:
+        """Resolve one operator selector to an active model content digest.
+
+        The projection service owns the human-facing list/detail response;
+        this mutation boundary still resolves the same canonical identities so
+        a request cannot evict a guessed or ambiguous cache entry.  Digests,
+        catalog UUIDs, ``publisher/slug`` and an exact slug are accepted.
+        """
+
+        if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
+            raise ModelCacheResolutionError(
+                "model_cache.selector_invalid", "model selector is required"
+            )
+        selector = selector.strip().casefold()
+        with self._session() as session:
+            if re.fullmatch(_DIGEST_PATTERN, selector):
+                rows = list(
+                    session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.state == "active",
+                            CatalogDocumentRevision.content_digest == selector,
+                        )
+                    )
+                )
+                if not rows:
+                    rows = list(
+                        session.scalars(
+                            select(ModelCacheSet.model_content_sha256).where(
+                                ModelCacheSet.model_content_sha256 == selector
+                            )
+                        )
+                    )
+                if rows:
+                    return selector
+            elif re.fullmatch(UUID_PATTERN, selector):
+                rows = list(
+                    session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.state == "active",
+                            (CatalogDocumentRevision.id == selector)
+                            | (CatalogDocumentRevision.document_id == selector),
+                        )
+                    )
+                )
+            else:
+                publisher = slug = None
+                if "/" in selector:
+                    publisher, slug = selector.split("/", 1)
+                rows = list(
+                    session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.state == "active",
+                            CatalogDocumentRevision.publisher == publisher
+                            if publisher is not None
+                            else CatalogDocumentRevision.slug == selector,
+                            CatalogDocumentRevision.slug == slug
+                            if slug is not None
+                            else True,
+                        )
+                    )
+                )
+            if len(rows) != 1:
+                if not rows:
+                    raise ModelCacheNotFound(
+                        "model_cache.selector_missing", "model selector was not found"
+                    )
+                raise ModelCacheConflict(
+                    "model_cache.selector_ambiguous", "model selector matches multiple models"
+                )
+            digest = rows[0].content_digest
+            if not isinstance(digest, str) or _optional_digest(digest) is None:
+                raise ModelCacheResolutionError(
+                    "model_cache.identity_invalid", "model catalog identity is invalid"
+                )
+            return digest
+
+    def resolve_latest_cached(
+        self,
+        *,
+        recipe_identity: str,
+        model_content_sha256: str | None = None,
+        model_variant: str | None = None,
+    ) -> Mapping[str, object]:
+        """Resolve one logical Recipe to its newest usable cached revision.
+
+        The profile read/load path calls this method for both web and CLI
+        operators.  It is read-only: missing content is reported, never
+        downloaded.  A newer active revision may be uncached; in that case we
+        return the newest compatible cached receipt and mark that a catalog
+        update is available.  If no revision is cached, the newest active
+        revision is returned with unknown (``None``) resource estimates so a
+        load operation can prepare it explicitly.
+        """
+
+        if not isinstance(recipe_identity, str) or not 1 <= len(recipe_identity.strip()) <= 256:
+            raise ModelCacheResolutionError(
+                "model_cache.recipe_identity_invalid", "recipe identity is required"
+            )
+        identity = recipe_identity.strip().casefold()
+        requested_model = _optional_digest(model_content_sha256)
+        if model_variant is not None and (
+            not isinstance(model_variant, str) or not 1 <= len(model_variant.strip()) <= 128
+        ):
+            raise ModelCacheResolutionError(
+                "model_cache.model_variant_invalid", "model variant is invalid"
+            )
+        requested_variant = model_variant.strip() if isinstance(model_variant, str) else None
+
+        with self._session() as session:
+            if re.fullmatch(_DIGEST_PATTERN, identity):
+                seed = session.scalar(select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.content_digest == identity,
+                ))
+            elif re.fullmatch(UUID_PATTERN, identity):
+                seed = session.scalar(select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    (CatalogDocumentRevision.id == identity)
+                    | (CatalogDocumentRevision.document_id == identity),
+                ))
+            elif "/" in identity:
+                publisher, slug = identity.split("/", 1)
+                seed = session.scalar(select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.publisher == publisher,
+                    CatalogDocumentRevision.slug == slug,
+                ).order_by(CatalogDocumentRevision.revision_number.desc()))
+            else:
+                seed = session.scalar(select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.slug == identity,
+                ).order_by(CatalogDocumentRevision.revision_number.desc()))
+            if seed is None:
+                raise ModelCacheResolutionError(
+                    "model_cache.recipe_identity_missing", "recipe identity was not found"
+                )
+
+            revisions = list(session.scalars(select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.document_id == seed.document_id,
+                CatalogDocumentRevision.state == "active",
+            ).order_by(
+                CatalogDocumentRevision.revision_number.desc(),
+                CatalogDocumentRevision.id.desc(),
+            )))
+            if not revisions:
+                raise ModelCacheResolutionError(
+                    "model_cache.recipe_revision_missing", "recipe has no active revision"
+                )
+
+            def compatible_model(revision: CatalogDocumentRevision) -> tuple[str, str | None]:
+                recipe = read_catalog_document(revision)
+                if not isinstance(recipe, RecipeDefinition):
+                    raise ModelCacheResolutionError(
+                        "model_cache.recipe_invalid", "recipe revision is not canonical"
+                    )
+                digests = _recipe_model_content_digests(recipe)
+                if requested_model is not None and requested_model not in digests:
+                    return "", None
+                for digest in digests if requested_model is None else [requested_model]:
+                    model_revision = session.scalar(select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "model",
+                        CatalogDocumentRevision.content_digest == digest,
+                        CatalogDocumentRevision.state == "active",
+                    ))
+                    if model_revision is None:
+                        continue
+                    model = ModelDefinition.model_validate(read_catalog_document(model_revision))
+                    variant = model.identity.variant
+                    if requested_variant is None or variant == requested_variant:
+                        return digest, variant
+                return "", None
+
+            def verified_image(revision_id: str) -> RuntimeImageReceiptRow | None:
+                return session.scalar(select(RuntimeImageReceiptRow).join(
+                    RuntimeImageAuthorization,
+                    RuntimeImageAuthorization.receipt_id == RuntimeImageReceiptRow.id,
+                ).where(
+                    RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                    RuntimeImageAuthorization.state == "authorized",
+                    RuntimeImageReceiptRow.state == "verified",
+                ).order_by(
+                    RuntimeImageReceiptRow.verified_at.desc(),
+                    RuntimeImageReceiptRow.id.desc(),
+                ))
+
+            selected: tuple[CatalogDocumentRevision, str, str | None, RuntimeImageReceiptRow | None] | None = None
+            newest_compatible: CatalogDocumentRevision | None = None
+            for revision in revisions:
+                digest, variant = compatible_model(revision)
+                if not digest:
+                    continue
+                newest_compatible = newest_compatible or revision
+                receipt = verified_image(revision.id)
+                if receipt is not None:
+                    selected = (revision, digest, variant, receipt)
+                    break
+            if selected is None:
+                if newest_compatible is None:
+                    raise ModelCacheConflict(
+                        "model_cache.pin_mismatch",
+                        "no active recipe revision matches the requested model variant",
+                    )
+                revision = newest_compatible
+                digest, variant = compatible_model(revision)
+                receipt = None
+            else:
+                revision, digest, variant, receipt = selected
+
+            model_rows = list(session.scalars(select(ModelCacheSet).where(
+                ModelCacheSet.model_content_sha256 == digest,
+                ModelCacheSet.state == "cached",
+            )))
+            model_set = max(
+                model_rows,
+                key=lambda item: (item.updated_at, item.artifact_set_sha256),
+                default=None,
+            )
+            model_cached = model_set is not None
+            model_expected = model_set.expected_bytes if model_set is not None else None
+            model_verified = model_set.verified_bytes if model_set is not None else None
+
+            recipe_cached = receipt is not None
+            image_bytes = receipt.image_bytes if receipt is not None else None
+            image_digest = receipt.platform_manifest_digest if receipt is not None else None
+            latest = next(
+                (item for item in revisions if item.revision_number > revision.revision_number),
+                None,
+            )
+            additional = (
+                model_expected + image_bytes
+                if isinstance(model_expected, int) and isinstance(image_bytes, int)
+                else None
+            )
+            blockers = []
+            if not recipe_cached:
+                blockers.append("recipe-not-cached")
+            if not model_cached:
+                blockers.append("model-not-cached")
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "recipe": {
+                    "recipe_revision_id": revision.id,
+                    "document_id": revision.document_id,
+                    "publisher": revision.publisher,
+                    "slug": revision.slug,
+                    "revision_number": revision.revision_number,
+                    "content_sha256": revision.content_digest,
+                    "cached": recipe_cached,
+                    "cache_state": "cached" if recipe_cached else "missing",
+                    "artifact_set_sha256": receipt.oci_archive_sha256 if receipt else None,
+                    "expected_bytes": image_bytes,
+                    "verified_bytes": image_bytes,
+                    "source": receipt.source if receipt else None,
+                    "image_digest": image_digest,
+                    "update_available": latest is not None,
+                },
+                "model": {
+                    "content_sha256": digest,
+                    "cached": model_cached,
+                    "cache_state": "cached" if model_cached else "missing",
+                    "artifact_set_sha256": model_set.artifact_set_sha256 if model_set else None,
+                    "expected_bytes": model_expected,
+                    "verified_bytes": model_verified,
+                    "variant": variant,
+                },
+                "resources": {
+                    "per_spark_memory_bytes": None,
+                    "additional_disk_bytes": additional,
+                    "model_bytes": model_expected,
+                    "image_bytes": image_bytes,
+                },
+                "blockers": blockers,
+            }
+
+    def download_model_selector(
+        self,
+        selector: str,
+        *,
+        actor: str,
+        request_key: str,
+        force: bool = False,
+    ) -> CacheOperationView:
+        """Plan and queue a model download from the operator selector."""
+
+        digest = self._resolve_model_selector(selector)
+        manifest = self.resolve_artifact_set(model_content_sha256=digest)
+        preview = self._download_preview_for_manifest(manifest)
+        if preview["blockers"]:
+            raise ModelCacheConflict(
+                "model_cache.download_blocked", "; ".join(str(item) for item in preview["blockers"])
+            )
+        return self.start_download(
+            actor=actor,
+            request_key=request_key,
+            plan_digest=str(preview["plan_digest"]),
+            artifact_set_sha256=manifest.digest,
+            selector=selector,
+            force=force or preview.get("already_cached_bytes", 0) == manifest.expected_bytes,
+        )
+
+    def remove_model_selector(
+        self,
+        selector: str,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> CacheOperationView:
+        """Cancel preparation and remove Controller bytes for one model.
+
+        The removal fence is written to every active transfer before any set,
+        membership, partial file, or unreferenced object is deleted.  Profile
+        rows and Spark-local copies are intentionally not consulted.
+        """
+
+        digest = self._resolve_model_selector(selector)
+        return self._remove_model_content(
+            digest, actor=actor, request_key=request_key, selector=selector
+        )
+
+    def _remove_model_content(
+        self,
+        digest: str,
+        *,
+        actor: str,
+        request_key: str,
+        selector: str,
+    ) -> CacheOperationView:
+        request_key = _request_key(request_key)
+        fence = str(uuid.uuid4())
+        with self._lock, self._session(write=True) as session:
+            existing = session.scalar(
+                select(ModelCacheOperation).where(ModelCacheOperation.request_key == request_key)
+            )
+            if existing is not None:
+                return self._operation_view(existing)
+            rows = list(
+                session.scalars(
+                    select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == digest)
+                )
+            )
+            selected = [row.artifact_set_sha256 for row in rows]
+            active = list(
+                session.scalars(
+                    select(ModelCacheOperation).where(
+                        ModelCacheOperation.artifact_set_sha256.in_(selected or ["0" ]),
+                        ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                        ModelCacheOperation.kind.in_(("download", "repair")),
+                    )
+                )
+            )
+            cancelled = []
+            now = self._clock()
+            for operation in active:
+                payload = _validated_operation_payload(operation)
+                payload["removal_fence"] = fence
+                payload["operator_action"] = "remove-model"
+                payload["selector"] = selector
+                payload.pop("claim", None)
+                operation.payload = _write_operation_payload(operation.kind, payload)
+                operation.state = "cancelled"
+                operation.completed_at = operation.updated_at = now
+                operation.progress = cache_phase(
+                    _validated_operation_progress(operation).model_dump(mode="json"),
+                    "failed", now,
+                )
+                cancelled.append(operation.id)
+                self._transfer_stop(operation.id).set()
+
+            memberships = list(session.scalars(select(ModelCacheSetArtifact)))
+            by_set: dict[str, list[ModelCacheSetArtifact]] = {}
+            for membership in memberships:
+                by_set.setdefault(membership.artifact_set_sha256, []).append(membership)
+            object_digests = {
+                membership.artifact_sha256
+                for set_digest in selected
+                for membership in by_set.get(set_digest, ())
+            }
+            for set_digest in selected:
+                session.query(ModelCacheSetArtifact).filter(
+                    ModelCacheSetArtifact.artifact_set_sha256 == set_digest
+                ).delete(synchronize_session=False)
+                row = session.get(ModelCacheSet, set_digest)
+                if row is not None:
+                    session.delete(row)
+                shutil.rmtree(self._root / "partials" / set_digest, ignore_errors=True)
+            referenced = {
+                membership.artifact_sha256
+                for membership in session.scalars(select(ModelCacheSetArtifact))
+            }
+            reclaimed = 0
+            for artifact in list(session.scalars(select(ModelCacheArtifact))):
+                if artifact.sha256 not in object_digests or artifact.sha256 in referenced:
+                    continue
+                path = self._object_path(artifact.sha256)
+                if path.is_file() and not path.is_symlink():
+                    reclaimed += path.stat().st_size
+                    path.unlink(missing_ok=True)
+                session.delete(artifact)
+            result = {
+                "schema_version": SCHEMA_VERSION,
+                "removed_entries": selected,
+                "reclaimed_bytes": reclaimed,
+                "cancelled_operations": cancelled,
+            }
+            operation = ModelCacheOperation(
+                request_key=request_key,
+                schema_version=SCHEMA_VERSION,
+                kind="remove",
+                state="succeeded",
+                attempt=1,
+                artifact_set_sha256=None,
+                plan_digest=_sha256_json({"action": "remove-model", "selector": selector, "fence": fence}),
+                payload=_write_operation_payload("remove", {
+                    "schema_version": SCHEMA_VERSION,
+                    "source_policy": SOURCE_POLICY,
+                    "selected": selected,
+                    "selected_objects": sorted(object_digests),
+                    "reclaimed_bytes": reclaimed,
+                    "operator_action": "remove-model",
+                    "selector": selector,
+                    "removal_fence": fence,
+                    "result": result,
+                }),
+                progress=cache_progress({
+                    "schema_version": SCHEMA_VERSION,
+                    "phase": "completed",
+                    "completed_artifacts": len(selected),
+                    "total_artifacts": len(selected),
+                    "downloaded_bytes": reclaimed,
+                    "expected_bytes": reclaimed,
+                    "current_artifact_key": None,
+                }, previous=None, now=now),
+                actor=actor,
+                created_at=now,
+                updated_at=now,
+                completed_at=now,
+            )
+            session.add(operation)
+            session.flush()
+            return self._operation_view(operation)
+
     def _recipe_document(
         self,
         session: Session,
@@ -1342,7 +1791,9 @@ class ModelCacheService:
         model_content_sha256: str | None = None,
         recipe_revision_sha256: str | None = None,
         recipe_revision_id: str | None = None,
+        selector: str | None = None,
         artifacts: Sequence[Mapping[str, object]] | None = None,
+        force: bool = False,
         interrupt_after_bytes: int | None = None,
     ) -> CacheOperationView:
         request_key = _request_key(request_key)
@@ -1386,9 +1837,9 @@ class ModelCacheService:
                 "model_cache.download_blocked",
                 "; ".join(str(item) for item in preview["blockers"]),
             )
-        transfer = preview.get("_transfer")
+        transfer = None if force else preview.get("_transfer")
         if not isinstance(transfer, Mapping):
-            transfer = self._transfer_state_for_manifest(manifest, force=False)
+            transfer = self._transfer_state_for_manifest(manifest, force=force)
         payload = {
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
@@ -1397,7 +1848,11 @@ class ModelCacheService:
             "plan_digest": requested_plan,
             "transfer": dict(transfer),
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
+            "force_refresh": bool(force),
         }
+        if selector is not None:
+            payload["selector"] = selector
+            payload["operator_action"] = "download-model"
         payload = _write_operation_payload("download", payload)
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
@@ -1444,7 +1899,7 @@ class ModelCacheService:
         if interrupt_after_bytes is not None:
             self._run_download(
                 operation_id,
-                force=False,
+                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         return self.get_operation(operation_id)
@@ -1757,6 +2212,7 @@ class ModelCacheService:
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
             operation_payload = _validated_operation_payload(operation)
+            force = bool(operation_payload.get("force_refresh") is True) or force
             operation_set_digest = operation.artifact_set_sha256
             manifest = ArtifactSetManifest.from_document(operation_payload["manifest"])
             set_digest = operation_set_digest
@@ -1774,11 +2230,11 @@ class ModelCacheService:
         self._set_operation_state(operation_id, "running")
         completed = 0
         try:
-            with self._session(write=True) as session:
-                self._ensure_set(
-                    session,
-                    manifest,
-                )
+            with self._lock:
+                if not self._publication_allowed(operation_id, set_digest):
+                    raise InterruptedError("model download was removed before publication")
+                with self._session(write=True) as session:
+                    self._ensure_set(session, manifest)
             unique_specs = list(_unique_artifacts(manifest.artifacts).values())
             self._set_operation_progress(
                 operation_id,
@@ -1898,11 +2354,12 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             assert operation is not None
+            is_repair = operation.kind == "repair"
             checkpoint = (
                 ModelCacheRepairCheckpoint.model_validate(
                     _validated_operation_payload(operation)["repair_checkpoint"]
                 )
-                if force else None
+                if force and is_repair else None
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
         if (not force or spec.sha256 in repaired) and self._object_is_verified(spec):
@@ -1916,7 +2373,7 @@ class ModelCacheService:
             force=force,
             interrupt_after_bytes=interrupt_after_bytes,
         )
-        if force:
+        if is_repair:
             with self._session(write=True) as session:
                 operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
                 assert operation is not None
@@ -1986,7 +2443,10 @@ class ModelCacheService:
         interrupt_after_bytes: int | None,
     ) -> None:
         partial_owner = set_digest
-        if force:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            is_repair = operation is not None and operation.kind == "repair"
+        if is_repair:
             with self._session() as session:
                 operation = session.get(ModelCacheOperation, operation_id)
                 assert operation is not None
@@ -2010,8 +2470,11 @@ class ModelCacheService:
                 os.fsync(retained.fileno())
         received = offset
         if offset == spec.expected_bytes and self._verify_file(part, spec):
-            self._publish_object(spec, part)
-            self._mark_artifact_verified(spec, set_digest)
+            with self._lock:
+                if not self._publication_allowed(operation_id, set_digest):
+                    raise InterruptedError("model download was removed during verification")
+                self._publish_object(spec, part)
+                self._mark_artifact_verified(spec, set_digest)
             return
         if offset == spec.expected_bytes:
             part.unlink(missing_ok=True)
@@ -2124,8 +2587,24 @@ class ModelCacheService:
         if (self._transfer_stop(operation_id).is_set() or self._closed.is_set()
             or self.get_operation(operation_id).state == "cancelled"):
             raise InterruptedError("model download cancelled during verification")
-        self._publish_object(spec, part)
-        self._mark_artifact_verified(spec, set_digest)
+        # Removal and publication share this process lock.  The durable
+        # operation state is checked while holding it, closing the race where
+        # a worker verifies an object just as an operator removes its set.
+        with self._lock:
+            if not self._publication_allowed(operation_id, set_digest):
+                raise InterruptedError("model download was removed during verification")
+            self._publish_object(spec, part)
+            self._mark_artifact_verified(spec, set_digest)
+
+    def _publication_allowed(self, operation_id: str, set_digest: str) -> bool:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None or operation.state == "cancelled":
+                return False
+            payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+            if payload.get("removal_fence") is not None:
+                return False
+            return session.get(ModelCacheSet, set_digest) is not None
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
         try:
@@ -3213,6 +3692,30 @@ class ModelCacheService:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
             return self._operation_view(operation)
 
+    def get_operator_operation(
+        self, operation_id: str
+    ) -> tuple[CacheOperationView, str, str]:
+        """Return one operator mutation with its stable action and selector."""
+
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            if operation.kind not in {"download", "remove"}:
+                raise ModelCacheResolutionError(
+                    "model_cache.operation_not_observable",
+                    "operation is not a current model operator mutation",
+                )
+            payload = _validated_operation_payload(operation)
+            selector = payload.get("selector")
+            if not isinstance(selector, str) or not selector:
+                raise ModelCacheResolutionError(
+                    "model_cache.operation_not_observable",
+                    "operator operation has no stable model selector",
+                )
+            action = "remove" if operation.kind == "remove" else "download"
+            return self._operation_view(operation), action, selector
+
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         if not 1 <= limit <= 100:
             raise ValueError("cache operation limit is invalid")
@@ -3323,9 +3826,7 @@ class ModelCacheService:
                     select(func.count())
                     .select_from(ModelCacheOperation)
                     .where(
-                        ModelCacheOperation.kind.in_(
-                            ["download", "repair", "evict"]
-                        )
+                        ModelCacheOperation.kind.in_(["download", "repair"])
                     )
                     .where(
                         ModelCacheOperation.state.in_(
@@ -3348,10 +3849,14 @@ class ModelCacheService:
             raise ValueError("cache worker batch limit is invalid")
         rows = self._claim_operations(limit=limit, respect_backoff=False)
         for operation_id, kind in rows:
-            if kind == "evict":
-                self._run_eviction(operation_id)
-            else:
-                self._run_download(operation_id, force=kind == "repair")
+            with self._session() as session:
+                operation = session.get(ModelCacheOperation, operation_id)
+                refresh = bool(
+                    operation is not None
+                    and isinstance(operation.payload, Mapping)
+                    and operation.payload.get("force_refresh") is True
+                )
+            self._run_download(operation_id, force=kind == "repair" or refresh)
         return len(rows)
 
     def tick(self, *, limit: int | None = None) -> int:
@@ -3388,16 +3893,16 @@ class ModelCacheService:
                 return completed
             claimed = self._claim_operations(limit=min(requested, capacity), respect_backoff=True)
             for operation_id, kind in claimed:
-                if kind == "evict":
-                    future = self._executor.submit(self._run_eviction, operation_id)
-                    self._background_operations[operation_id] = {
-                        "kind": kind,
-                        "futures": [future],
-                    }
-                    continue
+                with self._session() as session:
+                    operation = session.get(ModelCacheOperation, operation_id)
+                    refresh = bool(
+                        operation is not None
+                        and isinstance(operation.payload, Mapping)
+                        and operation.payload.get("force_refresh") is True
+                    )
                 self._schedule_background_download(
                     operation_id,
-                    force=kind == "repair",
+                    force=kind == "repair" or refresh,
                     capacity=1,
                 )
             # Allocate one transfer to every selected operation first, then
@@ -3650,15 +4155,18 @@ class ModelCacheService:
             transfer=self._transfer_state_for_operation(operation_id),
         )
         now = self._clock()
-        with self._session(write=True) as session:
-            row = session.get(ModelCacheSet, set_digest)
-            if row is not None:
-                row.state = "cached"
-                row.verified_bytes = manifest.expected_bytes
-                row.verified_at = now
-                row.updated_at = now
-                row.last_accessed_at = now
-                row.last_error = None
+        with self._lock:
+            if not self._publication_allowed(operation_id, set_digest):
+                return
+            with self._session(write=True) as session:
+                row = session.get(ModelCacheSet, set_digest)
+                if row is not None:
+                    row.state = "cached"
+                    row.verified_bytes = manifest.expected_bytes
+                    row.verified_at = now
+                    row.updated_at = now
+                    row.last_accessed_at = now
+                    row.last_error = None
         self._set_operation_state(
             operation_id,
             "succeeded",
@@ -3689,7 +4197,7 @@ class ModelCacheService:
             candidate_ids = list(
                 session.scalars(
                     select(ModelCacheOperation.id)
-                    .where(ModelCacheOperation.kind.in_(["download", "repair", "evict"]))
+                    .where(ModelCacheOperation.kind.in_(["download", "repair"]))
                     .where(ModelCacheOperation.state.in_(["queued", "running", "partial"]))
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                     .limit(max(limit * 4, limit))
@@ -3702,7 +4210,7 @@ class ModelCacheService:
                     select(ModelCacheOperation)
                     .where(
                         ModelCacheOperation.id == operation_id,
-                        ModelCacheOperation.kind.in_(["download", "repair", "evict"]),
+                        ModelCacheOperation.kind.in_(["download", "repair"]),
                         ModelCacheOperation.state.in_(["queued", "running", "partial"]),
                     )
                     .with_for_update(skip_locked=True)
@@ -4853,284 +5361,6 @@ class ModelCacheService:
             reclaimable_bytes=reclaimable_bytes,
         )
 
-    def eviction_preview(
-        self,
-        *,
-        target_bytes: int,
-    ) -> dict[str, object]:
-        if not isinstance(target_bytes, int) or isinstance(target_bytes, bool) or target_bytes <= 0:
-            raise ValueError("eviction target must be positive")
-        self.reconcile_storage()
-        before = self.storage_summary()
-        with self._session(write=True) as session:
-            rows = list(session.scalars(select(ModelCacheSet).order_by(ModelCacheSet.last_accessed_at)))
-            memberships = list(session.scalars(select(ModelCacheSetArtifact)))
-            by_set: dict[str, list[ModelCacheSetArtifact]] = {}
-            for membership in memberships:
-                by_set.setdefault(membership.artifact_set_sha256, []).append(membership)
-            object_paths = {
-                artifact.sha256: self._object_path(artifact.sha256)
-                for artifact in session.scalars(select(ModelCacheArtifact))
-            }
-            selected: list[dict[str, object]] = []
-            protected_entries: list[dict[str, object]] = []
-            selected_sets: set[str] = set()
-            for row in rows:
-                self._refresh_protection(session, row)
-                entry = {
-                    "schema_version": SCHEMA_VERSION,
-                    "artifact_set_sha256": row.artifact_set_sha256,
-                    "reclaimable_bytes": 0,
-                    "protected": bool(row.protected),
-                    "protected_reasons": list(row.protected_reasons or ()),
-                    "last_accessed_at": _iso(row.last_accessed_at) or "",
-                }
-                if row.protected:
-                    protected_entries.append(entry)
-                elif row.state != "cached":
-                    continue
-                else:
-                    selected.append(entry)
-            # A shared object is reclaimable only when every referencing set
-            # is in the selected removal plan.  Build the plan incrementally
-            # in LRU order and report actual object bytes, not declared sizes.
-            candidates = [entry for entry in selected]
-            chosen: list[dict[str, object]] = []
-            chosen_objects: set[str] = set()
-            previous_bytes = 0
-            for entry in candidates:
-                selected_sets.add(str(entry["artifact_set_sha256"]))
-                chosen.append(entry)
-                for membership in by_set.get(str(entry["artifact_set_sha256"]), ()):
-                    digest = membership.artifact_sha256
-                    references = {
-                        item.artifact_set_sha256
-                        for item in memberships
-                        if item.artifact_sha256 == digest
-                    }
-                    if references <= selected_sets:
-                        chosen_objects.add(digest)
-                cumulative_bytes = sum(
-                    object_paths[digest].stat().st_size
-                    for digest in chosen_objects
-                    if digest in object_paths and object_paths[digest].is_file()
-                )
-                entry["reclaimable_bytes"] = max(0, cumulative_bytes - previous_bytes)
-                previous_bytes = cumulative_bytes
-                if cumulative_bytes >= target_bytes:
-                    break
-            selected_bytes = sum(
-                object_paths[digest].stat().st_size
-                for digest in chosen_objects
-                if digest in object_paths and object_paths[digest].is_file()
-            )
-            # Include protected rows in the review so the operator sees why
-            # the target cannot be met; apply never permits deleting them.
-            blockers: list[str] = []
-            if selected_bytes < target_bytes:
-                if protected_entries:
-                    blockers.append("protected entries require separate reference removal")
-                else:
-                    blockers.append("target-exceeds-reclaimable-bytes")
-            plan = {
-                "schema_version": SCHEMA_VERSION,
-                "kind": "evict",
-                "target_bytes": target_bytes,
-                "selected": [entry["artifact_set_sha256"] for entry in chosen],
-                "selected_objects": sorted(chosen_objects),
-            }
-            plan_digest = _sha256_json(plan)
-            after = StorageSummary(
-                total_bytes=before.total_bytes,
-                free_bytes=before.free_bytes + selected_bytes,
-                reserve_bytes=before.reserve_bytes,
-                available_bytes=before.available_bytes + selected_bytes,
-                unique_used_bytes=max(0, before.unique_used_bytes - selected_bytes),
-                in_flight_bytes=before.in_flight_bytes,
-                protected_bytes=before.protected_bytes,
-                reclaimable_bytes=max(0, before.reclaimable_bytes - selected_bytes),
-            )
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "plan_digest": plan_digest,
-                "target_bytes": target_bytes,
-                "selected": chosen,
-                "protected_entries": protected_entries,
-                "reclaimable_bytes": before.reclaimable_bytes,
-                "selected_bytes": selected_bytes,
-                "storage_before": before.document(),
-                "storage_after": after.document(),
-                "blockers": blockers,
-                "_selected_objects": sorted(chosen_objects),
-            }
-
-    def evict(
-        self,
-        *,
-        actor: str,
-        request_key: str,
-        plan_digest: str,
-        target_bytes: int,
-    ) -> CacheOperationView:
-        request_key = _request_key(request_key)
-        requested_plan = _optional_digest(plan_digest)
-        assert requested_plan is not None
-        preview = self.eviction_preview(target_bytes=target_bytes)
-        if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflict("model_cache.stale_plan", "eviction preview is stale")
-        if preview["blockers"]:
-            raise ModelCacheConflict(
-                "model_cache.eviction_blocked",
-                "; ".join(str(item) for item in preview["blockers"]),
-            )
-        selected = [str(item["artifact_set_sha256"]) for item in preview["selected"]]
-        if any(bool(item["protected"]) for item in preview["selected"]):
-            raise ModelCacheConflict(
-                "model_cache.protected_reference",
-                "protected cache content must be unreferenced before removal",
-            )
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "source_policy": SOURCE_POLICY,
-            "target_bytes": target_bytes,
-            "selected": selected,
-            "selected_objects": list(
-                preview.get("_selected_objects", ())
-            ),
-            "before_unique_used_bytes": self.storage_summary().unique_used_bytes,
-        }
-        payload = _write_operation_payload("evict", payload)
-        with self._lock, self._session(write=True) as session:
-            existing = session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == request_key
-                )
-            )
-            if existing is not None:
-                _validated_operation_payload(existing)
-                if existing.kind != "evict" or existing.plan_digest != requested_plan:
-                    raise ModelCacheConflict(
-                        "model_cache.request_key_reused",
-                        "request key was already used for another cache operation",
-                    )
-                operation_id = existing.id
-            else:
-                operation = ModelCacheOperation(
-                    request_key=request_key,
-                    schema_version=SCHEMA_VERSION,
-                    kind="evict",
-                    state="queued",
-                    attempt=1,
-                    artifact_set_sha256=None,
-                    plan_digest=requested_plan,
-                    payload=payload,
-                    progress=cache_progress({
-                        "schema_version": SCHEMA_VERSION,
-                        "phase": "queued",
-                        "completed_artifacts": 0,
-                        "total_artifacts": len(selected),
-                        "downloaded_bytes": 0,
-                        "expected_bytes": int(preview["selected_bytes"]),
-                        "current_artifact_key": None,
-                    }, previous=None, now=self._clock()),
-                    actor=actor,
-                    created_at=self._clock(),
-                    updated_at=self._clock(),
-                )
-                session.add(operation)
-                session.flush()
-                operation_id = operation.id
-        return self.get_operation(operation_id)
-
-    def _run_eviction(self, operation_id: str) -> None:
-        with self._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
-            if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            payload = _validated_operation_payload(operation)
-            selected = tuple(payload["selected"])
-            before_unique = payload["before_unique_used_bytes"]
-        self._set_operation_state(operation_id, "running")
-        try:
-            with self._session(write=True) as session:
-                for index, digest in enumerate(selected, start=1):
-                    row = session.get(ModelCacheSet, digest)
-                    if row is None:
-                        continue
-                    self._refresh_protection(session, row)
-                    if row.protected:
-                        raise ModelCacheConflict(
-                            "model_cache.protected_reference",
-                            "protected cache content changed before eviction",
-                        )
-                    session.query(ModelCacheSetArtifact).filter(
-                        ModelCacheSetArtifact.artifact_set_sha256 == digest
-                    ).delete(synchronize_session=False)
-                    session.delete(row)
-                    operation = session.get(ModelCacheOperation, operation_id)
-                    if operation is not None:
-                        operation_progress = _validated_operation_progress(operation)
-                        operation.progress = cache_progress({
-                            "schema_version": SCHEMA_VERSION,
-                            "phase": "reclaiming",
-                            "completed_artifacts": index,
-                            "total_artifacts": len(selected),
-                            "downloaded_bytes": 0,
-                            "expected_bytes": operation_progress.expected_bytes or 0,
-                            "current_artifact_key": None,
-                        },
-                            previous=operation_progress.model_dump(mode="json"),
-                            now=self._clock(),
-                        )
-                session.flush()
-                referenced = {
-                    item.artifact_sha256
-                    for item in session.scalars(select(ModelCacheSetArtifact))
-                }
-                for artifact in list(session.scalars(select(ModelCacheArtifact))):
-                    if artifact.sha256 in referenced:
-                        continue
-                    path = self._object_path(artifact.sha256)
-                    if path.exists() or path.is_symlink():
-                        path.unlink(missing_ok=True)
-                    session.delete(artifact)
-            self._set_operation_state(
-                operation_id,
-                "succeeded",
-                result={
-                    "schema_version": SCHEMA_VERSION,
-                    "removed_entries": list(selected),
-                    "reclaimed_bytes": max(
-                        0,
-                        before_unique - self.storage_summary().unique_used_bytes,
-                    ),
-                },
-            )
-        except (ModelCacheError, OSError, ValueError) as error:
-            now = self._clock()
-            with self._session(write=True) as session:
-                operation = session.get(ModelCacheOperation, operation_id)
-                if operation is not None:
-                    operation.state = "failed"
-                    operation.last_error = redact_text(
-                        error.detail if isinstance(error, ModelCacheError) else str(error)
-                    )[:512]
-                    payload = _validated_operation_payload(operation)
-                    payload.pop("claim", None)
-                    payload.pop("result", None)
-                    payload["failure"] = _cache_failure(
-                        error.code if isinstance(error, ModelCacheError) else "model_cache.eviction_failed",
-                        operation.last_error, retryable=False, recovery="inspect",
-                    )
-                    operation.payload = _write_operation_payload("evict", payload)
-                    operation.progress = cache_phase(
-                        _validated_operation_progress(operation).model_dump(mode="json"),
-                        "failed",
-                        now,
-                    )
-                    operation.updated_at = now
-                    operation.completed_at = now
-
     def _refresh_entry_state(self, session: Session, set_digest: str) -> None:
         row = session.get(ModelCacheSet, set_digest)
         if row is None:
@@ -5242,17 +5472,6 @@ def _contains_digest(value: object, model_digest: str | None, recipe_digest: str
     if isinstance(value, list):
         return any(_contains_digest(child, model_digest, recipe_digest) for child in value)
     return False
-
-
-def _eviction_plan_objects(preview: Mapping[str, object], root: Path) -> tuple[str, ...]:
-    # The preview exposes selected bytes and entries; the apply operation
-    # revalidates membership and computes object reachability again.  This
-    # helper intentionally returns no filesystem-derived authority.
-    del root
-    values = preview.get("selected_objects")
-    if isinstance(values, list):
-        return tuple(str(value) for value in values)
-    return ()
 
 
 def _fsync_directory(path: Path) -> None:

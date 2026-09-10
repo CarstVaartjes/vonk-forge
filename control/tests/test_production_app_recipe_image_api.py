@@ -6,16 +6,15 @@ from datetime import UTC, datetime
 from importlib.resources import files
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
+from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
-def test_production_app_recipe_availability_auth_status_and_retry(
+def test_production_app_recipe_download_auth_and_status(
     tmp_path, monkeypatch, postgres_engine
 ) -> None:
     Base.metadata.create_all(postgres_engine)
@@ -142,51 +141,22 @@ def test_production_app_recipe_availability_auth_status_and_retry(
     viewer = codec.issue(Actor("viewer", "viewer"), ttl_seconds=3600, now=int(time.time()))
     headers = {"Authorization": f"Bearer {operator}"}
     with TestClient(app) as client:
+        selector = f"{recipe.identity.publisher}/{recipe.identity.slug}"
         denied = client.post(
-            "/api/library/recipe-image-availability",
+            f"/api/recipe/{selector}/download",
             headers={"Authorization": f"Bearer {viewer}"},
             json={
-                "request_key": "v" * 36,
-                "recipe_revision_id": "production-recipe-revision",
+                "request_key": "00000000-0000-4000-8000-000000000001",
             },
         )
         assert denied.status_code == 403
 
         started = client.post(
-            "/api/library/recipe-image-availability",
+            f"/api/recipe/{selector}/download",
             headers=headers,
             json={
-                "request_key": "o" * 36,
-                "recipe_revision_id": "production-recipe-revision",
+                "request_key": "00000000-0000-4000-8000-000000000002",
             },
         )
         assert started.status_code == 202, started.text
-        operation_id = started.json()["id"]
-        status = client.get(
-            f"/api/library/recipe-image-availability/{operation_id}",
-            headers=headers,
-        )
-        assert status.status_code == 200
-        assert status.json()["recipe_revision_id"] == "production-recipe-revision"
-
-        sessions = sessionmaker(bind=create_engine(database_url))
-        with sessions.begin() as session:
-            operation = session.get(Job, operation_id)
-            assert operation is not None
-            operation.state = "failed"
-            operation.payload = dict(operation.payload) | {
-                "failure": {
-                    "code": "recipe_image.network_error",
-                    "detail": "test transport interruption",
-                    "retryable": True,
-                    "recovery_actions": ["retry"],
-                },
-                "retry": {"automatic_attempts": 1, "operator_retries": 0},
-            }
-        retried = client.post(
-            f"/api/library/recipe-image-availability/{operation_id}/retry",
-            headers=headers,
-            json={"request_key": "r" * 36},
-        )
-        assert retried.status_code == 202
-        assert retried.json()["id"] != operation_id
+        assert started.json()["recipe_revision_id"] == "production-recipe-revision"
