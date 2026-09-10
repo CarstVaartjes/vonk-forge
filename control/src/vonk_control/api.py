@@ -9,7 +9,8 @@ import re
 import secrets
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Protocol
@@ -75,11 +76,6 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
-from .operator_projection_api import (
-    FleetOperatorServices,
-    build_fleet_operator_services,
-    install_operator_projection_routes,
-)
 from .metrics import MetricsRegistry
 from .model_cache_api import (
     install_model_operator_routes,
@@ -111,6 +107,11 @@ from .operation_api import (
     decode_offset,
     job_response,
     operation_detail_response,
+)
+from .operator_projection_api import (
+    FleetOperatorServices,
+    build_fleet_operator_services,
+    install_operator_projection_routes,
 )
 from .recipe_builds import RecipeBuildService
 from .recipe_library_types import RecipeLibraryError
@@ -510,6 +511,7 @@ def create_app(
     browser_auth: BrowserAuthService | None = None,
     model_cache: Any | None = None,
     recipe_image_availability: Any | None = None,
+    lifespan: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control",
@@ -517,6 +519,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         responses={422: {"model": RequestValidationProblem}},
+        lifespan=lifespan,
     )
     app.router.route_class = ControllerAPIRoute
     cursor_codec = tokens.cursor_codec()
@@ -1606,6 +1609,54 @@ def production_app() -> FastAPI:
         max_parallel_builds=settings.recipe_build_parallel_preparations,
     )
     audits_store = SqlAuditStore(sessions, clock)
+
+    automatic_sync_task: asyncio.Task[None] | None = None
+    automatic_sync_stop = asyncio.Event()
+
+    async def run_automatic_catalog_sync() -> None:
+        # Let migrations, health checks, and the local relay settle before the
+        # first network-bound refresh. The durable ledger remains authoritative.
+        try:
+            await asyncio.wait_for(automatic_sync_stop.wait(), timeout=10)
+            return
+        except TimeoutError:
+            pass
+        while not automatic_sync_stop.is_set():
+            try:
+                await asyncio.to_thread(managed_catalog_sync.automatic)
+            except (
+                CatalogError,
+                CatalogSyncError,
+                RecipeLibraryError,
+                OSError,
+            ) as error:
+                _LOGGER.warning(
+                    "automatic managed recipe catalog sync failed: %s",
+                    type(error).__name__,
+                )
+            try:
+                await asyncio.wait_for(
+                    automatic_sync_stop.wait(),
+                    timeout=settings.recipe_library_sync_interval_seconds,
+                )
+            except TimeoutError:
+                continue
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        nonlocal automatic_sync_task
+        automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
+        try:
+            yield
+        finally:
+            automatic_sync_stop.set()
+            if automatic_sync_task is not None:
+                await automatic_sync_task
+            model_cache.close()
+            recipe_image_production.close()
+            recipe_library.close()
+            agent_upgrades.close()
+
     app = create_app(
         jobs=job_service,
         tokens=token_codec,
@@ -1656,57 +1707,11 @@ def production_app() -> FastAPI:
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,
         recipe_image_availability=recipe_image_production.service,
+        lifespan=lifespan,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")
-
-    automatic_sync_task: asyncio.Task[None] | None = None
-    automatic_sync_stop = asyncio.Event()
-
-    async def run_automatic_catalog_sync() -> None:
-        # Let migrations, health checks, and the local relay settle before the
-        # first network-bound refresh. The durable ledger remains authoritative.
-        try:
-            await asyncio.wait_for(automatic_sync_stop.wait(), timeout=10)
-            return
-        except TimeoutError:
-            pass
-        while not automatic_sync_stop.is_set():
-            try:
-                await asyncio.to_thread(managed_catalog_sync.automatic)
-            except (
-                CatalogError,
-                CatalogSyncError,
-                RecipeLibraryError,
-                OSError,
-            ) as error:
-                _LOGGER.warning(
-                    "automatic managed recipe catalog sync failed: %s",
-                    type(error).__name__,
-                )
-            try:
-                await asyncio.wait_for(
-                    automatic_sync_stop.wait(),
-                    timeout=settings.recipe_library_sync_interval_seconds,
-                )
-            except TimeoutError:
-                continue
-
-    @app.on_event("startup")
-    async def start_automatic_catalog_sync() -> None:
-        nonlocal automatic_sync_task
-        automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
-
-    @app.on_event("shutdown")
-    async def close_catalog_services() -> None:
-        automatic_sync_stop.set()
-        if automatic_sync_task is not None:
-            await automatic_sync_task
-        model_cache.close()
-        recipe_image_production.close()
-        recipe_library.close()
-        agent_upgrades.close()
 
     return app
 
