@@ -322,10 +322,18 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         file_digest="1" * 64,
     )
     model_digest = content_sha256(model)
+    newer_model = _canonical_model(
+        publisher="vonk-forge",
+        slug="resolver-model",
+        file_id="weights",
+        file_digest="2" * 64,
+    )
+    newer_model_digest = content_sha256(newer_model)
     old_document = _canonical_recipe(model_digest)
     old_document["identity"] = {"publisher": "vonk-forge", "slug": "resolver-recipe"}
     old_recipe = RecipeDefinition.model_validate(old_document)
     new_document = json.loads(json.dumps(old_document))
+    new_document["models"][0]["model"]["content_sha256"] = newer_model_digest
     new_document["metadata"]["description"] += " newer"
     new_recipe = RecipeDefinition.model_validate(new_document)
     model_root = CatalogDocument(
@@ -357,8 +365,15 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     model_revision = CatalogDocumentRevision(
         id="00000000-0000-0000-0000-000000000105", document_id=model_root.id,
         kind="model", publisher=model_root.publisher, slug=model_root.slug,
-        revision_number=1, schema_version=2, state="active",
+        revision_number=1, schema_version=2, state="failed",
         document=model.model_dump(mode="json"), content_digest=model_digest,
+        projected={}, created_by="test", created_at=NOW,
+    )
+    newer_model_revision = CatalogDocumentRevision(
+        id="00000000-0000-0000-0000-000000000109", document_id=model_root.id,
+        kind="model", publisher=model_root.publisher, slug=model_root.slug,
+        revision_number=2, schema_version=2, state="active",
+        document=newer_model.model_dump(mode="json"), content_digest=newer_model_digest,
         projected={}, created_by="test", created_at=NOW,
     )
     build = RecipeBuild(
@@ -396,7 +411,8 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         updated_at=NOW, verified_at=NOW, last_accessed_at=NOW, last_error=None,
     )
     with sessions.begin() as session:
-        session.add_all([model_root, recipe_root, model_revision, old_revision, new_revision,
+        session.add_all([model_root, recipe_root, model_revision, newer_model_revision,
+                         old_revision, new_revision,
                          AgentNode(node_id="resolver-builder", state="active"), build,
                          receipt, authorization, model_cache])
 
@@ -415,9 +431,18 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     }
 
     with sessions.begin() as session:
+        session.delete(model_cache)
+    image_only = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert image_only["recipe"]["recipe_revision_id"] == old_revision.id
+    assert image_only["recipe"]["cached"] is True
+    assert image_only["model"]["cached"] is False
+    assert image_only["resources"]["additional_disk_bytes"] is None
+
+    with sessions.begin() as session:
         session.delete(authorization)
         session.delete(receipt)
-        session.delete(model_cache)
     missing = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )

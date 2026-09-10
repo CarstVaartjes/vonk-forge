@@ -1310,7 +1310,10 @@ class ModelCacheService:
                     model_revision = session.scalar(select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
                         CatalogDocumentRevision.content_digest == digest,
-                        CatalogDocumentRevision.state == "active",
+                    ).order_by(
+                        (CatalogDocumentRevision.state == "active").desc(),
+                        CatalogDocumentRevision.revision_number.desc(),
+                        CatalogDocumentRevision.id.desc(),
                     ))
                     if model_revision is None:
                         continue
