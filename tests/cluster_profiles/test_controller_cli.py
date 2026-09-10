@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from contextlib import redirect_stdout
 from io import StringIO
 
@@ -10,13 +12,110 @@ from cluster_profiles.controller_cli import _operation_progress_line
 
 
 class FakeClient:
-    def __init__(self, responses: dict[tuple[str, str], dict[str, object]]):
+    """Strict in-process adapter for the current operator wire contracts."""
+
+    def __init__(self, responses: dict[tuple[str, str], object]):
         self.responses = responses
         self.calls: list[tuple[str, str, dict[str, object] | None, object]] = []
 
     def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
-        return self.responses.get((method, path), {})
+        response = self.responses.get((method, path), {})
+        if isinstance(response, list):
+            return response.pop(0)
+        return response
+
+    def _validate_request(self, method, path, payload, query):
+        profile_path = re.fullmatch(r"/api/profile/(\d+)(?:/(preview|load|progress))?", path)
+        selector_path = re.fullmatch(
+            r"/api/(model|recipe)/[^/]+(?:/(download|remove))?", path
+        )
+        known_get = {
+            "/api/fleet",
+            "/api/model",
+            "/api/model/library",
+            "/api/recipe",
+            "/api/recipe/library",
+            "/api/profile",
+        }
+        known = path in known_get or profile_path is not None or selector_path is not None
+        known = known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
+        known = known or path in {"/api/fleet/enroll", "/api/fleet/upgrade"}
+        known = known or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path) is not None
+        if not known:
+            raise AssertionError(f"CLI emitted retired or invented route: {method} {path}")
+
+        if method == "GET":
+            if path.endswith("/library"):
+                assert query is None or set(query) <= {
+                    "search", "usage", "family", "version", "quantization",
+                    "updated_since", "sort", "limit", "cursor", "model", "all_models",
+                }
+            elif path.startswith("/api/fleet/") and not path.endswith("/loginfo"):
+                assert query is None or set(query) <= {
+                    "metrics", "range", "device", "interface", "run", "capabilities", "technical",
+                }
+            elif path.endswith("/loginfo"):
+                assert query is None or set(query) <= {
+                    "since", "lines", "recipe", "source", "follow",
+                }
+            elif selector_path is not None and selector_path.group(2) is None:
+                assert query is None or set(query) <= {"technical"}
+            else:
+                assert query is None
+            return
+
+        if method == "PUT":
+            assert profile_path is not None and profile_path.group(2) is None
+            assert isinstance(payload, dict)
+            assert set(payload) <= {"assignments", "name", "expected_revision"}
+            assert isinstance(payload.get("assignments"), list)
+            for assignment in payload["assignments"]:
+                assert set(assignment) <= {
+                    "recipe_selector", "spark_ids", "assignment_name", "model_variant", "desired_state",
+                }
+                assert isinstance(assignment["recipe_selector"], str)
+                assert isinstance(assignment["spark_ids"], list)
+                assert "model_content_sha256" not in assignment
+            return
+
+        if method != "POST":
+            raise AssertionError(f"unexpected method: {method}")
+        if path.endswith("/preview"):
+            assert profile_path is not None and payload == {}
+        elif path.endswith("/load"):
+            assert profile_path is not None
+            assert set(payload) <= {"request_key", "dry_run"}
+            assert "request_key" in payload
+            uuid.UUID(payload["request_key"])
+        elif selector_path is not None and selector_path.group(2) in {"download", "remove"}:
+            assert isinstance(payload, dict)
+            assert set(payload) <= {"schema_version", "request_key", "yes", "with_model"}
+            assert payload["schema_version"] == 2
+            uuid.UUID(payload["request_key"])
+            if selector_path.group(1) == "model":
+                assert "with_model" not in payload
+            if selector_path.group(2) == "download":
+                assert "yes" not in payload and "with_model" not in payload
+        elif path == "/api/recipe/update":
+            assert isinstance(payload, dict)
+            assert set(payload) == {"schema_version", "request_key", "selectors", "all"}
+            assert payload["schema_version"] == 2
+            uuid.UUID(payload["request_key"])
+            assert isinstance(payload["selectors"], list)
+            assert isinstance(payload["all"], bool)
+        elif path == "/api/fleet/upgrade":
+            assert set(payload) == {"selectors", "all", "strategy"}
+            assert isinstance(payload["selectors"], list)
+        elif path == "/api/fleet/enroll":
+            assert set(payload) == {"name", "ttl_seconds"}
+        elif path.endswith("/rename"):
+            assert set(payload) == {"display_name"}
+        elif path.endswith("/re-enroll") or path.endswith("/remove"):
+            assert payload is None
+        else:
+            raise AssertionError(f"invented mutation payload route: {path}")
 
 
 def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, object]]:
@@ -84,25 +183,63 @@ def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None
     }
 
 
-def test_download_is_one_step_and_repeat_can_request_refresh() -> None:
+def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() -> None:
     client = FakeClient(
         {
             ("POST", "/api/model/qwen/download"): {
-                "state": "running",
+                "state": "accepted",
                 "action": "Following",
             },
             ("POST", "/api/recipe/qwen-code/download"): {
                 "state": "running",
-                "action": "Re-downloading",
+                "action": "Resuming",
             },
         }
     )
     assert run(("model", "download", "qwen", "--json"), client)[1]["action"] == "Following"
-    assert run(("model", "download", "qwen", "--force", "--json"), client)[0] == 0
-    assert run(("recipe", "download", "qwen-code", "--force", "--json"), client)[0] == 0
-    assert client.calls[0][2]["force_refresh"] is False
-    assert client.calls[1][2]["force_refresh"] is True
-    assert client.calls[2][2]["force_refresh"] is True
+    assert run(("model", "download", "qwen", "--json"), client)[0] == 0
+    assert run(("recipe", "download", "qwen-code", "--json"), client)[0] == 0
+    assert client.calls[0][2] == client.calls[1][2] == {
+        "schema_version": 2,
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
+    assert client.calls[2][2] == {
+        "schema_version": 2,
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
+
+
+def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:
+    detail = FakeClient(
+        {
+            ("GET", "/api/model/qwen"): {
+                "selector": "qwen",
+                "name": "Qwen 3.8",
+                "cache": {"state": "Not cached"},
+                "technical": {"artifact_set_sha256": "digest"},
+            },
+            ("GET", "/api/model"): {
+                "title": "Models",
+                "models": [
+                    {
+                        "selector": "qwen",
+                        "name": "Qwen 3.8",
+                        "cache": {"state": "Cached"},
+                        "running": {"spark_ids": ["Atlas"]},
+                        "artifact": {"size_bytes": 42},
+                    }
+                ],
+            },
+        }
+    )
+    status, payload = run(("model", "detail", "qwen", "--watch", "--technical", "--json"), detail)
+    assert status == 0 and payload["technical"]["artifact_set_sha256"] == "digest"
+    assert detail.calls[0][3] == {"technical": True}
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(("model",), control_client=detail) == 0
+    text = output.getvalue()
+    assert "Cached" in text and "Atlas" in text and "42" in text
 
 
 def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
@@ -172,7 +309,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             {
                 "assignments": [
                     {
-                        "recipe_id": "recipe-uuid",
+                        "recipe_selector": "recipe-uuid",
                         "spark_ids": ["Atlas", "Boreal"],
                         "desired_state": "running",
                     }
@@ -203,6 +340,23 @@ def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
     assert client.calls[1][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111"
     }
+
+
+def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): [
+                {"state": "running", "progress": {"step": 1, "steps": 2}},
+                {"state": "succeeded", "progress": {"step": 2, "steps": 2}},
+            ]
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.1", "--json"),
+        client,
+    )
+    assert status == 0 and payload["state"] == "succeeded"
+    assert len(client.calls) == 2
 
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
@@ -243,6 +397,65 @@ def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
     assert parser.parse_args(
         ("recipe", "remove", "qwen-code", "--keep-model")
     ).keep_model is True
+    for argv in (
+        ("model", "download", "qwen", "--force"),
+        ("recipe", "download", "qwen-code", "--force"),
+    ):
+        try:
+            parser.parse_args(argv)
+        except cli._UsageError:
+            pass
+        else:
+            raise AssertionError(f"redundant refresh flag accepted: {argv}")
+
+
+def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
+    client = FakeClient({("POST", "/api/model/qwen/download"): {"state": "running"}})
+    status, _ = run(
+        (
+            "model",
+            "download",
+            "qwen",
+            "--request-key",
+            "22222222-2222-4222-8222-222222222222",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    assert client.calls[0][2]["request_key"] == "22222222-2222-4222-8222-222222222222"
+
+
+def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
+    class ConflictClient(FakeClient):
+        def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+            self._validate_request(method, path, payload, query)
+            self.calls.append((method, path, payload, query))
+            if method == "PUT":
+                raise ValueError("profile revision conflict")
+            return {"number": 1, "revision": 4, "assignments": []}
+
+    client = ConflictClient({})
+    status, payload = run(
+        ("profile", "add", "qwen-code", "--spark", "Atlas", "--json"), client
+    )
+    assert status == 2
+    assert payload["error"] == "profile revision conflict"
+    assert [call[0] for call in client.calls] == ["GET", "PUT"]
+
+
+def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
+    class AmbiguousClient(FakeClient):
+        def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+            self._validate_request(method, path, payload, query)
+            self.calls.append((method, path, payload, query))
+            raise ValueError("ambiguous model selector; choose an exact selector")
+
+    client = AmbiguousClient({})
+    status, payload = run(("model", "download", "qwen", "--json"), client)
+    assert status == 2
+    assert "ambiguous model selector" in payload["error"]
+    assert len(client.calls) == 1
 
 
 def test_profile_selection_and_progress_use_numbered_current_routes() -> None:

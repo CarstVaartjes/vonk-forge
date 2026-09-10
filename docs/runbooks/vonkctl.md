@@ -50,7 +50,7 @@ vonkctl model
 vonkctl model library --family Qwen --usage code --sort updated
 vonkctl model detail qwen-3.8-nvfp4
 vonkctl model download qwen-3.8-nvfp4
-vonkctl model download qwen-3.8-nvfp4 --force
+vonkctl model download qwen-3.8-nvfp4   # repeat to refresh a completed copy
 vonkctl model remove qwen-3.8-nvfp4 --yes
 ```
 
@@ -67,7 +67,7 @@ vonkctl recipe
 vonkctl recipe library
 vonkctl recipe library --model "Qwen 3.8" --all-models
 vonkctl recipe detail qwen-code
-vonkctl recipe download qwen-code
+vonkctl recipe download qwen-code       # repeat to refresh a completed copy
 vonkctl recipe update
 vonkctl recipe update --all
 vonkctl recipe remove qwen-code --yes
@@ -99,7 +99,7 @@ vonkctl --profile 2 profile load
 vonkctl --profile 2 profile progress --follow
 ```
 
-Profile authoring stores recipe identity (`recipe_id`), sorted Spark identity
+Profile authoring stores logical recipe identity (`recipe_selector`), sorted Spark identity
 (`spark_ids`), optional assignment name, optional exact model variant, and
 desired state. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at

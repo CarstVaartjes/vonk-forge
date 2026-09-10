@@ -130,21 +130,23 @@ def add_controller_commands(
     enroll = fleet_actions.add_parser("enroll", help="Create a one-time enrollment grant")
     enroll.add_argument("name")
     enroll.add_argument("--ttl-seconds", type=int, default=900)
-    _action_flags(enroll)
+    _add_output(enroll)
     for action_name, help_text in (
         ("re-enroll", "Replace a Spark certificate"),
         ("remove", "Revoke and remove a Spark"),
     ):
         action = fleet_actions.add_parser(action_name, help=help_text)
         _selector(action, "selector", help="Exact Spark selector or friendly name")
-        _action_flags(action, destructive=action_name == "remove")
+        _add_output(action)
+        if action_name == "remove":
+            action.add_argument("--yes", action="store_true")
     upgrade = fleet_actions.add_parser("upgrade", help="Install the latest signed Spark client")
     upgrade.add_argument("selector", nargs="?")
     upgrade.add_argument("--all", action="store_true")
     upgrade.add_argument(
         "--strategy", choices=("one-at-a-time", "all-at-once"), default="one-at-a-time"
     )
-    _action_flags(upgrade)
+    _add_output(upgrade)
     loginfo = fleet_actions.add_parser(
         "loginfo", help="Read bounded Controller-collected logs"
     )
@@ -170,9 +172,6 @@ def add_controller_commands(
     _add_output(model_detail)
     model_download = model_actions.add_parser("download", help="Cache a model variant")
     _selector(model_download, "selector", help="Exact model selector or friendly name")
-    model_download.add_argument(
-        "--force", action="store_true", help="Refresh a completed cache entry"
-    )
     _action_flags(model_download)
     model_remove = model_actions.add_parser(
         "remove", help="Cancel/remove Controller model cache"
@@ -198,9 +197,6 @@ def add_controller_commands(
         "download", help="Cache a recipe and missing model"
     )
     _selector(recipe_download, "selector", help="Exact recipe selector or friendly name")
-    recipe_download.add_argument(
-        "--force", action="store_true", help="Refresh a completed cache entry"
-    )
     _action_flags(recipe_download)
     recipe_update = recipe_actions.add_parser(
         "update", help="List or refresh cached recipe updates"
@@ -225,10 +221,9 @@ def add_controller_commands(
     profile_add = profile_actions.add_parser(
         "add", help="Assign a recipe to Sparks and autosave"
     )
-    profile_add.add_argument("recipe_id")
+    profile_add.add_argument("recipe_selector")
     profile_add.add_argument("--spark", action="append", required=True)
     profile_add.add_argument("--as", dest="assignment_name")
-    profile_add.add_argument("--model-content-sha256")
     profile_add.add_argument("--model-variant")
     _profile_edit_flags(profile_add)
     profile_remove = profile_actions.add_parser(
@@ -314,23 +309,19 @@ def _fleet(
         return client.request(
             "POST",
             "/api/fleet/enroll",
-            {
-                "name": args.name,
-                "ttl_seconds": args.ttl_seconds,
-                "request_key": _request_key(args, factory),
-            },
+            {"name": args.name, "ttl_seconds": args.ttl_seconds},
         )
     if action == "re-enroll":
         return client.request(
             "POST",
             f"/api/fleet/{_quoted(selector)}/re-enroll",
-            {"request_key": _request_key(args, factory)},
+            None,
         )
     if action == "remove":
         return client.request(
             "POST",
             f"/api/fleet/{_quoted(selector)}/remove",
-            {"request_key": _request_key(args, factory), "yes": args.yes},
+            None,
         )
     if action == "upgrade":
         if not args.selector and not args.all:
@@ -342,7 +333,6 @@ def _fleet(
                 "selectors": [args.selector] if args.selector else [],
                 "all": args.all,
                 "strategy": args.strategy,
-                "request_key": _request_key(args, factory),
             },
         )
     if action == "loginfo":
@@ -394,7 +384,11 @@ def _model(
             "GET", "/api/model/library", query=_library_query(args, recipe=False) or None
         )
     if action == "detail":
-        return client.request("GET", f"/api/model/{_quoted(args.selector)}")
+        return client.request(
+            "GET",
+            f"/api/model/{_quoted(args.selector)}",
+            query=_query(technical=args.technical) or None,
+        )
     if action == "download":
         return client.request(
             "POST",
@@ -402,7 +396,6 @@ def _model(
             {
                 "schema_version": 2,
                 "request_key": _request_key(args, factory),
-                "force_refresh": args.force,
             },
         )
     if action == "remove":
@@ -431,7 +424,11 @@ def _recipe(
             "GET", "/api/recipe/library", query=_library_query(args, recipe=True) or None
         )
     if action == "detail":
-        return client.request("GET", f"/api/recipe/{_quoted(args.selector)}")
+        return client.request(
+            "GET",
+            f"/api/recipe/{_quoted(args.selector)}",
+            query=_query(technical=args.technical) or None,
+        )
     if action == "download":
         return client.request(
             "POST",
@@ -439,7 +436,6 @@ def _recipe(
             {
                 "schema_version": 2,
                 "request_key": _request_key(args, factory),
-                "force_refresh": args.force,
             },
         )
     if action == "update":
@@ -472,8 +468,7 @@ def _authoring_assignments(profile: Mapping[str, object]) -> list[dict[str, obje
     if not isinstance(raw, list):
         return []
     allowed = {
-        "recipe_id",
-        "model_content_sha256",
+        "recipe_selector",
         "model_variant",
         "spark_ids",
         "assignment_name",
@@ -555,20 +550,18 @@ def _profile(
             )
         if action == "add":
             new_assignment: dict[str, object] = {
-                "recipe_id": args.recipe_id,
+                "recipe_selector": args.recipe_selector,
                 "spark_ids": sorted(set(args.spark)),
                 "desired_state": "running",
             }
             if args.assignment_name:
                 new_assignment["assignment_name"] = args.assignment_name
-            if args.model_content_sha256:
-                new_assignment["model_content_sha256"] = args.model_content_sha256
             if args.model_variant:
                 new_assignment["model_variant"] = args.model_variant
             matching = [
                 assignment
                 for assignment in assignments
-                if assignment.get("recipe_id") == args.recipe_id
+                if assignment.get("recipe_selector") == args.recipe_selector
                 and assignment.get("assignment_name") == args.assignment_name
             ]
             if matching:
@@ -583,7 +576,9 @@ def _profile(
             kept: list[dict[str, object]] = []
             for assignment in assignments:
                 identity = str(
-                    assignment.get("assignment_name", assignment.get("recipe_id", ""))
+                    assignment.get(
+                        "assignment_name", assignment.get("recipe_selector", "")
+                    )
                 )
                 if identity.casefold() != target:
                     kept.append(assignment)

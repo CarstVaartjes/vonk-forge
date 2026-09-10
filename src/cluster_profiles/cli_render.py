@@ -38,6 +38,30 @@ def _label(value: object, fallback: str = "—") -> str:
     return str(value) if value is not None else fallback
 
 
+def _row_value(row: Mapping[str, object], key: str) -> object:
+    """Read the current projection's nested resource/cache fields for tables."""
+    if key in row:
+        return row[key]
+    nested_paths = {
+        "display_name": (("identity", "display_name"),),
+        "cache_state": (("cache", "state"), ("cache", "status")),
+        "running_on": (("running", "spark_ids"), ("running", "nodes")),
+        "disk_bytes": (("artifact", "size_bytes"), ("resources", "disk_bytes")),
+        "model_name": (("model", "name"),),
+        "state": (("operation", "state"),),
+    }
+    for path in nested_paths.get(key, ()):
+        value: object = row
+        for part in path:
+            if not isinstance(value, Mapping):
+                break
+            value = value.get(part)
+        else:
+            if value is not None:
+                return value
+    return None
+
+
 def render_payload(payload: Mapping[str, object], noun: str, *, wide: bool = False) -> None:
     """Render an adaptive snapshot without cursor control or color assumptions."""
     title = payload.get("title") or payload.get("heading") or noun.title()
@@ -78,7 +102,7 @@ def render_payload(payload: Mapping[str, object], noun: str, *, wide: bool = Fal
         columns = columns_by_noun[noun]
         if not wide and shutil.get_terminal_size((80, 24)).columns < 80:
             columns = columns[:3]
-        rendered = [[_cell(row.get(key)) for key, _ in columns] for row in rows]
+        rendered = [[_cell(_row_value(row, key)) for key, _ in columns] for row in rows]
         widths = [
             max(len(label), *(len(row[i]) for row in rendered))
             for i, (_, label) in enumerate(columns)

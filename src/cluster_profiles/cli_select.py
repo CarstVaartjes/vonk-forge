@@ -15,7 +15,7 @@ class SelectorError(ValueError):
 
 def selector_for(item: Mapping[str, object]) -> str | None:
     """Return the canonical readable selector emitted by a Controller row."""
-    for key in ("selector", "use", "slug", "id", "name", "display_name"):
+    for key in ("selector", "name", "display_name"):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -37,7 +37,7 @@ def select_exact(
     for item in items:
         values = [
             value
-            for key in ("selector", "use", "slug", "id", "name", "display_name")
+            for key in ("selector", "name", "display_name")
             if isinstance(value := item.get(key), str)
         ]
         if any(value.casefold() == needle for value in values):
