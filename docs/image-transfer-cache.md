@@ -24,6 +24,15 @@ creation is a separate `prepare` phase, without an invented download percentage.
 Slow progress persistence does not block Skopeo's receive loop.
 
 Completed layers are converted locally into the same Docker archive consumed
-by Sparks. No registry push is involved. The NAS-to-Spark distribution endpoint
-already supports authenticated HTTP Range, partial files and cache reuse;
-archive transfers synchronize storage at completion rather than per fragment.
+by Sparks. No registry push is involved. The verified archive and its immutable
+image identity in the Controller/NAS cache are authoritative; Spark imports are
+derived execution copies and cannot replenish or replace that cache.
+
+After the exact model and image assets for a profile are ready in the cache, the
+Controller distributes them to all selected Sparks in parallel. The transfer
+grant binds the image identity, size, destination and operation. A Spark
+verifies the destination before import, and an already verified local copy is
+skipped. The NAS-to-Spark distribution endpoint already supports authenticated
+HTTP Range and resumable partial files; archive transfers synchronize storage
+at completion rather than per fragment. Distribution progress and per-Spark
+readiness are reported before workloads are stopped and replaced.

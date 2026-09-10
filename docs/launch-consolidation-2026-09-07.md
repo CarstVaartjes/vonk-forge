@@ -1,5 +1,7 @@
 # Launch consolidation
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Updated 7 September 2026. The prior consolidation was merged through
 [PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614), producing main
 `1ed542a1`. The subsequent nested-contract closure uses four explicitly assigned

@@ -1,5 +1,7 @@
 # Interface acceptance contract ledger
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Evidence refresh: 2026-09-05. The current platform integration base is
 `8930f9fbef2bd3bb2889450bf0dfb46c0edbcd4e` (canonical Library projection
 cutover). Recipe authority is `10db3c7a73a18319f81103448ddaeada50334bb2`,

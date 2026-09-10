@@ -58,6 +58,9 @@ export type LibraryViewRecipe = {
   runs_truncated?: boolean;
   reasons?: {code: string; severity: string; detail: string}[];
 };
+export function canonicalRecipeSelector(recipe: Pick<LibraryViewRecipe, "publisher" | "slug">): string {
+  return `${recipe.publisher}/${recipe.slug}`;
+}
 export type LibraryViewModel = {
   page_local?: boolean;
   model: {kind: "model"; publisher: string; slug: string; content_sha256: string};

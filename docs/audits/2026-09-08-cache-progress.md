@@ -1,5 +1,7 @@
 # Cache progress integration for issues 593 and 594
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Based on integrated platform `90ae6140368c20efbdb25385f0778e79198bb9ad`.
 No live NAS or Spark was touched.
 

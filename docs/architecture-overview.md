@@ -1,7 +1,9 @@
 # Vonk Forge architecture overview
 
 Vonk Forge separates the Docker service host from the GPU node compute plane. The
-service host can be a NAS or any Docker Compose-capable Linux machine. A cluster
+service host can be a NAS or any Docker Compose-capable Linux machine. Its local
+model and recipe-image cache is the trusted authority for Fleet profile choices
+and apply admission; Spark-local copies are execution caches only. A cluster
 can contain one, two, or more Vonk Forge GPU nodes; no product contract fixes the count or
 uses a GPU node hostname or IP address as identity.
 
@@ -25,7 +27,7 @@ flowchart LR
     subgraph host[Docker-capable service host]
         tailscale[Tailscale gateway]
         caddy[Caddy]
-        api[Control API and authority services]
+        api[Control API, authority, and profile cache]
         worker[PostgreSQL-backed control worker]
         db[(PostgreSQL)]
         litellm[LiteLLM]
@@ -34,8 +36,8 @@ flowchart LR
     end
 
     subgraph nodes[One or more Vonk Forge GPU nodes]
-        s1[GPU node agent and model runtimes]
-        sn[Additional GPU node agents and model runtimes]
+        s1[GPU node agent, execution cache, and runtimes]
+        sn[Additional GPU node agents, execution caches, and runtimes]
     end
 
     cli -->|authenticated API| caddy
@@ -78,11 +80,14 @@ API.
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the
 local platform authority and recipe catalog: topology, fleet policy, package
-families, authored and imported revisions, WorkloadRun import reports,
-installations, placements, and runs. A published recipe catalog is optional
-discovery, never a remote dependency for local execution. TUF remains the
-authority for signed platform release artifacts; desired platform topology and
-policy are persisted in PostgreSQL.
+families, authored and imported revisions, saved profiles, WorkloadRun import
+reports, installations, placements, and runs. The trusted NAS/Controller cache
+is the authoritative availability projection for profile authoring and apply
+admission: profile choices resolve from it to exact model and recipe-image
+identities. A published recipe catalog is optional discovery, never a remote
+dependency for local execution, and a Spark-local copy never changes profile
+authority. TUF remains the authority for signed platform release artifacts;
+desired platform topology and policy are persisted in PostgreSQL.
 
 For the current platform path, the API owns the PostgreSQL authority head,
 immutable revisions, persisted proposals, and eligibility policy. The catalog
@@ -113,7 +118,7 @@ fabric recovery, and explicit break-glass inspection.
 | Component | Responsibility |
 | --- | --- |
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
-| Control API | Admin API/web backend, PostgreSQL authority and policy, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
+| Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
 | PostgreSQL | Jobs, immutable resolved plans, operation/attempt fences, agent identity/presence, reconciliation state, cancellation, and audit evidence. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
@@ -121,7 +126,7 @@ fabric recovery, and explicit break-glass inspection.
 | Prometheus/Grafana | Platform, agent, job, route, node-exporter, and DCGM observability. |
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
-| GPU node runtimes | Repository-declared model adapters and verified local artifacts; model weights and tensor traffic remain off the service host. |
+| GPU node runtimes | Repository-declared model adapters and verified local execution-cache artifacts; model weights and tensor traffic remain off the service host during execution. |
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 registry publication, inference, and Hermes networks separate. Only Caddy
@@ -192,7 +197,8 @@ authenticated agent channel and each target re-verifies it before import, so a
 three-node recipe never rebuilds independently on the other two nodes. Model
 downloads are independent of recipes: the Controller can fill the NAS model
 cache before any runtime image or Spark assignment exists, and recipes reuse
-the same content-addressed model files. Published images and local builds both
+the same content-addressed model files. The NAS model and recipe-image cache is
+the profile choice and admission surface. Published images and local builds both
 use Docker-save archives in the shared `image-cache` directory. The original
 registry pin remains separate from the exported platform manifest, config ID,
 and archive checksum; the Controller inspects the exported config and platform
@@ -213,6 +219,37 @@ route is published to LiteLLM only after every
 mapped node has acknowledged the same build and run evidence. The global
 catalog, when enabled, stores recipe metadata and source bundles; it does not
 store image layers or registry credentials.
+
+## Profile cache lifecycle
+
+Profile authoring resolves every choice through the trusted NAS/Controller
+cache. The cache projection selects the exact active recipe revision, model
+variant, model artifact set, and recipe image available for the profile. A
+public catalog result can describe a candidate, but it cannot author a profile
+choice; a Spark-local copy can satisfy execution, but it cannot authorize one.
+The managed NAS cache is trusted under its storage and identity contract, so
+ordinary profile reads and admission do not promise a costly repeated full
+hash of every asset.
+
+If the exact model or recipe image is absent, preview and admission return a
+named, actionable blocker and the prepare-cache action. Preparation reuses the
+same exact cache identities and deduplicates shared assets; it does not turn a
+missing asset into an implicit Spark-side download. A profile becomes ready only
+after the NAS cache reports the required assets available.
+
+Applying a ready, digest-bound profile fans exact model and recipe-image
+preparation out to the target Sparks in parallel. Each target skips an asset it
+already has locally, then the Controller stops affected workloads safely before
+replacing them and records durable per-target progress. Routes are published
+only after the required preparation, startup, health, and authenticated result
+evidence is accepted. Spark-local copies may be reused, evicted, or rehydrated;
+they remain execution caches rather than profile authority.
+
+NAS reconciliation cleans unused local model-cache entries while retaining
+entries referenced by saved profiles, active workloads, or other current
+authority. This cleanup does not remove shared immutable recipe or model
+authority and does not treat Spark-local cache state as a reason to retain a
+NAS entry.
 
 The run alias is the stable client-facing model name. A recipe may serve a
 different implementation-local model name: the first ordered value in
@@ -247,8 +284,10 @@ restart-safe sequence:
 2. Withdraw the prior route into acknowledged maintenance.
 3. Execute stop operations in authority-declared order, then prove every
    affected node has zero active NVIDIA compute processes.
-4. Install, prepare, start, health-check, and verify the new workload graph
-   through outbound agent operations.
+4. Fan out exact model and recipe-image preparation to the target agents in
+   parallel, skip already-local assets, then safely replace, start,
+   health-check, and verify the new workload graph through outbound agent
+   operations.
 5. Compensate or enter `waiting-for-operator` when mutation outcome is uncertain.
 6. Publish routes only after every required result and endpoint-evidence digest
    is accepted, then require an exact LiteLLM supervisor acknowledgement.

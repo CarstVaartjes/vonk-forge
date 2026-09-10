@@ -2,18 +2,18 @@
 
 Design proposal · 10 September 2026 · No implementation
 
-This document defines the proposed `vonkctl` experience. Every command and terminal transcript below is a design example, not a claim that the existing `vonkctl` implements it. Names, sizes, rates, progress and hardware readings in transcripts are illustrative.
+This document defines the proposed `vonkctl` experience. Every command, route-shaped reference and terminal transcript below is a design example, not a claim that the existing CLI or web UI implements it. Names, IDs, sizes, rates, progress and hardware readings in examples are illustrative.
 
 ## 1. The experience
 
-Three things to manage: **Fleet**, **Model**, **Recipe**. One workspace that connects them: **Profile**.
+Four operator nouns: **Fleet**, **Model**, **Recipe**, and **Profile**. There is no fifth operator area such as Jobs, Library or Workspace.
 
 - **Fleet:** my Sparks, their health, and what they are running.
 - **Model:** the model files I have and the models I can download.
 - **Recipe:** the runnable configurations and images that use those models.
-- **Profile:** what I want the entire fleet to run, using the latest cached recipes and compatible models. Edit freely; load when ready. Unassigned Sparks become idle on load.
+- **Profile:** the cached model and recipe choices I want the entire fleet to run. Edit freely; apply when ready. Unassigned Sparks become idle on apply.
 
-The ordinary journey is browse, download, assign, load:
+The ordinary journey is browse, download, assign, apply:
 
 ```sh
 vonkctl model library --family Qwen --usage code
@@ -21,12 +21,12 @@ vonkctl recipe library --model "Qwen 3.8"
 vonkctl recipe download qwen-code
 vonkctl --profile 2 profile name "Coding"
 vonkctl --profile 2 profile add qwen-code --spark Atlas
-vonkctl --profile 2 profile load
+vonkctl --profile 2 profile apply
 ```
 
 `qwen-code` represents a unique human-readable selector returned by the library, not a guessed model or real recipe recommendation. The recipe download also obtains its model if missing. Starting with `model download` is optional.
 
-Bare nouns are useful: `fleet`, `model`, `recipe`, and `profile` each show their overview. No `list` subcommand is necessary. Bare `vonkctl` shows the current profile overview and one next-action hint when appropriate. `vonkctl --help` explains the four entry points in one screen.
+Bare nouns are useful: `fleet`, `model`, `recipe`, and `profile` each show their overview. `library` is only a Model/Recipe catalog subcommand, not a fifth operator noun. No `list` subcommand is necessary. Bare `vonkctl` shows the current profile overview and one next-action hint when appropriate. `vonkctl --help` explains the four entry points in one screen.
 
 ## 2. Command map
 
@@ -44,9 +44,9 @@ Bare nouns are useful: `fleet`, `model`, `recipe`, and `profile` each show their
 | | `model library [FILTERS]` | Available models, newest updated first |
 | | `model detail MODEL` | Exact variant, usage, sizes, cache and running locations |
 | | `model download MODEL` | Download the chosen variant; re-download an existing copy |
-| | `model remove MODEL` | Cancel its download and remove its Controller cache copy |
+| | `model remove MODEL` | Cancel its download and remove its NAS/Controller cache copy |
 | Recipe | `recipe [--watch]` | Downloading/building, cached and running recipes |
-| | `recipe library [FILTERS]` | Library, initially filtered to models present locally |
+| | `recipe library [FILTERS]` | Recipe catalog, initially filtered to NAS/Controller-cached models |
 | | `recipe detail RECIPE` | Model, exposed usage, topology, image and resource requirements |
 | | `recipe download RECIPE` | Fetch the image or build it; obtain a missing model too |
 | | `recipe update [RECIPE \| --all]` | List available updates, or refresh the specified cached recipes |
@@ -54,21 +54,22 @@ Bare nouns are useful: `fleet`, `model`, `recipe`, and `profile` each show their
 | Profile | `profile` | Selected profile, per-Spark assignments and resource totals |
 | | `profile list` | Numbered saved profiles and their live match state |
 | | `profile name NAME` | Name the selected profile |
-| | `profile add RECIPE --spark SPARK ...` | Assign a recipe and immediately save |
+| | `profile add RECIPE --spark SPARK ...` | Assign a cached recipe/model choice and immediately save |
 | | `profile remove ASSIGNMENT [--spark SPARK ...]` | Remove an assignment or selected members and save |
-| | `profile load [--dry-run]` | Apply the entire fleet setup using the latest cached versions; obtain missing assets |
-| | `profile progress [--follow]` | Inspect or follow its latest load operation |
+| | `profile prepare-cache [--dry-run]` | Prepare the selected profile's missing NAS/Controller cache assets |
+| | `profile apply [--dry-run]` | Apply the entire fleet setup from exact cached assets |
+| | `profile progress [--follow]` | Inspect or follow its latest apply operation |
 
-Use singular nouns consistently. `fleet rename` describes naming; `profile name` names the selected workspace. This proposed command surface replaces the current hierarchy upon a future implementation; it does not introduce compatibility aliases. No runtime command is changed by this design document.
+Use only the four operator nouns consistently. `fleet rename` describes naming; `profile name` names the selected profile. This proposed command surface replaces the current hierarchy upon a future implementation; it does not introduce compatibility aliases. No runtime command is changed by this design document.
 
 ## 3. Terminal design language
 
 Quiet headings, aligned rows, generous spacing between sections. No full-screen dashboard, nested boxes or decorative banners. The useful information starts immediately below the command.
 
-- Friendly names lead. Stable readable selectors appear where the next command needs them; UUIDs and digests belong in `detail --technical` and JSON.
+- Friendly names lead. The CLI may resolve a unique friendly name or displayed selector to a canonical ID before sending a request; JSON and API requests/responses use canonical IDs and immutable asset identities.
 - Tables use light horizontal dividers, no vertical grid. Numbers align right; names and states align left. Units are always visible.
 - Green means Running/Ready, amber means attention, red means failure. Color always repeats a written state. Busy GPU usage alone is neutral.
-- Snapshot output is the default. `--watch` refreshes the table in place and keeps its row order stable. Download, upgrade and load commands follow their own progress automatically.
+- Snapshot output is the default. `--watch` refreshes the table in place and keeps its row order stable. Download, upgrade and apply commands follow their own progress automatically.
 - At 120 columns and wider, show full tables. Below that, use two lines per row; below 80 columns, use compact named blocks. Preserve the identity, state and action first. `--wide` allows deliberate full-width output.
 - Honor `NO_COLOR` and terminal capabilities. Non-Unicode terminals use ASCII bars. Redirected output contains plain snapshots or timestamped progress lines, never cursor escapes.
 - `--json` emits one structured result to stdout. Progress and human hints never pollute it. With `--watch --json`, emit newline-delimited typed snapshots with documented event semantics.
@@ -78,9 +79,9 @@ Long names wrap on continuation lines; avoid shortening two distinct variants in
 
 ### Choosing an object
 
-Every Model and Recipe row shows a copyable `USE` selector, on a continuation line if necessary. Commands accept that selector or an exact unique displayed name. Matching is case-insensitive. Partial matches suggest choices; mutations require an exact selection instead of silently guessing. Multiple matches open a numbered chooser in an interactive terminal; scripts receive an ambiguity error with candidate selectors. Row numbers are never persistent identifiers. Profile rows show the assignment selector too, including any explicit `--as` name.
+Every Model and Recipe row shows a copyable `USE` selector, on a continuation line if necessary. Commands accept that selector or an exact unique displayed name, then resolve it to the canonical model or recipe ID. Matching is case-insensitive. Partial matches suggest choices; mutations require an exact selection instead of silently guessing. Multiple matches open a numbered chooser in an interactive terminal; scripts receive an ambiguity error with candidate IDs. Row numbers are never persistent identifiers. Profile rows show the assignment selector too, including any explicit `--as` name.
 
-Spark friendly names should be unique within the Controller. Renaming preserves its identity and profile assignments. Model and recipe selectors distinguish publisher, version and variant as necessary. The CLI offers shell completion from the same catalog facets and enrolled fleet.
+Spark friendly names should be unique within the Controller. Renaming preserves its canonical Spark ID and profile assignments. Model and recipe selectors distinguish publisher, version and variant as necessary. The CLI offers shell completion from the same catalog facets and enrolled fleet. The web UI displays friendly labels in dropdowns but submits canonical IDs; it does not perform name-based resolution.
 
 ## 4. Fleet
 
@@ -141,10 +142,10 @@ Addresses above are documentation examples. Actual output distinguishes host nam
 
 ## 5. Model
 
-`model` lists the union of downloading, cached and running model variants. “Local cache” means Controller/NAS cache throughout this CLI; Spark copies are separately identified in detail.
+`model` lists the union of downloading, cached and running model variants. “Local cache” means the NAS/Controller cache throughout this CLI. That cache is authoritative for profile editing and apply readiness; Spark copies are observations shown separately in detail and never make an uncached profile choice valid.
 
 ```text
-Models                                     Controller cache · 3 models
+Models                                     NAS/Controller cache · 3 models
 
 MODEL                    USAGE       CACHE / PROGRESS             RUNNING ON   MEMORY~   DISK
 ────────────────────────────────────────────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ Vision model  27.2 / 40 GiB · 420 MiB/s · about 31s remaining
 Memory is an estimate; exact run requirements depend on the recipe and configuration.
 ```
 
-Cache state and running location are separate columns because a model can be running while its cache copy is refreshed. An incomplete or failed download remains visible with resumable bytes and failure context. A model running only on a Spark reads `Not cached` in the cache column.
+Cache state and running location are separate columns because a model can be running while its NAS/Controller cache copy is refreshed. An incomplete or failed download remains visible with resumable bytes and failure context. A model running only on a Spark reads `Not cached` in the cache column and cannot be selected for a new or edited profile until it is prepared in the NAS/Controller cache.
 
 Memory is the declared model estimate/range, or `Recipe-dependent` when no justified model-only estimate exists. Disk is the exact complete artifact size, with downloaded/total separately during transfer. Observed runtime memory lives in Fleet/detail and is not conflated with this estimate. Usage comes from canonical model capabilities; recipe restrictions are shown in Recipe.
 
@@ -197,14 +198,16 @@ Results use bounded pagination with `--limit`, `--cursor`, and `--all`. Interact
 
 Re-download verifies the replacement before replacing the cached copy; a failure preserves the last verified copy and running workloads. `--detach` returns a short tracking reference. Later `model detail MODEL --watch` follows it.
 
-`model remove MODEL` cancels its active download and removes that variant's Controller cache copies and partial data. One confirmation describes both effects and the reclaimable bytes. Saved profiles, including the active profile, keep their assignments and show `Model not cached`. Running Sparks retain their local copies and continue running. Cache removal never implies stopping workloads or deleting Spark-local files.
+`model remove MODEL` cancels its active download and removes that variant's NAS/Controller cache copies and partial data. One confirmation describes both effects and the reclaimable bytes. Saved profiles, including the active profile, keep their assignments and show `Model not cached`. Running Sparks retain their local copies and continue running, but those copies do not make the profile applyable. Cache removal never implies stopping workloads or deleting Spark-local files.
 
-If a build or load is waiting for this model, name it and mark it `Model removed; download required`. Dependent work stops or waits at a safe boundary; it must not automatically restart the cancelled download. Record cancellation before cleanup so late workers cannot restore a removed entry. Other cached objects retain shared bytes, excluded from the reclaimed total. Running Spark copies and saved profile references do not block Controller cache deletion.
+If a build or apply is waiting for this model, name it and mark it `Model removed; prepare-cache required`. Dependent work stops or waits at a safe boundary; it must not automatically restart the cancelled download. Record cancellation before cleanup so late workers cannot restore a removed entry. Other cached objects retain shared bytes, excluded from the reclaimed total. Running Spark copies and saved profile references do not block NAS/Controller cache deletion.
 
 ## 6. Recipe
 
+`recipe` lists the union of downloading/building, cached and running recipes. “Local” means the NAS/Controller cache; Spark-local images are shown separately and are not profile authority.
+
 ```text
-Recipes                                    Controller cache · 1 update
+Recipes                                    NAS/Controller cache · 1 update
 
 RECIPE         MODEL                 USAGE       SPARKS   CACHE / PROGRESS       RUNNING ON   UPDATE
 ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -221,7 +224,7 @@ Shape Studio   Shape model · BF16     3D               1   Building · step 4/7
 
 Resource subrows keep the main table readable. Model memory and runtime overhead state whether values are total or per Spark; per-rank requirements appear in detail. A container image has a disk size, not inherently a RAM size. Therefore the requested image memory is represented as **runtime memory overhead**, if declared or measured, alongside **image disk size**. Unknown overhead is never filled with the image's byte size.
 
-Update state compares the cached revision to the newest compatible published revision of the same recipe. Detail shows both revisions, change date, model/image/resource changes, affected profiles and versions actually running. Failed catalog checks yield `Unknown`. Running old and cached new copies remain individually inspectable; profiles automatically resolve the latest cached version.
+Update state compares the cached revision to the newest compatible published revision of the same recipe. Detail shows both revisions, change date, model/image/resource changes, affected profiles and versions actually running. Failed catalog checks yield `Unknown`. Running old and cached new copies remain individually inspectable. A new cached revision is a new selectable canonical asset; profiles do not silently resolve to it or to a Spark-local copy.
 
 ### Library
 
@@ -232,7 +235,7 @@ vonkctl recipe library --all-models --updated-since 14d
 vonkctl recipe library --sort name
 ```
 
-The default includes recipes whose exact model variant is downloading, cached or running locally. A partially downloaded model qualifies; a different quantization of the same family does not. The heading explains `For your models · downloading, cached or running` and offers `--all-models`.
+The default includes recipes whose exact model variant is downloading, cached or running locally. A partially downloaded model qualifies for browsing, but only a complete verified NAS/Controller cache entry is offered by the profile editor. A different quantization of the same family does not. The heading explains `For your models · downloading, cached or running` and offers `--all-models`.
 
 An explicit `--model` replaces the local-model default so browsing an uncached model works immediately. Additional filters then intersect with that model selection. `--updated-since`, sorting and pagination follow Model rules. Columns show recipe, exact model/variant, usage exposed by that recipe, Spark count, resource summaries, updated date, and local state. Empty local results point directly to `recipe library --all-models`.
 
@@ -264,13 +267,13 @@ Model and image will be cached on Controller.
 
 `recipe update` by itself lists locally cached recipes with updates. Interpret the unfinished “update all recipes list” requirement as this preview plus `recipe update --all` to update every eligible entry in that displayed set. `recipe update RECIPE` updates one entry. `--all` captures a bounded set at invocation, skips current entries, and summarizes updated/failed/skipped results; one independent failure does not hide the others. Current recipes are not forcibly rebuilt by update; explicit download performs that refresh.
 
-Updates cache new immutable revisions. Every profile immediately shows its latest cached resolution and recalculated resource estimates. Running Sparks keep their loaded copies until `profile load`. Output says `Cached update ready · used on next profile load`. There is no separate profile update command or flag. An in-progress download/build becomes the latest usable cache copy only after verification completes.
+Updates cache new immutable revisions. Every profile can show a new cached choice and recalculated resource estimates, but its saved canonical asset IDs do not change silently. Running Sparks keep their loaded copies until `profile apply`. Output says `Cached update ready · select it for the next profile apply`. There is no separate profile update command or flag. An in-progress download/build becomes selectable only after verification completes.
 
 ### Removal
 
-`recipe remove RECIPE` cancels the recipe's active download/build and removes its Controller-cached revisions and partial data, reporting actual reclaimable bytes after shared-layer accounting. All profiles keep their assignments and show `Recipe not cached`, including the active profile. Running Sparks continue on their own copies. Dependent loads are marked `Recipe removed; download required` and cannot recreate it until a new explicit download/load action. Cancellation prevents a late build result from republishing the removed entry.
+`recipe remove RECIPE` cancels the recipe's active download/build and removes its NAS/Controller-cached revisions and partial data, reporting actual reclaimable bytes after shared-layer accounting. All profiles keep their assignments and show `Recipe not cached`, including the active profile. Running Sparks continue on their own copies, but those copies do not make the profile applyable. Dependent applies are marked `Recipe removed; prepare-cache required` and cannot recreate it until a new explicit prepare-cache/download action. Cancellation prevents a late build result from republishing the removed entry.
 
-If this is the last locally cached recipe for the exact model variant, include one combined confirmation:
+If this is the last NAS/Controller-cached recipe for the exact model variant, include one combined confirmation:
 
 ```text
 Remove Shape Studio?                      4.2 GiB reclaimable
@@ -294,18 +297,18 @@ vonkctl --profile 2 profile
 vonkctl --profile 2 profile name "3D development"
 ```
 
-A read of an unused number shows `Profile 2 · not yet created`; the first explicit edit creates and saves it. Names are editable labels; numbered identity remains stable. Selected, saved and actually loaded state are distinct: selecting profile 2 does not change running workloads.
+A read of an unused number shows `Profile 2 · not yet created`; the first explicit edit creates and saves it. Names are editable labels; numbered identity remains stable. Selected, saved and actually applied state are distinct: selecting profile 2 does not change running workloads.
 
-Profiles save recipe choices and Spark assignments, not revision pins. Resolve the latest verified cached recipe and latest cached model compatible with its declared contract and selected variant. Latest follows published revision ordering, not cache insertion time. Never substitute another family or quantization. A recipe binding an exact model revision still requires that revision; “latest” cannot override compatibility.
+Profiles save canonical model/recipe IDs and Spark assignments, not friendly names or floating revision pins. The profile editor offers only complete, verified model/recipe choices from the NAS/Controller cache. A newly cached revision is a separate selectable choice; it never silently rewrites a saved profile. Never substitute another family, quantization or revision, and never use a Spark-local copy to make an uncached choice valid.
 
-When Controller assets are removed, the overview shows `Model not cached` / `Recipe not cached` alongside actual Spark status, even for the active profile. Reading never downloads anything. Loading reuses compatible verified Spark copies and obtains missing assets for targets that need them. If no cached recipe exists, resolve its current library definition and show the required download/build. A cached recipe does not upgrade merely because a newer upstream version exists.
+When NAS/Controller assets are removed, the overview shows `Model not cached` / `Recipe not cached` alongside actual Spark status, even for the active profile. Reading never downloads anything. Editing cannot select an uncached asset. Apply first checks the complete NAS/Controller cache and, when incomplete, offers `profile prepare-cache`; it does not fall back to compatible Spark-local copies. A cached recipe does not upgrade merely because a newer upstream version exists.
 
-Each load freezes its resolved content and fleet snapshot for that execution. Subsequent cache updates affect the next load, not the running operation. These execution records support verification without adding version management to profile editing.
+Each apply freezes the selected canonical asset IDs, exact trusted NAS/Controller content and fleet snapshot for that execution. Subsequent cache updates affect the next explicit profile edit/apply, not the running operation. These execution records support verification without adding version management to profile editing.
 
 ### Overview
 
 ```text
-Profile 2 · 3D development                 Saved · changes not loaded
+Profile 2 · 3D development                 Saved · changes not applied
 
 SPARK    RECIPE / MODEL                         CONTROLLER CACHE       ON SPARK
 ───────────────────────────────────────────────────────────────────────────────────
@@ -313,43 +316,45 @@ Atlas    Shape Studio / Shape model BF16         Cached                 Differen
          USE shape-studio
          Vision Dual / Vision model FP8         Model not cached       Not running
          USE vision-dual
-         Memory after load   ~68 / 128 GiB · ~60 GiB headroom
+         Memory after apply  ~68 / 128 GiB · ~60 GiB headroom
          Additional disk      52 GiB needed · 180 GiB available
          Combined model/image footprint: 89 GiB
 
-Boreal   Vision Dual / Vision model FP8          Model not cached       Copy available
+Boreal   Vision Dual / Vision model FP8          Model not cached       Local copy observed; not authority
          USE vision-dual
-         Memory after load   ~28 / 128 GiB · ~100 GiB headroom
+         Memory after apply  ~28 / 128 GiB · ~100 GiB headroom
          Additional disk       0 GiB needed · 320 GiB available
          Combined model/image footprint: 52 GiB
 
 Vision Dual: Atlas + Boreal · 2/2 Sparks assigned
-Controller cache: Vision model missing · Boreal retains a verified local copy
+NAS/Controller cache: Vision model missing · apply blocked
+Spark observation: Boreal retains a local copy; it cannot satisfy the cache preflight
 Fleet footprint: 89 GiB unique artifacts · 141 GiB across Spark disks
 
-Load this setup: vonkctl --profile 2 profile load
+Prepare missing cache: vonkctl --profile 2 profile prepare-cache
+Apply this setup:    vonkctl --profile 2 profile apply
 ```
 
-Examples assume declared per-rank requirements, not model size divided by Spark count. `Memory after load` includes concurrent runtime memory, context/KV requirements and system/non-profile allowance; illustrative totals assume those allowances are included. Headroom uses that complete estimate. Detail separates each component and observed current use. Missing estimates produce a known subtotal plus `unknown`, never a reassuring full total.
+Examples assume declared per-rank requirements, not model size divided by Spark count. `Memory after apply` includes concurrent runtime memory, context/KV requirements and system/non-profile allowance; illustrative totals assume those allowances are included. Headroom uses that complete estimate. Detail separates each component and observed current use. Missing estimates produce a known subtotal plus `unknown`, never a reassuring full total.
 
-`Additional disk` is incremental required space, including peak temporary/import needs and reuse of verified local content; compare it directly with observed available space. Combined footprint counts unique model/image bytes once per Spark. Controller missingness and Spark availability are separate facts. Removing an assignment changes desired resource use without necessarily freeing physical disk.
+`Additional disk` is incremental required space, including peak temporary/import needs and the exact assets that will be fanned out from the trusted NAS/Controller cache; compare it directly with observed available space. Combined footprint counts unique model/image bytes once per Spark. NAS/Controller cache missingness and Spark availability are separate facts. Removing an assignment changes desired resource use without necessarily freeing physical disk.
 
 The narrow-terminal layout preserves the same decisions:
 
 ```text
 Atlas · profile 2 “3D development”
   shape-studio   Cached             Different run
-  vision-dual    Model not cached   Not running
-  Memory after load  ~68/128 GiB · ~60 GiB headroom
+  vision-dual    Model not cached   Apply blocked; prepare-cache
+  Memory after apply  ~68/128 GiB · ~60 GiB headroom
   Additional disk     52 GiB · 180 GiB available
 ```
 
-An active profile after Controller cache deletion can show:
+An active profile after NAS/Controller cache deletion can show:
 
 ```text
 Profile 2 · 3D development · Active
 Atlas   shape-studio   Recipe + model not cached   Running
-Running on Atlas's local copy. Controller cache was removed.
+Running on Atlas's local copy; profile apply is blocked until NAS/Controller cache is prepared.
 ```
 
 ### Add/remove and autosave
@@ -361,7 +366,7 @@ vonkctl --profile 2 profile add vision-dual --spark Boreal
 vonkctl --profile 2 profile remove vision-dual --spark Atlas
 ```
 
-`profile add` saves a library/local recipe choice and its Spark assignments. Feedback resolves latest cached compatible versions without pinning the profile. Missing Controller assets are labeled explicitly; per-Spark feedback explains whether a verified copy is reusable or downloads are needed on load. Repeat `--spark` to assign a complete group in one edit. Repeating the same assignment to the same Spark is idempotent.
+`profile add` saves a cached model/recipe choice and its Spark assignments as canonical IDs. The editor offers only complete, verified NAS/Controller cache choices. Missing NAS/Controller assets are labeled explicitly; per-Spark feedback reports transfer and fit requirements, never treats a Spark-local copy as a substitute. Repeat `--spark` to assign a complete group in one edit. Repeating the same assignment to the same Spark is idempotent.
 
 For a distributed recipe, a later add to another Spark extends its one unambiguous existing assignment. To create independent copies or groups, use an explicit `--as NAME`, for example `--as vision-east`; this name becomes the assignment selector. If multiple assignments could match, prompt for the assignment instead of merging groups arbitrarily. Rank mapping comes from the Controller and is available in detail.
 
@@ -371,55 +376,54 @@ Every edit is a durable Controller save, with revision/concurrency checking. Pri
 Saved profile 2 · 3D development
 Added Vision Dual to Atlas.
 
-Atlas memory after load  ~40 → ~68 GiB / 128 GiB · ~60 GiB headroom
+Atlas memory after apply  ~40 → ~68 GiB / 128 GiB · ~60 GiB headroom
 Additional disk            0 → 52 GiB needed · 180 GiB available
 Combined recipe disk      37 → 89 GiB
-Info: Vision Dual needs 2 Sparks; 1 is assigned. Add one more before loading.
+Info: Vision Dual needs 2 Sparks; 1 is assigned. Add one more before applying.
 ```
 
 Adding the third Spark to a two-Spark assignment still saves successfully:
 
 ```text
 Saved. Info: Vision Dual needs 2 Sparks; 3 are assigned.
-Choose the two members before loading this assignment.
+Choose the two members before applying this assignment.
 ```
 
 Memory pressure, insufficient storage, offline targets and incomplete groups are informational while editing. Give immediate per-Spark before/after totals for each add/remove, including shared-artifact reuse. Unknown resources explain what remains unknown.
 
 ### The entire fleet, every time
 
-Every profile covers every currently enrolled Spark. The overview shows every Spark with its recipes or explicitly `Idle`. There are no include/exclude controls. Removing a Spark's last assignment says `Atlas will stop its managed recipes on the next load`. Editing alone never stops workloads.
+Every profile covers every currently enrolled Spark. The overview shows every Spark with its recipes or explicitly `Idle`. There are no include/exclude controls. Removing a Spark's last assignment says `Atlas will stop its managed recipes on the next apply`. Editing alone never stops workloads.
 
-New profiles initially show every Spark as Idle. Newly enrolled Sparks automatically appear as Idle in every profile without immediate runtime changes. Loading an empty profile idles the entire fleet and states that outcome prominently. Removed Sparks leave the roster; unresolved assignments remain named for correction, especially when a distributed group becomes incomplete.
+New profiles initially show every Spark as Idle. Newly enrolled Sparks automatically appear as Idle in every profile without immediate runtime changes. Applying an empty profile idles the entire fleet and states that outcome prominently. Removed Sparks leave the roster; unresolved assignments remain named for correction, especially when a distributed group becomes incomplete.
 
-Resolve and validate the complete current fleet on load. Offline Sparks are named as preflight blockers before workload replacement. A membership change during a load is reported; a fresh whole-fleet load reconciles it. Do not claim complete success for nodes outside the execution's frozen fleet snapshot.
+Resolve and validate the complete current fleet on apply. Offline Sparks are named as preflight blockers before workload replacement. A membership change during an apply is reported; a fresh whole-fleet apply reconciles it. Do not claim complete success for nodes outside the execution's frozen fleet snapshot.
 
-### Loading
+### Applying
 
-`profile load` means “make the entire fleet run this setup using the latest cached compatible recipes and models.” Reuse verified Spark copies, obtain missing assets through Controller as needed, deliver/verify them, stop managed workloads absent from this profile, start its recipes and check readiness. Unassigned Sparks become idle. Cached updates take effect automatically on load; downloading updates never restarts live workloads. There is no profile update command, update flag or mandatory manual preparation.
+`profile apply` means “make the entire fleet run this setup from the exact model and recipe assets selected from the NAS/Controller cache.” It first checks that every selected asset is complete and verified in that cache. If any asset is missing or incomplete, it makes no Spark workload change and offers `vonkctl --profile N profile prepare-cache`; prepare-cache obtains and verifies the missing assets in the NAS/Controller cache. It never treats a Spark-local copy as profile authority and does not perform an expensive second hash of trusted NAS cache content. Once the cache preflight passes, apply fans out those exact assets to all target Sparks in parallel, reports per-Spark progress, stops managed workloads absent from this profile, starts its recipes and checks readiness. Unassigned Sparks become idle.
 
-An invalid group is an informational save condition but a load blocker. Preflight the complete profile before changing any running workload. A two-Spark recipe assigned to one or three nodes cannot be launched truthfully; loading reports `Profile saved; not loaded` and the exact corrective command. It neither guesses a group nor silently loads just the valid subset.
+An invalid group is an informational save condition but an apply blocker. Preflight the complete profile before changing any running workload. A two-Spark recipe assigned to one or three nodes cannot be launched truthfully; applying reports `Profile saved; not applied` and the exact corrective command. It neither guesses a group nor silently applies just the valid subset.
 
-`--dry-run` shows current → desired changes for every Spark, resolved versions, missing assets and resource fit without loading. Ordinary load binds the Controller plan internally. Submitted content remains fixed for that execution; cache updates cannot swap bytes mid-load. Changed topology or incompatible model requirements must be resolved before execution rather than guessed.
+`--dry-run` shows current → desired changes for every Spark, selected canonical asset IDs, NAS/Controller cache preflight, resource fit and the exact fan-out without applying. Ordinary apply binds the Controller plan internally. Submitted content remains fixed for that execution; cache updates cannot swap bytes mid-apply. Changed topology or incompatible model requirements must be resolved before execution rather than guessed.
 
 ```text
-Loading profile 2 · 3D development
+Applying profile 2 · 3D development
 Atlas: Qwen Code → Shape Studio + Vision Dual
 Boreal: Idle → Vision Dual
 
-Controller   Model files       ━━━━━━━━━━ 100%  Verified
-Controller   Recipe images     ━━━━━━━━━━ 100%  Verified
-Atlas        Copying assets    ━━━━━━━╸──  76%  39.5 / 52 GiB
-Boreal       Copying assets    ━━━━━╸────  54%  28.1 / 52 GiB
+NAS/Controller cache preflight  ━━━━━━━━━━ 100%  Exact assets verified
+Atlas        Copying exact assets  ━━━━━━━╸──  76%  39.5 / 52 GiB
+Boreal       Copying exact assets  ━━━━━╸────  54%  28.1 / 52 GiB
 
 Next: start Shape Studio on Atlas; start Vision Dual on Atlas + Boreal.
 ```
 
-Stage before stopping existing workloads where resource and runtime constraints permit. Preserve prior assets for reuse and recovery. Show unavoidable interruption and any recipe-specific preparation phase. Do not promise atomic whole-fleet replacement or automatic rollback after runtime failures.
+Stage before stopping existing workloads where resource and runtime constraints permit. Preserve prior assets for recovery and observation, but always fan out the exact assets from the trusted NAS/Controller cache; prior Spark assets never satisfy cache preflight or replace that source. Show unavoidable interruption and any recipe-specific preparation phase. Do not promise atomic whole-fleet replacement or automatic rollback after runtime failures.
 
 Completion shows each assignment as `Running` for services or `Ready for jobs` for artifact workers, with Spark names and endpoint/usage details where available. A distributed assignment requires all ranks and coordinator readiness. A failed rank produces a failed/degraded group, never partial “Running” success.
 
-`profile progress` shows the latest durable load; `--follow` attaches. Interrupting observation leaves accepted work running. Repeating load while it is applying follows that frozen execution. After failure, a new load resolves current fleet/cache state, reports any newly selected cached versions and reuses compatible completed work. A successful entire-fleet load identifies the active profile. A partial switch names actual per-Spark state and the attempted profile without claiming full activation. Removing Controller cache does not make a healthy running profile inactive. New cache versions show `New cached version · next load` beside the actual running copy.
+`profile progress` shows the latest durable apply; `--follow` attaches. Interrupting observation leaves accepted work running. Repeating apply while it is applying follows that frozen execution. After failure, a new apply rechecks the NAS/Controller cache and exact profile asset IDs; it may reuse completed fan-out work only when the same trusted assets and request identity still match. A successful entire-fleet apply identifies the active profile. A partial switch names actual per-Spark state and the attempted profile without claiming full activation. Removing NAS/Controller cache does not stop a healthy running workload, but it makes the profile not applyable until `prepare-cache`; a Spark-local copy never restores profile usability. New cache versions show `New cached choice · select before next apply` beside the actual running copy.
 
 ## 8. Progress and recovery
 
@@ -431,14 +435,14 @@ Builds have a meter too. When a builder exposes genuine bounded work, show its r
 Building Shape Studio   ───╺━━╸────   Step 4/7 · compiling runtime · 2m 14s
 ```
 
-Do not convert step 4/7 to “57% done”: build steps can differ enormously in duration. A builder with no step total shows the current phase and elapsed time. Completion becomes 100% only when the final image is verified. Multiple model/image transfers appear as separate lines; any overall byte percentage is labeled transfer progress, not total load completion.
+Do not convert step 4/7 to “57% done”: build steps can differ enormously in duration. A builder with no step total shows the current phase and elapsed time. Completion becomes 100% only when the final image is verified. Multiple model/image transfers appear as separate lines; any overall byte percentage is labeled transfer progress, not total apply completion.
 
 Failure output leads with object, phase, preserved work and next command:
 
 ```text
 Vision Dual could not finish copying to Boreal: connection lost.
 Atlas is staged. Boreal has 28.1 / 52 GiB. Existing runs are unchanged.
-Retry: vonkctl --profile 2 profile load
+Retry: vonkctl --profile 2 profile apply
 Logs:  vonkctl fleet loginfo Boreal --recipe vision-dual
 ```
 
@@ -446,7 +450,7 @@ Those preservation claims must reflect the actual operation: if stopping already
 
 ## 9. Predictable automation
 
-`--json`, `--no-input`, `--detach`, `--timeout`, and `--dry-run` are consistent wherever applicable. `--yes` answers a described destructive confirmation but never chooses an ambiguous object, changes topology or broadens scope. Routine download, assign and load commands express sufficient intent without an extra `--apply`.
+`--json`, `--no-input`, `--detach`, `--timeout`, and `--dry-run` are consistent wherever applicable. `--yes` answers a described destructive confirmation but never chooses an ambiguous object, changes topology or broadens scope. Routine download, assign and apply commands express sufficient intent without an extra `--apply`.
 
 Noninteractive ambiguity or a required consequential decision returns a typed actionable error. In JSON, include canonical identities and units, selected profile, desired/observed states, operation reference, request identity, freshness, warnings, and next actions as applicable. Use authoritative typed contracts; avoid another handwritten wire schema.
 
@@ -456,27 +460,27 @@ The CLI connects to the Controller using the existing supported secure connectio
 
 ## 10. Acceptance for the eventual implementation
 
-1. A new user can find a model, obtain its recipe, assign it to named Sparks and load the profile using only help and the next-action hints.
+1. A new user can find a model, obtain its recipe, assign it to named Sparks and apply the profile using only help and the next-action hints.
 2. Every requested overview has readable wide and narrow output; redirected output is plain, and JSON is parseable without scraping terminal prose.
 3. Fleet shows all agreed glance metrics and exposes the full existing coverage through detail. Missing or stale data, update-check failures and distributed metrics are truthful.
-4. Local Model and Recipe views include active preparation, cached and running states concurrently. Recipe library defaults to exact local model variants and explains how to broaden it.
+4. NAS/Controller Model and Recipe views include active preparation, cached and running states concurrently. Recipe library defaults to exact locally cached model variants and explains how to broaden it.
 5. Both progress meters handle unknown totals without invented percentages. Failed refreshes preserve existing verified content.
-6. Active download commands attach, failed/incomplete attempts resume valid work, and completed downloads refresh on repetition. Update-all refreshes only outdated recipes. Profiles automatically resolve latest cached compatible versions; running workloads change only on load.
-7. One-, two- and three-member drafts of a two-Spark recipe save with appropriate information. Only valid complete groups load, and no load mutation starts when preflight blocks the profile.
+6. Active download commands attach, failed/incomplete attempts resume valid work, and completed downloads refresh on repetition. Update-all refreshes only outdated recipes. Profiles use their saved canonical cached choices; running workloads change only on apply.
+7. One-, two- and three-member drafts of a two-Spark recipe save with appropriate information. Only valid complete groups apply, and no apply mutation starts when preflight blocks the profile.
 8. Edits autosave with concurrent-write protection, show resource deltas, and never change live workloads. Profile selection defaults deterministically to 1.
 9. Resource totals distinguish shared physical memory, runtime overhead, unique disk content, retained cache and incremental transfer space. Unknown totals remain explicit.
-10. Profile load covers the entire fleet, idles unassigned Sparks, reuses verified copies, obtains missing assets and reports observed readiness and partial failures. Newly enrolled Sparks appear as Idle; membership changes are detected.
-11. Removing a model/recipe cancels its download/build and removes Controller cache without changing profile assignments or running Spark copies. Active profiles show missing cache too. Dependent operations cannot recreate removed content without a new explicit action. Last-recipe removal offers model deletion and preserves shared bytes owned by other cached objects.
+10. Profile apply first checks the NAS/Controller cache, offers `prepare-cache` when incomplete, then fans out the exact cached assets to every target Spark in parallel and reports per-Spark progress, readiness and partial failures. Newly enrolled Sparks appear as Idle; membership changes are detected. A Spark-local copy alone never satisfies the cache check.
+11. Removing a model/recipe cancels its download/build and removes NAS/Controller cache without changing profile assignments or running Spark copies. Active profiles show missing cache too, but are not applyable from Spark-local copies alone. Dependent operations cannot recreate removed content without a new explicit prepare-cache/download action. Last-recipe removal offers model deletion and preserves shared bytes owned by other cached objects.
 12. Upgrade uses signed Controller operations and named targets. Log retrieval stays on the authenticated Controller path. Enrollment/re-enrollment makes the necessary host action understandable.
 
 ## 11. Design handoff
 
-This proposal adopts the user's Fleet / Model / Recipe structure and Profile loading workflow. It preserves the documented automatic Controller preparation behavior and the established metrics coverage. Prior Fleet/Library navigation and command-tree proposals are background, not constraints on this new CLI design.
+This proposal adopts the user's four-noun Fleet / Model / Recipe / Profile structure and Profile apply workflow. It preserves the documented NAS/Controller cache preparation boundary and the established metrics coverage. Prior Fleet/Library navigation and command-tree proposals are background, not constraints on this new CLI design.
 
-Before implementation, map each proposed behavior to the current canonical API: particularly friendly selectors/profile numbering, log retrieval, cancellation and cache eviction independent of running Spark copies, automatic latest-compatible cache resolution, whole-fleet profiles, distributed draft editing, autosave concurrency and resource projections. Any absent behavior is an implementation gap; none is advertised as already shipped here.
+Before implementation, map each proposed behavior to the current canonical API: particularly friendly-name-to-ID resolution, web dropdown IDs, profile numbering, log retrieval, cancellation and cache eviction independent of running Spark copies, NAS/Controller cache preflight and preparation, exact parallel fan-out, whole-fleet profiles, distributed draft editing, autosave concurrency and resource projections. Any absent behavior is an implementation gap; none is advertised as already shipped here.
 
 The CLI's acceptance comes first. The future web experience can use these proven tasks and contracts once they work end to end. This document changes no Python/Rust/TypeScript code, recipe definitions, published commands, deployment or live Spark state.
 
-This revision incorporates the user's explicit review decisions: whole-fleet profiles, latest cached compatible content, removal as cancellation, and independent Controller/Spark cache lifetimes. Those decisions supersede older profile-pinning or retention assumptions in the background documents.
+This revision incorporates the user's explicit review decisions: four operator nouns, friendly-name-to-ID CLI resolution, web dropdown IDs, whole-fleet profiles, NAS/Controller cache authority, cache-first `profile apply` with `prepare-cache`, exact parallel asset fan-out, removal as cancellation, no extra hash of trusted NAS cache content, and independent Controller/Spark cache lifetimes. Those decisions supersede older profile-pinning, floating-resolution or Spark-local-retention assumptions in the background documents.
 
 Design evidence: [current CLI guide](/opt/vonk-forge/docs/runbooks/vonkctl.md), [metrics contract](/opt/vonk-forge/docs/interface-metrics-spec-2026-09-04.md), [automatic Controller preparation](/opt/vonk-forge/docs/controller-preparation-contract-2026-09-05.md), [existing interface requirements](/opt/vonk-forge/docs/interface-implementation-spec-2026-09-04.md), and the canonical Model/Recipe package in `/opt/vonk-forge-recipes/contracts`.

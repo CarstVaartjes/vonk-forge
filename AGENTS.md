@@ -171,6 +171,37 @@ artifacts. Do not delete PostgreSQL volumes or run `docker compose down -v` for
 a normal upgrade. SSH is diagnostic/bootstrap-only, never a hidden fallback
 for an authorized Controller operation.
 
+## Profile cache contract
+
+The local NAS/Controller cache is the authoritative availability surface for
+Fleet profile authoring and apply admission. Profile choices must resolve from
+that cache to an exact model and recipe-image identity; a public catalog entry
+or a Spark-local copy is not sufficient. Persisted profiles still belong to
+the current PostgreSQL authority and schema-2 contracts, but their choices and
+readiness are cache-backed.
+
+Missing model or recipe-image assets are actionable blockers. Preview and
+authoring must name the missing asset and expose the current prepare-cache
+action; do not silently admit a profile and defer the problem to a Spark.
+The local NAS cache is trusted under its managed-storage contract, so do not
+promise costly repeated full hashing as part of ordinary profile reads or
+admission.
+
+Applying a ready profile binds the exact profile and plan digests, fans out
+exact model and recipe-image preparation to the target Sparks in parallel, and
+skips assets already local on each target. It must stop and replace workloads
+safely, retain durable per-target progress, and report that progress before a
+route is published. NAS reconciliation removes unused local model-cache
+entries while preserving profile and active-workload references. Spark-local
+copies are execution caches only: they may be reused or rehydrated, but they
+never become profile authority.
+
+Keep these readiness and admission facts separate from repository, CI and
+publication evidence, Controller deployment evidence, and physical Spark or
+model-quality acceptance. A passing profile preview or cache operation is not
+physical Spark qualification, and SSH must not become an undocumented
+alternative rollout path.
+
 ## Parallel work
 
 Use an isolated branch/worktree for each independent agent, based on the latest

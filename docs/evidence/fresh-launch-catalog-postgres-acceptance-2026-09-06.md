@@ -1,5 +1,7 @@
 # Fresh launch catalog PostgreSQL acceptance
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 This evidence belongs to the isolated `codex/pg-acceptance-3943` checkout,
 based on local integration commit
 `1d4093fa12c4365755f9465195d70faeaf3019e0`.

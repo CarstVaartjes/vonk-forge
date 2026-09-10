@@ -292,6 +292,19 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 "revision": 7,
                 "assignments": [],
             },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/recipe-uuid",
+                        "identity": {
+                            "publisher": "vonk-forge",
+                            "slug": "recipe-uuid",
+                            "title": "Recipe UUID",
+                        },
+                    }
+                ],
+                "next_cursor": None,
+            },
             ("GET", "/api/fleet"): {
                 "nodes": [
                     {
@@ -319,7 +332,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             "2",
             "profile",
             "add",
-            "recipe-uuid",
+            "Recipe UUID",
             "--spark",
             "Boreal",
             "--spark",
@@ -332,6 +345,12 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     assert payload["revision"] == 8
     assert client.calls == [
         ("GET", "/api/profile/2", None, None),
+        (
+            "GET",
+            "/api/recipe/library",
+            None,
+            {"all_models": True, "limit": 512, "sort": "name"},
+        ),
         ("GET", "/api/fleet", None, None),
         (
             "PUT",
@@ -339,7 +358,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             {
                 "assignments": [
                     {
-                        "recipe_selector": "recipe-uuid",
+                        "recipe_selector": "vonk-forge/recipe-uuid",
                         "spark_ids": ["spk_" + "a" * 32, "spk_" + "b" * 32],
                         "desired_state": "running",
                     }
@@ -379,12 +398,55 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     )
 
     status, payload = run(
-        ("profile", "add", "qwen-code", "--spark", "Atlas", "--json"), client
+        (
+            "profile",
+            "add",
+            "vonk-forge/qwen-code",
+            "--spark",
+            "Atlas",
+            "--json",
+        ),
+        client,
     )
 
     assert status == 2
     assert "ambiguous spark selector" in payload["error"]
     assert [call[1] for call in client.calls] == ["/api/profile/1", "/api/fleet"]
+
+
+def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1"): {
+                "number": 1,
+                "name": "Default",
+                "revision": 3,
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/recipe-uuid",
+                        "assignment_name": None,
+                        "spark_ids": ["spk_" + "a" * 32],
+                    }
+                ],
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/recipe-uuid",
+                        "identity": {"title": "Recipe UUID", "slug": "recipe-uuid"},
+                    }
+                ],
+                "next_cursor": None,
+            },
+            ("PUT", "/api/profile/1"): {"number": 1, "revision": 4},
+        }
+    )
+
+    status, payload = run(("profile", "remove", "Recipe UUID", "--json"), client)
+
+    assert status == 0
+    assert payload["revision"] == 4
+    assert client.calls[-1][2]["assignments"] == []
 
 
 def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
@@ -498,25 +560,25 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
 def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     class ConflictClient(FakeClient):
         def request(self, method, path, payload=None, *, extra_headers=None, query=None):
-                self._validate_request(method, path, payload, query)
-                self.calls.append((method, path, payload, query))
-                if method == "PUT":
-                    raise ValueError("profile revision conflict")
-                if path == "/api/fleet":
-                    return {
-                        "nodes": [
-                            {
-                                "id": "spk_" + "a" * 32,
-                                "display_name": "Atlas",
-                                "hostname": "atlas",
-                            }
-                        ]
-                    }
-                return {"number": 1, "revision": 4, "assignments": []}
+            self._validate_request(method, path, payload, query)
+            self.calls.append((method, path, payload, query))
+            if method == "PUT":
+                raise ValueError("profile revision conflict")
+            if path == "/api/fleet":
+                return {
+                    "nodes": [
+                        {
+                            "id": "spk_" + "a" * 32,
+                            "display_name": "Atlas",
+                            "hostname": "atlas",
+                        }
+                    ]
+                }
+            return {"number": 1, "revision": 4, "assignments": []}
 
     client = ConflictClient({})
     status, payload = run(
-        ("profile", "add", "qwen-code", "--spark", "Atlas", "--json"), client
+        ("profile", "add", "vonk-forge/qwen-code", "--spark", "Atlas", "--json"), client
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"

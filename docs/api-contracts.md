@@ -32,6 +32,29 @@ Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
 additional recipe documents for users to maintain.
 
+## Cache-first profile lifecycle
+
+The Controller/NAS cache is the trusted preparation authority for profiles. A
+profile choice binds the exact model artifact set and required runtime image;
+profile creation and updates must not select an uncached or merely Spark-local
+asset. If an existing choice is no longer fully cached and verified, apply is
+blocked with typed, actionable reasons and offers the cache-preparation
+operation. Apply must not silently fetch from upstream, choose another
+revision, or recover the authority from a Spark copy.
+
+After the cache gate succeeds, the Controller distributes the exact digest- and
+size-bound assets to all selected Sparks in parallel. Each target verifies its
+destination and image identity; a verified local copy is skipped. The
+Controller then stops and replaces conflicting workloads and reports durable
+per-Spark transfer progress and serving readiness. Spark-local copies are
+execution evidence only, never an alternate persisted authority.
+
+NAS garbage collection may remove local model objects that are no longer
+referenced by a saved profile, active workload, or preparation operation. It
+must not remove referenced cache objects, and Spark copies do not pin or replace
+NAS ownership. Cache eviction results therefore describe Controller/NAS
+authority changes; target-local cleanup is not a cache-authority operation.
+
 Only the current Model and Recipe authoring format is supported. The retired
 recipe parser, recipe-v1 schema asset, and flat install/start fixtures are
 removed. Version numbers belong to each document: current job envelopes and
@@ -312,12 +335,14 @@ before a later operation consumes it:
 | Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
 | Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
 | Catalog projections | `catalog_revision_contract.py`, composed from public model/topology and protocol build-option types |
-| Cache manifests, download/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
+| Cache manifests, preparation/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
 
 A required nullable value remains present; unused optional fields are omitted.
 Malformed stored documents produce a controlled error instead of becoming empty
-state. Engine-owned extension values retain their declared flexibility. Unused
-parallel copies have no persistence contract: remove their column and writer.
+state. Engine-owned extension values retain their declared flexibility. Spark
+copies are derived target evidence, not parallel cache authorities; persist
+their verification and readiness through the current lifecycle receipts rather
+than creating a second cache document.
 
 Structure validation does not replace transaction semantics. Cache workers
 refresh the database row when acquiring its lock, so a prior cooldown scan

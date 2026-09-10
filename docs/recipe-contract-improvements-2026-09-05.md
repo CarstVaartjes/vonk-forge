@@ -29,13 +29,28 @@ it for downloading, Controller/NAS caching and Spark distribution. Model downloa
 is independent of a recipe. Do not duplicate editable model metadata in recipes
 or manufacture a recipe choice for a model-only download.
 
-## 2. Image or build, with one reusable Controller cache
+## 2. Image or build, with one trusted Controller/NAS cache
 
 A Recipe either selects an executable image or declares how to build one.
-Image-only recipes need no dummy build context. Prepare missing images once and
-reuse the resulting Controller artifact across the assigned Sparks. Run and
-Switch obtain missing assets automatically and communicate actual progress.
-Changing a setting that only needs a restart must not rebuild an unchanged image.
+Image-only recipes need no dummy build context. Resolve the exact model file
+manifest, recipe revision, runtime image identity and source/build inputs once.
+`Prepare cache` explicitly downloads or builds the missing immutable model and
+image assets in the trusted Controller/NAS cache, verifies them, and reports
+durable progress. It does not revise a saved profile's identities.
+
+Run, Switch and profile Apply require that exact cache state. If an asset is
+missing or unverified, the operation is blocked with the named model or
+recipe-image blocker and offers `prepare-cache`; it never fetches from an
+upstream origin as a hidden prerequisite. Changing a setting that only needs a
+restart must not rebuild an unchanged image.
+
+After cache preparation, the Controller distributes the exact digest- and
+size-bound assets to all selected Sparks in parallel. Each target verifies its
+destination and image identity; a verified local copy is skipped. The
+Controller then stops and safely replaces only conflicting workloads in the
+requested scope, starts the desired workload, and reports durable per-Spark
+transfer progress and serving readiness. Spark-local copies are derived
+execution caches, never profile or cache authority.
 
 ## 3. Engines own their runtime invariants
 
@@ -50,13 +65,28 @@ See [runtime writable paths](runtime-writable-path-contract.md).
 Resolve settings once for launch, placement, memory planning and preparation
 reuse. Distinguish current capacity from capacity released by planned stops.
 Report missing resource evidence explicitly instead of inventing estimates.
-Distributed assignments account for the whole Spark group.
+Distributed assignments account for the whole Spark group. The apply plan
+retains the exact canonical asset identities and target scope across retries;
+completed distribution and replacement work is not discarded on a transient
+failure. Readiness is observed per Spark and endpoint publication waits for the
+required group state.
 
 ## 5. Test representative serving behavior
 
 Maintainer checks exercise the declared interface: HTTP serving for endpoint
 models and typed input/output jobs for image, audio, video or other workloads.
 Check useful output properties without brittle exact model answers. Cover
-restart and cache reuse; lightweight readiness and physical model acceptance
-remain distinct from structural catalog validation. A recipe in the repository
-should work without adding a user-facing qualification ceremony.
+restart, cache reuse, parallel distribution, verified-local-copy skipping,
+safe workload replacement, and durable per-Spark progress/readiness. The
+Controller/NAS cache may garbage-collect only local model objects that are no
+longer referenced by a saved profile, active workload, or preparation
+operation; it must preserve referenced objects. Managed NAS cache state is
+trusted for ordinary profile reads and admission, so the contract must not
+promise repeated full hashing of every profile asset.
+
+Structural catalog and Controller/CI evidence, NAS preparation evidence,
+Spark distribution evidence, and physical model/hardware acceptance are
+separate gates. Lightweight readiness or a successful cache operation does not
+prove physical Spark acceptance; that claim requires the designated Linux/
+ARM64 or actual Spark lane and its retained bounded evidence. A recipe in the
+repository should work without adding a user-facing qualification ceremony.

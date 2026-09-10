@@ -1,5 +1,7 @@
 # Agreed delivery scope — 2026-09-05
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 User authorizes autonomous implementation of all agreed work using best judgment, without routine approval pauses. This is the current product scope when earlier design proposals conflict. Sol supervises Luna implementation agents in isolated worktrees; root reviews integration and actual interface evidence.
 
 ## Product

@@ -41,6 +41,14 @@ Alias = Annotated[
         pattern=r"^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
     ),
 ]
+RecipeSelector = Annotated[
+    str,
+    StringConstraints(
+        min_length=5,
+        max_length=127,
+        pattern=r"^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+    ),
+]
 
 
 class _StrictModel(StrictJSONModel):
@@ -82,7 +90,7 @@ class FleetProfileAssignmentInput(_StrictModel):
     preview/load, so incomplete distributed drafts can be saved.
     """
 
-    recipe_selector: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    recipe_selector: RecipeSelector
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
     assignment_name: Alias | None = None
     model_variant: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
@@ -137,7 +145,7 @@ class FleetProfileAssignmentView(_StrictModel):
 
     selector: Alias
     display_name: Name
-    recipe_selector: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    recipe_selector: RecipeSelector
     recipe_id: UuidId | None = None
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
     required_sparks: int | None = Field(default=None, ge=1, le=32)
@@ -590,9 +598,9 @@ __all__ = [
     "FleetProfileApplicationView",
     "FleetProfileAssignment",
     "FleetProfileAssignmentInput",
-    "FleetProfileAssignmentView",
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
+    "FleetProfileAssignmentView",
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
     "FleetProfileChildResult",

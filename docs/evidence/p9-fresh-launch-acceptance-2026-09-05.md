@@ -1,5 +1,7 @@
 # P9 fresh-launch acceptance evidence
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 This evidence belongs to the isolated `codex/p9-launch-acceptance` checkout.
 The integrated base is `codex/interface-integration` at
 `8930f9fbef2bd3bb2889450bf0dfb46c0edbcd4e`. The P9 commits only add this

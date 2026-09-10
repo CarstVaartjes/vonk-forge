@@ -1,5 +1,7 @@
 # DGX Spark platform-alignment audit — 2026-08-12
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 This audit compares both development GPU nodes and the Vonk Forge runtime with
 NVIDIA's supported DGX Spark operating model. It is a read-only assessment;
 the observations below did not reconfigure Docker, the NVIDIA driver,

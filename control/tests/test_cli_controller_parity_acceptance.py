@@ -98,7 +98,7 @@ def _model_operation(state: str = "succeeded") -> dict[str, Any]:
 
 
 def _library(kind: str) -> dict[str, Any]:
-    return {
+    value = {
         "schema_version": 2,
         "generated_at": NOW,
         kind: [],
@@ -107,6 +107,7 @@ def _library(kind: str) -> dict[str, Any]:
         "filters": {},
         "freshness_policy": {},
     }
+    return value
 
 
 def _fleet() -> dict[str, Any]:
@@ -264,7 +265,7 @@ def _app() -> FastAPI:
         if body.assignments is not None:
             profile["assignments"] = [
                 {
-                    "selector": item["recipe_selector"],
+                    "selector": item["recipe_selector"].replace("/", "-"),
                     "display_name": item["recipe_selector"],
                     "recipe_selector": item["recipe_selector"],
                     "spark_ids": item["spark_ids"],
@@ -356,7 +357,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
     )
 
     assignment = {
-        "recipe_selector": "qwen-code",
+        "recipe_selector": "vonk-forge/qwen-code",
         "spark_ids": [SPARK],
         "desired_state": "running",
     }
@@ -371,7 +372,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "1",
         "profile",
         "add",
-        "qwen-code",
+        "vonk-forge/qwen-code",
         "--spark",
         SPARK,
         "--json",

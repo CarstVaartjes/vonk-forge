@@ -21,6 +21,9 @@ preview changes, and operate one Spark or a fleet.
 
 - **One place to operate local AI.** Fleet, Library, Activity, and reusable
   fleet profiles share one controller and one source of truth.
+- **Cache-backed profiles.** Profile choices and apply admission come from the
+  trusted local NAS/Controller cache, which resolves exact model and
+  recipe-image identities.
 - **A safer change path.** See compatibility, placement, downloads, memory,
   and the exact planned change before you apply it.
 - **Reproducible model recipes.** Recipes bind model, runtime, topology,
@@ -35,18 +38,21 @@ preview changes, and operate one Spark or a fleet.
 ```mermaid
 flowchart LR
     Catalog[Public recipe catalog<br/>metadata and verified source]
-    Controller[Your local controller<br/>Web UI, API, PostgreSQL, policy]
-    SparkA[DGX Spark<br/>agent, cache, runtime]
+    Controller[Your local controller<br/>Web UI, API, PostgreSQL, policy, profile cache]
+    SparkA[DGX Spark<br/>agent, execution cache, runtime]
     SparkN[More Sparks<br/>enroll when needed]
 
     Catalog -->|verify and import| Controller
-    Controller -->|preview, approve, operate| SparkA
+    Controller -->|admit and prepare exact assets| SparkA
     Controller -->|same local authority| SparkN
 ```
 
 The public website is documentation and catalog—not a hosted admin surface.
-Model artifacts remain at immutable origins and in node-local caches. Your
-controller decides what may run and records what happened.
+The trusted local NAS/Controller cache is the authority for profile choices and
+apply admission. Model and recipe-image assets remain tied to immutable
+identities there before an apply distributes them to Sparks. Spark-local copies
+are execution caches, not profile authority; normal cache trust does not imply
+costly repeated full hashing.
 
 ## Install
 
@@ -113,10 +119,11 @@ agent upgrade; certificate replacement is an explicit Fleet re-enrollment.
 
 | Stage | What you see before moving on |
 | --- | --- |
-| Find | Local and public recipes filtered against the fleet you actually own |
-| Preview | Compatibility, placement, capacity, downloads, and planned changes |
-| Apply | One digest-bound plan, confirmed in the browser or with an explicit CLI flag |
-| Observe | Live Fleet state, workload progress, warnings, recovery, and audit history |
+| Find | Cache-backed model and recipe choices filtered against the fleet you own |
+| Preview | Compatibility, placement, capacity, exact assets, and actionable blockers |
+| Prepare | Resolve missing NAS model or recipe-image assets with the prepare-cache action |
+| Apply | A ready, digest-bound plan prepares exact assets in parallel, skips local copies, and safely replaces workloads |
+| Observe | Live Fleet state, per-target progress, warnings, recovery, and audit history |
 
 The private Web Controller is the guided path. `vonkctl` exposes the same API,
 filters, previews, mutations, and JSON output for repeatable operations. See the
@@ -126,15 +133,17 @@ filters, previews, mutations, and JSON output for repeatable operations. See the
 
 | Public | Local controller | DGX Sparks |
 | --- | --- | --- |
-| Documentation, signed installers, recipe metadata, verified source | PostgreSQL authority, policy, service identity, runtime secrets, previews | Enrolled agent identity, model caches, runtime execution, telemetry |
+| Documentation, signed installers, recipe metadata, verified source | PostgreSQL authority, policy, service identity, runtime secrets, trusted profile cache, previews | Enrolled agent identity, execution caches, runtime execution, telemetry |
 
 - The public site never controls Sparks or receives runtime secrets, fleet
   state, controller authority, or model uploads.
 - Agents connect outbound with independently enrolled identity.
 - Secret values live in controller-owned files, not Git, command arguments, or
   captured diagnostics.
-- Model weights are fetched from immutable origins and cached on the Sparks;
-  they do not pass through the public catalog.
+- Model weights and recipe images are resolved from immutable identities in the
+  local cache, then prepared on target Sparks; already-local assets are skipped.
+  They do not pass through the public catalog. NAS cleanup removes unused local
+  model-cache entries while preserving profile and active-workload references.
 
 For the trust and network model, see the
 [architecture guide](https://vonkforge.ai/architecture) and

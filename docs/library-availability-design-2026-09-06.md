@@ -1,4 +1,4 @@
-# Make available, progress, updates and recovery
+# Prepare cache, progress, updates and recovery
 
 This extends the [compact list design](list-interface-design-2026-09-05.md) for
 the first internal release. It is an implementation brief, not a claim that
@@ -7,11 +7,13 @@ and web/CLI owners; root reviews their combined result.
 
 ## The operator's task
 
-Select a Model or Recipe and make its required files available on the NAS.
-Understand what is happening without opening logs. Refresh those files when a
-new published definition is available, or explicitly download/build them again.
-Run remains a separate action and automatically performs missing preparation.
-The same operations and results must be available to a CLI agent.
+Select a Model or Recipe and prepare its exact required files in the
+Controller/NAS cache. Understand what is happening without opening logs.
+Refresh those files when a new published definition is available, or explicitly
+download/build them again. Run remains a separate action: it can apply only
+fully cached profile choices. If cache assets are missing, apply is blocked with
+reasons and offers cache preparation. The same operations and results must be
+available to a CLI agent.
 
 The global recipe repository is the sole authored Model/Recipe authority.
 Controller metadata refresh is automatic. There is no user-facing catalog sync,
@@ -21,8 +23,8 @@ import, qualification, or approval workflow in this feature.
 
 | Action | Result |
 | --- | --- |
-| Make available, on a Model | Cache and verify every required file of the selected exact Model definition. Reuse verified shared files. |
-| Make available, on a Recipe | Cache its complete required Model files and download or build its runtime image. Retain the verified image archive on the Controller/NAS. Do not start a workload. |
+| Prepare cache, on a Model | Cache and verify every required file of the selected exact Model definition. Reuse verified shared files. |
+| Prepare cache, on a Recipe | Cache its complete required Model files and download or build its runtime image. Retain the verified image archive on the Controller/NAS. Do not start a workload. |
 | Refresh | Check the latest global definition for the selected canonical identity and prepare its changed inputs. Report the selected old/new version and the amount reused. If unchanged, report Up to date. |
 | Download again, on a Model | Fetch fresh bytes for the selected exact Model definition, even if already cached. Verify before replacing any valid cached object. |
 | Download image again | Fetch a fresh copy of the selected published image using its declared immutable identity. |
@@ -34,17 +36,19 @@ update becomes usable through a new definition in the global repository. If
 the requested version has been removed or cannot be resolved, explain that
 result instead of silently selecting a different creator, variant, or engine.
 
-Put Make available on the row/details as the ordinary action. Available rows
-show Available on NAS and offer Refresh. Put Download again and Rebuild image
+Put Prepare cache on the row/details as the ordinary action. Available rows
+show Available in Controller/NAS cache and offer Refresh. Put Download again and Rebuild image
 in a small additional-actions menu. Offer only actions supported by the image
 source: a published image can be downloaded; a build recipe can be rebuilt.
 Avoid presenting the internal operation name Repair as the normal user label.
 
 Preparation may use an appropriate enrolled ARM64 builder when the NAS cannot
 build that runtime itself. Explain the actual builder in progress. The builder
-returns the archive to the Controller; Sparks subsequently consume that local
-archive. Do not imply a public registry push or that CPU-only NAS compilation
-proves GPU execution. Availability ends at verified NAS files, not Spark staging.
+returns the archive to the Controller, which verifies and publishes it in the
+authoritative cache; Sparks subsequently receive exact copies during apply. Do
+not imply a public registry push or that CPU-only NAS compilation proves GPU
+execution. Availability ends at verified Controller/NAS files, not Spark
+staging. Spark copies are derived execution state, never a source of truth.
 
 ## Compact progress
 
@@ -57,8 +61,8 @@ Illustrative text, never production fixture claims:
 
 - Downloading model · 42.6 / 168 GB · 87 MB/s · about 24 min left
 - Downloading image · 6.1 / 19 GB · 64 MB/s
-- Building image on Spark 3542 · Step 8 of 14 · Compiling attention kernels
-- Receiving built image from Spark 3542 · 12.4 / 19 GB
+- Building image on the Controller builder · Step 8 of 14 · Compiling attention kernels
+- Receiving built image from the Controller builder · 12.4 / 19 GB
 - Verifying model files · 27 of 32 files
 - Available on NAS · Model 168 GB · Image 19 GB
 
@@ -137,8 +141,10 @@ secret write path. Sparks receive verified local artifacts without HF tokens.
 - Expose the same operation IDs, states, progress, errors, retry timing and
   recovery actions through the API, generated clients and CLI JSON output.
 - Keep valid immutable cache objects and active workload receipts until their
-  replacement is verified. Refreshing availability does not switch workloads
-  or trigger automatic destructive cache cleanup.
+  replacement is verified. Refreshing availability does not switch workloads.
+  Separate NAS garbage collection may remove local model objects that are no
+  longer referenced by a saved profile, active workload, or preparation
+  operation. Spark-local copies do not pin or replace the NAS authority.
 
 ## Acceptance evidence
 
@@ -150,7 +156,10 @@ forced download that preserves the old object until validation succeeds.
 
 Verify image download, build, retry and forced rebuild through their real
 Controller operations. Prove that an existing workload receipt remains bound
-to its original image and that the new available receipt can be selected later.
+to its original image and that the new cached receipt can be selected later.
+Verify that an apply with missing model/image cache is blocked with the exact
+reasons and a cache-preparation action, and that a ready apply distributes exact
+assets in parallel while skipping verified Spark-local copies.
 Exercise simultaneous Model downloads, image pulls and independent builds;
 verify resource limits, duplicate request reuse and worker responsiveness.
 Do not substitute a simulated successful build for absent build infrastructure.

@@ -1,5 +1,7 @@
 # Remaining worktree disposition
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 Reviewed against main `c34ef50a` after PR622 merged.
 
 | Work area | Added value and disposition |

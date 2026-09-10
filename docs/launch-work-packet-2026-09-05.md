@@ -1,5 +1,7 @@
 # Vonk Forge launch work instructions
 
+> Historical/as-of status: This is a historical repository/progress/evidence snapshot, valid only as of its stated baseline/date. Do not read it as current deployment state.
+
 This is the execution brief for Sol and every Luna HIGH worker across
 `vonk-forge-recipes`, `vonk-forge`, and `vonk-forge-web`. The user has authorized
 implementation, PRs, merges, publication, and deployment. Work in parallel now;
