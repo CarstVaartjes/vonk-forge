@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import re
@@ -11,7 +10,6 @@ import secrets
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Protocol
@@ -67,9 +65,6 @@ from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogError, CatalogService
 from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from .cluster_mappings import ClusterMappingService
-from .database_authority import (
-    ProposalChangeRequest,
-)
 from .deployment_provenance import DeploymentProvenanceService
 from .deployment_provenance_api import install_deployment_provenance_routes
 from .distribution_executor import CompositeDistributionPhaseExecutor
@@ -88,7 +83,6 @@ from .fleet_projection import (
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
 from .library_api import install_library_routes
-from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
 from .model_cache_api import (
     install_model_cache_routes,
@@ -98,9 +92,7 @@ from .operation_api import (
     AgentsResponse,
     AuditEventResponse,
     AuditResponse,
-    AuthorityResponse,
     BoundedErrorResponse,
-    ChangeResponse,
     EndpointResponse,
     ErrorContextResponse,
     HealthzResponse,
@@ -114,7 +106,6 @@ from .operation_api import (
     OperationDetailResponse,
     OperationPage,
     OperationsResponse,
-    ProposalPreviewResponse,
     ReadyzResponse,
     RequestValidationIssue,
     RequestValidationProblem,
@@ -125,12 +116,10 @@ from .operation_api import (
     job_response,
     operation_detail_response,
 )
-from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
-from .run_switch_api import install_run_switch_routes
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .strict_json import ControllerAPIRoute
@@ -257,13 +246,6 @@ async def _bounded_request_body(request: Request, maximum: int) -> bytes:
     bounded = bytes(body)
     request._body = bounded
     return bounded
-
-
-@dataclass(frozen=True)
-class AdminServices:
-    authority: Any
-    proposals: Any
-    changes: Any | None
 
 
 def build_agent_services(
@@ -503,17 +485,6 @@ def refresh_fleet_metrics(
     metrics.update_fleet(fleet_snapshot)
 
 
-class ProposalRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    base_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    changes: list[ProposalChangeRequest] = Field(min_length=1, max_length=32)
-
-
-class ChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 class NodeProfileUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     display_name: str = Field(
@@ -534,7 +505,6 @@ def create_app(
     fleet_stream: Any | None = None,
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
-    admin: AdminServices | None = None,
     metrics: MetricsRegistry | None = None,
     metrics_token: str | None = None,
     metrics_refresh: Callable[[], None] | None = None,
@@ -550,7 +520,6 @@ def create_app(
     run_switch_operations: RunSwitchOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
-    library_placements: Any | None = None,
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
     model_cache: Any | None = None,
@@ -854,12 +823,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         projection=library_projection,
     )
-    install_library_placement_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        service=library_placements,
-        audits=audits,
-    )
     install_fleet_profile_routes(
         app,
         actor_dependency=authenticated_actor,
@@ -875,18 +838,6 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=failure_evidence,
-    )
-    install_recipe_operation_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        audits=audits,
-        service=recipe_operations,
-    )
-    install_run_switch_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        audits=audits,
-        service=run_switch_operations,
     )
     install_artifact_job_routes(
         app,
@@ -1236,82 +1187,6 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/authority",
-        response_model=AuthorityResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getAuthority",
-    )
-    def authority_view(
-        revision: str | None = None, _actor: Actor = authenticated_actor
-    ) -> AuthorityResponse:
-        if admin is None:
-            raise HTTPException(status_code=503, detail="authority unavailable")
-        resolved = revision or admin.authority.head()
-        snapshot = admin.authority.inspect(resolved)
-        return AuthorityResponse(
-            revision=snapshot.revision,
-            documents=dict(snapshot.documents),
-            dependencies={
-                path: list(dependencies)
-                for path, dependencies in snapshot.dependencies.items()
-            },
-        )
-
-    @app.post(
-        "/api/proposals",
-        response_model=ProposalPreviewResponse,
-        responses=bounded_error_responses(401, 403, 422, 503),
-        operation_id="previewProposal",
-    )
-    def proposal_preview(
-        body: ProposalRequest, authenticated: Actor = authenticated_actor
-    ) -> ProposalPreviewResponse:
-        require_mutation_role(authenticated, "/api/proposals")
-        if admin is None:
-            raise HTTPException(status_code=503, detail="authority unavailable")
-        preview = admin.proposals.preview(
-            authenticated.subject,
-            body.base_revision,
-            body.changes,
-        )
-        return ProposalPreviewResponse(
-            base_revision=preview.base_revision,
-            digest=preview.digest,
-            patch=base64.b64encode(preview.patch).decode(),
-            affected_documents=list(preview.affected_documents),
-            validation_results=list(preview.validation_results),
-        )
-
-    @app.post(
-        "/api/changes",
-        response_model=ChangeResponse,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="submitChange",
-    )
-    def submit_change(
-        body: ChangeRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> ChangeResponse:
-        require_mutation_role(authenticated, "/api/changes")
-        if admin is None or admin.changes is None:
-            raise HTTPException(status_code=503, detail="change submission unavailable")
-        result = admin.changes.submit(
-            body.proposal_digest, authenticated.subject, request.state.request_id
-        )
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "authority.change.submit",
-                None,
-                (),
-            )
-        )
-        return ChangeResponse.model_validate(result)
-
-    @app.get(
         "/api/jobs",
         response_model=JobsResponse,
         responses=bounded_error_responses(401, 422),
@@ -1359,14 +1234,7 @@ def create_app(
         """Expose recovery only when its family route is installed."""
         if failure_evidence is not None:
             item = failure_evidence.decorate(item)
-        kind = item.get("kind")
-        can_retry = isinstance(kind, str) and (
-            (kind.startswith("fleet-profile.") and fleet_profiles is not None)
-            or (kind == "library.placement" and library_placements is not None)
-        )
-        return operation_detail_response(
-            item, available_actions=("retry",) if can_retry else ()
-        )
+        return operation_detail_response(item, available_actions=())
 
     @app.get(
         "/api/operations",
@@ -1616,8 +1484,6 @@ def production_app() -> FastAPI:
     from .availability_production import build_recipe_image_availability
     from .database_authority import (
         DatabaseAuthorityService,
-        DatabaseChangeService,
-        DatabaseProposalService,
     )
     from .db import build_engine, session_factory
     from .execution_plan_service import ControllerExecutionPlanService
@@ -1659,8 +1525,6 @@ def production_app() -> FastAPI:
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
     authority = DatabaseAuthorityService(sessions, clock=clock)
     authority.ensure_initialized()
-    proposals = DatabaseProposalService(authority)
-    changes = DatabaseChangeService(authority, proposals)
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
@@ -1917,9 +1781,6 @@ def production_app() -> FastAPI:
         recipe_operations=recipe_operations,
         switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch_operations),
     )
-    from .library_placements import LibraryPlacementService
-
-    library_placements = LibraryPlacementService(visual_library, fleet_profiles)
     agent_upgrades = AgentUpgradeService(
         sessions,
         agent_services.operations,
@@ -1997,11 +1858,6 @@ def production_app() -> FastAPI:
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
-        admin=AdminServices(
-            authority,
-            proposals,
-            changes,
-        ),
         metrics=metrics,
         metrics_token=settings.metrics_token,
         metrics_refresh=refresh_metrics,
@@ -2036,7 +1892,6 @@ def production_app() -> FastAPI:
         fleet_profiles=fleet_profiles,
         deployment_provenance=DeploymentProvenanceService(sessions),
         failure_evidence=FailureEvidenceService(sessions),
-        library_placements=library_placements,
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,
         recipe_image_availability=recipe_image_production.service,

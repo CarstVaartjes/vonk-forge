@@ -27,8 +27,16 @@ MUTATION_ROLES = {
     ("PATCH", "/api/nodes/{node_id}/profile"): frozenset(
         {"operator", "administrator"}
     ),
-    ("POST", "/api/proposals"): frozenset({"operator", "administrator"}),
-    ("POST", "/api/changes"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/enroll"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/re-enroll"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/remove"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/{selector}/rename"): frozenset({"operator", "administrator"}),
+    ("POST", "/api/fleet/upgrade"): frozenset({"administrator"}),
+    ("POST", "/api/model/{selector}/download"): frozenset({"operator", "administrator"}),
+    ("POST", "/api/model/{selector}/remove"): frozenset({"operator", "administrator"}),
+    ("POST", "/api/recipe/{selector}/download"): frozenset({"operator", "administrator"}),
+    ("POST", "/api/recipe/{selector}/remove"): frozenset({"operator", "administrator"}),
+    ("POST", "/api/recipe/update"): frozenset({"operator", "administrator"}),
     ("POST", "/api/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),
     ("POST", "/api/agents/enrollments/grants"): frozenset({"administrator"}),
     ("POST", "/api/agents/nodes/{node_id}/revoke"): frozenset({"administrator"}),

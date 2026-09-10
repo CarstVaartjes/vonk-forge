@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -125,9 +123,6 @@ _ADMIN_OPERATION_IDS = {
     ): "listNodeTelemetryWorkloads",
     ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/agents"): "listAgents",
-    ("get", "/api/authority"): "getAuthority",
-    ("post", "/api/proposals"): "previewProposal",
-    ("post", "/api/changes"): "submitChange",
     ("get", "/api/jobs"): "listJobs",
     ("get", "/api/operations"): "listOperations",
     ("get", "/api/audit"): "listAuditEvents",
@@ -211,38 +206,6 @@ class HealthzResponse(StrictModel):
 
 class ReadyzResponse(StrictModel):
     status: Literal["ready"]
-
-
-class AuthorityResponse(StrictModel):
-    revision: str = Field(pattern=DIGEST_PATTERN)
-    documents: dict[str, str] = Field(max_length=256)
-    dependencies: dict[str, list[str]] = Field(max_length=256)
-
-
-class ProposalPreviewResponse(StrictModel):
-    base_revision: str = Field(pattern=DIGEST_PATTERN)
-    digest: str = Field(pattern=DIGEST_PATTERN)
-    patch: str = Field(min_length=1, max_length=16 * 1024 * 1024)
-    affected_documents: list[str] = Field(min_length=1, max_length=32)
-    validation_results: list[str] = Field(max_length=32)
-
-    @field_validator("patch")
-    @classmethod
-    def patch_is_canonical_base64(cls, value: str) -> str:
-        try:
-            decoded = base64.b64decode(value, validate=True)
-        except (ValueError, binascii.Error):
-            raise ValueError("patch must be base64") from None
-        if base64.b64encode(decoded).decode("ascii") != value:
-            raise ValueError("patch must be canonical base64")
-        return value
-
-
-class ChangeResponse(StrictModel):
-    proposal_digest: str = Field(pattern=DIGEST_PATTERN)
-    previous_revision: str = Field(pattern=DIGEST_PATTERN)
-    authority_revision: str = Field(pattern=DIGEST_PATTERN)
-    mode: Literal["database"]
 
 
 class JobResponse(StrictModel):
