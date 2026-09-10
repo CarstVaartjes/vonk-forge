@@ -727,7 +727,7 @@ mod tests {
             vec![b'o', b'c']
         );
         assert_eq!(
-            fs::metadata(archive).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&archive).unwrap().permissions().mode() & 0o777,
             0o700
         );
         assert_eq!(
