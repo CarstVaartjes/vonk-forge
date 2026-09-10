@@ -731,6 +731,49 @@ def _resolve_recipe_selector(client: ControllerClient, requested: str) -> str:
     )
 
 
+def _resolve_spark_selectors(
+    client: ControllerClient, selectors: list[str]
+) -> list[str]:
+    """Resolve operator-facing Spark names to immutable node IDs."""
+
+    if not selectors:
+        return []
+    payload = client.request("GET", "/api/fleet")
+    raw_nodes = payload.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raise TypeError("fleet response does not contain nodes")
+    nodes = [node for node in raw_nodes if isinstance(node, Mapping)]
+    resolved: list[str] = []
+    for requested in selectors:
+        needle = requested.strip().casefold()
+        if not needle:
+            raise SelectorError("spark selector cannot be empty")
+        matches = [
+            node
+            for node in nodes
+            if any(
+                isinstance(value, str) and value.casefold() == needle
+                for key in ("id", "display_name", "hostname")
+                for value in (node.get(key),)
+            )
+        ]
+        if not matches:
+            raise SelectorError(f"unknown spark selector: {requested}")
+        if len(matches) > 1:
+            candidates = tuple(
+                str(node.get("display_name") or node.get("id")) for node in matches
+            )
+            raise SelectorError(
+                f"ambiguous spark selector: {requested}; choose one of {', '.join(candidates)}",
+                candidates=candidates,
+            )
+        node_id = matches[0].get("id")
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("fleet response contains a Spark without an ID")
+        resolved.append(node_id)
+    return sorted(set(resolved))
+
+
 def _profile(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -764,9 +807,10 @@ def _profile(
             )
         if action == "add":
             recipe_selector = _resolve_recipe_selector(client, args.recipe_selector)
+            spark_ids = _resolve_spark_selectors(client, list(args.spark))
             new_assignment: dict[str, object] = {
                 "recipe_selector": recipe_selector,
-                "spark_ids": sorted(set(args.spark)),
+                "spark_ids": spark_ids,
                 "desired_state": "running",
             }
             if args.assignment_name:
@@ -788,6 +832,7 @@ def _profile(
                 assignments.append(new_assignment)
         else:
             target = args.assignment.casefold()
+            spark_ids = _resolve_spark_selectors(client, list(args.spark))
             if not any(
                 str(assignment.get("assignment_name", "")).casefold() == target
                 for assignment in assignments
@@ -811,7 +856,7 @@ def _profile(
                 remaining = [
                     spark
                     for spark in assignment.get("spark_ids", [])
-                    if spark not in args.spark
+                    if spark not in spark_ids
                 ]
                 if remaining:
                     kept.append({**assignment, "spark_ids": sorted(set(remaining))})

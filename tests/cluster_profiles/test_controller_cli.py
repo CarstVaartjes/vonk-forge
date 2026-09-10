@@ -305,6 +305,20 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 ],
                 "next_cursor": None,
             },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Boreal",
+                        "hostname": "boreal",
+                    },
+                ]
+            },
             ("PUT", "/api/profile/2"): {
                 "number": 2,
                 "revision": 8,
@@ -337,6 +351,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             None,
             {"all_models": True, "limit": 512, "sort": "name"},
         ),
+        ("GET", "/api/fleet", None, None),
         (
             "PUT",
             "/api/profile/2",
@@ -344,7 +359,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
                 "assignments": [
                     {
                         "recipe_selector": "vonk-forge/recipe-uuid",
-                        "spark_ids": ["Atlas", "Boreal"],
+                        "spark_ids": ["spk_" + "a" * 32, "spk_" + "b" * 32],
                         "desired_state": "running",
                     }
                 ],
@@ -354,6 +369,49 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             None,
         ),
     ]
+
+
+def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1"): {
+                "number": 1,
+                "name": "Default",
+                "revision": 1,
+                "assignments": [],
+            },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-a",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-b",
+                    },
+                ]
+            },
+        }
+    )
+
+    status, payload = run(
+        (
+            "profile",
+            "add",
+            "vonk-forge/qwen-code",
+            "--spark",
+            "Atlas",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert "ambiguous spark selector" in payload["error"]
+    assert [call[1] for call in client.calls] == ["/api/profile/1", "/api/fleet"]
 
 
 def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
@@ -506,6 +564,16 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
             self.calls.append((method, path, payload, query))
             if method == "PUT":
                 raise ValueError("profile revision conflict")
+            if path == "/api/fleet":
+                return {
+                    "nodes": [
+                        {
+                            "id": "spk_" + "a" * 32,
+                            "display_name": "Atlas",
+                            "hostname": "atlas",
+                        }
+                    ]
+                }
             return {"number": 1, "revision": 4, "assignments": []}
 
     client = ConflictClient({})
@@ -514,7 +582,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"
-    assert [call[0] for call in client.calls] == ["GET", "PUT"]
+    assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
 
 
 def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
