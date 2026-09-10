@@ -6,20 +6,9 @@ from .agent_failure_result import AgentFailureResult
 from .agent_operation import AgentOperation
 from .agent_operation_change import AgentOperationChange
 from .agent_operation_payload import AgentOperationPayload
-from .agent_repair_manifest_request import AgentRepairManifestRequest
-from .agent_summary import AgentSummary
-from .agent_upgrade_apply_request import AgentUpgradeApplyRequest
-from .agent_upgrade_apply_request_strategy import AgentUpgradeApplyRequestStrategy
-from .agent_upgrade_apply_response import AgentUpgradeApplyResponse
 from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
-from .agent_upgrade_package_request import AgentUpgradePackageRequest
-from .agent_upgrade_preview_request import AgentUpgradePreviewRequest
-from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestStrategy
-from .agent_upgrade_preview_response import AgentUpgradePreviewResponse
-from .agent_upgrade_preview_response_strategy import AgentUpgradePreviewResponseStrategy
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
-from .agents_response import AgentsResponse
 from .artifact_file_declaration import ArtifactFileDeclaration
 from .artifact_input_contract import ArtifactInputContract
 from .artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
@@ -71,8 +60,6 @@ from .endpoint_response import EndpointResponse
 from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
-from .enrollment_list_response import EnrollmentListResponse
-from .enrollment_summary import EnrollmentSummary
 from .enum_parameter import EnumParameter
 from .error_context_response import ErrorContextResponse
 from .error_context_response_decision import ErrorContextResponseDecision
@@ -165,8 +152,6 @@ from .float_parameter import FloatParameter
 from .freshness_policy import FreshnessPolicy
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .get_fleet_metrics_history_resolution import GetFleetMetricsHistoryResolution
-from .grant_request import GrantRequest
-from .grant_request_purpose import GrantRequestPurpose
 from .identity_history_item import IdentityHistoryItem
 from .identity_history_response import IdentityHistoryResponse
 from .installation_node_change import InstallationNodeChange
@@ -469,19 +454,8 @@ __all__ = (
     "AgentOperation",
     "AgentOperationChange",
     "AgentOperationPayload",
-    "AgentRepairManifestRequest",
-    "AgentsResponse",
-    "AgentSummary",
-    "AgentUpgradeApplyRequest",
-    "AgentUpgradeApplyRequestStrategy",
-    "AgentUpgradeApplyResponse",
     "AgentUpgradeDiagnosticsResponse",
     "AgentUpgradeIdentityResponse",
-    "AgentUpgradePackageRequest",
-    "AgentUpgradePreviewRequest",
-    "AgentUpgradePreviewRequestStrategy",
-    "AgentUpgradePreviewResponse",
-    "AgentUpgradePreviewResponseStrategy",
     "AgentUpgradeTargetDiagnosticsResponse",
     "ArtifactFileDeclaration",
     "ArtifactInputContract",
@@ -534,8 +508,6 @@ __all__ = (
     "EnrollmentGrantResponse",
     "EnrollmentGrantResponseInstallerUrl",
     "EnrollmentGrantResponsePurpose",
-    "EnrollmentListResponse",
-    "EnrollmentSummary",
     "EnumParameter",
     "ErrorContextResponse",
     "ErrorContextResponseDecision",
@@ -628,8 +600,6 @@ __all__ = (
     "FreshnessPolicy",
     "GetFleetLogInfoSourceType0",
     "GetFleetMetricsHistoryResolution",
-    "GrantRequest",
-    "GrantRequestPurpose",
     "IdentityHistoryItem",
     "IdentityHistoryResponse",
     "InstallationNodeChange",

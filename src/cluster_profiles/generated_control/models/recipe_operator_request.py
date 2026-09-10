@@ -24,13 +24,11 @@ class RecipeOperatorRequest:
     """
         Attributes:
             request_key (str):
-            force (Union[Unset, bool]):  Default: False.
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             with_model (Union[Unset, bool]):  Default: False.
      """
 
     request_key: str
-    force: Union[Unset, bool] = False
     schema_version: Union[Literal[2], Unset] = 2
     with_model: Union[Unset, bool] = False
 
@@ -40,8 +38,6 @@ class RecipeOperatorRequest:
 
     def to_dict(self) -> dict[str, Any]:
         request_key = self.request_key
-
-        force = self.force
 
         schema_version = self.schema_version
 
@@ -53,8 +49,6 @@ class RecipeOperatorRequest:
         field_dict.update({
             "request_key": request_key,
         })
-        if force is not UNSET:
-            field_dict["force"] = force
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
         if with_model is not UNSET:
@@ -69,8 +63,6 @@ class RecipeOperatorRequest:
         d = dict(src_dict)
         request_key = d.pop("request_key")
 
-        force = d.pop("force", UNSET)
-
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -79,7 +71,6 @@ class RecipeOperatorRequest:
 
         recipe_operator_request = cls(
             request_key=request_key,
-            force=force,
             schema_version=schema_version,
             with_model=with_model,
         )

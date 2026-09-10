@@ -166,7 +166,6 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
     assert set(schema["paths"]) >= {
-        "/api/agents",
         "/api/endpoints/{alias}",
         "/api/fleet",
         "/api/fleet/stream",
