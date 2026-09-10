@@ -4054,8 +4054,9 @@
             "title": "Model Variant"
           },
           "recipe_selector": {
-            "maxLength": 200,
-            "minLength": 1,
+            "maxLength": 127,
+            "minLength": 5,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
             "title": "Recipe Selector",
             "type": "string"
           },
@@ -4229,8 +4230,9 @@
             "title": "Recipe Id"
           },
           "recipe_selector": {
-            "maxLength": 200,
-            "minLength": 1,
+            "maxLength": 127,
+            "minLength": 5,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
             "title": "Recipe Selector",
             "type": "string"
           },

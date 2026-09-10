@@ -6,7 +6,7 @@ import {LibraryNodeNamesProvider} from "./library-node-names";
 import {LibraryProfileComposer} from "./library-profile-composer";
 
 const nodeId = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const detail = {recipe: {slug: "qwen-code", title: "Qwen Code"}, model_documents: [{model_document: {identity: {variant: "nvfp4"}}}], definition: {topology: {name: "single"}}, placement: [{recommendations: [{eligible: true, node_ids: [nodeId], nodes: [{node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true}], topology_name: "single", load_state: "ready", install_state: "ready"}]}]} as unknown as LibraryViewRecipeDetail;
+const detail = {recipe: {publisher: "vonk-forge", slug: "qwen-code", title: "Qwen Code"}, model_documents: [{model_document: {identity: {variant: "nvfp4"}}}], definition: {topology: {name: "single"}}, placement: [{recommendations: [{eligible: true, node_ids: [nodeId], nodes: [{node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true}], topology_name: "single", load_state: "ready", install_state: "ready"}]}]} as unknown as LibraryViewRecipeDetail;
 const saved = {number: 1, name: "Qwen Code ready"} as unknown as FleetProfile;
 
 test("autosaves a recipe choice using the shared numbered Profile API", async () => {
@@ -19,6 +19,6 @@ test("autosaves a recipe choice using the shared numbered Profile API", async ()
   await screen.findByRole("heading", {name: "Add recipe to a Fleet Profile"});
   await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
 
-  expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({recipe_selector: "qwen-code", model_variant: "nvfp4", spark_ids: [nodeId]})]}));
+  expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({recipe_selector: "vonk-forge/qwen-code", model_variant: "nvfp4", spark_ids: [nodeId]})]}));
   expect(await screen.findByText("Qwen Code ready is ready")).toBeVisible();
 });

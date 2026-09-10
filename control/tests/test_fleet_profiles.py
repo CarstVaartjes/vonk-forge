@@ -490,7 +490,7 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
             "favorite": True,
             "assignments": [
                 {
-                    "recipe_selector": "synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
                     "spark_ids": [_node_id(1)],
                     "desired_state": "running",
                     "assignment_name": "studio-chat",
@@ -883,7 +883,7 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
                 "name": "Dual applied",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
                         "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
                         "assignment_name": "dual-chat",
@@ -899,7 +899,7 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
                 "name": "Solo applied",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-solo",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
                         "spark_ids": [_node_id(1)],
                         "desired_state": "running",
                         "assignment_name": "solo-chat",
@@ -1123,7 +1123,7 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
 
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
     sessions = _database()
-    dual_revision_id, solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    _dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -1145,13 +1145,13 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                 "name": "Dual plus solo",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
                         "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
                         "assignment_name": "dual-chat",
                     },
                     {
-                        "recipe_selector": "synthetic-tiny-solo",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
                         "spark_ids": [_node_id(3)],
                         "desired_state": "running",
                         "assignment_name": "solo-chat",
@@ -1215,7 +1215,7 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
 
 def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
     sessions = _database()
-    dual_revision_id, solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
     with sessions.begin() as session:
         session.add(
             ClusterMapping(
@@ -1369,13 +1369,13 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
                 "name": "Two solo assignments",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-solo",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
                         "spark_ids": [_node_id(1)],
                         "desired_state": "running",
                         "assignment_name": "solo-one",
                     },
                     {
-                        "recipe_selector": "synthetic-tiny-solo",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
                         "spark_ids": [_node_id(2)],
                         "desired_state": "running",
                         "assignment_name": "solo-two",
@@ -1497,7 +1497,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
                 "name": "Production child",
                 "assignments": [
                     {
-                        "recipe_selector": revision.slug,
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
                         "spark_ids": list(nodes),
                         "desired_state": "running",
                         "assignment_name": "production-child",
@@ -1687,12 +1687,12 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
         )
     assignments = [
         {
-            "recipe_selector": "synthetic-tiny-image",
+            "recipe_selector": "vonk-forge/synthetic-tiny-image",
             "spark_ids": [_node_id(2)],
             "desired_state": "installed",
         },
         {
-            "recipe_selector": "synthetic-tiny-image",
+            "recipe_selector": "vonk-forge/synthetic-tiny-image",
             "spark_ids": [_node_id(1)],
             "desired_state": "installed",
         },
@@ -2212,7 +2212,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             {
                 "name": "Dual",
                 "assignments": [{
-                    "recipe_selector": "synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
                     "spark_ids": [_node_id(1), _node_id(2)],
                     "desired_state": "running",
                     "assignment_name": "dual-chat",
@@ -2226,7 +2226,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             {
                 "name": "Solo and idle",
                 "assignments": [{
-                    "recipe_selector": "synthetic-tiny-solo",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-solo",
                     "spark_ids": [_node_id(1)],
                     "desired_state": "running",
                     "assignment_name": "solo-chat",

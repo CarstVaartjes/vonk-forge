@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from importlib.resources import files
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -154,7 +155,7 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
                 "name": "Canonical idle",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
                         "spark_ids": [NODE_1],
                         "desired_state": "running",
                         "assignment_name": "canonical",
@@ -168,7 +169,7 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
     assert profile.number == 1
     assert profile.revision == 1
     assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
-    assert profile.assignments[0].recipe_selector == "synthetic-tiny-image"
+    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-image"
     assert profile.assignments[0].spark_ids == [NODE_1]
     preview = service.preview(profile.id)
     assert preview.scope.node_ids == [NODE_1, NODE_2]
@@ -197,8 +198,23 @@ def test_profile_accepts_the_library_publisher_slug_selector() -> None:
         actor="test",
     )
 
-    assert profile.assignments[0].recipe_selector == "synthetic-tiny-image"
+    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-image"
     assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
+
+
+def test_profile_contract_rejects_a_bare_recipe_slug() -> None:
+    with pytest.raises(ValidationError, match="recipe_selector"):
+        FleetProfileInput.model_validate(
+            {
+                "name": "Bare slug",
+                "assignments": [
+                    {
+                        "recipe_selector": "synthetic-tiny-image",
+                        "spark_ids": [NODE_1],
+                    }
+                ],
+            }
+        )
 
 
 def test_all_idle_canonical_profile_previews_without_assignments() -> None:
@@ -225,7 +241,7 @@ def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() 
             "name": "Draft",
             "assignments": [
                 {
-                    "recipe_selector": "vision-dual",
+                    "recipe_selector": "vonk-forge/vision-dual",
                     "spark_ids": [NODE_1],
                     "model_variant": "fp8",
                 }
@@ -235,7 +251,7 @@ def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() 
     document = value.model_dump(mode="json")
     assert document["assignments"] == [
         {
-            "recipe_selector": "vision-dual",
+            "recipe_selector": "vonk-forge/vision-dual",
             "spark_ids": [NODE_1],
             "assignment_name": None,
             "model_variant": "fp8",
@@ -322,7 +338,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
             name="Cached",
             assignments=[
                 FleetProfileAssignmentInput(
-                    recipe_selector="synthetic-tiny-image",
+                    recipe_selector="vonk-forge/synthetic-tiny-image",
                     spark_ids=[NODE_1],
                     model_variant="fp16",
                 )
