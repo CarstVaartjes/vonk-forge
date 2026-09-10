@@ -39,7 +39,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
             "application/json"
         ]["schema"]
         assert response_schema == {"$ref": f"#/components/schemas/{component}"}
-            assert schema["components"]["schemas"][component]["type"] == "object"
+        assert schema["components"]["schemas"][component]["type"] == "object"
     assert "approveAgentEnrollment" not in operations
     assert "rejectAgentEnrollment" not in operations
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
