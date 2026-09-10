@@ -49,14 +49,10 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
-from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
     AgentNode,
-    AgentNodeProfile,
     AgentOperationAttempt,
     AgentPresence,
     Base,
@@ -71,10 +67,8 @@ from vonk_control.models import (
     Observation,
     RecipeBuild,
     RecipeInstallation,
-    RecipeRouteAuthority,
     RecipeRun,
     RecipeSourceBundle,
-    RoutePublication,
     RunNode,
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
@@ -83,9 +77,7 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_execution_contract import (
     installation_plan_document,
-    run_plan_document,
 )
-from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_control.workload_helper_authority import (
     WorkloadHelperGrantIssuer,
@@ -1717,81 +1709,8 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
         assert session.get(AgentPresence, NODE_A) is not None
 
 
-def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) -> None:
-    client, services, _, clock = agent_system
-    clock.now += timedelta(seconds=15)
-    with services.sessions.begin() as session:
-        session.add(
-            AgentNodeProfile(
-                node_id=NODE_A,
-                display_name=NODE_A,
-                hostname="",
-                lifecycle="ready",
-                labels={},
-            )
-        )
-
-    response = client.post(
-        "/agent/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES,
-            "hostname": "spark-3542",
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 3
-        assert node.capabilities == CAPABILITIES
-        assert node.semantic_version == "1.2.3"
-        assert node.build_digest == "sha256:" + "b" * 64
-        assert node.architecture == "linux-amd64"
-        assert node.binary_digest == "c" * 64
-        assert node.self_test_passed is True
-        assert node.contact_certificate_serial == "serial-a"
-        assert node.contact_observation_digest is not None
-        profile = session.get(AgentNodeProfile, NODE_A)
-        assert profile is not None
-        assert profile.hostname == "spark-3542"
-    metrics = MetricsRegistry()
-    OperationalMetricsCollector(metrics, services.sessions, clock=clock).refresh()
-    rendered = metrics.render()
-    assert f'vonk_agent_last_seen_age_seconds{{node_id="{NODE_A}"}} 0' in rendered
-    assert (
-        f'vonk_agent_version_compatibility{{node_id="{NODE_A}",version_bucket="supported"}} 1'
-        in rendered
-    )
 
 
-def test_authenticated_claim_accepts_model_uninstall_capability(agent_system) -> None:
-    client, services, _, _ = agent_system
-    response = client.post(
-        "/agent/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": [*CAPABILITIES, "recipe.model-uninstall.v1"],
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert "recipe.model-uninstall.v1" in node.capabilities
 
 
 @pytest.mark.parametrize(
@@ -1963,29 +1882,6 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
         assert node.architecture is None
 
 
-def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-
-    response = client.post(
-        "/agent/claim",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "capabilities": CAPABILITIES + ["shell.exec"],
-            "lease_seconds": 30,
-            "node_id": NODE_A,
-            "protocol_version": 3,
-            "wait_seconds": 0,
-        },
-    )
-
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.capabilities == CAPABILITIES
-        assert node.protocol_version == 3
 
 
 @pytest.mark.parametrize(

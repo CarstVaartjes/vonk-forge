@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -13,7 +12,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog_api import CatalogProblem
 from vonk_control.models import Base, User
-from vonk_control.operation_api import BoundedErrorResponse, RequestValidationProblem
+from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -131,8 +130,9 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
     client, headers, _, _ = _client("viewer")
 
     response = client.post(
-        "/api/model-cache/operations/00000000-0000-4000-8000-000000000001/cancel",
+        "/api/model/qwen-code/remove",
         headers=headers,
+        json={"request_key": "00000000-0000-4000-8000-000000000001"},
     )
 
     assert response.status_code == 403
@@ -225,13 +225,13 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
 def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     client, issued, _service, _sessions, _clock, _codec, jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
-    document = {"proposal_digest": "a" * 64}
+    document = {"name": "CSRF test", "assignments": []}
 
-    assert client.post("/api/changes", json=document).status_code == 403
+    assert client.put("/api/profile/1", json=document).status_code == 403
     client.cookies.set("vonk_csrf", issued.csrf)
     assert (
-        client.post(
-            "/api/changes",
+        client.put(
+            "/api/profile/1",
             headers={"x-csrf-token": "wrong"},
             json=document,
         ).status_code
@@ -239,8 +239,8 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     )
     assert jobs.calls == []
     assert (
-        client.post(
-            "/api/changes",
+        client.put(
+            "/api/profile/1",
             headers={"x-csrf-token": issued.csrf},
             json=document,
         ).status_code

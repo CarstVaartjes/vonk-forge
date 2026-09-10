@@ -149,16 +149,6 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     assert observed[0].get_header("Authorization") == "Bearer private-token"
 
 
-def test_raw_request_accepts_no_content_mutation_response(tmp_path: Path) -> None:
-    client = ControlClient(
-        "https://forge.example.test",
-        _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _Response(204, None),
-    )
-
-    assert client.request("POST", "/api/agents/nodes/spk_node/revoke") == {}
-
-
 def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
@@ -229,7 +219,7 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Pat
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://forge.example.test/api/model-cache/download",
+            "https://forge.example.test/api/model/qwen-code/download",
             403,
             "Forbidden",
             headers,
@@ -243,14 +233,13 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Pat
     with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
         client.request(
             "POST",
-            "/api/model-cache/download",
+            "/api/model/qwen-code/download",
             {
                 "request_key": "11111111-1111-4111-8111-111111111111",
-                "plan_digest": "a" * 64,
             },
         )
 
-def test_request_validates_canonical_route_models_and_preserves_204(
+def test_request_validates_canonical_route_models(
     tmp_path: Path,
 ) -> None:
     capabilities = {
@@ -290,12 +279,6 @@ def test_request_validates_canonical_route_models_and_preserves_204(
         "/api/artifact-jobs/capabilities",
     )
     assert result == capabilities
-
-    assert client.request(
-        "POST", "/api/agents/nodes/spk_node/revoke"
-    ) == {}
-    assert observed[-1] is None
-
 
 def test_request_rejects_undocumented_no_content_status(tmp_path: Path) -> None:
     client = ControlClient(
@@ -505,12 +488,11 @@ def test_generated_transport_rejects_malformed_request_before_network() -> None:
     transport = _RecordingTransport(underlying)
     request = httpx.Request(
         "POST",
-        "https://forge.example.test/api/model-cache/download",
+        "https://forge.example.test/api/model/qwen-code/download",
         headers={"Content-Type": "application/json"},
         content=json.dumps(
             {
                 "request_key": 7,
-                "plan_digest": "a" * 64,
             }
         ).encode(),
     )

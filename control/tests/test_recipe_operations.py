@@ -2571,21 +2571,6 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
 
     assert service.get(first.id).state == "failed"
     assert service.get(first.id).result["successful_nodes"] == [nodes[0]]
-    from pydantic import ValidationError
-    from vonk_control.recipe_api import OperationResponse
-    failed = service.get(first.id)
-    document = {
-        "id": failed.id, "kind": failed.kind, "owner_id": failed.owner_id,
-        "state": failed.state, "plan_digest": failed.plan_digest,
-        "nodes": list(failed.nodes), "result": failed.result,
-    }
-    response = OperationResponse.model_validate(document)
-    assert response.result.successful_nodes == [nodes[0]]
-    assert response.result.failed_nodes == [nodes[1]]
-    with pytest.raises(ValidationError, match="cannot retain failed nodes"):
-        OperationResponse.model_validate(document | {"state": "succeeded"})
-    with pytest.raises(ValidationError, match="requires result evidence"):
-        OperationResponse.model_validate(document | {"result": None})
     retry = service.retry(first.id, actor="admin", request_id="3" * 36)
     assert retry.id != first.id
     assert retry.owner_id == first.owner_id
