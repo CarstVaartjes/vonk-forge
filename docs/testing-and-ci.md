@@ -6,17 +6,19 @@ acceptance test on every change.
 
 ## Required on every pull request
 
-The protected `main` ruleset requires exactly these checks:
+The protected `main` ruleset requires exactly these checks (verified against the
+live repository ruleset, not the dated protection report under `inventory/`):
 
 | Check | Purpose |
 | --- | --- |
 | `Ruff` | Lint changed Python files (or the whole tree for a release tag). |
 | `Generated control clients` | Rebuild OpenAPI clients and reject generated drift. |
-| `PR contract smoke` | Run the focused repository, control-package, and package-page contracts. |
+| `Compose integration` | Exercise the Compose and ingress boundaries. |
+| `CI gate` | Aggregate the suites selected for the change. |
 
-These checks are intentionally bounded. They do not start Docker Compose,
-Playwright, real model services, multi-GPU node jobs, or the full Python/web test
-matrices.
+These checks are intentionally bounded. The change selector chooses ownership
+areas, so an unrelated pull request does not start Playwright, real model
+services, multi-GPU node jobs, or the full Python and web matrices.
 
 ## Local verification before requesting review
 

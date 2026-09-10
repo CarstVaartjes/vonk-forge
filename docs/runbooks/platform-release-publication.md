@@ -76,7 +76,9 @@ assignment, never whether a test is selected.
 
 ```sh
 scripts/verify-supply-chain --json
-uv run pytest -q tests/test_installer_publication_workflow.py
+uv run --python 3.12 --frozen --with pytest==9.1.1 \
+  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+  pytest -q tests/scripts/test_install_release_publication.py
 ```
 
 Publication is performed by CI. Operators consume the stable or development

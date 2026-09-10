@@ -158,7 +158,7 @@ address and hostname list are explicit even when they are `null` and `[]`.
 There is no setup-schema selector or older bootstrap variant.
 
 The work-claim request and runtime identity are defined in
-`agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
+`agent_protocol/src/vonk_agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
 wait time, and the enrolled agent's observation key are required. The Rust
 HTTP transport and the connected test use the same request serializer and
 capability declaration. Enrollment keeps its bounded raw-body security
@@ -289,10 +289,11 @@ model works on physical Spark hardware.
 
 ## Nested contract coverage
 
-The 7 September 2026 application inventory contains 136 routes. Its 115
-response models cover JSON responses; the other 21 routes handle empty
-responses, raw uploads/downloads, signed files, metrics, or event streams.
-OpenAPI is generated from the actual application and its nested Pydantic graph.
+OpenAPI is generated from the actual application and its nested Pydantic graph
+rather than maintained by hand, so the generated document is the authority for
+exact route and model counts. Every application route appears in it; the routes
+without a response model handle empty responses, raw uploads/downloads, signed
+files, metrics, or event streams.
 
 The fixed documents previously exposed as dictionaries now use concrete models:
 

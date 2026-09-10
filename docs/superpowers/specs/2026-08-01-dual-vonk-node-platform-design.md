@@ -18,8 +18,8 @@ This specification uses measurable defaults and acceptance gates. A measured val
 
 ## Current Environment
 
-The completed host and fabric preparation is recorded chronologically in the
-[installation record and lessons learned](../../installation-record.md). The
+The completed host and fabric preparation was recorded chronologically in an
+installation record and lessons-learned note that has since been retired. The
 detailed runbooks and checked-in evidence remain the operational source of
 truth.
 

@@ -13,7 +13,9 @@ harnesses but have no current published recipe in the sibling catalog; their
 contract is therefore limited to the generic XDG/home/temp paths until a
 runtime-specific source proves an additional cache variable.
 
-The indexed source set is deliberately concrete: `adapters/llm/vllm-openai/Dockerfile:15-25`,
+The indexed source set is deliberately concrete, and these paths are relative to
+the recipe-library checkout rather than this repository:
+`adapters/llm/vllm-openai/Dockerfile:15-25`,
 `adapters/llm/laguna-s-vllm/Dockerfile:15-28`, and
 `adapters/nvidia/qwen36-35b-vllm/Dockerfile:13-23` provide the vLLM
 Python/Triton defaults; `adapters/qwen/flash-next-sglang-dual/Dockerfile:22-29`
@@ -26,9 +28,10 @@ receipt cannot add a second writable root or change the selected destinations.
 
 The read-only catalog audit at 2026-09-05 found 84 recipes across six active
 families (vLLM 33, PyTorch pipeline 21, Diffusers 13, ComfyUI 10, SGLang 5,
-and DS4 2). Twelve reserved path variables occurred in the two MIA vLLM
-recipes before recipe commit `8da79f23`; that cleanup is complete and the
-recipe copies are absent there.
+and DS4 2). That snapshot predates the current catalog, whose exact set is
+whatever `catalog-index.json` records. Twelve reserved path variables occurred
+in the two MIA vLLM recipes before recipe commit `8da79f23`; that cleanup is
+complete and the recipe copies are absent there.
 Triton, TorchInductor, compiler, framework, and temporary paths are injected
 from the engine harness contract for every compatible image, whether the
 recipe consumes a direct image or a source-build receipt. Variant-specific

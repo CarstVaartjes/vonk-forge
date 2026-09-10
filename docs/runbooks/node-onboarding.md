@@ -34,7 +34,7 @@ generated command; it uses the NAS installation's own publication channel and
 the same generic enrollment intent used for a new Spark:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
 ```
 
 The re-enrollment flow preserves the locally generated node ID, replaces its

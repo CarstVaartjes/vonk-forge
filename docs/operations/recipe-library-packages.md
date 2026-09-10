@@ -6,7 +6,7 @@ routes:
 
 * `GET /v1/recipe-library/index.json` returns the generated schema-2
   `catalog-index.json` descriptor with `kind: recipe-library-index`, the
-  repository, the exact source commit, and 84 recipe package entries. A static
+  repository, the exact source commit, and one entry per recipe package. A static
   deployment maps the publisher's `catalog-index.json` and package directory to
   these routes.
 * Each recipe package entry contains `source_path`, `content_sha256`, and a
