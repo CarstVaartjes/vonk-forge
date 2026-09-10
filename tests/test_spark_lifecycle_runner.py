@@ -240,6 +240,29 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
     )
 
 
+def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
+    pytest.importorskip("sqlalchemy", reason="Fleet projection contract requires the control environment")
+    lifecycle = _module()
+    expected_payload = {
+        "schema_version": 1,
+        "event_cursor": 0,
+        "generated_at": "2026-09-10T00:00:00Z",
+        "authority_revision": "a" * 64,
+        "nodes": [],
+    }
+
+    class Control:
+        @staticmethod
+        def request(method, path, request_payload=None, **kwargs):
+            assert (method, path, request_payload, kwargs) == ("GET", "/api/fleet", None, {})
+            return 200, expected_payload
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+
+    assert run._fleet_snapshot() == expected_payload
+
+
 def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
     tmp_path: Path,
 ) -> None:

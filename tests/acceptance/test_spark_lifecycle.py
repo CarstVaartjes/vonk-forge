@@ -2400,8 +2400,8 @@ class SparkLifecycle:
 
         _, payload = self.control.request("GET", "/api/fleet")
         try:
-            return FleetSnapshot.model_validate(
-                require_object(payload, "Fleet snapshot")
+            return FleetSnapshot.model_validate_json(
+                json.dumps(require_object(payload, "Fleet snapshot"), separators=(",", ":"))
             ).model_dump(mode="json")
         except (TypeError, ValueError) as error:
             raise LifecycleError("Fleet snapshot response is invalid") from error
