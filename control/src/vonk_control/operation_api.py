@@ -69,18 +69,9 @@ IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
-    ("post", "/api/agents/enrollments/grants"): "createEnrollmentGrant",
-    ("get", "/api/agents/enrollments"): "listAgentEnrollments",
-    ("post", "/api/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
-    ("get", "/api/agents/upgrades/candidate"): "getAgentUpgradeCandidate",
-    ("post", "/api/agents/upgrades/preview"): "previewAgentUpgrade",
-    ("post", "/api/agents/upgrades"): "applyAgentUpgrade",
     ("get", "/api/fleet"): "getFleetStatus",
-    ("get", "/api/deployment-provenance"): "getDeploymentProvenance",
     ("get", "/api/operations/{operation_id}/evidence"): "getOperationEvidence",
     ("get", "/api/fleet/stream"): "streamFleetEvents",
-    ("get", "/api/library"): "listLibrary",
-    ("post", "/api/recipes/job-runs"): "activateRecipeJobRun",
     (
         "get",
         "/api/recipe/runs/{run_id}/artifact-jobs",
@@ -100,29 +91,7 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/artifact-jobs/{job_id}/results/{sha256}",
     ): "downloadArtifactJobResult",
-    (
-        "get",
-        "/api/library/recipes/{recipe_id}",
-    ): "getLibraryRecipe",
-    ("patch", "/api/nodes/{node_id}/profile"): "updateNodeProfile",
-    (
-        "get",
-        "/api/nodes/{node_id}/telemetry",
-    ): "getNodeTelemetryHistory",
-    (
-        "get",
-        "/api/nodes/{node_id}/telemetry/current",
-    ): "getNodeTelemetryCurrent",
-    (
-        "get",
-        "/api/nodes/{node_id}/telemetry/capabilities",
-    ): "getNodeTelemetryCapabilities",
-    (
-        "get",
-        "/api/nodes/{node_id}/telemetry/workloads",
-    ): "listNodeTelemetryWorkloads",
     ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
-    ("get", "/api/agents"): "listAgents",
     ("get", "/api/jobs"): "listJobs",
     ("get", "/api/operations"): "listOperations",
     ("get", "/api/audit"): "listAuditEvents",

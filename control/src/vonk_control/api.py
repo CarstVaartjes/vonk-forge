@@ -86,7 +86,6 @@ from .model_cache_api import (
     register_model_cache_operation_provider,
 )
 from .operation_api import (
-    AgentsResponse,
     AuditEventResponse,
     AuditResponse,
     BoundedErrorResponse,
@@ -778,10 +777,8 @@ def create_app(
 
     install_agent_routes(
         app,
-        actor_dependency=actor,
         audits=audits,
         services=agent,
-        upgrades=agent_upgrades,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
     authenticated_actor = Depends(actor)
@@ -940,22 +937,6 @@ def create_app(
         except RuntimeError:
             raise HTTPException(
                 status_code=503, detail="endpoint publication unavailable"
-            ) from None
-
-    @app.get(
-        "/api/agents",
-        response_model=AgentsResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="listAgents",
-    )
-    def agent_list(_actor: Actor = authenticated_actor) -> AgentsResponse:
-        if operations is None:
-            raise HTTPException(status_code=503, detail="agent projection unavailable")
-        try:
-            return AgentsResponse(agents=list(operations.agents()))
-        except RuntimeError:
-            raise HTTPException(
-                status_code=503, detail="agent projection unavailable"
             ) from None
 
     @app.get(
