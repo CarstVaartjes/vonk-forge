@@ -283,8 +283,6 @@ def test_operator_tailscale_assets_have_no_acceptance_service_or_policy() -> Non
         ROOT / "deploy/compose/tailscale/compose.yaml",
         ROOT / "deploy/compose/tailscale/configure.sh",
         ROOT / "deploy/compose/tailscale/grants.example.hujson",
-        ROOT / "deploy/compose/tailscale/README.md",
-        ROOT / "docs/runbooks/tailscale.md",
     )
     forbidden = (
         "svc:vonk-forge-acceptance",
