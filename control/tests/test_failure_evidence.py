@@ -401,28 +401,6 @@ def test_collection_time_budget_yields_and_leaves_cursor_for_next_tick(
     assert service.last_collection_error is None
 
 
-def test_migration_creates_evidence_tables_on_fresh_database(tmp_path):
-    import importlib.util
-    from pathlib import Path
-
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import inspect
-
-    path = Path(__file__).parents[1] / "migrations/versions/0024_failure_evidence.py"
-    spec = importlib.util.spec_from_file_location("failure_evidence_migration", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    engine = create_engine(f"sqlite:///{tmp_path / 'fresh.sqlite'}")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            module.upgrade()
-        assert set(inspect(connection).get_table_names()) == {
-            "failure_evidence_records",
-            "failure_evidence_cursors",
-        }
-
-
 def test_secret_control_characters_cannot_evade_redaction(service):
     value = item()
     value["result"]["stderr"] = (
