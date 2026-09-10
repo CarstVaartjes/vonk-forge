@@ -293,17 +293,36 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             self.plan_calls += 1
             if self.plan_calls > 1:
                 raise AssertionError("selected plan must not be admitted twice")
-            return SimpleNamespace(build_input_sha256="b" * 64)
+            return SimpleNamespace(
+                build_input_sha256="b" * 64,
+                builder_node_id="builder-node-000000000000000000000000000000",
+            )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
             return plan
 
     class Operations:
-        def build(self, *_args, **_kwargs):
+        def build(self, plan, **_kwargs):
             return SimpleNamespace(
                 state="succeeded",
                 owner_id="build-id",
-                result={"image_digest": "sha256:" + "d" * 64},
+                result={
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "build_input_sha256": "b" * 64,
+                            "image_bytes": 1,
+                            "image_digest": "sha256:" + "d" * 64,
+                            "oci_layout_sha256": "e" * 64,
+                            "policy": {
+                                "passed": True,
+                                "dockerfile": "Dockerfile",
+                                "findings": [],
+                            },
+                        }
+                    },
+                },
             )
 
     builds = Builds()
@@ -510,11 +529,27 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
             return plan
 
     class Operations:
-        def build(self, *_args, **_kwargs):
+        def build(self, plan, **_kwargs):
             return SimpleNamespace(
                 state="succeeded",
                 owner_id="build-id",
-                result={"image_digest": "sha256:" + "d" * 64},
+                result={
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "build_input_sha256": plan.build_input_sha256,
+                            "image_bytes": 1,
+                            "image_digest": "sha256:" + "d" * 64,
+                            "oci_layout_sha256": "e" * 64,
+                            "policy": {
+                                "passed": True,
+                                "dockerfile": "Dockerfile",
+                                "findings": [],
+                            },
+                        }
+                    },
+                },
             )
 
     class Settings:
@@ -674,10 +709,21 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 state="succeeded",
                 owner_id=build_id,
                 result={
-                    "image_digest": image_digest,
-                    "oci_layout_sha256": archive_digest,
-                    "image_bytes": len(archive),
-                    "build_id": build_id,
+                    "successful_nodes": [plan.builder_node_id],
+                    "failed_nodes": [],
+                    "node_evidence": {
+                        plan.builder_node_id: {
+                            "build_input_sha256": final_input,
+                            "image_digest": image_digest,
+                            "oci_layout_sha256": archive_digest,
+                            "image_bytes": len(archive),
+                            "policy": {
+                                "passed": True,
+                                "dockerfile": "Dockerfile",
+                                "findings": [],
+                            },
+                        }
+                    },
                 },
             )
 

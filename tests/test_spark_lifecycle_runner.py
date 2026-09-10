@@ -263,6 +263,61 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     assert run._fleet_snapshot() == expected_payload
 
 
+def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> None:
+    lifecycle = _module()
+    node_id = "spk_" + "1" * 32
+    self_test = {
+        "semantic_version": "1.2.3",
+        "architecture": "linux-arm64",
+        "build_digest": "sha256:" + "a" * 64,
+        "binary_digest": "b" * 64,
+    }
+    responses = iter(
+        [
+            {
+                "id": node_id,
+                "display_name": "Spark",
+                "connection": {"agent_state": "active", "online_state": "online"},
+                "inventory": {"freshness": "fresh", "capabilities": []},
+            },
+            {
+                "id": node_id,
+                "display_name": "Spark",
+                "connection": {"agent_state": "active", "online_state": "online"},
+                "inventory": {
+                    "freshness": "fresh",
+                    "capabilities": ["recipe.build.v1"],
+                },
+            },
+        ]
+    )
+
+    class Control:
+        def request(self, method, path):
+            assert (method, path) == ("GET", "/api/fleet")
+            return 200, {"nodes": [next(responses)]}
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.arguments = SimpleNamespace(platform="linux-arm64")
+    run.control = Control()
+    run.graph = {
+        "baseline_version": "0.0.0",
+        "baseline_package_sha256": "c" * 64,
+        "candidate_package_sha256": "d" * 64,
+    }
+    run._self_test = lambda: self_test
+    run._installed_package_version = lambda: "1.2.3"
+    run._psql = lambda _query: [
+        ["linux-arm64", "1.2.3", "sha256:" + "a" * 64, "b" * 64, "1", "1234567890"]
+    ]
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    identity = run._wait_for_agent_identity(package_version="1.2.3", timeout=1)
+
+    assert identity["node_id"] == node_id
+    assert identity["package_sha256"] == "d" * 64
+
+
 def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
     source = ENTRY_POINT.read_text(encoding="utf-8")
     start = source.index('f"/api/recipe/{recipe_selector}/download"')

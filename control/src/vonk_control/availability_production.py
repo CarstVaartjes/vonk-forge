@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import RecipeBuildEvidence
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
@@ -582,7 +583,36 @@ def build_recipe_image_availability(
                 retryable=True,
                 step="build",
             )
-        return dict(operation.result) | {
+        aggregate = operation.result
+        successful_nodes = aggregate.get("successful_nodes")
+        node_evidence = aggregate.get("node_evidence")
+        raw_evidence = (
+            node_evidence.get(builder_node_id)
+            if isinstance(node_evidence, Mapping)
+            else None
+        )
+        if (
+            not isinstance(successful_nodes, list)
+            or builder_node_id not in successful_nodes
+            or not isinstance(raw_evidence, Mapping)
+        ):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_invalid",
+                "canonical Recipe build evidence is incomplete",
+            )
+        try:
+            evidence = RecipeBuildEvidence.model_validate(raw_evidence)
+        except (TypeError, ValueError) as error:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_invalid",
+                "canonical Recipe build evidence is invalid",
+            ) from error
+        if evidence.build_input_sha256 != build_input_sha256:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.identity_conflict",
+                "canonical Recipe build evidence does not match its inputs",
+            )
+        return evidence.model_dump(mode="json") | {
             "state": operation.state,
             "build_id": operation.owner_id,
             "build_input_sha256": build_input_sha256,
