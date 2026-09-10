@@ -1,15 +1,17 @@
 """Current singular model cache operator routes cancel before eviction."""
 
-from unittest.mock import Mock
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-
 from vonk_control.auth import MUTATION_ROLES, Actor
 from vonk_control.model_cache import CacheOperationView
 from vonk_control.model_cache_api import install_model_operator_routes
-from vonk_control.model_cache_contract import ModelCacheOperatorResponse, ModelCacheRemovalResult
+from vonk_control.model_cache_contract import (
+    ModelCacheOperatorResponse,
+    ModelCacheRemovalResult,
+)
 from vonk_control.model_cache_progress import cache_progress
 
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"

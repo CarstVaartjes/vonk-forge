@@ -39,12 +39,10 @@ recovered memory after shutdown.
 | TripoSG | Official [TripoSG](https://github.com/VAST-AI-Research/TripoSG) requires at least 8 GB. | GB10-native build of the official Diffusers pipeline with its separately verified RMBG dependency. | One GPU node | `single-exclusive`, then co-residency candidate | Official requirement fits comfortably; no exact maintained GPU node-specific optimization was found. |
 | Hunyuan3D-Omni | Official [Hunyuan3D-Omni](https://github.com/Tencent-Hunyuan/Hunyuan3D-Omni) reports 10 GB for generation. | GB10-native official runtime with its `--flashvdm` acceleration enabled after output comparison. A Hunyuan3D 2.1 GPU node container is only a build reference because it is not Omni. | One GPU node | `single-exclusive`, then co-residency candidate | Official requirement fits comfortably; FlashVDM build and controlled-input acceptance pending. |
 
-The current DeepSeek operational evidence is recorded in the
-[`Mia dual-GPU node`](../inventory/reports/deepseek-mia-operational.json) and
-[`DS4 single-GPU node`](../inventory/reports/deepseek-ds4-operational.json)
-reports. DS4 measured a 67-second cold start, 110.86 GiB of consumed available
-memory after its live gate run, a 32,768-token context, and an 8 GiB disk-KV
-budget on GPU node 1.
+The current DeepSeek operational evidence is recorded under
+`inventory/reports/`. DS4 measured a 67-second cold start, 110.86 GiB of
+consumed available memory after its live gate run, a 32,768-token context, and
+an 8 GiB disk-KV budget on GPU node 1.
 `verified` is definition-specific: the DS4 single-GPU node definition requires its
 offline artifact, image, architecture, identity, mapped/no-copy, reasoning, and
 cache gates. Mia has additionally passed its sustained thermal, repeated

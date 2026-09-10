@@ -31,7 +31,7 @@ credential in the page. Store that file privately, then point the CLI at it:
 export VONK_CONTROL_URL=https://forge.example.test
 export VONK_CONTROL_TOKEN_FILE="$HOME/Downloads/vonkctl-token"
 chmod 600 "$VONK_CONTROL_TOKEN_FILE"
-vonkctl models discover --all --json
+vonkctl model library --json
 ```
 
 The download requires the active browser session and its CSRF protection. The

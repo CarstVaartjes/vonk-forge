@@ -248,6 +248,94 @@ class RunSwitchFleetProfileAdapter:
             self._run_switch.tick()
         return self._advance(operation_id, assignments)
 
+    @staticmethod
+    def _assignment_request(
+        session: Session,
+        assignment: FleetProfileAssignment,
+        *,
+        request_key: str | None = None,
+    ) -> RunSwitchApplyRequest:
+        """Map one profile assignment onto the Run/Switch authority.
+
+        This is the single definition of how a profile assignment becomes a
+        Run/Switch request.  Both apply and preparation projection use it, so a
+        preview can never describe a different model, revision, group or alias
+        than the child operation it later binds.
+        """
+
+        revision = session.get(
+            CatalogDocumentRevision, assignment.recipe_revision_id
+        )
+        if revision is None:
+            raise KeyError(assignment.recipe_revision_id)
+        resolved = resolve_recipe_entities(session, revision.document)
+        models = resolved.get("models")
+        model_digest = (
+            models[0].content_digest
+            if isinstance(models, Sequence) and models
+            else None
+        )
+        if not isinstance(model_digest, str):
+            raise FleetProfileConflict(
+                "Profile assignment has no exact model identity"
+            )
+        group = SparkGroup(
+            nodes=[
+                SparkGroupNode(
+                    node_id=node.node_id,
+                    rank=node.rank,
+                    role=node.role,
+                    endpoint_owner=node.endpoint_owner,
+                )
+                for node in sorted(assignment.nodes, key=lambda item: item.rank)
+            ]
+        )
+        return RunSwitchApplyRequest(
+            model_content_sha256=model_digest,
+            recipe_revision_id=assignment.recipe_revision_id,
+            spark_group=group,
+            alias=assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
+            action="switch",
+            retention="retain-cached",
+            plan_digest=None,
+            request_key=request_key,
+        )
+
+    def preparation(
+        self,
+        session: Session,
+        assignment: FleetProfileAssignment,
+        expected_nodes: tuple[str, ...],
+    ) -> RolloutPreparation | None:
+        """Project the exact preparation a profile apply would bind.
+
+        Run/Switch remains the authority for the exact model artifact set, the
+        runtime image identity and per-target readiness.  Asking it to plan is
+        what keeps a profile preview honest: the preview shows the same
+        preparation evidence the child operation will require, instead of a
+        second, weaker estimate maintained at the profile boundary.
+        """
+
+        observed = tuple(sorted(node.node_id for node in assignment.nodes))
+        if observed != expected_nodes:
+            raise ValueError(
+                "Profile assignment nodes changed during preparation projection."
+            )
+        request = self._assignment_request(session, assignment)
+        plan = self._run_switch.preview(
+            request, actor="controller:profile-preparation"
+        )
+        if plan.preparation is None:
+            codes = sorted({reason.code for reason in plan.blockers})[:8]
+            detail = (
+                "The Run/Switch authority cannot attest exact model and OCI "
+                f"preparation evidence for {assignment.recipe_title}"
+            )
+            if codes:
+                detail += " (" + ", ".join(codes) + ")"
+            raise ValueError(detail + ".")
+        return plan.preparation
+
     def _advance(
         self,
         application_id: str,
@@ -379,39 +467,9 @@ class RunSwitchFleetProfileAdapter:
         if assignment is None:
             raise FleetProfileConflict("Profile switch assignment is unavailable")
         with self._sessions() as session:
-            revision = session.get(CatalogDocumentRevision, assignment.recipe_revision_id)
-            if revision is None:
-                raise KeyError(assignment.recipe_revision_id)
-            resolved = resolve_recipe_entities(session, revision.document)
-            models = resolved.get("models")
-            model_digest = (
-                models[0].content_digest
-                if isinstance(models, Sequence) and models
-                else None
+            request = self._assignment_request(
+                session, assignment, request_key=child_request_key
             )
-        if not isinstance(model_digest, str):
-            raise FleetProfileConflict("Profile assignment has no exact model identity")
-        group = SparkGroup(
-            nodes=[
-                SparkGroupNode(
-                    node_id=node.node_id,
-                    rank=node.rank,
-                    role=node.role,
-                    endpoint_owner=node.endpoint_owner,
-                )
-                for node in sorted(assignment.nodes, key=lambda item: item.rank)
-            ]
-        )
-        request = RunSwitchApplyRequest(
-            model_content_sha256=model_digest,
-            recipe_revision_id=assignment.recipe_revision_id,
-            spark_group=group,
-            alias=assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
-            action="switch",
-            retention="retain-cached",
-            plan_digest=None,
-            request_key=child_request_key,
-        )
         plan = self._run_switch.preview(request, actor=actor)
         if not plan.allowed:
             raise RunSwitchOperationConflict(
@@ -716,6 +774,36 @@ def _profile_document(row: FleetProfile) -> dict[str, object]:
         "favorite": row.favorite,
         "assignments": list(row.assignments),
     }
+
+
+def build_production_fleet_profile_service(
+    sessions: sessionmaker[Session],
+    *,
+    clock: Callable[[], datetime],
+    run_switch_operations: RunSwitchOperationService,
+    recipe_operations: RecipeOperationService | None = None,
+    cache_resolver: Callable[..., Mapping[str, object]] | None = None,
+) -> FleetProfileService:
+    """Compose the Controller's Fleet profile service and its authority.
+
+    The Run/Switch adapter is both the apply boundary and the preparation
+    provider.  Composing them in one place means a profile preview and the
+    child operation it later queues always resolve the exact same model,
+    recipe revision, target group and runtime image identity.  It also makes
+    the preparation binding impossible to drop by accident: a deployment
+    cannot construct this service without a provider that can attest the
+    assets a plan requires.
+    """
+
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch_operations)
+    return FleetProfileService(
+        sessions,
+        clock=clock,
+        recipe_operations=recipe_operations,
+        switch_adapter=adapter,
+        cache_resolver=cache_resolver,
+        preparation_provider=adapter.preparation,
+    )
 
 
 class FleetProfileService:
@@ -1147,6 +1235,14 @@ class FleetProfileService:
                 preparation = None
                 expected_nodes = tuple(sorted(node.node_id for node in assignment.nodes))
                 item_reasons: list[FleetProfileReason] = []
+                # Exact preparation evidence is only required when this
+                # assignment must actually place the model and runtime image.
+                # A profile that already matches live state legitimately has
+                # nothing to prepare, so unavailable evidence stays a warning
+                # there rather than blocking an otherwise idle plan.
+                requires_preparation = state.installation is None or (
+                    state.current_state in {"not-placed", "placed", "degraded"}
+                )
                 active_node_ids = {node.node_id for node in roster}
                 unknown_nodes = sorted(set(expected_nodes) - active_node_ids)
                 revision = session.get(
@@ -1186,7 +1282,9 @@ class FleetProfileService:
                                 code="profile.preparation_unavailable",
                                 detail=(
                                     "Exact model and OCI preparation evidence is "
-                                    "unavailable from the configured Controller provider."
+                                    f"unavailable for {assignment.recipe_title}; "
+                                    "the Controller has no preparation provider "
+                                    "configured."
                                 ),
                                 severity="warning",
                             )
@@ -1203,7 +1301,9 @@ class FleetProfileService:
                                 code="profile.preparation_unavailable",
                                 detail=str(error)[:512]
                                 or "The preparation provider returned no exact evidence.",
-                                severity="warning",
+                                severity=(
+                                    "error" if requires_preparation else "warning"
+                                ),
                             )
                         )
                     if preparation is not None and not isinstance(
@@ -1213,7 +1313,9 @@ class FleetProfileService:
                             FleetProfileReason(
                                 code="profile.preparation_unavailable",
                                 detail="The preparation provider returned an invalid contract.",
-                                severity="warning",
+                                severity=(
+                                    "error" if requires_preparation else "warning"
+                                ),
                             )
                         )
                         preparation = None

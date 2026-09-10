@@ -24,7 +24,7 @@ Vonk Forge joins a curated model-and-recipe library to a trusted local NAS/Contr
 
 ## Operating Context
 
-The control plane runs on a local NAS. Sparks enroll through an outbound native agent; PostgreSQL owns fleet and operational state, while the local NAS/Controller model and recipe-image cache is authoritative for profile authoring and apply admission. Profile choices must come from that cache and resolve to exact immutable identities. Routine operation does not require SSH, Git, direct browser-to-Spark access, or manually edited agent configuration. Models can have multiple immutable recipe revisions and topologies. A recipe may be installed on several complete Spark groups and may be running on zero or more groups.
+The control plane runs on one local computer with Docker Compose—a laptop, a NAS, or a local server. Sparks enroll through an outbound native agent; PostgreSQL owns fleet and operational state, while the local NAS/Controller model and recipe-image cache is authoritative for profile authoring and apply admission. Profile choices must come from that cache and resolve to exact immutable identities. Routine operation does not require SSH, Git, direct browser-to-Spark access, or manually edited agent configuration. Models can have multiple immutable recipe revisions and topologies. A recipe may be installed on several complete Spark groups and may be running on zero or more groups.
 
 The approved source briefs remain authoritative product history and requirements:
 

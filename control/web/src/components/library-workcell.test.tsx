@@ -34,6 +34,20 @@ test("keeps URL-selected Models in the paired right pane", () => {
   expect(screen.getByLabelText("Recipes matching selected Model")).toHaveTextContent("No Recipe linked");
 });
 
+test("offers to cache the missing models when downloading a recipe", () => {
+  const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
+  const selector = `${base.model.publisher}/${base.model.slug}`;
+  const snapshot = {
+    ...libraryViewSnapshot,
+    models: libraryViewSnapshot.models.map(entry => entry === base
+      ? {...entry, recipes: entry.recipes.map(recipe => ({...recipe, model_selectors: [selector]}))}
+      : entry),
+  };
+  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={snapshot}/>);
+  expect(screen.getAllByRole("button", {name: /Download recipe and 1 missing model/}).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(new RegExp(`Also caches ${selector}`)).length).toBeGreaterThan(0);
+});
+
 test("keeps same-Model Recipe variants together and shows creator attribution", () => {
   const model = libraryViewSnapshot.models.find(entry => entry.model.publisher === "lightricks" && entry.model.slug === "ltx-2-gemma3-text-encoder-dfcc2108")!;
   const key = modelKey(model.model);

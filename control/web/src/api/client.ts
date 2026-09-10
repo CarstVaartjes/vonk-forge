@@ -27,6 +27,9 @@ import type {
   ModelDetail,
   ModelLibrary,
   ModelStatus,
+  ModelCacheOperatorResponse,
+  RecipeImageAvailabilityResponse,
+  RecipeCacheOperation,
   RecipeDetail,
   RecipeLibrary,
   RecipeStatus,
@@ -281,6 +284,38 @@ export class ApiClient implements ControlApi {
   async libraryJobProgress(jobId: string, signal?: AbortSignal) {
     return resultData(await this.generated.GET("/api/jobs/{job_id}", {
       params: {path: {job_id: jobId}, query: {}},
+      signal,
+    }));
+  }
+
+  async prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.POST("/api/model/{selector}/download", {
+      params: {path: {selector}},
+      body: {request_key: requestKey, schema_version: 2, with_model: false},
+      signal,
+    }));
+  }
+
+  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.GET("/api/model/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse> {
+    // The recipe download caches the recipe image and its missing model
+    // artifacts together, which is what `vonkctl recipe download` documents.
+    return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
+      params: {path: {selector}},
+      body: {request_key: requestKey, schema_version: 2, with_model: true},
+      signal,
+    }));
+  }
+
+  async recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation> {
+    return resultData(await this.generated.GET("/api/recipe/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
       signal,
     }));
   }

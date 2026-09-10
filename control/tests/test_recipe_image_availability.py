@@ -15,8 +15,8 @@ from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
-    Base,
     AgentNode,
+    Base,
     CatalogDocument,
     CatalogDocumentRevision,
     Job,

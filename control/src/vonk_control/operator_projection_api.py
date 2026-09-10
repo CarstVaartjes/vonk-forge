@@ -32,10 +32,10 @@ from .fleet_projection import (
     TelemetryWorkloadsResponse,
 )
 from .library_projection import LibrarySelectorAmbiguous
+from .models import Job, JobLogEntry
 from .operation_api import bounded_error_responses
 from .strict_json import StrictJSONModel
 from .telemetry import TelemetryResolution
-from .models import Job, JobLogEntry
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
@@ -303,7 +303,7 @@ class ControllerJobLogProvider:
             entries=entries[:lines],
             retained=True,
             # DatabaseJobLogStore is retained evidence, not a live stream.
-            follow=False if follow else False,
+            follow=False,
         )
 
 

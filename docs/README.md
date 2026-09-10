@@ -12,7 +12,7 @@ require routine SSH.
 | --- | --- |
 | Install a controller and first Spark | [Public installation guide](https://vonkforge.ai/install) |
 | Understand what is public and what stays local | [Architecture overview](architecture-overview.md) |
-| Operate Fleet, Library, profiles, and workloads | [Control-plane operations](runbooks/control-plane-operations.md) |
+| Understand the engineering stance | [Engineering principles](engineering-principles.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
@@ -56,7 +56,6 @@ flowchart LR
 - [Fresh development installation](runbooks/fresh-development-install.md)
 - [Controller bootstrap](runbooks/control-plane-bootstrap.md)
 - [Tailscale ingress and fresh-install preflight](runbooks/tailscale.md)
-- [Controller operations](runbooks/control-plane-operations.md)
 - [`vonkctl` controller CLI](runbooks/vonkctl.md)
 - [PostgreSQL authority administration](runbooks/authority-administration.md)
 - [Node onboarding and health](runbooks/node-onboarding.md)
@@ -71,8 +70,6 @@ flowchart LR
 
 - [Platform release publication](runbooks/platform-release-publication.md)
 - [Agent package release](operations/agent-package-release.md)
-- [Identity verification policy](identity-verifier.md)
-- [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
 
 Commands in these pages are plan-first: they expose revisions, placement,
 resource checks, and affected nodes before mutation. State-changing CLI

@@ -12,9 +12,9 @@ content-addressed and available only to operator/administrator API roles.
 ## Routes stuck in maintenance
 
 Inspect the current recipe operation and affected-node Fleet connection,
-inventory, and telemetry state. Keep routes withdrawn until the pinned commit,
-current API settings, recipe operation leases, and acceptance checks all pass. Do not manually point LiteLLM
-at an unaccepted GPU node endpoint.
+inventory, and telemetry state. Keep routes withdrawn until the pinned recipe
+revision, current API settings, recipe operation leases, and acceptance checks
+all pass. Do not manually point LiteLLM at an unaccepted GPU node endpoint.
 
 ## Stale fleet evidence
 
@@ -34,8 +34,8 @@ available.
 ## Control job failures
 
 Filter operations and Audit by action, inspect sanitized evidence, and verify the
-protected commit is still eligible. Re-plan after correcting repository state;
-never retry a revoked or stale plan.
+recipe revision and build evidence are still current. Re-plan after correcting
+persisted state; never retry a revoked or stale plan.
 
 ## Stale backup
 
@@ -46,7 +46,8 @@ metric advances only after encryption and manifest creation succeed.
 
 Check the private PostgreSQL healthcheck, secret-file mounts, storage capacity,
 and migration version. Do not recreate desired profiles/models in PostgreSQL;
-restore operational data and retain Git as authority.
+restore operational data. PostgreSQL remains the sole runtime authority and the
+control plane mounts no Git repository.
 
 ## Worker lease starvation
 

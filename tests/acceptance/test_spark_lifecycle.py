@@ -2086,7 +2086,10 @@ class SparkLifecycle:
                 or not isinstance(preview.get("preparations"), list)
                 or len(preview["preparations"]) != 1
             ):
-                raise LifecycleError("synthetic canary profile preview is not admitted")
+                raise LifecycleError(
+                    "synthetic canary profile preview is not admitted: "
+                    + self._preview_diagnostic(preview)
+                )
             preparation = require_object(
                 preview["preparations"][0], "synthetic canary preparation"
             ).get("preparation")
@@ -2190,7 +2193,10 @@ class SparkLifecycle:
             cleanup_preview = require_object(cleanup_preview_payload, "synthetic canary cleanup preview")
             summary = require_object(cleanup_preview.get("summary"), "synthetic canary cleanup summary")
             if cleanup_preview.get("allowed") is not True or summary.get("stops", 0) < 1 or summary.get("uninstalls", 0) < 1:
-                raise LifecycleError("synthetic canary cleanup preview is not admitted")
+                raise LifecycleError(
+                    "synthetic canary cleanup preview is not admitted: "
+                    + self._preview_diagnostic(cleanup_preview)
+                )
             _, cleanup_application_payload = self.control.request(
                 "POST",
                 "/api/profile/1/load",
@@ -2383,6 +2389,49 @@ class SparkLifecycle:
             )
             raise LifecycleError(f"{label} failed: {details}")
         return typed.model_dump(mode="json")
+
+    @staticmethod
+    def _preview_diagnostic(preview: dict[str, object]) -> str:
+        """Describe a rejected profile preview instead of collapsing its cause.
+
+        The preview contract carries the decisive evidence separately: entry
+        admission, per-assignment preparation receipts, the plan summary and
+        the structured reasons.  Reporting them together keeps an acceptance
+        failure diagnosable without a second run.
+        """
+
+        reasons = preview.get("reasons")
+        rendered_reasons: object = reasons
+        if isinstance(reasons, list):
+            rendered_reasons = [
+                {
+                    "code": reason.get("code"),
+                    "severity": reason.get("severity"),
+                    "detail": reason.get("detail"),
+                }
+                for reason in reasons
+                if isinstance(reason, dict)
+            ]
+        preparations = preview.get("preparations")
+        rendered_preparations: object = preparations
+        if isinstance(preparations, list):
+            rendered_preparations = [
+                item.get("assignment_id")
+                for item in preparations
+                if isinstance(item, dict)
+            ]
+        return json.dumps(
+            {
+                "allowed": preview.get("allowed"),
+                "preparations": rendered_preparations,
+                "reasons": rendered_reasons,
+                "scope": preview.get("scope"),
+                "summary": preview.get("summary"),
+            },
+            default=str,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
 
     @staticmethod
     def _profile_run_switch_result(step_results: dict[str, object]) -> dict[str, object]:

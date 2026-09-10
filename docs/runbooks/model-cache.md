@@ -34,9 +34,9 @@ Unknown sizes are reported as unknown.
 ## Remove and cancel
 
 ```bash
-vonkctl model remove MODEL
-vonkctl recipe remove RECIPE
-vonkctl recipe remove RECIPE --with-model
+vonkctl model remove MODEL --yes
+vonkctl recipe remove RECIPE --keep-model --yes
+vonkctl recipe remove RECIPE --with-model --yes
 ```
 
 Removal cancels the corresponding download or build and removes the Controller
@@ -46,8 +46,9 @@ blocked with the missing asset and a cache-preparation action; it does not
 silently fetch upstream. A late worker completion must not republish a removed
 entry.
 
-When removing the last cached recipe for a model, the CLI asks whether to remove
-the model too. Use `--keep-model` or `--with-model` to make that choice explicit.
+When removing the last cached recipe for a model, the CLI does not prompt: it
+fails closed and requires `--keep-model` or `--with-model`. Removal is
+non-interactive and needs `--yes`.
 Shared physical objects remain while another cache entry, saved profile, active
 workload, or preparation operation still requires them. NAS garbage collection
 may remove unused local model objects after those references are gone. It does

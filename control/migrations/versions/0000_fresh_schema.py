@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 from sqlalchemy import inspect
-
 from vonk_control.models import Base
 
 revision = "0000_fresh_schema"

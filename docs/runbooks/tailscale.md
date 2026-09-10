@@ -278,11 +278,9 @@ with the control database and Hermes state. Restore state before startup when
 possible.
 
 If state cannot be restored, recreate the project with the OAuth files. Verify
-exactly one current tagged node advertises the one development Service or all
-three production Services, as appropriate, and revoke the orphan. For
-compromise, revoke OAuth, the node, and its tag/Service approvals; for
-development, capture both replacement values and run the documented
-`--rotate-tailscale-oauth` transaction with one stable non-secret UUIDv4
-`--tailscale-oauth-rotation-id` before republishing and choosing
-**Pull** then **Redeploy** with every named volume preserved. Never add a
-temporary LAN human endpoint.
+exactly one current tagged node advertises the Services expected for the enabled
+feature set, and revoke the orphan. For compromise, revoke OAuth, the node, and
+its tag/Service approvals; then repeat the fresh-install preflight so the OAuth
+client, grants, and auto-approvals are recreated rather than rotated in place,
+and choose **Pull** then **Redeploy** with every named volume preserved. Never
+add a temporary LAN human endpoint.

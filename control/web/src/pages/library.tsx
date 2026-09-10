@@ -35,6 +35,7 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     slug: recipe.identity.slug,
     title: recipe.identity.title,
     topology_name: recipe.document.topology.name,
+    model_selectors: recipe.model_selectors,
   };
 }
 
@@ -43,6 +44,11 @@ function viewModel(model: ModelLibrary["models"][number], recipes: LibraryViewRe
     model: {kind: "model", publisher: model.identity.publisher, slug: model.identity.slug, content_sha256: model.identity.content_sha256},
     model_document: model.document,
     model_capabilities: model.document.capabilities,
+    local: model.local,
+    family: model.family,
+    version: model.version,
+    quantization: model.quantization,
+    usage: model.usage,
     recipes,
   };
 }

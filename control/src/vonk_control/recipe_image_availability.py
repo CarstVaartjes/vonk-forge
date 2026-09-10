@@ -623,7 +623,7 @@ class RecipeImageAvailabilityService:
                         actor=actor,
                         request_key=child_request,
                     )
-                except Exception as error:  # noqa: BLE001 - report dependent cleanup explicitly
+                except Exception as error:
                     raise RecipeImageAvailabilityError(
                         "recipe_image.model_cache_removal_failed",
                         "recipe image was removed but its model cache was not",

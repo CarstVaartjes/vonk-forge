@@ -35,7 +35,6 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
@@ -697,7 +696,7 @@ def create_app(
                     )
                 else:
                     response = await call_next(request)
-        except Exception:
+        except Exception:  # noqa: BLE001 - middleware safety net, see log below
             # Preserve the correlation key without serializing the exception,
             # request body, headers, or URL query into logs.
             from .logging import log_event
@@ -1530,13 +1529,13 @@ def production_app() -> FastAPI:
         retention_seconds=settings.artifact_job_retention_seconds,
     )
     artifact_jobs.reconcile_storage()
-    from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
+    from .fleet_profiles import build_production_fleet_profile_service
 
-    fleet_profiles = FleetProfileService(
+    fleet_profiles = build_production_fleet_profile_service(
         sessions,
         clock=clock,
+        run_switch_operations=run_switch_operations,
         recipe_operations=recipe_operations,
-        switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch_operations),
         cache_resolver=model_cache.resolve_latest_cached,
     )
     agent_upgrades = AgentUpgradeService(

@@ -31,6 +31,10 @@ export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
+export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
+export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
+export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse;
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
 
 // UI-only projections combine the independent Model and Recipe list responses.
@@ -47,6 +51,7 @@ export type LibraryViewRecipe = {
   slug: string;
   title: string;
   topology_name: string;
+  model_selectors?: string[];
   installations?: unknown[];
   runs?: unknown[];
   recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
@@ -66,6 +71,14 @@ export type LibraryViewModel = {
   model: {kind: "model"; publisher: string; slug: string; content_sha256: string};
   model_document: ModelDefinition;
   model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  local: components["schemas"]["LibraryLocalState"];
+  // Projected facets, named exactly as the CLI filter flags and the
+  // /api/model/library query parameters: --usage --family --version
+  // --quantization.
+  family: string;
+  version: string;
+  quantization: string;
+  usage: string[];
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
@@ -139,6 +152,10 @@ export interface LibraryApi {
   cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, sha256: string): string;
+  prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
+  recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;

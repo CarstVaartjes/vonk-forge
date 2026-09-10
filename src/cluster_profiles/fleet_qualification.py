@@ -20,11 +20,8 @@ from typing import Any, Protocol
 
 from .generated_control.models.library_recipe_model import LibraryRecipeModel
 from .generated_control.models.model_definition import ModelDefinition
-from .generated_control.models.recipe_detail_response import RecipeDetailResponse
 from .generated_control.models.recipe_definition import RecipeDefinition
-from .generated_control.models.recipe_image_availability_response import (
-    RecipeImageAvailabilityResponse,
-)
+from .generated_control.models.recipe_detail_response import RecipeDetailResponse
 from .generated_control.models.recipe_library_response import RecipeLibraryResponse
 from .generated_control.types import Unset
 from .qualification_fixtures import (

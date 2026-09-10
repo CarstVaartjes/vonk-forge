@@ -147,9 +147,8 @@ models by `scripts/generate-agent-wire`, using pinned typify 0.7.0. The exporter
 checks in the exact validation schema; typify generates the declarations used
 by production protocol and HTTP consumers. Handwritten code retains semantic,
 execution, and signature validation rather than defining competing wire fields.
-Remaining adoption and connected checks are tracked in
-`docs/contract-handoff-implementation-plan-2026-09-08.md`; generated types beside
-handwritten active DTOs do not complete the chain.
+Remaining adoption and connected checks are not yet complete; generated types
+beside handwritten active DTOs do not complete the chain.
 Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
@@ -159,7 +158,7 @@ address and hostname list are explicit even when they are `null` and `[]`.
 There is no setup-schema selector or older bootstrap variant.
 
 The work-claim request and runtime identity are defined in
-`agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
+`agent_protocol/src/vonk_agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
 wait time, and the enrolled agent's observation key are required. The Rust
 HTTP transport and the connected test use the same request serializer and
 capability declaration. Enrollment keeps its bounded raw-body security
@@ -290,10 +289,11 @@ model works on physical Spark hardware.
 
 ## Nested contract coverage
 
-The 7 September 2026 application inventory contains 136 routes. Its 115
-response models cover JSON responses; the other 21 routes handle empty
-responses, raw uploads/downloads, signed files, metrics, or event streams.
-OpenAPI is generated from the actual application and its nested Pydantic graph.
+OpenAPI is generated from the actual application and its nested Pydantic graph
+rather than maintained by hand, so the generated document is the authority for
+exact route and model counts. Every application route appears in it; the routes
+without a response model handle empty responses, raw uploads/downloads, signed
+files, metrics, or event streams.
 
 The fixed documents previously exposed as dictionaries now use concrete models:
 

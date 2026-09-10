@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import Actor, TokenCodec, MUTATION_ROLES
+from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import Base
 
@@ -60,3 +60,20 @@ def test_profile_mutation_role_is_declared_for_final_route() -> None:
     assert ("PUT", "/api/profile/{number}") not in MUTATION_ROLES or (
         "administrator" in MUTATION_ROLES[("PUT", "/api/profile/{number}")]
     )
+
+
+def test_production_app_composes_fleet_profiles_with_preparation_authority() -> None:
+    """Production must compose Fleet profiles through the guarded builder.
+
+    ``build_production_fleet_profile_service`` binds the Run/Switch adapter as
+    the preparation provider, so a profile preview always carries the exact
+    preparation the queued child operation binds.  Constructing
+    ``FleetProfileService`` directly in production would silently drop that
+    binding and admit a profile whose required assets cannot be attested.
+    """
+
+    from vonk_control import api
+
+    source = inspect.getsource(api.production_app)
+    assert "build_production_fleet_profile_service(" in source
+    assert "FleetProfileService(" not in source

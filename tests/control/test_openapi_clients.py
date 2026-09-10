@@ -112,7 +112,9 @@ def test_generated_profile_authoring_is_logical_and_transport_neutral() -> None:
         authored["properties"]
     )
     assert "scope" not in components["FleetProfileInput"]["properties"]
-    from cluster_profiles.generated_control.models.fleet_profile_assignment_input import FleetProfileAssignmentInput
+    from cluster_profiles.generated_control.models.fleet_profile_assignment_input import (
+        FleetProfileAssignmentInput,
+    )
     assignment = FleetProfileAssignmentInput(recipe_selector="publisher/recipe", spark_ids=["Spark One"])
     payload = assignment.to_dict()
     assert payload["recipe_selector"] == "publisher/recipe"
