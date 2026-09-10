@@ -147,9 +147,8 @@ models by `scripts/generate-agent-wire`, using pinned typify 0.7.0. The exporter
 checks in the exact validation schema; typify generates the declarations used
 by production protocol and HTTP consumers. Handwritten code retains semantic,
 execution, and signature validation rather than defining competing wire fields.
-Remaining adoption and connected checks are tracked in
-`docs/contract-handoff-implementation-plan-2026-09-08.md`; generated types beside
-handwritten active DTOs do not complete the chain.
+Remaining adoption and connected checks are not yet complete; generated types
+beside handwritten active DTOs do not complete the chain.
 Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued

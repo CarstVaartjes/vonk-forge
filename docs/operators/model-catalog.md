@@ -32,9 +32,7 @@ that cache gate; missing assets block the operation and offer **Prepare cache**.
 Once the gate succeeds, the Controller distributes the exact assets to the
 selected Sparks in parallel, skips verified local copies, safely replaces
 conflicting workloads, and reports per-Spark progress and readiness. Run and
-apply do not silently prepare missing assets or fetch from upstream. See the
-[availability and recovery design](../library-availability-design-2026-09-06.md)
-for progress and update behavior.
+apply do not silently prepare missing assets or fetch from upstream.
 
 ## Local state and updates
 

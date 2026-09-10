@@ -5,6 +5,28 @@ recipe definitions live in the sibling `/opt/vonk-forge-recipes` checkout.
 Keep repository, CI/publication, Controller deployment, and physical Spark
 qualification as separate evidence boundaries.
 
+## Engineering stance
+
+Vonk Forge optimizes for simplicity, stability, and security while keeping every
+frontier recipe runnable on local Spark capacity. Read
+[docs/engineering-principles.md](docs/engineering-principles.md) before making a
+structural choice. The short form:
+
+- **Simplicity:** one Compose application, one PostgreSQL authority, one current
+  execution path per operation. Kubernetes, a service mesh, an event bus, custom
+  microservices, and a mandatory Vault are explicit non-goals. GPU nodes run
+  workloads, never ingress, databases, monitoring, or the admin UI.
+- **Stability:** state before controls, live-versus-desired before mutation, and
+  one Spark at a time for consequential fleet-wide change. Remove retired paths
+  together with their callers instead of carrying compatibility shims.
+- **Security:** fail closed. Never soften a `PermissionDenied`, never clamp an
+  invalid request into a valid one, keep the update-signing key separate from
+  administrative authorization, and never let candidate tooling install itself.
+  SSH is diagnostic and bootstrap-only.
+- **Every frontier recipe:** the curated library exists to make any model
+  reproducible, not to restrict what can run. Missing assets are actionable
+  cache blockers and never a problem deferred to a Spark.
+
 ## Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only
