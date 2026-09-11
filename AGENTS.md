@@ -107,16 +107,41 @@ platform-gated code such as `rustix::fs::openat2`, so run those suites in the
 Linux/OrbStack or designated CI lane instead of reading the failure as a
 regression.
 
-Lint the whole repository from the root project, which pins the ruff version
-declared by `[tool.ruff] required-version`:
+### Lint, format and type checks
+
+Run all three after a change. Each is pinned and deterministic.
 
 ```bash
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+
+# Python lint; ruff is the repository's formatting authority too.
 UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache uv run --frozen ruff check .
+
+# Python types. Pyright reads [tool.pyright] and resolves imports from the
+# control virtualenv, so sync that project once first.
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv sync --project control --frozen
+UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache scripts/check-python-types
+
+# TypeScript types; the build runs tsc --noEmit before bundling.
+npm ci --prefix control/web
+npm run build --prefix control/web
 ```
 
-`control/.venv` cannot satisfy that pin because `openapi-python-client` requires
-`ruff<0.14`; always lint through the root project. CI runs the same version via
-`uvx --from ruff==0.16.1 ruff check .`.
+`control/.venv` cannot satisfy the ruff pin because `openapi-python-client`
+requires `ruff<0.14`; always lint through the root project. CI runs the same
+version via `uvx --from ruff==0.16.1 ruff check .`.
+
+The repository does not type-check cleanly yet. `scripts/check-python-types`
+enforces a per-file ratchet against `tools/pyright-baseline.json`: a file may
+never exceed its recorded error count, and a file that improves must lower its
+entry in the same change, so the known-error set only shrinks. `pyright` runs
+over `control/src`, `src`, `tests` and `control/tests` in basic mode; generated
+clients and virtualenvs are excluded. Pass `--update` only to record a
+reduction.
+
+There is no separate ESLint or Prettier configuration. TypeScript formatting
+follows the surrounding files, and `npm run build` is the type gate.
 
 When acceptance inputs are available, run the actual harness through the same
 OrbStack Docker context, not only its unit tests:

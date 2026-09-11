@@ -42,6 +42,21 @@ extend-exclude = [
     "src/cluster_profiles/generated_control",
 ]
 
+[tool.pyright]
+# One checker for the whole repository. The control virtualenv carries the
+# union of both projects' dependencies, so import resolution is complete.
+pythonVersion = "3.12"
+venvPath = "control"
+venv = ".venv"
+typeCheckingMode = "basic"
+include = ["control/src", "src", "tests", "control/tests"]
+exclude = [
+    "**/generated_control/**",
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/__pycache__/**",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]

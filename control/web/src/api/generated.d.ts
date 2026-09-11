@@ -3052,6 +3052,42 @@ export interface components {
             version: string[];
         };
         /**
+         * LibraryFilterValues
+         * @description The filters that produced a Library page, echoed to the client.
+         *
+         *     This is a typed echo rather than a free-form map so the request and the
+         *     response describe the same vocabulary. Every field is optional, so a page
+         *     that applied no filter stays valid without inventing values.
+         */
+        LibraryFilterValues: {
+            /** Alignment */
+            alignment?: string[];
+            /** All Models */
+            all_models?: boolean | null;
+            /** Family */
+            family?: string[];
+            /** Local Only */
+            local_only?: boolean | null;
+            /** Model */
+            model?: string[];
+            /** Publisher */
+            publisher?: string[];
+            /** Quantization */
+            quantization?: string[];
+            /** Search */
+            search?: string | null;
+            /** Sort */
+            sort?: ("updated" | "name") | null;
+            /** Sparks */
+            sparks?: number[];
+            /** Updated Since */
+            updated_since?: string | null;
+            /** Usage */
+            usage?: string[];
+            /** Version */
+            version?: string[];
+        };
+        /**
          * LibraryLocalProgress
          * @description Observable progress for a Controller-local preparation operation.
          */
@@ -3631,10 +3667,7 @@ export interface components {
         /** ModelLibraryResponse */
         ModelLibraryResponse: {
             facets: components["schemas"]["LibraryFacetValues"];
-            /** Filters */
-            filters: {
-                [key: string]: string[] | string | boolean | null;
-            };
+            filters?: components["schemas"]["LibraryFilterValues"];
             freshness_policy: components["schemas"]["FreshnessPolicy"];
             /**
              * Generated At
@@ -4694,10 +4727,7 @@ export interface components {
         /** RecipeLibraryResponse */
         RecipeLibraryResponse: {
             facets: components["schemas"]["LibraryFacetValues"];
-            /** Filters */
-            filters: {
-                [key: string]: string[] | string | boolean | null;
-            };
+            filters?: components["schemas"]["LibraryFilterValues"];
             freshness_policy: components["schemas"]["FreshnessPolicy"];
             /**
              * Generated At
