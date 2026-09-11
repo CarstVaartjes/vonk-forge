@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -76,7 +77,7 @@ class RenewalConflictRevocationUncertain(EnrollmentDenied):
 @dataclass(frozen=True)
 class EnrollmentGrant:
     id: str
-    node_id: str
+    node_id: str | None
     expires_at: datetime
     purpose: str
     token: str = field(repr=False)
@@ -1428,10 +1429,13 @@ def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
         raise EnrollmentDenied("CSR must be valid PEM") from error
     if not request.is_signature_valid:
         raise EnrollmentDenied("CSR signature is invalid")
-    common_names = request.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
-    if len(common_names) != 1 or _NODE_ID.fullmatch(common_names[0].value) is None:
+    common_names = request.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    if len(common_names) != 1:
         raise EnrollmentDenied("CSR subject must contain a canonical node ID")
-    csr_node_id = common_names[0].value
+    common_name = common_names[0].value
+    if not isinstance(common_name, str) or _NODE_ID.fullmatch(common_name) is None:
+        raise EnrollmentDenied("CSR subject must contain a canonical node ID")
+    csr_node_id = common_name
     if node_id is not None and csr_node_id != node_id:
         raise EnrollmentDenied("CSR subject does not match enrollment node")
     if len(request.extensions) != 1:

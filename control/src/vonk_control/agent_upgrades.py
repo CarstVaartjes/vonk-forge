@@ -365,6 +365,7 @@ class AgentUpgradeService:
                 or len(order) != len(set(order))
                 or order != parent.targets
                 or strategy not in {"one-at-a-time", "all-at-once"}
+                or (repair is not None and not isinstance(repair, Mapping))
             ):
                 raise ValueError("stored agent upgrade plan is invalid")
             try:
@@ -747,7 +748,15 @@ class AgentUpgradeService:
         package = parent.payload.get("package")
         if not isinstance(package, dict):
             raise AgentUpgradeConflict("stored agent upgrade package is invalid")
-        source = AgentPackageSource.model_validate(parent.payload["sources"][node_id])
+        stored_sources = parent.payload.get("sources")
+        stored_source = (
+            stored_sources.get(node_id)
+            if isinstance(stored_sources, Mapping)
+            else None
+        )
+        if stored_source is None:
+            raise AgentUpgradeConflict("stored rollback sources are invalid")
+        source = AgentPackageSource.model_validate(stored_source)
         node = session.get(AgentNode, node_id)
         if node is None or node.binary_digest != source.package.binary_sha256 or node.build_digest != source.build_digest:
             raise AgentUpgradeConflict("rollback source no longer matches installed agent")
@@ -813,6 +822,7 @@ class AgentUpgradeService:
         package: Mapping[str, object],
     ) -> dict[str, object]:
         document = dict(value)
+        manifest_package_value = document.get("package")
         if (
             set(document)
             != {
@@ -828,10 +838,10 @@ class AgentUpgradeService:
             or _NODE_ID.fullmatch(str(document["node_id"])) is None
             or not isinstance(document.get("authority_sha256"), str)
             or _SHA256.fullmatch(str(document["authority_sha256"])) is None
-            or not isinstance(document.get("package"), Mapping)
+            or not isinstance(manifest_package_value, Mapping)
         ):
             raise AgentUpgradeConflict("agent repair manifest is invalid")
-        manifest_package = cls._package(dict(document["package"]))
+        manifest_package = cls._package(manifest_package_value)
         expected_url = (
             "https://install.vonkforge.ai/repair-capsules/"
             f"{document['node_id']}/{document['authority_sha256']}/"
