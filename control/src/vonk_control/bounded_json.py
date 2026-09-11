@@ -15,7 +15,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-__all__ = ["BoundedJSONError", "integer", "mapping", "require_mapping", "sequence", "text"]
+__all__ = [
+    "BoundedJSONError",
+    "integer",
+    "mapping",
+    "require_integer",
+    "require_mapping",
+    "require_sequence",
+    "sequence",
+    "text",
+]
 
 
 class BoundedJSONError(ValueError):
