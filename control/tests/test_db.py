@@ -118,3 +118,53 @@ def test_database_startup_retry_does_not_mask_permission_failures() -> None:
         db.run_with_database_startup_retry(operation)
 
     assert calls == 1
+
+
+def test_build_engine_bounds_row_lock_waits_only_on_postgres(monkeypatch) -> None:
+    """A writer that waits forever on a row lock stops the worker silently.
+
+    PostgreSQL accepts a per-connection ``lock_timeout``; SQLite rejects the
+    option, so it must only be sent for a PostgreSQL URL.
+    """
+
+    from vonk_control import db
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def record(url: str, **kwargs: object) -> object:
+        calls.append((url, kwargs))
+        return object()
+
+    monkeypatch.setattr(db, "create_engine", record)
+
+    db.build_engine("postgresql+psycopg://control@postgres/control")
+    db.build_engine("sqlite+pysqlite:///:memory:")
+
+    assert calls == [
+        (
+            "postgresql+psycopg://control@postgres/control",
+            {
+                "pool_pre_ping": True,
+                "connect_args": {"options": "-c lock_timeout=30000"},
+            },
+        ),
+        (
+            "sqlite+pysqlite:///:memory:",
+            {"pool_pre_ping": True, "connect_args": {}},
+        ),
+    ]
+
+
+def test_build_engine_sets_the_lock_timeout_on_the_server(postgres_engine) -> None:
+    """The bound must reach PostgreSQL, not just the engine's argument list."""
+
+    from vonk_control import db
+
+    engine = db.build_engine(
+        postgres_engine.url.render_as_string(hide_password=False)
+    )
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SHOW lock_timeout").scalar() == "30s"
+    finally:
+        engine.dispose()

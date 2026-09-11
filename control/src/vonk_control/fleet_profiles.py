@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
@@ -816,18 +815,6 @@ class RunSwitchFleetProfileAdapter:
                 else None
             ),
         )
-
-
-@contextmanager
-def _borrowed(session: Session) -> Iterator[Session]:
-    """Yield a caller's session without owning its transaction.
-
-    A caller that already holds the application row passes its session down so
-    the adapter cannot open a second transaction on the same row: that nested
-    write waits for the lock its own caller holds and deadlocks the worker.
-    """
-
-    yield session
 
 
 def _aware(value: datetime) -> datetime:
