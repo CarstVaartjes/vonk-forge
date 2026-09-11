@@ -13,7 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .auth import CursorCodec
+from .auth import CursorCodec, CursorError
 from .catalog_queries import active_head_revision
 from .library_contract import (
     _MAX_PAGE_RECIPES,
@@ -48,6 +48,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .request_fault import RequestFault
 
 
 class LibraryProjectionError(RuntimeError):
@@ -652,9 +653,9 @@ class LibraryProjection:
         local_only: bool = False,
     ) -> ModelLibraryResponse:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
-            raise ValueError("model library limit is invalid")
+            raise RequestFault("model library limit is invalid")
         if sort not in {"updated", "name"}:
-            raise ValueError("model library sort is invalid")
+            raise RequestFault("model library sort is invalid")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         alignment_by_model = self._alignment_by_model(recipe_rows)
@@ -722,7 +723,7 @@ class LibraryProjection:
             )
             expected_length = 3 if sort == "updated" else 2
             if not isinstance(boundary, list) or len(boundary) != expected_length:
-                raise ValueError("model library cursor is invalid")
+                raise CursorError("model library cursor is invalid")
             boundary_key = tuple(str(value) for value in boundary)
             if sort == "updated":
                 filtered = [item for item in filtered if key(item) < boundary_key]
@@ -797,9 +798,9 @@ class LibraryProjection:
         sort: Literal["updated", "name"] = "updated",
     ) -> RecipeLibraryResponse:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
-            raise ValueError("recipe library limit is invalid")
+            raise RequestFault("recipe library limit is invalid")
         if sort not in {"updated", "name"}:
-            raise ValueError("recipe library sort is invalid")
+            raise RequestFault("recipe library sort is invalid")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         models = [_canonical_model(row) for row in model_rows]
@@ -900,7 +901,7 @@ class LibraryProjection:
                 cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
             )
             if not isinstance(boundary, list) or len(boundary) != 3:
-                raise ValueError("recipe library cursor is invalid")
+                raise CursorError("recipe library cursor is invalid")
             boundary_key = tuple(str(value) for value in boundary)
             filtered = [item for item in filtered if (key(item) < boundary_key if sort == "updated" else key(item) > boundary_key)]
         page = filtered[:limit]

@@ -12,6 +12,7 @@ from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
+from .auth import CursorError
 from .fleet_event_contract import validate_fleet_event_payload
 from .models import (
     AgentNodeProfile,
@@ -299,7 +300,7 @@ class FleetEventRepository:
         """Read replay rows and continuity metadata in one database snapshot."""
 
         if type(last_id) is not int or not 0 <= last_id <= 9_223_372_036_854_775_807:
-            raise ValueError("Fleet event cursor is invalid")
+            raise CursorError("Fleet event cursor is invalid")
         if not 1 <= limit <= MAX_REPLAY_BATCH:
             raise ValueError("Fleet event read limit must be between 1 and 128")
         replay = (

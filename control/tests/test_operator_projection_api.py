@@ -3,18 +3,22 @@ from __future__ import annotations
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from vonk_control.agent_api import EnrollmentGrantResponse
-from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.deployment_provenance_contract import (
     DeploymentProvenance,
     PlatformObservation,
 )
+from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
     FleetOperatorServices,
     _deployment_provenance,
+    _operator_error,
     build_fleet_operator_services,
     install_operator_projection_routes,
 )
+from vonk_control.request_fault import RequestFault
 
 _NODE = "spk_" + "a" * 32
 _GRANT = {
@@ -138,8 +142,10 @@ def test_configured_provenance_document_that_no_longer_validates_fails_loudly() 
 
     with pytest.raises(HTTPException) as error:
         _deployment_provenance(_CorruptProvenance())
-    assert error.value.status_code == 422
-    assert "PlatformObservation" in str(error.value.detail)
+    # A corrupt stored document is the Controller's state, not a bad request,
+    # and the detail names the failing field path without echoing its value.
+    assert error.value.status_code == 503
+    assert str(error.value.detail).startswith("stored document is invalid at ")
 
 
 def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
@@ -169,5 +175,30 @@ def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
         fleet_services=FleetOperatorServices(provenance=_CorruptProvenance()),
     )
     response = TestClient(app).get(f"/api/fleet/{NODE}")
-    assert response.status_code == 422
-    assert "PlatformObservation" in response.json()["detail"]
+    assert response.status_code == 503
+    assert response.json()["detail"].startswith("stored document is invalid at ")
+
+
+def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> None:
+    """A server-side failure must not answer 422, and a bad request must not 503.
+
+    Both surfaces used to map any ``ValueError`` to 422, which also caught
+    stored documents that no longer validate and the ORM's own integrity
+    refusals.
+    """
+
+    try:
+        PlatformObservation.model_validate({})
+    except ValidationError as corrupt:
+        stored = corrupt
+
+    for mapper in (_operator_error, library_error):
+        assert mapper(RequestFault("model library sort is invalid")).status_code == 422
+        assert mapper(CursorError("model library cursor is invalid")).status_code == 422
+        assert mapper(KeyError("missing")).status_code == 404
+        # A stored document that no longer validates is the Controller's state.
+        server = mapper(stored)
+        assert server.status_code == 503
+        assert str(server.detail).startswith("stored document is invalid at ")
+        # So is an unexpected failure with no client-correctable cause.
+        assert mapper(RuntimeError("projection unavailable")).status_code == 503

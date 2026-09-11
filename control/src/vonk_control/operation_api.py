@@ -37,7 +37,7 @@ from .agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from .auth import CursorCodec, CursorError
-from .bounded_json import BoundedJSONError, require_integer, require_sequence
+from .bounded_json import BoundedJSONError, mapping, require_integer, require_sequence
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -941,9 +941,20 @@ def _agent_upgrade_diagnostics(
     job = session.get(Job, job_id)
     if job is None or job.kind != "agent-upgrade":
         return None
-    package = job.payload.get("package")
-    if not isinstance(package, Mapping):
+    payload = mapping(job.payload)
+    if payload is None:
+        raise BoundedJSONError(
+            f"agent upgrade job {job_id} has no package payload document"
+        )
+    if "package" not in payload or payload["package"] is None:
+        # An upgrade that carries no package document simply has no
+        # diagnostics to project; only a present but unreadable one fails.
         return None
+    package = payload["package"]
+    if not isinstance(package, Mapping):
+        raise BoundedJSONError(
+            f"agent upgrade job {job_id} package payload is invalid"
+        )
     operations = list(
         session.scalars(
             select(AgentOperation)
