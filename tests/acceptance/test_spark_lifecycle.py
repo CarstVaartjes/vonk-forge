@@ -2429,10 +2429,17 @@ class SparkLifecycle:
                         if isinstance(rows, list):
                             for row in rows:
                                 job = require_object(row, "stalled job")
+                                # The agent's own progress names the phase it
+                                # believes it is in, which separates "waiting
+                                # for the Controller" from "copying slowly".
+                                reported = json.dumps(
+                                    job.get("progress"), sort_keys=True
+                                )[:200]
                                 summary.append(
-                                    f"{job.get('kind')}={job.get('state')}"
+                                    f"{job.get('id')} {job.get('kind')}"
+                                    f"={job.get('state')} progress={reported}"
                                 )
-                        job_detail = ", ".join(summary) or "none"
+                        job_detail = " | ".join(summary) or "none"
                     except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
                         job_detail = f"unavailable: {type(error).__name__}"
                 raise LifecycleError(
