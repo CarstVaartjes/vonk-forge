@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ConfigDict, Field, ValidationError
@@ -14,6 +15,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.recipe import RecipeTopology
 
+from .bounded_json import require_mapping
 from .schema_resources import read_runtime_schema
 from .strict_json import StrictJSONModel, serialize_json_value
 
@@ -38,7 +40,10 @@ class RecipePackageHandleProjection(StrictJSONModel):
     closure_path: str
 
 
-ModelModalities = ModelDefinition.model_fields["modalities"].annotation
+# ``vonk_forge_contracts.model`` declares these modality literals inline and is
+# outside this change's scope, so the set is named locally. The order must match
+# the contract field exactly to keep the projection schema byte-identical.
+ModelModalities = list[Literal["text", "image", "audio", "video", "3d", "embeddings"]]
 
 
 class _CatalogRevisionProjection(StrictJSONModel):
@@ -125,8 +130,6 @@ def _json(value: object) -> bytes:
 
 @lru_cache(maxsize=1)
 def _test_report_validator() -> Draft202012Validator:
-    import json
-
     schema = json.loads(read_runtime_schema("test-report-v1.schema.json"))
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema, format_checker=FormatChecker())
@@ -146,6 +149,7 @@ def read_catalog_projection(
         parsed = projection_type.model_validate_json(_json(revision.projected))
         if revision.kind == "recipe":
             recipe = read_catalog_document(revision)
+            assert isinstance(recipe, RecipeDefinition)
             assert isinstance(parsed, RecipeRevisionProjection)
             if recipe.execution.mode == "build" and any(
                 value is None
@@ -153,7 +157,7 @@ def read_catalog_projection(
             ):
                 raise ValueError("source-build projection is incomplete")
             if parsed.test_report is not None and not _test_report_validator().is_valid(
-                parsed.test_report
+                json.loads(_json(parsed.test_report))
             ):
                 raise ValueError("catalog test report projection is invalid")
         return parsed
@@ -182,10 +186,14 @@ def write_catalog_projection(
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError("catalog projection is invalid") from error
     if parsed.test_report is not None and not _test_report_validator().is_valid(
-        parsed.test_report
+        json.loads(_json(parsed.test_report))
     ):
         raise CatalogRevisionContractError("catalog test report projection is invalid")
-    return serialize_json_value(parsed)  # type: ignore[return-value]
+    return dict(
+        require_mapping(
+            serialize_json_value(parsed), "catalog projection is not a JSON object"
+        )
+    )
 
 
 def read_catalog_document(revision: CatalogDocumentRevision) -> ModelDefinition | RecipeDefinition:

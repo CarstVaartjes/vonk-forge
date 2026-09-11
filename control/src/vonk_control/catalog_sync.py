@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
-from .bounded_json import integer
+from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogError, CatalogService
 from .catalog_sync_contract import ManagedCatalogSyncResult
 from .models import RecipeLibrarySyncRun
@@ -194,7 +194,13 @@ class ManagedRecipeCatalogSyncService:
             if previous is not None and (previous.publisher, previous.slug) != (item.publisher, item.slug):
                 self._record_problem(result, item, "catalog.sync_identity_changed", "canonical recipe identity changed")
             elif previous is not None and previous.content_sha256 == item.content_sha256:
-                result["unchanged_count"] = integer(result["unchanged_count"], default=0) + 1
+                result["unchanged_count"] = (
+                    require_integer(
+                        result["unchanged_count"],
+                        "stored catalog sync unchanged_count is invalid",
+                    )
+                    + 1
+                )
             else:
                 try:
                     hydrated = self._reader.fetch(item.uri)
@@ -215,7 +221,12 @@ class ManagedRecipeCatalogSyncService:
                         source_bundle_sha256=getattr(hydrated, "source_bundle_sha256", None),
                     )
                     key = "imported_count" if previous is None else "updated_count"
-                    result[key] = integer(result[key], default=0) + 1
+                    result[key] = (
+                        require_integer(
+                            result[key], "stored catalog sync count is invalid"
+                        )
+                        + 1
+                    )
                 except (CatalogError, RecipeLibraryError, CatalogSyncError) as error:
                     self._record_problem(result, item, str(getattr(error, "code", "catalog.sync_item_failed")), str(getattr(error, "detail", str(error))))
             self._progress(run_id, result)
@@ -229,8 +240,17 @@ class ManagedRecipeCatalogSyncService:
             self._catalog.store_source_bundle(source_digest, io.BytesIO(source_bundle), actor)
 
     def _record_problem(self, result: dict[str, object], item: RecipeLibraryItem, code: str, detail: str) -> None:
-        result["skipped_count"] = integer(result["skipped_count"], default=0) + 1
-        problems = list(result["problems"])
+        result["skipped_count"] = (
+            require_integer(
+                result["skipped_count"], "stored catalog sync skipped_count is invalid"
+            )
+            + 1
+        )
+        problems = list(
+            require_sequence(
+                result["problems"], "stored catalog sync problems are invalid"
+            )
+        )
         if len(problems) < _MAX_RESULT_ITEMS:
             problems.append({"recipe_uri": item.uri, "code": code[:128], "detail": detail[:256]})
         result["problems"] = problems

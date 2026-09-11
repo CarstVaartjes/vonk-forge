@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
 
-from .bounded_json import integer, sequence
+from .bounded_json import integer, require_integer, sequence
 from .logging import redact_text
 
 _SENSITIVE = re.compile(
@@ -211,17 +211,33 @@ def validate_progress_update(
         )
         if key not in current or current[key] is None or omitted_total:
             normalized[key] = old[key]
-    old_bytes = integer(old.get("completed_bytes"), default=0)
-    new_bytes = integer(normalized.get("completed_bytes"), default=0)
+    old_bytes = require_integer(
+        old.get("completed_bytes"), "previous progress completed_bytes is invalid"
+    )
+    new_bytes = require_integer(
+        normalized.get("completed_bytes"), "progress completed_bytes is invalid"
+    )
     if new_bytes < old_bytes:
         raise ValueError("operation progress bytes cannot move backwards")
-    if integer(normalized.get("completed_items"), default=0) < integer(old.get("completed_items"), default=0):
+    # ``completed_items`` is optional: an operation without item accounting
+    # persists no count, which is zero for the monotonicity check.
+    old_items = integer(old.get("completed_items"), default=0)
+    new_items = integer(normalized.get("completed_items"), default=0)
+    if old_items is None:
+        old_items = 0
+    if new_items is None:
+        new_items = 0
+    if new_items < old_items:
         raise ValueError("operation progress items cannot move backwards")
     old_checkpoint = old.get("checkpoint")
     new_checkpoint = normalized.get("checkpoint")
     if isinstance(old_checkpoint, Mapping) and isinstance(new_checkpoint, Mapping):
-        old_sequence = integer(old_checkpoint.get("sequence"), default=0)
-        new_sequence = integer(new_checkpoint.get("sequence"), default=0)
+        old_sequence = require_integer(
+            old_checkpoint.get("sequence"), "previous checkpoint sequence is invalid"
+        )
+        new_sequence = require_integer(
+            new_checkpoint.get("sequence"), "checkpoint sequence is invalid"
+        )
         if new_sequence < old_sequence:
             raise ValueError("operation checkpoint sequence cannot move backwards")
         if new_sequence == old_sequence and dict(new_checkpoint) != dict(
@@ -238,8 +254,11 @@ def validate_progress_update(
             continue
         member_id = item.get("member_id")
         prior = old_members.get(str(member_id))
-        if prior is not None and integer(item.get("completed_bytes"), default=0) < int(
-            prior.get("completed_bytes", 0)
+        if prior is not None and require_integer(
+            item.get("completed_bytes"), "operation member completed_bytes is invalid"
+        ) < require_integer(
+            prior.get("completed_bytes"),
+            "stored operation member completed_bytes is invalid",
         ):
             raise ValueError("operation member progress bytes cannot move backwards")
     return normalize_operation_progress(normalized)
@@ -309,8 +328,10 @@ def recovery_for_operation(
                 advertised.append(action)
     if available_actions is None:
         permitted = set(advertised)
-    else:
+    elif isinstance(available_actions, (list, tuple, set, frozenset)):
         permitted = {OperationRecoveryAction(raw) for raw in available_actions}
+    else:
+        raise TypeError("available actions must be a collection of recovery actions")
     actions.extend(action for action in advertised if action in permitted)
     return OperationRecovery(
         uncertain=uncertain or state in {"waiting-for-operator", "uncertain"},

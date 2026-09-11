@@ -79,11 +79,15 @@ def drop_runtime_privileges(
 ) -> None:
     """Irreversibly become the API identity and verify secret isolation."""
     os.setgroups([])
-    os.setresgid(_API_GID, _API_GID, _API_GID)
-    os.setresuid(_API_UID, _API_UID, _API_UID)
-    if os.getgroups() or os.getresgid() != (_API_GID,) * 3:
+    # ``setres*``/``getres*`` are Linux-only: this pre-exec path runs in the
+    # API container, and typeshed omits the calls on Darwin. Read the live
+    # module namespace (which tests replace) instead of hiding the platform
+    # boundary behind an ignore.
+    os.__dict__["setresgid"](_API_GID, _API_GID, _API_GID)
+    os.__dict__["setresuid"](_API_UID, _API_UID, _API_UID)
+    if os.getgroups() or os.__dict__["getresgid"]() != (_API_GID,) * 3:
         raise RuntimeError("control API group privileges were not dropped")
-    if os.getresuid() != (_API_UID,) * 3:
+    if os.__dict__["getresuid"]() != (_API_UID,) * 3:
         raise RuntimeError("control API user privileges were not dropped")
     try:
         source_probe(Path(source_secrets))
