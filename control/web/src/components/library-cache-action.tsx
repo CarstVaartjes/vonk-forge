@@ -37,6 +37,7 @@ export function LibraryCacheAction({api, selector, state, onPrepared}: {
   onPrepared(): void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [phase, setPhase] = useState("");
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
@@ -75,8 +76,45 @@ export function LibraryCacheAction({api, selector, state, onPrepared}: {
     }
   }, [api, onPrepared, selector]);
 
+  const remove = useCallback(async () => {
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.removeModelCache(selector, crypto.randomUUID(), controller.signal);
+      if (controller.signal.aborted) return;
+      setBusy(false);
+      setConfirming(false);
+      if (result.state === "failed" || result.state === "cancelled") {
+        setError(failureText(result));
+        return;
+      }
+      onPrepared();
+    } catch (value) {
+      if (controller.signal.aborted) return;
+      setBusy(false);
+      setError(value instanceof Error ? value.message.slice(0, 256) : "Cache removal failed");
+    }
+  }, [api, onPrepared, selector]);
+
   if (state === "cached") {
-    return <span className="library-cache-state is-ready">Cached</span>;
+    // Removal is destructive, so it takes an explicit second action rather
+    // than a single click, matching the CLI's mandatory --yes.
+    return <div className="library-cache-action">
+      <span className="library-cache-state is-ready">Cached</span>
+      {confirming
+        ? <>
+            <button type="button" className="button secondary" disabled={busy} onClick={() => void remove()}>
+              {busy ? "Removing…" : "Confirm remove"}
+            </button>
+            <button type="button" className="button secondary" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+          </>
+        : <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Remove from cache</button>}
+      {confirming && <span className="library-cache-missing">Referenced profiles and running workloads keep the entry.</span>}
+      {error && <span className="library-cache-error" role="alert">{error}</span>}
+    </div>;
   }
   return <div className="library-cache-action">
     <button type="button" className="button secondary" disabled={busy || state === "preparing"} onClick={() => void prepare()}>

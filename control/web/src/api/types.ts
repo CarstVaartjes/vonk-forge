@@ -155,6 +155,7 @@ export interface LibraryApi {
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, sha256: string): string;
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;

@@ -46,6 +46,20 @@ test("prepares the Controller cache for an uncached model", async () => {
   expect(requestKey).toMatch(/^[0-9a-f-]{36}$/);
 });
 
+test("removes a cached model only after an explicit confirmation", async () => {
+  const removeModelCache = vi.fn().mockResolvedValue({...prepared, action: "remove" as const});
+  const api = {removeModelCache} as unknown as ControlApi;
+  const base = libraryViewSnapshot.models[0]!;
+  const inventory = [{...base, local: {...base.local, controller: "cached" as const}}];
+  render(<LibraryModelsView api={api} entries={[]} modelInventory={inventory} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
+
+  // Removal is destructive, so the first click only asks for confirmation.
+  fireEvent.click(screen.getByRole("button", {name: "Remove from cache"}));
+  expect(removeModelCache).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
+  await waitFor(() => expect(removeModelCache).toHaveBeenCalledTimes(1));
+});
+
 test("offers the same model filters as vonkctl model library", () => {
   renderModels();
   for (const name of ["Filter model usage", "Filter model family", "Filter model version", "Filter model quantization", "Filter model creator", "Filter model alignment", "Filter exact model"]) {
