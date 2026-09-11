@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Table, create_engine, select, update
+from sqlalchemy import Engine, Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
 from vonk_control.fleet_profile_contract import (
@@ -1769,6 +1769,95 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     committed = service.application(application.id).progress.switch_adapter
     assert committed is not None
     assert committed.active_operation_id == child_id
+
+
+def test_profile_tick_advances_a_switch_child_on_postgres(
+    tmp_path: Path, postgres_engine: Engine
+) -> None:
+    """PostgreSQL takes a real row lock, so the tick must reuse its own session.
+
+    ``SELECT ... FOR UPDATE`` blocks another writer of the same row for real
+    here, which is what stalled the deployed worker: the adapter opened a second
+    transaction for the application row the tick already held. With a short
+    ``lock_timeout`` the wrong implementation surfaces as
+    ``canceling statement due to lock timeout`` instead of a worker that stops
+    advancing forever.
+    """
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    engine = create_engine(
+        postgres_engine.url.render_as_string(hide_password=False),
+        connect_args={"options": "-c lock_timeout=3000"},
+    )
+    try:
+        sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+            tmp_path, engine=engine
+        )
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+        assert revision is not None
+        run_switch = RunSwitchOperationService(
+            sessions,
+            lifecycle=lifecycle,
+            clock=lifecycle._clock,
+            artifacts=CompleteArtifactInspector(),
+            artifact_phase_executor=RecordingArtifactExecutor(),
+            memory_floor_bytes=50,
+        )
+        adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+        service = FleetProfileService(
+            sessions, clock=lifecycle._clock, switch_adapter=adapter
+        )
+        profile = service.create(
+            FleetProfileInput.model_validate(
+                {
+                    "name": "Postgres transaction",
+                    "assignments": [
+                        {
+                            "recipe_selector": f"vonk-forge/{revision.slug}",
+                            "spark_ids": list(nodes),
+                            "desired_state": "running",
+                            "assignment_name": "postgres-transaction",
+                        }
+                    ],
+                }
+            ),
+            actor="admin",
+        )
+        preview = service.preview(profile.id)
+        assert preview.allowed is True
+        application = service.apply(
+            profile.id,
+            plan_digest=preview.plan_digest,
+            request_key=_uuid(646),
+            actor="admin",
+        )
+
+        assert service.tick() is True
+        started = service.application(application.id)
+        assert started.current_operation_id == application.id
+        assert started.progress.switch_adapter is not None
+        child_id = started.progress.switch_adapter.active_operation_id
+        assert isinstance(child_id, str)
+        # The next pass reads the child again while it holds the same row.
+        assert service.tick() is True
+        resumed = service.application(application.id)
+        assert resumed.progress.switch_adapter is not None
+        assert resumed.progress.switch_adapter.active_operation_id == child_id
+    finally:
+        engine.dispose()
 
 
 def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
