@@ -140,6 +140,12 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache scripts/check-python-types
 # TypeScript types; the build runs tsc --noEmit before bundling.
 npm ci --prefix control/web
 npm run build --prefix control/web
+
+# Rust wire structures: fail if they no longer match the Pydantic schemas.
+# This is the typify step, and it is a text comparison, so it needs no cargo.
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . \
+  python scripts/generate-agent-wire --check
 ```
 
 `control/.venv` cannot satisfy the ruff pin because `openapi-python-client`

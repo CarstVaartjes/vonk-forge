@@ -47,6 +47,11 @@ npm ci --prefix control/web
 npm test --prefix control/web -- --run
 npm run build --prefix control/web
 
+# Rust wire structures must still match the Pydantic schemas. Typify generation
+# is a text comparison, so this needs no cargo and runs on any host.
+uv run --project control --frozen --with-editable . \
+  python scripts/generate-agent-wire --check
+
 # Compose and ingress boundaries. The control environment, not the root one,
 # because the container config imports pydantic. TMPDIR must be short on macOS:
 # see the note below.
