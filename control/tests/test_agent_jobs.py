@@ -83,6 +83,28 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
+class MonotonicClock:
+    """A monotonic clock the test advances explicitly.
+
+    A long poll measures its budget against a monotonic clock, so a CPU-starved
+    scheduler must not be able to expire that budget between two database
+    reads. Freezing the clock here is what makes the observation deterministic;
+    the test advances it only to retire a poll that never observed the re-read.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+# A hang guard, not a latency assertion: the frozen clock keeps a working poll
+# alive until it observes the enqueue, and this bound only surfaces a broken
+# re-read that would otherwise never observe anything.
+_SCHEDULER_GUARD_SECONDS = 30.0
+
+
 @pytest.fixture
 def service(tmp_path):
     engine = create_engine(
@@ -734,7 +756,9 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
 
 
 def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> None:
-    jobs, sessions, clock = service
+    _, sessions, clock = service
+    monotonic = MonotonicClock()
+    jobs = AgentJobService(sessions, clock=clock, monotonic=monotonic)
     other_process = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     first_poll = Event()
@@ -746,13 +770,21 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
         return result
 
     jobs._claim_once = observed_claim_once  # type: ignore[method-assign]
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
         waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 30, 2.0)
-        assert first_poll.wait(timeout=1)
+        assert first_poll.wait(timeout=_SCHEDULER_GUARD_SECONDS)
         operation = other_process.enqueue(
             parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
         )
-        claim = waiting.result(timeout=0.8)
+        claim = waiting.result(timeout=_SCHEDULER_GUARD_SECONDS)
+    finally:
+        # Retire a poll that never observed the enqueue so the executor cannot
+        # wait on it forever: advance past the budget and wake a wait that is
+        # still blocked.
+        monotonic.now += 60.0
+        jobs.notify_available()
+        pool.shutdown(wait=True)
 
     assert claim is not None and claim.operation_id == operation.id
 

@@ -151,6 +151,7 @@ class AgentJobService:
         clock: Callable[[], datetime],
         result_consumer: ResultConsumer | None = None,
         contact_consumer: ContactConsumer | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if result_consumer is not None and not callable(result_consumer):
             raise TypeError("agent result consumer must be callable")
@@ -158,6 +159,7 @@ class AgentJobService:
             raise TypeError("agent contact consumer must be callable")
         self._sessions = sessions
         self._clock = clock
+        self._monotonic = monotonic
         self._result_consumer = result_consumer
         self._contact_consumer = contact_consumer
         self._configuration_lock = threading.Lock()
@@ -357,7 +359,7 @@ class AgentJobService:
             raise ValueError("node, certificate, and positive lease are required")
         advertised = self._capabilities(capabilities)
         running = self._runtime_identity(runtime_identity)
-        deadline = time.monotonic() + wait_seconds
+        deadline = self._monotonic() + wait_seconds
         with self._available:
             while True:
                 claim = self._claim_once(
@@ -372,7 +374,7 @@ class AgentJobService:
                 )
                 if claim is not None:
                     return claim
-                remaining = deadline - time.monotonic()
+                remaining = deadline - self._monotonic()
                 if remaining <= 0:
                     return None
                 self._available.wait(min(remaining, _DATABASE_REPOLL_SECONDS))
