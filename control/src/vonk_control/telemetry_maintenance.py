@@ -326,6 +326,10 @@ def _lock_maintenance_state(session: Session) -> RollupResolution:
             .where(TelemetryMaintenanceState.singleton_id == 1)
             .with_for_update()
         )
+    # The column's check constraint already keeps this value in domain, so a
+    # typed caller cannot reach this branch; it stays so that an unmigrated or
+    # externally written database still fails closed instead of rolling up a
+    # window the fairness pointer was never allowed to select.
     if resolution not in (60, 900):
         raise RuntimeError("telemetry maintenance state singleton is not initialized")
     return resolution

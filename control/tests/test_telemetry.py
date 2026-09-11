@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Select, create_engine, event, func, select
+from sqlalchemy import Select, create_engine, event, func, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -20,6 +20,7 @@ from vonk_control.models import (
     NodeTelemetryRollupDirty,
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
+    TelemetryMaintenanceState,
 )
 from vonk_control.telemetry import (
     TelemetryDetailsInput,
@@ -173,12 +174,44 @@ def test_rollup_bucket_flooring_is_utc_aware_and_exact() -> None:
     )
     with pytest.raises(ValueError, match="timezone-aware"):
         telemetry_maintenance.bucket_start(value.replace(tzinfo=None), 60)
-    with pytest.raises(ValueError, match="resolution"):
-        # ``300`` is deliberately outside the declared ``RollupResolution``
-        # contract, which only an untyped caller can reach. The mismatch is the
-        # point of the case, so it stays recorded in the pyright baseline
-        # instead of being silenced; the runtime guard it exercises is real.
-        telemetry_maintenance.bucket_start(value, 300)
+
+
+def test_maintenance_fairness_pointer_cannot_leave_its_declared_domain(
+    telemetry,
+) -> None:
+    """The durable fairness pointer only ever holds a real rollup resolution.
+
+    ``_lock_maintenance_state`` also refuses an out-of-domain value, but the
+    schema is what makes one impossible to store, so this constraint is the
+    protection the maintenance path actually relies on. The Controller builds
+    its schema from the same ORM metadata, so the Postgres deployment carries
+    the identical constraint.
+    """
+    _, sessions, _, _ = telemetry
+
+    with sessions() as session:
+        assert (
+            session.scalar(select(TelemetryMaintenanceState.next_resolution_seconds))
+            == 60
+        )
+
+    def store(value: int) -> None:
+        with sessions.begin() as session:
+            session.execute(
+                update(TelemetryMaintenanceState)
+                .where(TelemetryMaintenanceState.singleton_id == 1)
+                .values(next_resolution_seconds=value)
+            )
+
+    store(900)
+    with sessions() as session:
+        assert (
+            session.scalar(select(TelemetryMaintenanceState.next_resolution_seconds))
+            == 900
+        )
+    for rejected in (300, 0, -60):
+        with pytest.raises(IntegrityError):
+            store(rejected)
 
 
 def test_new_boot_only_newer_observation_advances_latest(
