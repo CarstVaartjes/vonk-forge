@@ -1,6 +1,6 @@
 import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
-import type {ControlApi, LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibrarySort, LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
 import {canonicalRecipeSelector} from "../api/types";
 import type {LibraryRoute} from "../lib/library-route";
 import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
@@ -11,9 +11,33 @@ import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
 
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
 // one-for-one: --model --usage --family --version --quantization --publisher
-// --alignment, plus --sparks for recipe topology size.
-export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string};
-export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: ""};
+// --alignment, plus --sparks for recipe topology size. `sort` and `updated`
+// mirror --sort and --updated-since; `updated` is the recency window that the
+// request turns into a timestamp. Both ordering controls are applied by the
+// projection to the whole library, so changing one restarts paging.
+export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string; sort: LibrarySort; updated: LibraryRecency};
+export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: "", sort: "updated", updated: "any"};
+
+// The values here are checked against the generated `sort` union, so a server
+// value rename or removal breaks the type gate instead of drifting silently.
+export const LIBRARY_SORTS = ["updated", "name"] as const satisfies readonly LibrarySort[];
+export const LIBRARY_RECENCY_VALUES = ["any", "24h", "7d", "31d"] as const;
+export type LibraryRecency = (typeof LIBRARY_RECENCY_VALUES)[number];
+
+const LIBRARY_RECENCY_HOURS: Record<LibraryRecency, number> = {any: 0, "24h": 24, "7d": 24 * 7, "31d": 24 * 31};
+export const LIBRARY_RECENCY_LABELS: Record<LibraryRecency, string> = {any: "Any time", "24h": "Last 24 hours", "7d": "Last 7 days", "31d": "Last 31 days"};
+export const LIBRARY_SORT_LABELS: Record<LibrarySort, string> = {updated: "Recently updated", name: "Name"};
+
+export function librarySortFromValue(value: string): LibrarySort {
+  return LIBRARY_SORTS.find(candidate => candidate === value) ?? "updated";
+}
+export function libraryRecencyFromValue(value: string): LibraryRecency {
+  return LIBRARY_RECENCY_VALUES.find(candidate => candidate === value) ?? "any";
+}
+export function libraryRecencySince(recency: LibraryRecency, now = new Date()): string | undefined {
+  const hours = LIBRARY_RECENCY_HOURS[recency];
+  return hours === 0 ? undefined : new Date(now.getTime() - hours * 3_600_000).toISOString();
+}
 
 const FILTER_PARAMS = ["model", "usage", "family", "version", "quantization", "publisher", "alignment", "sparks"] as const;
 
@@ -27,12 +51,16 @@ export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkce
     publisher: params.get("publisher") ?? "",
     alignment: params.get("alignment") ?? "",
     sparks: params.get("sparks") ?? "",
+    sort: librarySortFromValue(params.get("sort") ?? ""),
+    updated: libraryRecencyFromValue(params.get("updated") ?? ""),
   };
 }
 export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params = new URLSearchParams()): URLSearchParams {
   for (const name of FILTER_PARAMS) {
     if (filters[name]) params.set(name, filters[name]); else params.delete(name);
   }
+  if (filters.sort === "updated") params.delete("sort"); else params.set("sort", filters.sort);
+  if (filters.updated === "any") params.delete("updated"); else params.set("updated", filters.updated);
   return params;
 }
 
@@ -149,6 +177,8 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
       <label>Creator<select aria-label="Filter creator" value={filters.publisher} onChange={event => onFiltersChange({...filters, publisher: event.target.value})}><option value="">All creators</option>{[...new Set(records.map(record => record.recipe?.publisher).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Alignment<select aria-label="Filter alignment" value={filters.alignment} onChange={event => onFiltersChange({...filters, alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(records.flatMap(record => record.recipe?.recipe_document.metadata.alignment ? [record.recipe.recipe_document.metadata.alignment] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Sparks<select aria-label="Filter Sparks" value={filters.sparks} onChange={event => onFiltersChange({...filters, sparks: event.target.value})}><option value="">Any Sparks</option>{[...new Set(records.map(record => String(record.recipe?.recipe_document.topology.node_count ?? "")).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Sort<select aria-label="Sort Library" value={filters.sort} onChange={event => onFiltersChange({...filters, sort: librarySortFromValue(event.target.value)})}>{LIBRARY_SORTS.map(value => <option key={value} value={value}>{LIBRARY_SORT_LABELS[value]}</option>)}</select></label>
+      <label>Updated<select aria-label="Filter updated" value={filters.updated} onChange={event => onFiltersChange({...filters, updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
     <LibraryRecipeUpdateAction api={api} onUpdated={refresh} /></div>
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>

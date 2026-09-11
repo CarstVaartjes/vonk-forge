@@ -24,6 +24,7 @@ import type {
   ArtifactJobInputFile,
   ArtifactJobList,
   ArtifactTransferProgress,
+  LibrarySort,
   ModelDetail,
   ModelLibrary,
   ModelStatus,
@@ -251,9 +252,9 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/model", {signal}));
   }
 
-  async modelLibrary(cursor?: string, signal?: AbortSignal): Promise<ModelLibrary> {
+  async modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary> {
     return resultData(await this.generated.GET("/api/model/library", {
-      params: {query: {cursor, limit: 100}},
+      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
       signal,
     }));
   }
@@ -269,9 +270,9 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/recipe", {signal}));
   }
 
-  async recipeLibrary(cursor?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
+  async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
     return resultData(await this.generated.GET("/api/recipe/library", {
-      params: {query: {cursor, limit: 100}},
+      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
       signal,
     }));
   }

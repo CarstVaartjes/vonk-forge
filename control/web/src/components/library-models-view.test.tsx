@@ -67,6 +67,20 @@ test("offers the same model filters as vonkctl model library", () => {
   }
 });
 
+test("offers the same server ordering controls as vonkctl model library", () => {
+  // Break caught: the Models view keeps only the client-side filters, so its
+  // order and recency can no longer match the request the Library page makes.
+  const onFiltersChange = vi.fn();
+  render(<LibraryModelsView api={cacheApi()} entries={[]} modelInventory={[libraryViewSnapshot.models[0]!]} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={onFiltersChange} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
+  for (const name of ["Sort models", "Filter model updated"]) {
+    expect(screen.getByRole("combobox", {name})).toBeVisible();
+  }
+  fireEvent.change(screen.getByRole("combobox", {name: "Sort models"}), {target: {value: "name"}});
+  expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({sort: "name"}));
+  fireEvent.change(screen.getByRole("combobox", {name: "Filter model updated"}), {target: {value: "31d"}});
+  expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({updated: "31d"}));
+});
+
 test("filters models by exact selector and preserves the current route shape", () => {
   const onFiltersChange = vi.fn();
   render(<LibraryModelsView api={cacheApi()} entries={[]} modelInventory={[libraryViewSnapshot.models[0]!]} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={onFiltersChange} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
