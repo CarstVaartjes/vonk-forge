@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, update
+from sqlalchemy import create_engine, event, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
@@ -1550,6 +1550,194 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         external_run.group_state,
         external_run.degraded_reason,
     ) == ([0], [NODE_A], False, "degraded", "external-member")
+
+
+@pytest.mark.parametrize("damage", ("document", "digest", "candidate"))
+def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
+    damage: str,
+) -> None:
+    """A node whose catalog revision is unreadable must not read as empty.
+
+    Skipping the group would show an operator a node with nothing installed,
+    which says "nothing is deployed" rather than "the catalog is
+    inconsistent". An ineligible revision is different: it is simply not this
+    node's business, so it disappears without an error.
+    """
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    recipe_id = "00000000-0000-4000-8000-000000000401"
+    revision_id = "00000000-0000-4000-8000-000000000402"
+    model_id = "00000000-0000-4000-8000-000000000403"
+    model_revision_id = "00000000-0000-4000-8000-000000000404"
+    mapping_id = "00000000-0000-4000-8000-000000000405"
+    build_id = "00000000-0000-4000-8000-000000000406"
+    installation_id = "00000000-0000-4000-8000-000000000407"
+    run_id = "00000000-0000-4000-8000-000000000408"
+    nodes = {
+        NODE_A: {
+            "display_name": "Alpha",
+            "hostname": "alpha.internal",
+            "lifecycle": "managed",
+            "labels": {},
+        }
+    }
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "broken-revision"))
+        documents, revisions = _canonical_catalog_documents(
+            recipe_id,
+            revision_id,
+            model_id,
+            model_revision_id,
+            slug="broken-recipe",
+            title="Broken Recipe",
+        )
+        mapping = ClusterMapping(
+            id=mapping_id,
+            recipe_revision_id=revision_id,
+            topology_name="single",
+            generation=1,
+            node_count=1,
+            state="ready",
+            parameters={},
+            placement_digest="2" * 64,
+            endpoint_owner_node_id=NODE_A,
+            created_by="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        build = RecipeBuild(
+            id=build_id,
+            recipe_revision_id=revision_id,
+            builder_node_id=NODE_A,
+            source_bundle_sha256="3" * 64,
+            build_input_sha256="4" * 64,
+            state="succeeded",
+            policy_report={},
+            plan={},
+            image_digest="sha256:" + "5" * 64,
+            oci_layout_sha256="6" * 64,
+            image_bytes=100,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add_all(documents)
+        session.flush()
+        session.add_all([*revisions, mapping, build])
+        session.flush()
+        session.add(
+            ClusterMappingNode(
+                id="00000000-0000-4000-8000-000000000409",
+                mapping_id=mapping_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                endpoint_owner=True,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=revision_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                recipe_build_id=build_id,
+                image_digest="sha256:" + "5" * 64,
+                plan_digest="7" * 64,
+                plan={},
+                state="installed",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            InstallationNode(
+                id="00000000-0000-4000-8000-000000000410",
+                installation_id=installation_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=100,
+                installed_bytes=100,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=installation_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                alias="broken-run",
+                plan_digest="8" * 64,
+                plan={},
+                state="running",
+                route_state="published",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            RunNode(
+                id="00000000-0000-4000-8000-000000000411",
+                run_id=run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="running",
+                port=8000,
+                reserved_memory_bytes=200,
+                observed_memory_bytes=180,
+                updated_at=NOW,
+            )
+        )
+    # Damage the row the way an out-of-band write would, in its own session:
+    # the ORM refuses to rewrite an active revision (before_update,
+    # before_delete, and a commit-time digest check), so only a restore, manual
+    # surgery or drift against a newer canonical model leaves this state on disk.
+    with sessions.begin() as session:
+        if damage == "candidate":
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == revision_id)
+                .values(state="candidate")
+            )
+        else:
+            column = "document" if damage == "document" else "content_digest"
+            value = '{"schema_version": 2}' if damage == "document" else "0" * 64
+            session.execute(
+                text(
+                    "UPDATE catalog_document_revisions "
+                    f"SET {column} = :value WHERE id = :id"
+                ),
+                {"value": value, "id": revision_id},
+            )
+
+    projection = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW)
+    if damage == "candidate":
+        snapshot = projection.read()
+        assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
+        return
+    # The revision refuses to be read as canonical, and no snapshot is produced
+    # at all: an empty installation list is never substituted for the failure.
+    with pytest.raises(ValueError, match="immutable"):
+        projection.read()
 
 
 def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> None:

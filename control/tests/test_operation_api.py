@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +17,7 @@ from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.fleet_profile_contract import (
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
@@ -1088,6 +1090,35 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
         )
         assert response.status_code == 422
         assert response.json() == {"detail": "job cursor is invalid", "issues": []}
+
+
+def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> None:
+    """Unreadable durable state is the Controller's fault, not the caller's.
+
+    Both projections surface a stored document that no longer validates as a
+    ``ValueError``, and the routes answered that with 422 "cursor is invalid",
+    blaming the request for a cursor the caller never sent.
+    """
+    def unavailable(*_args: object) -> NoReturn:
+        raise BoundedJSONError("stored operation progress is invalid")
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=unavailable,
+        resume_job=lambda _job_id: None,
+        list_operations=unavailable,
+        get_operation=lambda _operation_id: {},
+    )
+    client, operator, *_ = _client(operations=services)
+
+    detail = client.get(f"/api/jobs/{EnqueuedJob.id}", headers=operator)
+    assert detail.status_code == 503
+    assert detail.json()["detail"] == "operation projection unavailable"
+
+    listed = client.get("/api/operations", headers=operator)
+    assert listed.status_code == 503
+    assert listed.json()["detail"] == "operation projection unavailable"
 
 
 

@@ -58,6 +58,7 @@ from .auth import (
     Actor,
     AgentSource,
     AuthError,
+    CursorError,
     TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
 )
@@ -159,14 +160,22 @@ def _bounded_error_content(
     validation: bool = False,
     context: ErrorContextResponse | None = None,
 ) -> bytes:
-    """Serialize the documented non-agent HTTP error contract."""
+    """Serialize the documented non-agent HTTP error contract.
+
+    The detail is redacted as well as truncated: several routes build it from a
+    caught exception, and a ``pydantic`` ``ValidationError`` stringifies the
+    submitted input alongside the type error.
+    """
+
+    from .logging import redact_text
 
     if not isinstance(detail, str):
         detail = "request failed"
+    detail = redact_text(detail)[:256]
     response = (
-        RequestValidationProblem(detail=detail[:256], issues=[], context=context)
+        RequestValidationProblem(detail=detail, issues=[], context=context)
         if validation
-        else BoundedErrorResponse(detail=detail[:256], context=context)
+        else BoundedErrorResponse(detail=detail, context=context)
     )
     return canonical_message(response.model_dump(mode="json", exclude_none=True))
 
@@ -1028,11 +1037,14 @@ def create_app(
             page = _global_list_operations(
                 operations, cursor, limit, operation_state, node_id
             )
-        except ValueError:
+        except CursorError:
             raise HTTPException(
                 status_code=422, detail="operation cursor is invalid"
             ) from None
-        except RuntimeError:
+        except (RuntimeError, TypeError, ValueError):
+            # Anything else here is the projection refusing stored operation
+            # state, not the caller's cursor, so it must not read as a request
+            # fault.
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
@@ -1120,7 +1132,7 @@ def create_app(
     @app.get(
         "/api/jobs/{job_id}",
         response_model=JobDetailResponse,
-        responses=bounded_error_responses(401, 404, 422),
+        responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getJob",
     )
     def job_view(
@@ -1156,9 +1168,13 @@ def create_app(
                 if failure_evidence is not None
                 else None,
             )
-        except ValueError:
+        except CursorError:
             raise HTTPException(
                 status_code=422, detail="job cursor is invalid"
+            ) from None
+        except (RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
             ) from None
 
     @app.post(

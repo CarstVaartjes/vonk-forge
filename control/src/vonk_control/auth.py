@@ -278,6 +278,14 @@ class TokenCodec:
         return CursorCodec(key)
 
 
+class CursorError(ValueError):
+    """A presented cursor is not a valid signed cursor for this query.
+
+    Separated from a plain ``ValueError`` so a caller can tell a rejected
+    cursor apart from stored data that failed to validate.
+    """
+
+
 class CursorCodec:
     """Versioned authenticated cursors bound to one resource and query context."""
 
@@ -366,4 +374,4 @@ class CursorCodec:
                 raise ValueError
             return document["boundary"]
         except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-            raise ValueError("cursor is invalid") from None
+            raise CursorError("cursor is invalid") from None

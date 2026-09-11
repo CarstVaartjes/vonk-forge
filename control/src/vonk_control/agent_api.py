@@ -1744,10 +1744,13 @@ def install_agent_routes(
         try:
             spec = validate_compiled_launch_payload(candidate)
             typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
-        except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+        except (CompiledExecutionPlanError, TypeError, ValueError):
+            # The candidate plan is caller-supplied, and a pydantic error string
+            # embeds the offending input, so the response names the fault
+            # without echoing the document back.
             raise HTTPException(
                 status_code=409,
-                detail=f"recipe specification compiled execution plan is invalid: {error}",
+                detail="recipe specification compiled execution plan is invalid",
             ) from None
         topology = spec.get("topology")
         if not isinstance(topology, Mapping) or (
