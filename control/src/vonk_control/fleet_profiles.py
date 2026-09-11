@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
+from .bounded_json import integer, sequence
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -377,7 +378,7 @@ class RunSwitchFleetProfileAdapter:
                         state,
                         f"Run/Switch child returned {child.state}",
                     )
-                children = list(state.get("children", []))
+                children = list(sequence(state.get("children")) or ())
                 children.append(
                     {
                         "operation_id": child.operation_id,
@@ -388,21 +389,23 @@ class RunSwitchFleetProfileAdapter:
                 state["children"] = children
                 state["active_operation_id"] = None
                 state["active_kind"] = None
-                state["position"] = int(position or 0) + 1
+                state["position"] = (integer(position) or 0) + 1
                 self._write_state(session, application, state)
                 session.flush()
                 position = state["position"]
-            queue = state.get("queue")
-            if not isinstance(queue, list) or int(position or 0) >= len(queue):
+            queue = sequence(state.get("queue"))
+            if queue is None or (integer(position) or 0) >= len(queue):
                 state["state"] = "succeeded"
                 state["result"] = {
-                    "children": list(state.get("children", [])),
-                    "assignment_ids": list(state.get("assignment_ids", [])),
+                    "children": list(sequence(state.get("children")) or ()),
+                    "assignment_ids": list(
+                        sequence(state.get("assignment_ids")) or ()
+                    ),
                 }
                 self._write_state(session, application, state)
                 session.flush()
                 return self._view_from_state(application, state)
-            item = queue[int(position or 0)]
+            item = queue[integer(position) or 0]
             if not isinstance(item, Mapping):
                 return self._failed_in_session(
                     session,
@@ -414,10 +417,13 @@ class RunSwitchFleetProfileAdapter:
                 application_id,
                 item,
                 assignments,
-                tuple(str(node_id) for node_id in state["scope_node_ids"]),
+                tuple(
+                    str(node_id)
+                    for node_id in (sequence(state.get("scope_node_ids")) or ())
+                ),
                 str(state["actor"]),
                 str(state["request_id"]),
-                int(position or 0),
+                integer(position) or 0,
             )
             state["active_operation_id"] = operation.operation_id
             state["active_kind"] = item.get("kind")

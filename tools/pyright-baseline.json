@@ -28,7 +28,7 @@
   "control/src/vonk_control/failure_evidence.py": 27,
   "control/src/vonk_control/fleet_event_contract.py": 3,
   "control/src/vonk_control/fleet_profile_contract.py": 2,
-  "control/src/vonk_control/fleet_profiles.py": 49,
+  "control/src/vonk_control/fleet_profiles.py": 37,
   "control/src/vonk_control/fleet_projection.py": 28,
   "control/src/vonk_control/fleet_stream.py": 3,
   "control/src/vonk_control/fleet_stream_contract.py": 4,
