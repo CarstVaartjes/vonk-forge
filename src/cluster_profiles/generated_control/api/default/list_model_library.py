@@ -29,6 +29,8 @@ def _get_kwargs(
     family: Union[None, Unset, list[str]] = UNSET,
     version: Union[None, Unset, list[str]] = UNSET,
     quantization: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListModelLibrarySort] = 'updated',
@@ -92,6 +94,28 @@ def _get_kwargs(
     else:
         json_quantization = quantization
     params["quantization"] = json_quantization
+
+    json_publisher: Union[None, Unset, list[str]]
+    if isinstance(publisher, Unset):
+        json_publisher = UNSET
+    elif isinstance(publisher, list):
+        json_publisher = publisher
+
+
+    else:
+        json_publisher = publisher
+    params["publisher"] = json_publisher
+
+    json_alignment: Union[None, Unset, list[str]]
+    if isinstance(alignment, Unset):
+        json_alignment = UNSET
+    elif isinstance(alignment, list):
+        json_alignment = alignment
+
+
+    else:
+        json_alignment = alignment
+    params["alignment"] = json_alignment
 
     json_search: Union[None, Unset, str]
     if isinstance(search, Unset):
@@ -183,6 +207,8 @@ def sync_detailed(
     family: Union[None, Unset, list[str]] = UNSET,
     version: Union[None, Unset, list[str]] = UNSET,
     quantization: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListModelLibrarySort] = 'updated',
@@ -197,6 +223,8 @@ def sync_detailed(
         family (Union[None, Unset, list[str]]):
         version (Union[None, Unset, list[str]]):
         quantization (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
@@ -217,6 +245,8 @@ usage=usage,
 family=family,
 version=version,
 quantization=quantization,
+publisher=publisher,
+alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -238,6 +268,8 @@ def sync(
     family: Union[None, Unset, list[str]] = UNSET,
     version: Union[None, Unset, list[str]] = UNSET,
     quantization: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListModelLibrarySort] = 'updated',
@@ -252,6 +284,8 @@ def sync(
         family (Union[None, Unset, list[str]]):
         version (Union[None, Unset, list[str]]):
         quantization (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
@@ -273,6 +307,8 @@ usage=usage,
 family=family,
 version=version,
 quantization=quantization,
+publisher=publisher,
+alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -288,6 +324,8 @@ async def asyncio_detailed(
     family: Union[None, Unset, list[str]] = UNSET,
     version: Union[None, Unset, list[str]] = UNSET,
     quantization: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListModelLibrarySort] = 'updated',
@@ -302,6 +340,8 @@ async def asyncio_detailed(
         family (Union[None, Unset, list[str]]):
         version (Union[None, Unset, list[str]]):
         quantization (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
@@ -322,6 +362,8 @@ usage=usage,
 family=family,
 version=version,
 quantization=quantization,
+publisher=publisher,
+alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,
@@ -343,6 +385,8 @@ async def asyncio(
     family: Union[None, Unset, list[str]] = UNSET,
     version: Union[None, Unset, list[str]] = UNSET,
     quantization: Union[None, Unset, list[str]] = UNSET,
+    publisher: Union[None, Unset, list[str]] = UNSET,
+    alignment: Union[None, Unset, list[str]] = UNSET,
     search: Union[None, Unset, str] = UNSET,
     updated_since: Union[None, Unset, datetime.datetime] = UNSET,
     sort: Union[Unset, ListModelLibrarySort] = 'updated',
@@ -357,6 +401,8 @@ async def asyncio(
         family (Union[None, Unset, list[str]]):
         version (Union[None, Unset, list[str]]):
         quantization (Union[None, Unset, list[str]]):
+        publisher (Union[None, Unset, list[str]]):
+        alignment (Union[None, Unset, list[str]]):
         search (Union[None, Unset, str]):
         updated_since (Union[None, Unset, datetime.datetime]):
         sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
@@ -378,6 +424,8 @@ usage=usage,
 family=family,
 version=version,
 quantization=quantization,
+publisher=publisher,
+alignment=alignment,
 search=search,
 updated_since=updated_since,
 sort=sort,

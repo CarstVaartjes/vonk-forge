@@ -3036,10 +3036,16 @@ export interface components {
         } | null;
         /** LibraryFacetValues */
         LibraryFacetValues: {
+            /** Alignment */
+            alignment?: string[];
             /** Family */
             family: string[];
+            /** Publisher */
+            publisher?: string[];
             /** Quantization */
             quantization: string[];
+            /** Sparks */
+            sparks?: number[];
             /** Usage */
             usage: string[];
             /** Version */
@@ -3104,6 +3110,8 @@ export interface components {
          * @description One exact canonical model variant with operator-facing projections.
          */
         LibraryModelProjection: {
+            /** Alignment */
+            alignment?: string[];
             document: components["schemas"]["ModelDefinition"];
             /** Family */
             family: string;
@@ -3159,11 +3167,15 @@ export interface components {
          * @description One exact canonical recipe and its model/resource/local projections.
          */
         LibraryRecipeProjection: {
+            /** Alignment */
+            alignment?: string | null;
             document: components["schemas"]["RecipeDefinition"];
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
             /** Model Selectors */
             model_selectors: string[];
+            /** Node Count */
+            node_count: number;
             resources: components["schemas"]["LibraryResourceProjection"];
             /**
              * Schema Version
@@ -3533,6 +3545,8 @@ export interface components {
         };
         /** ModelDetailResponse */
         ModelDetailResponse: {
+            /** Alignment */
+            alignment?: string[];
             document: components["schemas"]["ModelDefinition"];
             /** Family */
             family: string;
@@ -4240,6 +4254,8 @@ export interface components {
         };
         /** RecipeDetailResponse */
         RecipeDetailResponse: {
+            /** Alignment */
+            alignment?: string | null;
             document: components["schemas"]["RecipeDefinition"];
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
@@ -4247,6 +4263,8 @@ export interface components {
             model_documents: components["schemas"]["LibraryRecipeModel"][];
             /** Model Selectors */
             model_selectors: string[];
+            /** Node Count */
+            node_count: number;
             resources: components["schemas"]["LibraryResourceProjection"];
             /**
              * Schema Version
@@ -8504,6 +8522,8 @@ export interface operations {
                 family?: string[] | null;
                 version?: string[] | null;
                 quantization?: string[] | null;
+                publisher?: string[] | null;
+                alignment?: string[] | null;
                 search?: string | null;
                 updated_since?: string | null;
                 sort?: "updated" | "name";
@@ -9431,9 +9451,12 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string | null;
-                model?: string | null;
+                model?: string[] | null;
                 all_models?: boolean;
                 usage?: string[] | null;
+                publisher?: string[] | null;
+                alignment?: string[] | null;
+                sparks?: number[] | null;
                 search?: string | null;
                 updated_since?: string | null;
                 sort?: "updated" | "name";

@@ -9,7 +9,9 @@ from ..types import UNSET, Unset
 from ..types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
+from typing import cast, Union
 from typing import Literal, Union, cast
+from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -35,10 +37,12 @@ class LibraryRecipeProjection:
             identity (LibraryRecipeIdentity):
             local (LibraryLocalState): Controller cache and Spark-local runtime evidence kept separate.
             model_selectors (list[str]):
+            node_count (int):
             resources (LibraryResourceProjection): Declared resource facts; unknown values remain null.
             selector (str):
             updated_at (datetime.datetime):
             usage (list[str]):
+            alignment (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
@@ -46,10 +50,12 @@ class LibraryRecipeProjection:
     identity: 'LibraryRecipeIdentity'
     local: 'LibraryLocalState'
     model_selectors: list[str]
+    node_count: int
     resources: 'LibraryResourceProjection'
     selector: str
     updated_at: datetime.datetime
     usage: list[str]
+    alignment: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -71,6 +77,8 @@ class LibraryRecipeProjection:
 
 
 
+        node_count = self.node_count
+
         resources = self.resources.to_dict()
 
         selector = self.selector
@@ -80,6 +88,12 @@ class LibraryRecipeProjection:
         usage = self.usage
 
 
+
+        alignment: Union[None, Unset, str]
+        if isinstance(self.alignment, Unset):
+            alignment = UNSET
+        else:
+            alignment = self.alignment
 
         schema_version = self.schema_version
 
@@ -91,11 +105,14 @@ class LibraryRecipeProjection:
             "identity": identity,
             "local": local,
             "model_selectors": model_selectors,
+            "node_count": node_count,
             "resources": resources,
             "selector": selector,
             "updated_at": updated_at,
             "usage": usage,
         })
+        if alignment is not UNSET:
+            field_dict["alignment"] = alignment
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -128,6 +145,8 @@ class LibraryRecipeProjection:
         model_selectors = cast(list[str], d.pop("model_selectors"))
 
 
+        node_count = d.pop("node_count")
+
         resources = LibraryResourceProjection.from_dict(d.pop("resources"))
 
 
@@ -143,6 +162,16 @@ class LibraryRecipeProjection:
         usage = cast(list[str], d.pop("usage"))
 
 
+        def _parse_alignment(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        alignment = _parse_alignment(d.pop("alignment", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -152,10 +181,12 @@ class LibraryRecipeProjection:
             identity=identity,
             local=local,
             model_selectors=model_selectors,
+            node_count=node_count,
             resources=resources,
             selector=selector,
             updated_at=updated_at,
             usage=usage,
+            alignment=alignment,
             schema_version=schema_version,
         )
 

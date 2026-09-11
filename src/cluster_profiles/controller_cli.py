@@ -66,7 +66,7 @@ def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
 
 def _filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--search", default="")
-    for name in ("usage", "family", "version", "quantization"):
+    for name in ("usage", "family", "version", "quantization", "publisher", "alignment"):
         parser.add_argument(f"--{name}", action="append", default=[])
     parser.add_argument("--updated-since")
     parser.add_argument("--sort", choices=("updated", "name"), default="updated")
@@ -202,6 +202,9 @@ def add_controller_commands(
     _filters(recipe_library)
     recipe_library.add_argument("--model", action="append", default=[])
     recipe_library.add_argument("--all-models", action="store_true")
+    recipe_library.add_argument(
+        "--sparks", action="append", type=int, default=[], help="Exact topology node count"
+    )
     _add_output(recipe_library)
     recipe_detail = recipe_actions.add_parser("detail", help="Show an exact recipe")
     _selector(recipe_detail, "selector", help="Exact recipe selector or friendly name")
@@ -504,6 +507,8 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
             "family",
             "version",
             "quantization",
+            "publisher",
+            "alignment",
             "updated_since",
             "sort",
             "limit",
@@ -511,7 +516,11 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
         )
     }
     if recipe:
-        values.update(model=getattr(args, "model", []), all_models=args.all_models)
+        values.update(
+            model=getattr(args, "model", []),
+            all_models=args.all_models,
+            sparks=getattr(args, "sparks", []),
+        )
     return _query(**values)
 
 

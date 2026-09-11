@@ -8,11 +8,12 @@ import {formatBytes} from "../lib/fleet";
 import {LibraryRecipeDownloadAction} from "./library-recipe-download-action";
 
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
-// one-for-one: --model --usage --family --version --quantization.
-export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string};
-export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: ""};
+// one-for-one: --model --usage --family --version --quantization --publisher
+// --alignment, plus --sparks for recipe topology size.
+export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string};
+export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: ""};
 
-const FILTER_PARAMS = ["model", "usage", "family", "version", "quantization"] as const;
+const FILTER_PARAMS = ["model", "usage", "family", "version", "quantization", "publisher", "alignment", "sparks"] as const;
 
 export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkcellFilters {
   return {
@@ -21,6 +22,9 @@ export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkce
     family: params.get("family") ?? "",
     version: params.get("version") ?? "",
     quantization: params.get("quantization") ?? "",
+    publisher: params.get("publisher") ?? "",
+    alignment: params.get("alignment") ?? "",
+    sparks: params.get("sparks") ?? "",
   };
 }
 export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params = new URLSearchParams()): URLSearchParams {
@@ -83,7 +87,10 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
       && (!filters.usage || record.capabilities.includes(filters.usage))
       && (!filters.family || recordFamily(record) === filters.family)
       && (!filters.version || record.modelDocument?.identity.version === filters.version)
-      && (!filters.quantization || record.modelDocument?.format.quantization === filters.quantization);
+      && (!filters.quantization || record.modelDocument?.format.quantization === filters.quantization)
+      && (!filters.publisher || record.recipe?.publisher === filters.publisher)
+      && (!filters.alignment || record.recipe?.recipe_document.metadata.alignment === filters.alignment)
+      && (!filters.sparks || String(record.recipe?.recipe_document.topology.node_count) === filters.sparks);
   });
 }
 
@@ -137,6 +144,9 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
       <label>Family<select aria-label="Filter family" value={filters.family} onChange={event => onFiltersChange({...filters, family: event.target.value})}><option value="">All families</option>{[...new Set(records.map(recordFamily).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Version<select aria-label="Filter version" value={filters.version} onChange={event => onFiltersChange({...filters, version: event.target.value})}><option value="">All versions</option>{[...new Set(records.map(record => record.modelDocument?.identity.version).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Quantization<select aria-label="Filter quantization" value={filters.quantization} onChange={event => onFiltersChange({...filters, quantization: event.target.value})}><option value="">All quantization</option>{[...new Set(records.map(record => record.modelDocument?.format.quantization).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Creator<select aria-label="Filter creator" value={filters.publisher} onChange={event => onFiltersChange({...filters, publisher: event.target.value})}><option value="">All creators</option>{[...new Set(records.map(record => record.recipe?.publisher).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Alignment<select aria-label="Filter alignment" value={filters.alignment} onChange={event => onFiltersChange({...filters, alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(records.flatMap(record => record.recipe?.recipe_document.metadata.alignment ? [record.recipe.recipe_document.metadata.alignment] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Sparks<select aria-label="Filter Sparks" value={filters.sparks} onChange={event => onFiltersChange({...filters, sparks: event.target.value})}><option value="">Any Sparks</option>{[...new Set(records.map(record => String(record.recipe?.recipe_document.topology.node_count ?? "")).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
     </div>
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>

@@ -31,6 +31,8 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     .filter(model => !filters.family || model.family === filters.family)
     .filter(model => !filters.version || model.version === filters.version)
     .filter(model => !filters.quantization || model.quantization === filters.quantization)
+    .filter(model => !filters.publisher || model.model.publisher === filters.publisher)
+    .filter(model => !filters.alignment || model.alignment.includes(filters.alignment))
     .filter(model => !normalizedQuery || filteredRecipes.some(record => record.modelKey === modelKey(model.model)) || modelTitle(model).toLowerCase().includes(normalizedQuery));
   const refresh = () => void onRefresh(new AbortController().signal);
 
@@ -55,6 +57,8 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
       <label>Family<select aria-label="Filter model family" value={filters.family} onChange={event => updateFilter("family", event.target.value)}><option value="">All families</option>{[...new Set(models.map(model => model.family).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Version<select aria-label="Filter model version" value={filters.version} onChange={event => updateFilter("version", event.target.value)}><option value="">All versions</option>{[...new Set(models.map(model => model.version).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Quantization<select aria-label="Filter model quantization" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">All quantization</option>{[...new Set(models.map(model => model.quantization).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Creator<select aria-label="Filter model creator" value={filters.publisher} onChange={event => updateFilter("publisher", event.target.value)}><option value="">All creators</option>{[...new Set(models.map(model => model.model.publisher).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Alignment<select aria-label="Filter model alignment" value={filters.alignment} onChange={event => updateFilter("alignment", event.target.value)}><option value="">All alignments</option>{[...new Set(models.flatMap(model => model.alignment))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
     </div>
     <div className="library-model-list" aria-label="Model library">
       {visible.map(model => <ModelRow key={modelKey(model.model)} api={api} model={model} onNavigate={onNavigate} onPrepared={refresh} />)}

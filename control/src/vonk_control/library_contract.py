@@ -211,6 +211,9 @@ class LibraryModelProjection(_StrictModel):
     resources: LibraryResourceProjection
     local: LibraryLocalState
     updated_at: datetime
+    # Alignment is declared by the recipes that serve this model, so a model
+    # used by both a standard and an abliterated recipe reports both.
+    alignment: list[Text64] = Field(default_factory=list, max_length=8)
 
 
 class LibraryFacetValues(_StrictModel):
@@ -218,6 +221,11 @@ class LibraryFacetValues(_StrictModel):
     family: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
     version: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
     quantization: list[Text64] = Field(max_length=_MAX_PAGE_RECIPES)
+    # Creator and alignment are optional facets: a library with none still
+    # projects a complete, filterable response.
+    publisher: list[Text128] = Field(default_factory=list, max_length=_MAX_PAGE_RECIPES)
+    alignment: list[Text64] = Field(default_factory=list, max_length=64)
+    sparks: list[int] = Field(default_factory=list, max_length=64)
 
 
 class ModelLibraryResponse(_StrictModel):
@@ -246,6 +254,8 @@ class LibraryRecipeProjection(_StrictModel):
     resources: LibraryResourceProjection
     local: LibraryLocalState
     updated_at: datetime
+    alignment: Text64 | None = None
+    node_count: int = Field(ge=1)
 
 
 class RecipeLibraryResponse(_StrictModel):

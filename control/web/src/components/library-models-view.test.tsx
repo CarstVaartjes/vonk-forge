@@ -48,7 +48,7 @@ test("prepares the Controller cache for an uncached model", async () => {
 
 test("offers the same model filters as vonkctl model library", () => {
   renderModels();
-  for (const name of ["Filter model usage", "Filter model family", "Filter model version", "Filter model quantization", "Filter exact model"]) {
+  for (const name of ["Filter model usage", "Filter model family", "Filter model version", "Filter model quantization", "Filter model creator", "Filter model alignment", "Filter exact model"]) {
     expect(screen.getByRole("combobox", {name})).toBeVisible();
   }
 });

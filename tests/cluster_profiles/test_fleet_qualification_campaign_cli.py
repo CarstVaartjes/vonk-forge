@@ -92,6 +92,10 @@ class _Client:
                         "selector": selector,
                         "updated_at": "2026-09-07T00:00:00Z",
                         "usage": [],
+                        # Derived from the canonical document so the fixture
+                        # cannot drift from the projection contract.
+                        "alignment": item["detail"]["definition"]["metadata"].get("alignment"),
+                        "node_count": item["detail"]["definition"]["topology"]["node_count"],
                     }
                     for selector, item in self._details.items()
                 ],
@@ -111,6 +115,8 @@ class _Client:
                 "selector": selector,
                 "updated_at": "2026-09-07T00:00:00Z",
                 "usage": [],
+                "alignment": detail["definition"]["metadata"].get("alignment"),
+                "node_count": detail["definition"]["topology"]["node_count"],
             }
         raise AssertionError((method, path))
 

@@ -49,6 +49,7 @@ function viewModel(model: ModelLibrary["models"][number], recipes: LibraryViewRe
     version: model.version,
     quantization: model.quantization,
     usage: model.usage,
+    alignment: model.alignment ?? [],
     recipes,
   };
 }

@@ -157,6 +157,69 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
             item.identity.content_sha256,
         }
 
+    # Creator is faceted and filterable on both nouns.
+    assert set(model_page.facets.publisher) == {
+        model.identity.publisher for model in model_page.models
+    }
+    assert set(recipe_page.facets.publisher) >= {
+        item.identity.publisher for item in recipe_page.recipes
+    }
+    creator = min({model.identity.publisher for model in model_page.models})
+    creator_models = projection.models(limit=100, publisher=[creator]).models
+    assert creator_models
+    assert {model.identity.publisher for model in creator_models} == {creator}
+
+    # Abliteration is the recipe's declared alignment, faceted and filterable,
+    # and it surfaces on the models that the aligned recipes serve.
+    assert set(recipe_page.facets.alignment) == {
+        item.alignment for item in recipe_page.recipes if item.alignment
+    } | set(model_page.facets.alignment)
+    assert "abliterated" in recipe_page.facets.alignment
+    abliterated = projection.recipe_library(
+        limit=100, all_models=True, alignment=["abliterated"]
+    ).recipes
+    assert abliterated
+    assert {item.alignment for item in abliterated} == {"abliterated"}
+    assert len(abliterated) == sum(
+        1 for item in recipe_page.recipes if item.alignment == "abliterated"
+    )
+    assert any("abliterated" in model.alignment for model in model_page.models)
+
+    # Sparks is the recipe topology node count, faceted and filterable.
+    assert {item.node_count for item in recipe_page.recipes} == set(
+        recipe_page.facets.sparks
+    )
+    sparks = max(recipe_page.facets.sparks)
+    by_sparks = projection.recipe_library(
+        limit=100, all_models=True, sparks=[sparks]
+    ).recipes
+    assert by_sparks
+    assert {item.node_count for item in by_sparks} == {sparks}
+
+    # Several model selectors are a union. A repeated query parameter used to
+    # reach a single-value parameter, so every selector but the last was lost.
+    selectors = sorted({model.selector for model in model_page.models})
+    first, second = selectors[0], selectors[1]
+    one = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[first]
+        ).recipes
+    }
+    two = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[second]
+        ).recipes
+    }
+    both = {
+        item.identity.recipe_id
+        for item in projection.recipe_library(
+            limit=100, all_models=False, model_selectors=[first, second]
+        ).recipes
+    }
+    assert both == one | two
+
     app = FastAPI()
     install_library_routes(
         app,

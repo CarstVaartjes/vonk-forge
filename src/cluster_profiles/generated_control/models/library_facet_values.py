@@ -6,7 +6,9 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
+from typing import Union
 
 
 
@@ -25,12 +27,18 @@ class LibraryFacetValues:
             quantization (list[str]):
             usage (list[str]):
             version (list[str]):
+            alignment (Union[Unset, list[str]]):
+            publisher (Union[Unset, list[str]]):
+            sparks (Union[Unset, list[int]]):
      """
 
     family: list[str]
     quantization: list[str]
     usage: list[str]
     version: list[str]
+    alignment: Union[Unset, list[str]] = UNSET
+    publisher: Union[Unset, list[str]] = UNSET
+    sparks: Union[Unset, list[int]] = UNSET
 
 
 
@@ -53,6 +61,24 @@ class LibraryFacetValues:
 
 
 
+        alignment: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.alignment, Unset):
+            alignment = self.alignment
+
+
+
+        publisher: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.publisher, Unset):
+            publisher = self.publisher
+
+
+
+        sparks: Union[Unset, list[int]] = UNSET
+        if not isinstance(self.sparks, Unset):
+            sparks = self.sparks
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -62,6 +88,12 @@ class LibraryFacetValues:
             "usage": usage,
             "version": version,
         })
+        if alignment is not UNSET:
+            field_dict["alignment"] = alignment
+        if publisher is not UNSET:
+            field_dict["publisher"] = publisher
+        if sparks is not UNSET:
+            field_dict["sparks"] = sparks
 
         return field_dict
 
@@ -82,11 +114,23 @@ class LibraryFacetValues:
         version = cast(list[str], d.pop("version"))
 
 
+        alignment = cast(list[str], d.pop("alignment", UNSET))
+
+
+        publisher = cast(list[str], d.pop("publisher", UNSET))
+
+
+        sparks = cast(list[int], d.pop("sparks", UNSET))
+
+
         library_facet_values = cls(
             family=family,
             quantization=quantization,
             usage=usage,
             version=version,
+            alignment=alignment,
+            publisher=publisher,
+            sparks=sparks,
         )
 
         return library_facet_values
