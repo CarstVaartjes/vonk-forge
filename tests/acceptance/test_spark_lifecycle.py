@@ -2159,6 +2159,7 @@ class SparkLifecycle:
             application = self._await_profile_application(
                 require_object(application_payload, "synthetic canary profile application"),
                 label="synthetic canary profile load",
+                node_id=node_id,
             )
             profile_progress = require_object(application.get("progress"), "profile progress")
             step_results = profile_progress.get("step_results")
@@ -2242,6 +2243,7 @@ class SparkLifecycle:
             cleanup_application = self._await_profile_application(
                 require_object(cleanup_application_payload, "synthetic canary cleanup application"),
                 label="synthetic canary profile cleanup",
+                node_id=node_id,
             )
             cleanup_steps = require_object(cleanup_application.get("progress"), "cleanup progress").get("step_results")
             if not isinstance(cleanup_steps, dict) or not {step.get("kind") for step in cleanup_steps.values() if isinstance(step, dict)} >= {"stop", "uninstall"}:
@@ -2382,7 +2384,7 @@ class SparkLifecycle:
         return typed.model_dump(mode="json")
 
     def _await_profile_application(
-        self, operation: dict[str, object], *, label: str
+        self, operation: dict[str, object], *, label: str, node_id: str
     ) -> dict[str, object]:
         """Consume the typed numbered-profile application until it is terminal."""
         assert self.control is not None
@@ -2413,28 +2415,24 @@ class SparkLifecycle:
                         else child.phase
                     )
                     child_bytes = f"{child.bytes}/{child.total_bytes}"
-                # The Controller's own answer for the stalled child: whether
-                # the agent job was ever handed out separates a Controller-side
-                # dispatch stall from a transfer that is running on the Spark.
+                # The Controller's own view separates a job that was never
+                # handed to the Spark from a transfer that is running there: a
+                # queued job is a dispatch stall, a running one is not.
                 job_detail = "unavailable"
-                operation_id = typed.current_operation_id
-                if operation_id is not None and self.control is not None:
+                if self.control is not None:
                     try:
-                        _, stalled = self.control.request(
-                            "GET", f"/api/operations/{operation_id}"
+                        _, listed = self.control.request(
+                            "GET", "/api/jobs", query={"target": node_id, "limit": 5}
                         )
-                        job_id = require_object(stalled, "stalled operation").get(
-                            "parent_id"
-                        )
-                        if isinstance(job_id, str):
-                            _, job = self.control.request("GET", f"/api/jobs/{job_id}")
-                            job_object = require_object(job, "stalled job")
-                            job_detail = (
-                                f"{job_id} state={job_object.get('state')} "
-                                + json.dumps(
-                                    job_object.get("progress"), sort_keys=True
-                                )[:300]
-                            )
+                        rows = require_object(listed, "stalled job list").get("jobs")
+                        summary: list[str] = []
+                        if isinstance(rows, list):
+                            for row in rows:
+                                job = require_object(row, "stalled job")
+                                summary.append(
+                                    f"{job.get('kind')}={job.get('state')}"
+                                )
+                        job_detail = ", ".join(summary) or "none"
                     except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
                         job_detail = f"unavailable: {type(error).__name__}"
                 raise LifecycleError(
