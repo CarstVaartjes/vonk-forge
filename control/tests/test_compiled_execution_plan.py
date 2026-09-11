@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import tarfile
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,13 +14,18 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
+from vonk_agent_protocol import (
+    canonical_message,
+)
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -37,6 +43,7 @@ from vonk_control.execution_plan_service import (
     ExecutionPlanCompilationError,
     _bind_runtime_artifacts,
     _placement,
+    _PlacementTarget,
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
@@ -48,6 +55,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
+    RecipeBuild,
     RecipeInstallation,
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
@@ -68,6 +76,25 @@ from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example
 from .recipe_library_source import recipe_library_root
+
+
+def _mapping(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _sequence(value: object) -> list[object]:
+    assert isinstance(value, list)
+    return value
+
+
+def _first_mapping(value: object) -> dict[str, object]:
+    return _mapping(_sequence(value)[0])
+
+
+def _integer(value: object) -> int:
+    assert isinstance(value, int)
+    return value
 
 
 def _spec(
@@ -161,7 +188,7 @@ def _spec(
             }
         ],
     }
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     return spec
 
 
@@ -179,7 +206,7 @@ def _job_spec() -> dict[str, object]:
     security["mounts"].append(
         {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
     )
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     return spec
 
 
@@ -275,14 +302,14 @@ def test_controller_compiler_preserves_canonical_model_path_and_publisher_text()
         slug="synthetic-model",
         content_sha256="e" * 64,
     )
-    artifact = spec["artifacts"][0]
+    artifact = _sequence(spec["artifacts"])[0]
     assert isinstance(artifact, dict)
     artifact["path"] = canonical_file.path
     artifact["model"]["publisher"] = canonical_reference.publisher
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     model_object = _model_objects()[0]
     model_object["path"] = path
-    model_object["distribution_object"]["name"] = path
+    _mapping(model_object["distribution_object"])["name"] = path
 
     plan = compile_verified_execution_plan(
         spec,
@@ -315,8 +342,9 @@ def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> Non
     assert "revision" not in rendered
     assert "token" not in rendered
     assert "recipe_revision_sha256" not in payload
-    assert "source" not in payload["runtime_image"]
-    assert "build_id" not in payload["runtime_image"]
+    runtime_image = _mapping(payload["runtime_image"])
+    assert "source" not in runtime_image
+    assert "build_id" not in runtime_image
 
 
 def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> None:
@@ -348,17 +376,19 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
         "endpoint",
         "job",
     }
-    assert validated["runtime"]["executable"] == "/opt/vonk/bin/vllm"
-    assert validated["runtime"]["argv"] == ["serve"]
-    assert validated["artifacts"][0]["selection_id"] == "primary"
-    assert validated["artifacts"][0]["mount"] == {
+    wire = WireCompiledExecutionPlan.parse(validated)
+    assert wire.runtime.executable == "/opt/vonk/bin/vllm"
+    assert wire.runtime.argv == ["serve"]
+    assert wire.artifacts[0].selection_id == "primary"
+    assert wire.artifacts[0].mount.model_dump() == {
         "target": "/models",
         "read_only": True,
     }
-    assert validated["security"]["network_mode"] == "none"
-    assert validated["security"]["host_network"] is False
-    assert validated["endpoint"]["port"] == 8000
-    assert validated["job"] is None
+    assert wire.security.network_mode == "none"
+    assert wire.security.host_network is False
+    assert wire.endpoint is not None
+    assert wire.endpoint.port == 8000
+    assert wire.job is None
 
 
 def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
@@ -379,9 +409,11 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
     )
 
     validated = validate_compiled_launch_payload(payload)
-    assert validated["endpoint"] is None
-    assert validated["job"]["interface"] == "image-job"
-    assert validated["runtime"]["placement"]["port"] is None
+    wire = WireCompiledExecutionPlan.parse(validated)
+    assert wire.endpoint is None
+    assert wire.job is not None
+    assert wire.job.interface == "image-job"
+    assert wire.runtime.placement.port is None
 
 
 def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
@@ -402,8 +434,10 @@ def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
     )
 
     validated = validate_compiled_launch_payload(payload)
-    assert validated["endpoint"]["port"] == 8000
-    assert validated["runtime"]["placement"]["port"] == 9000
+    wire = WireCompiledExecutionPlan.parse(validated)
+    assert wire.endpoint is not None
+    assert wire.endpoint.port == 8000
+    assert wire.runtime.placement.port == 9000
 
 
 @pytest.mark.parametrize("port", [None, 0, 65536, "9000"])
@@ -501,7 +535,7 @@ def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> No
             "reserved_memory_bytes": 1,
         },
     )
-    payload["runtime"]["oversized_flat_field"] = "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
+    _mapping(payload["runtime"])["oversized_flat_field"] = "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
     with pytest.raises(CompiledExecutionPlanError, match="too large"):
         validate_compiled_launch_payload(payload)
 
@@ -513,7 +547,7 @@ def test_controller_produces_real_751_artifact_plan() -> None:
         )
     )
     plan = validate_compiled_launch_payload(fixture)
-    assert len(plan["artifacts"]) == 751
+    assert len(_sequence(plan["artifacts"])) == 751
     assert len(canonical_message(plan)) > 500 * 1024
     parent_payload, encoded = _canonical_payload(
         {"phases": [{"payload": {"compiled_execution_plan": plan}}]},
@@ -567,7 +601,8 @@ def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
         },
     )
     mismatched = copy.deepcopy(payload)
-    mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
+    distribution = _mapping(_first_mapping(mismatched["artifacts"])["distribution_object"])
+    distribution["bytes"] = _integer(distribution["bytes"]) + 1
     with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(mismatched)
 
@@ -589,12 +624,12 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
         },
     )
     polluted = copy.deepcopy(payload)
-    polluted["security"]["network_mode"] = "bridge"
+    _mapping(polluted["security"])["network_mode"] = "bridge"
     with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
     polluted = copy.deepcopy(payload)
-    polluted["security"]["host_network"] = True
+    _mapping(polluted["security"])["host_network"] = True
     with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(polluted)
 
@@ -632,8 +667,9 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
         master_port=None,
         world_size=1,
     )
-    assert started["runtime"]["placement"]["endpoint_address"] == "192.0.2.10"
-    assert started["runtime"]["placement"]["reserved_memory_bytes"] == 4096
+    placement = WireCompiledExecutionPlan.parse(started).runtime.placement
+    assert placement.endpoint_address == "192.0.2.10"
+    assert placement.reserved_memory_bytes == 4096
     assert validate_compiled_launch_payload(started)["schema_version"] == 2
 
 
@@ -656,7 +692,11 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         clock=lambda: now,
     )
     operations = AgentJobService(sessions, clock=lambda: now)
-    operations.set_contact_consumer(presence.observe_in_session)
+
+    def observe_contact(session: Session, source: AgentSource) -> None:
+        presence.observe_in_session(session, source)
+
+    operations.set_contact_consumer(observe_contact)
     services = AgentApiServices(
         enrollment=None,
         operations=operations,
@@ -697,8 +737,9 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     document_id = str(uuid4())
     mapping_id = str(uuid4())
     receipt_id = str(uuid4())
-    effective_execution_key = payload["identity"]["execution_sha256"]
-    runtime_image = payload["runtime_image"]
+    payload_wire = WireCompiledExecutionPlan.parse(payload)
+    effective_execution_key = payload_wire.identity.execution_sha256
+    runtime_image = payload_wire.runtime_image
     with sessions.begin() as session:
         session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
         session.add(
@@ -795,14 +836,14 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                 source="published",
                 original_content_digest=original_digest,
                 effective_execution_key=effective_execution_key,
-                registry_manifest_digest=runtime_image["registry_manifest_digest"],
-                platform_manifest_digest=runtime_image["platform_manifest_digest"],
-                local_image_config_id=runtime_image["local_image_config_id"],
-                oci_archive_sha256=runtime_image["oci_layout_sha256"],
-                image_bytes=runtime_image["image_bytes"],
-                architecture=runtime_image["architecture"],
-                runtime_interface=runtime_image["runtime_interface"],
-                runtime_interface_label=runtime_image["runtime_interface_label"],
+                registry_manifest_digest=runtime_image.registry_manifest_digest,
+                platform_manifest_digest=runtime_image.platform_manifest_digest,
+                local_image_config_id=runtime_image.local_image_config_id,
+                oci_archive_sha256=runtime_image.oci_layout_sha256,
+                image_bytes=runtime_image.image_bytes,
+                architecture=runtime_image.architecture,
+                runtime_interface=runtime_image.runtime_interface,
+                runtime_interface_label=runtime_image.runtime_interface_label,
                 build_id=None,
                 verified_at=now,
                 state="verified",
@@ -815,11 +856,11 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                 source="published",
                 original_content_digest=original_digest,
                 effective_execution_key=effective_execution_key,
-                registry_manifest_digest=runtime_image["registry_manifest_digest"],
-                platform_manifest_digest=runtime_image["platform_manifest_digest"],
-                local_image_config_id=runtime_image["local_image_config_id"],
-                oci_archive_sha256=runtime_image["oci_layout_sha256"],
-                image_bytes=runtime_image["image_bytes"],
+                registry_manifest_digest=runtime_image.registry_manifest_digest,
+                platform_manifest_digest=runtime_image.platform_manifest_digest,
+                local_image_config_id=runtime_image.local_image_config_id,
+                oci_archive_sha256=runtime_image.oci_layout_sha256,
+                image_bytes=runtime_image.image_bytes,
                 build_id=None,
                 authorized_at=now,
                 state="authorized",
@@ -832,7 +873,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                 mapping_id=mapping_id,
                 mapping_generation=1,
                 recipe_build_id=None,
-                image_digest=payload["runtime_image"]["image_digest"],
+                image_digest=runtime_image.image_digest,
                 plan_digest="a" * 64,
                 plan=installation_plan_document(
                     {
@@ -840,7 +881,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                         "mapping_id": mapping_id,
                         "mapping_generation": 1,
                         "recipe_build_id": None,
-                        "image_digest": payload["runtime_image"]["image_digest"],
+                        "image_digest": runtime_image.image_digest,
                         "recipe_revision_id": revision_id,
                         "recipe_content_sha256": current_digest,
                         "allowed": True,
@@ -886,13 +927,32 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         )
 
     class Jobs:
-        def list(self):
+        def list(self, *, limit: int = 100) -> list[object]:
             return []
 
-        def get(self, _job_id):
-            raise KeyError
+        def list_page(
+            self,
+            *,
+            limit: int = 100,
+            cursor: str | None = None,
+            status: str | None = None,
+            target: str | None = None,
+        ) -> tuple[list[object], str | None, int]:
+            raise AssertionError("the spec route must not list jobs")
 
-        def enqueue(self, *_args, **_kwargs):
+        def get(self, job_id: str) -> object:
+            raise KeyError(job_id)
+
+        def enqueue(
+            self,
+            kind: str,
+            actor: str,
+            authority_revision: str,
+            targets: Sequence[str],
+            payload: Mapping[str, object],
+            *,
+            request_id: str,
+        ) -> object:
             raise AssertionError("the spec route must not enqueue work")
 
     app = create_app(
@@ -962,28 +1022,49 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
                 },
             )
 
-    node = SimpleNamespace(
+    node = ClusterMappingNode(
+        mapping_id="mapping-1",
         node_id="spk_" + "1" * 32,
         rank=0,
         role="entrypoint",
+        endpoint_owner=True,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
-    revision = SimpleNamespace(
+    revision = CatalogDocumentRevision(
+        id="revision-1",
+        document_id="document-1",
         kind="recipe",
+        publisher=recipe.identity.publisher,
+        slug=recipe.identity.slug,
+        revision_number=1,
+        schema_version=2,
         state="active",
-        content_digest=recipe_digest,
         document=recipe_document,
+        content_digest=recipe_digest,
+        projected={},
+        created_by="test",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
-    build = SimpleNamespace(
+    build = RecipeBuild(
         id="build-1",
-        state="succeeded",
-        image_digest="sha256:" + "1" * 64,
+        recipe_revision_id="revision-1",
+        builder_node_id="spk_" + "1" * 32,
+        source_bundle_sha256="a" * 64,
         build_input_sha256="b" * 64,
+        state="succeeded",
+        policy_report={},
+        plan={},
+        image_digest="sha256:" + "1" * 64,
         oci_layout_sha256="f" * 64,
         image_bytes=4096,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     def runtime_receipt(
-        _document, image_digest: str, _runtime_spec: dict[str, object]
+        _document: Mapping[str, object],
+        image_digest: str,
+        _runtime_spec: Mapping[str, object],
     ) -> RuntimeImageReceiptWire:
         return RuntimeImageReceiptWire(
             schema_version=2,
@@ -1010,7 +1091,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         Cache(), runtime_image_resolver=runtime_receipt
     )
     plans = service.compile_installation(
-        None,
+        Session(),
         revision=revision,
         build=build,
         mapping_nodes=(node,),
@@ -1024,11 +1105,12 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
 
     payload = plans[node.node_id]
     validate_compiled_launch_payload(payload)
-    assert payload["identity"]["model_artifact_set_sha256"] == artifact_set_digest
-    assert payload["identity"]["model_artifact_bytes"] == 1024
-    assert payload["identity"]["build_input_sha256"] == "b" * 64
-    assert payload["artifacts"][0]["path"] == "model.safetensors"
-    assert payload["runtime_image"]["source"] == "controller-build"
+    payload_wire = WireCompiledExecutionPlan.parse(payload)
+    assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
+    assert payload_wire.identity.model_artifact_bytes == 1024
+    assert payload_wire.identity.build_input_sha256 == "b" * 64
+    assert payload_wire.artifacts[0].path == "model.safetensors"
+    assert payload_wire.runtime_image.source == "controller-build"
     assert "repository" not in json.dumps(payload, sort_keys=True)
 
 
@@ -1062,11 +1144,20 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
         def resolve_artifact_set(self, **_kwargs: object) -> object:
             raise AssertionError("invalid recipes must fail before cache resolution")
 
-    revision = SimpleNamespace(
+    revision = CatalogDocumentRevision(
+        id="revision-1",
+        document_id="document-1",
         kind="recipe",
+        publisher="publisher",
+        slug="recipe",
+        revision_number=1,
+        schema_version=2,
         state="active",
-        content_digest="a" * 64,
         document=document,
+        content_digest="a" * 64,
+        projected={},
+        created_by="test",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     service = ControllerExecutionPlanService(Cache())
     with pytest.raises(
@@ -1074,7 +1165,7 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
         match="recipe does not satisfy the canonical contract",
     ):
         service.compile_installation(
-            None,
+            Session(),
             revision=revision,
             build=None,
             mapping_nodes=(),
@@ -1089,11 +1180,20 @@ def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resoluti
         def resolve_artifact_set(self, **_kwargs: object) -> object:
             raise AssertionError("digest mismatches must fail before cache resolution")
 
-    revision = SimpleNamespace(
+    revision = CatalogDocumentRevision(
+        id="revision-1",
+        document_id="document-1",
         kind="recipe",
+        publisher="publisher",
+        slug="recipe",
+        revision_number=1,
+        schema_version=2,
         state="active",
-        content_digest="a" * 64,
         document=recipe.model_dump(mode="json"),
+        content_digest="a" * 64,
+        projected={},
+        created_by="test",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     service = ControllerExecutionPlanService(Cache())
     with pytest.raises(
@@ -1101,7 +1201,7 @@ def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resoluti
         match="recipe revision digest does not match the canonical document",
     ):
         service.compile_installation(
-            None,
+            Session(),
             revision=revision,
             build=None,
             mapping_nodes=(),
@@ -1111,13 +1211,18 @@ def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resoluti
 
 def test_placement_rejects_unresolved_role_and_endpoint() -> None:
     recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
-    node = SimpleNamespace(rank=0, role="missing", node_id="spk_missing")
     with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
-        _placement(recipe, {"endpoint": {"port": 8000}}, node, 1)
+        _placement(
+            recipe,
+            {"endpoint": {"port": 8000}},
+            _PlacementTarget(rank=0, role="missing"),
+            1,
+        )
 
-    node.role = "entrypoint"
     with pytest.raises(ExecutionPlanCompilationError, match="endpoint"):
-        _placement(recipe, {}, node, 1)
+        _placement(
+            recipe, {}, _PlacementTarget(rank=0, role="entrypoint"), 1
+        )
 
 
 def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (
@@ -1129,10 +1234,11 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
         )
     )
     validated = validate_compiled_launch_payload(fixture)
-    artifacts = validated["artifacts"]
-    assert [item["path"] for item in artifacts].count("config.json") == 2
+    wire = WireCompiledExecutionPlan.parse(validated)
+    artifacts = wire.artifacts
+    assert [item.path for item in artifacts].count("config.json") == 2
     assert {
-        (item["selection_id"], item["file_id"], item["sha256"], item["size_bytes"])
+        (item.selection_id, item.file_id, item.sha256, item.size_bytes)
         for item in artifacts
     } >= {
         (
@@ -1148,37 +1254,37 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
             2448,
         ),
     }
-    empty = next(item for item in artifacts if item["size_bytes"] == 0)
-    assert empty["sha256"] == EMPTY_SHA256
-    assert empty["roles"] == ["entrypoint"]
-    assert empty["path"] == "__init__.py"
-    assert validated["security"]["network_mode"] == "none"
-    assert validated["security"]["host_network"] is False
-    runtime_image = validated["runtime_image"]
+    empty = next(item for item in artifacts if item.size_bytes == 0)
+    assert empty.sha256 == EMPTY_SHA256
+    assert empty.roles == ["entrypoint"]
+    assert empty.path == "__init__.py"
+    assert wire.security.network_mode == "none"
+    assert wire.security.host_network is False
+    runtime_image = wire.runtime_image
     assert (
-        runtime_image["registry_manifest_digest"]
-        != runtime_image["platform_manifest_digest"]
+        runtime_image.registry_manifest_digest
+        != runtime_image.platform_manifest_digest
     )
-    assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
-    assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
-    assert runtime_image["local_image_reference"] == (
+    assert runtime_image.platform_manifest_digest == runtime_image.image_digest
+    assert runtime_image.local_image_config_id != runtime_image.image_digest
+    assert runtime_image.local_image_reference == (
         "localhost/vonk/compiled-runtime-"
-        f"{runtime_image['oci_layout_sha256']}@{runtime_image['platform_manifest_digest']}"
+        f"{runtime_image.oci_layout_sha256}@{runtime_image.platform_manifest_digest}"
     )
-    assert runtime_image["runtime_interface"] == "vonk.runtime.v1"
-    assert runtime_image["runtime_interface_label"] == "v1"
-    argv = validated["runtime"]["argv"]
+    assert runtime_image.runtime_interface == "vonk.runtime.v1"
+    assert runtime_image.runtime_interface_label == "v1"
+    argv = wire.runtime.argv
     assert "--served-model-name" in argv
     assert argv[argv.index("--served-model-name") + 1] == "qwen3-8-27b-collision"
     assert any(
-        item["name"] == "XDG_CACHE_HOME" and item["value"] == "/outputs/cache"
-        for item in validated["runtime"]["env"]
+        item.name == "XDG_CACHE_HOME" and item.value == "/outputs/cache"
+        for item in wire.runtime.env
     )
     assert any(
-        item["name"] == "TMPDIR" and item["value"] == "/outputs/tmp"
-        for item in validated["runtime"]["env"]
+        item.name == "TMPDIR" and item.value == "/outputs/tmp"
+        for item in wire.runtime.env
     )
-    assert {mount["source"] for mount in validated["security"]["mounts"]} >= {
+    assert {mount.source for mount in wire.security.mounts} >= {
         "model",
         "outputs",
     }
@@ -1196,7 +1302,7 @@ def test_mount_change_invalidates_reuse_identity_without_changing_bytes() -> Non
 def test_selector_label_change_does_not_invalidate_reusable_bytes() -> None:
     first = _compile()
     changed_spec = _spec()
-    changed_spec["artifacts"][0]["id"] = "release-label"
+    _first_mapping(changed_spec["artifacts"])["id"] = "release-label"
 
     changed = _compile(changed_spec)
     assert changed.artifacts[0].id == "release-label"
@@ -1205,7 +1311,7 @@ def test_selector_label_change_does_not_invalidate_reusable_bytes() -> None:
 
 def test_upstream_authority_cannot_enter_compiled_receipts() -> None:
     polluted = _spec()
-    model = polluted["artifacts"][0]["model"]
+    model = _first_mapping(polluted["artifacts"])["model"]
     assert isinstance(model, dict)
     model["repository"] = "huggingface.co/private/model"
 
@@ -1227,7 +1333,7 @@ def test_controller_build_requires_build_id_and_exact_archive_identity() -> None
         _compile(image=_image(source="controller-build"))
 
     image = _image()
-    image["distribution_object"]["sha256"] = "2" * 64
+    _mapping(image["distribution_object"])["sha256"] = "2" * 64
     with pytest.raises(CompiledExecutionPlanError, match="verified runtime image"):
         _compile(image=image)
 
@@ -1235,7 +1341,7 @@ def test_controller_build_requires_build_id_and_exact_archive_identity() -> None
 def test_plan_rejects_incomplete_selected_cache_receipt() -> None:
     objects = _model_objects()
     objects[0]["path"] = "config.json"
-    objects[0]["distribution_object"]["name"] = "config.json"
+    _mapping(objects[0]["distribution_object"])["name"] = "config.json"
     with pytest.raises(CompiledExecutionPlanError, match="path, digest"):
         compile_verified_execution_plan(
             _spec(),
@@ -1280,7 +1386,7 @@ def test_runtime_spec_cannot_disagree_with_cache_authority_digest() -> None:
 
 def test_declared_execution_identity_must_cover_compiled_launch_facts() -> None:
     spec = _spec()
-    spec["identity"]["execution_sha256"] = "0" * 64
+    _mapping(spec["identity"])["execution_sha256"] = "0" * 64
     with pytest.raises(CompiledExecutionPlanError, match="launch facts"):
         compile_verified_execution_plan(
             spec,
@@ -1356,7 +1462,7 @@ def _collision_spec() -> dict[str, object]:
             },
         },
     ]
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     return spec
 
 
@@ -1466,6 +1572,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     package_path = library_root / "packages" / f"{recipe.identity.slug}.tar.gz"
     with tarfile.open(package_path, mode="r:*") as package_archive:
         package_paths = package_archive.getnames()
+    assert recipe.execution.mode == "build"
     package_paths.append(recipe.execution.build.context.path)
     image_digest = "1" * 64
     spec = compile_runtime_spec(
@@ -1485,10 +1592,11 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
         content_digest=content_sha256(model),
     )
     spec = _bind_runtime_artifacts(spec, [model_projection])
-    assert len(spec["artifacts"]) == 2
+    artifacts = _sequence(spec["artifacts"])
+    assert len(artifacts) == 2
+    rows = [_mapping(item) for item in artifacts]
     assert [
-        (item["id"], item["selection_id"], item["file_id"], item["path"])
-        for item in spec["artifacts"]
+        (row["id"], row["selection_id"], row["file_id"], row["path"]) for row in rows
     ] == [
         (
             "primary-filtered-snapshot",
@@ -1503,7 +1611,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
             "filtered-snapshot",
         ),
     ]
-    targets = [item["mount"]["target"] for item in spec["artifacts"]]
+    targets = [_mapping(_mapping(item)["mount"])["target"] for item in artifacts]
     assert targets == ["/models/license-token-preflight", "/models/target"]
     plan = compile_verified_execution_plan(
         spec,
@@ -1580,7 +1688,7 @@ def test_empty_model_support_file_requires_empty_digest_and_keeps_original_path(
     tmp_path,
 ) -> None:
     spec = _spec()
-    spec["artifacts"][0].update(
+    _first_mapping(spec["artifacts"]).update(
         {
             "id": "tokenizer-config",
             "file_id": "tokenizer-config",
@@ -1590,7 +1698,7 @@ def test_empty_model_support_file_requires_empty_digest_and_keeps_original_path(
             "roles": ["auxiliary"],
         }
     )
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     objects = [
         {
             "model_content_sha256": "e" * 64,
@@ -1621,8 +1729,8 @@ def test_empty_model_support_file_requires_empty_digest_and_keeps_original_path(
     assert path.name == "tokenizer_config.json"
     assert path.read_bytes() == b""
 
-    spec["artifacts"][0]["sha256"] = "a" * 64
-    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    _first_mapping(spec["artifacts"])["sha256"] = "a" * 64
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     with pytest.raises(CompiledExecutionPlanError, match="digest or size"):
         compile_verified_execution_plan(
             spec,
@@ -1650,7 +1758,7 @@ def test_execution_identity_covers_compiled_launch_facts_and_ignores_notes() -> 
     baseline = execution_identity_sha256(base)
     notes = copy.deepcopy(base)
     notes["editorial_notes"] = {"release": "same bytes"}
-    notes["model_dependencies"][0]["artifact_key"] = "new-provenance-handle"
+    _first_mapping(notes["model_dependencies"])["artifact_key"] = "new-provenance-handle"
     assert execution_identity_sha256(notes) == baseline
 
     changes = []
@@ -1662,10 +1770,12 @@ def test_execution_identity_covers_compiled_launch_facts_and_ignores_notes() -> 
         ("endpoint", {"port": 8001}),
     ):
         changed = copy.deepcopy(base)
-        changed[key].update(value)
+        _mapping(changed[key]).update(_mapping(value))
         changes.append(execution_identity_sha256(changed))
     changed_artifact = copy.deepcopy(base)
-    changed_artifact["artifacts"][0]["mount"]["target"] = "/models/changed"
+    _mapping(_first_mapping(changed_artifact["artifacts"])["mount"])["target"] = (
+        "/models/changed"
+    )
     changes.append(execution_identity_sha256(changed_artifact))
 
     assert all(value != baseline for value in changes)

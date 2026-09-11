@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_control.artifact_job_api import ArtifactJobCreate, install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobResponse
+from vonk_control.artifact_jobs import (
+    ArtifactJobResponse,
+    ArtifactJobService,
+    ArtifactJobView,
+    CompiledArtifactContract,
+)
 from vonk_control.auth import Actor
 from vonk_control.strict_json import ControllerAPIRoute
 
@@ -20,51 +26,53 @@ from cluster_profiles.generated_control.models.artifact_job_response import (
 JOB_ID = "00000000-0000-4000-8000-000000000001"
 
 
-@dataclass(frozen=True)
-class _ArtifactJobView:
+@dataclass(frozen=True, slots=True)
+class _ArtifactJobView(ArtifactJobView):
     id: str
-    state: str
+    state: str = "draft"
     run_id: str = "00000000-0000-4000-8000-000000000002"
     operation_id: str | None = None
     interface: str = "image-job"
     contract_sha256: str = "a" * 64
-    compiled_contract: dict[str, object] = field(
-        default_factory=lambda: {
-            "schema_version": 1,
-            "interface": "image-job",
-            "input": {
-                "required": False,
-                "media_types": [],
-                "max_bytes": 0,
-                "slots": [],
-            },
-            "parameters": [],
-            "output": {
-                "path": "/outputs",
-                "max_total_bytes": 1024,
-                "slots": [
-                    {
-                        "id": "image",
-                        "label": "Image",
-                        "description": "Generated image",
-                        "media_types": ["image/png"],
-                        "extensions": [".png"],
-                        "min_files": 0,
-                        "max_files": 1,
-                        "max_file_bytes": 1024,
-                        "max_total_bytes": 1024,
-                    }
-                ],
-            },
-            "output_limits": {
-                "max_files": 1,
-                "max_file_bytes": 1024,
-                "max_total_bytes": 1024,
-                "allowed_media_types": ["image/png"],
-            },
-            "max_timeout_seconds": 3600,
-            "engine": {"future_argument": {"enabled": True}},
-        }
+    compiled_contract: CompiledArtifactContract = field(
+        default_factory=lambda: CompiledArtifactContract.model_validate(
+            {
+                "schema_version": 1,
+                "interface": "image-job",
+                "input": {
+                    "required": False,
+                    "media_types": [],
+                    "max_bytes": 0,
+                    "slots": [],
+                },
+                "parameters": [],
+                "output": {
+                    "path": "/outputs",
+                    "max_total_bytes": 1024,
+                    "slots": [
+                        {
+                            "id": "image",
+                            "label": "Image",
+                            "description": "Generated image",
+                            "media_types": ["image/png"],
+                            "extensions": [".png"],
+                            "min_files": 0,
+                            "max_files": 1,
+                            "max_file_bytes": 1024,
+                            "max_total_bytes": 1024,
+                        }
+                    ],
+                },
+                "output_limits": {
+                    "max_files": 1,
+                    "max_file_bytes": 1024,
+                    "max_total_bytes": 1024,
+                    "allowed_media_types": ["image/png"],
+                },
+                "max_timeout_seconds": 3600,
+                "engine": {"future_argument": {"enabled": True}},
+            }
+        )
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
@@ -87,21 +95,32 @@ class _ArtifactJobView:
     updated_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-class _TransferService:
+class _TransferService(ArtifactJobService):
     def __init__(self, result_path: Path) -> None:
         self.result_path = result_path
         self.upload: dict[str, object] | None = None
 
-    async def put_input_stream(self, job_id: str, **values: object) -> _ArtifactJobView:
-        chunks = values.pop("chunks")
+    async def put_input_stream(
+        self,
+        job_id: str,
+        *,
+        name: str,
+        media_type: str,
+        expected_sha256: str,
+        content_length: int,
+        chunks: AsyncIterable[bytes],
+    ) -> ArtifactJobView:
         self.upload = {
             "job_id": job_id,
-            **values,
+            "name": name,
+            "media_type": media_type,
+            "expected_sha256": expected_sha256,
+            "content_length": content_length,
             "content": b"".join([chunk async for chunk in chunks]),
         }
-        return _ArtifactJobView(id=job_id, state="draft")
+        return _ArtifactJobView(id=job_id)
 
-    def result_blob(self, job_id: str, sha256: str):
+    def result_blob(self, job_id: str, sha256: str) -> tuple[Path, str, str, int]:
         assert job_id == JOB_ID
         assert sha256 == hashlib.sha256(self.result_path.read_bytes()).hexdigest()
         return (
