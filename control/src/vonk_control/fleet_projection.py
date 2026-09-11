@@ -22,6 +22,7 @@ from vonk_agent_protocol.telemetry import (
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .auth import CursorError
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentCertificate,
@@ -763,7 +764,7 @@ class FleetProjection:
             type(event_cursor) is not int
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
-            raise ValueError("Fleet event cursor is invalid")
+            raise CursorError("Fleet event cursor is invalid")
         revision = self._authority.head()
         current = _utc(self._clock())
         with self._sessions.begin() as session:

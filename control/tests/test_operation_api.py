@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import NoReturn
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
 from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
@@ -1254,3 +1255,47 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
     assert listed.json()["detail"] == (
         f"stored provenance for operation {value['id']} is invalid"
     )
+
+
+def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:
+    """A package document that is present but unreadable must not read as absent."""
+
+    engine = create_engine("sqlite://")
+    job_table = Job.__table__
+    assert isinstance(job_table, Table)
+    Base.metadata.create_all(engine, tables=[job_table])
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+
+    def stored(payload: dict[str, object]) -> str:
+        job_id = str(uuid.uuid4())
+        with sessions.begin() as session:
+            session.add(
+                Job(
+                    id=job_id,
+                    request_id=str(uuid.uuid4()),
+                    kind="agent-upgrade",
+                    state="running",
+                    actor="admin",
+                    authority_revision=COMMIT,
+                    targets=[NODE_ID],
+                    payload_digest="a" * 64,
+                    payload=payload,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        return job_id
+
+    def diagnostics(job_id: str) -> object:
+        with sessions() as session:
+            return operation_api._agent_upgrade_diagnostics(session, job_id)
+
+    # An upgrade that carries no package document has no diagnostics to project.
+    assert diagnostics(stored({})) is None
+    assert diagnostics(stored({"package": None})) is None
+    # A present but non-object package is corruption, and the message names the
+    # job so the corrupt row can be found.
+    corrupt = stored({"package": "not-a-document"})
+    with pytest.raises(BoundedJSONError, match=f"{corrupt} package payload is invalid"):
+        diagnostics(corrupt)

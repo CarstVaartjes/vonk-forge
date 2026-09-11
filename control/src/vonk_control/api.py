@@ -79,6 +79,7 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
+from .logging import JobLogCorruptError
 from .metrics import MetricsRegistry
 from .model_cache_api import (
     install_model_operator_routes,
@@ -1251,6 +1252,8 @@ def create_app(
         try:
             jobs.get(job_id)
             return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
+        except JobLogCorruptError:
+            raise HTTPException(status_code=503, detail="job logs unavailable") from None
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job not found") from None
 
@@ -1275,6 +1278,10 @@ def create_app(
             return Response(
                 job_logs.read(job_id, digest), media_type="text/plain; charset=utf-8"
             )
+        except JobLogCorruptError:
+            # The log exists but no longer matches its digest. Answering 404
+            # would report corrupt retained evidence as absent.
+            raise HTTPException(status_code=503, detail="job logs unavailable") from None
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job log not found") from None
 
