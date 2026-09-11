@@ -527,18 +527,14 @@ class ArtifactVerificationResult(_StrictModel):
     evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list)
 
 class _RunSwitchPhaseBase(_StrictModel):
+    # `subphase` is declared by each concrete result rather than here. A default
+    # on this base makes every subclass that narrows the field to its own
+    # Literal an override that drops the default, which pyright reports nine
+    # times; a base field without a default instead makes it required on the
+    # four results that do not narrow it, changing the committed OpenAPI. Each
+    # result declaring the field it actually publishes keeps both quiet without
+    # touching a published schema.
     phase: RunSwitchPhaseKind
-    # The default here is deliberate, and the nine `subphase overrides a field
-    # ... missing a default` errors it causes are accepted in
-    # tools/pyright-baseline.json. The nine concrete results that narrow
-    # `subphase` to their own Literal cannot all be given defaults, and removing
-    # this one is not schema-neutral either: the four results that do NOT
-    # override it -- RunSwitchCleanupResult, RunSwitchStartResult,
-    # RunSwitchStopResult and RunSwitchFinalVerifyResult -- would gain a
-    # required `subphase`, changing the committed OpenAPI. Giving the overrides
-    # a default, or dropping this field entirely, changes it too. Tried and
-    # verified; no schema-preserving formulation exists.
-    subphase: RunSwitchSubphase | None = None
 
 class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
     phase: Literal["prepare"]
@@ -652,6 +648,7 @@ class RunSwitchVerifyResult(ArtifactVerificationResult):
 
 class RunSwitchCleanupResult(_RunSwitchPhaseBase):
     phase: Literal["cleanup"]
+    subphase: RunSwitchSubphase | None = None
     scope: Literal["spark-local"]
     reclaimed_bytes: int = Field(ge=0)
     protected_referenced_bytes: int = Field(default=0, ge=0)
@@ -685,16 +682,19 @@ class RunSwitchRuntimeInstallResult(_RunSwitchPhaseBase):
 
 class RunSwitchStopResult(_RunSwitchPhaseBase):
     phase: Literal["stop"]
+    subphase: RunSwitchSubphase | None = None
     run_id: UuidId
 
 
 class RunSwitchStartResult(_RunSwitchPhaseBase):
     phase: Literal["start"]
+    subphase: RunSwitchSubphase | None = None
     run_id: UuidId
 
 
 class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     phase: Literal["final_verify"]
+    subphase: RunSwitchSubphase | None = None
     final_verified: bool
     run_id: UuidId
     state: Annotated[str, StringConstraints(min_length=1, max_length=32)]
