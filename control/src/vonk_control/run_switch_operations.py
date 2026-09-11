@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -99,12 +99,20 @@ from .run_switch_contract import (
     InvocationMetadata,
     MappingSelection,
     ResourceDemandEvidence,
+    RunSwitchAction,
     RunSwitchApplyRequest,
     RunSwitchBuildEvidence,
+    RunSwitchBuildEvidenceState,
     RunSwitchCancellation,
+    RunSwitchCapabilityEvidenceState,
+    RunSwitchChangeEffect,
     RunSwitchContainerBuildResult,
+    RunSwitchContainerBuildState,
+    RunSwitchCoverage,
     RunSwitchMemberProgress,
+    RunSwitchMemberState,
     RunSwitchOperation,
+    RunSwitchOperationKind,
     RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPhaseKind,
@@ -112,9 +120,14 @@ from .run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchProgress,
+    RunSwitchProgressState,
     RunSwitchReason,
+    RunSwitchReasonScope,
+    RunSwitchReasonSeverity,
+    RunSwitchRetention,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
+    RunSwitchSubphase,
     RunSwitchVerifyResult,
     RuntimeImageStorageImpact,
     SparkFit,
@@ -126,6 +139,19 @@ from .run_switch_contract import (
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
+
+# Persisted progress and catalog documents arrive as decoded JSON, so the
+# contract's closed value sets are read back through the declared alias instead
+# of a hand-written membership test that could drift from it.
+_CHANGE_EFFECTS_ADAPTER = TypeAdapter(dict[str, RunSwitchChangeEffect])
+_CAPABILITY_EVIDENCE_ADAPTER = TypeAdapter(RunSwitchCapabilityEvidenceState)
+_CONTAINER_BUILD_STATE_ADAPTER = TypeAdapter(RunSwitchContainerBuildState)
+_BUILD_EVIDENCE_STATE_ADAPTER = TypeAdapter(RunSwitchBuildEvidenceState)
+_OPERATION_KIND_ADAPTER = TypeAdapter(RunSwitchOperationKind)
+_MEMBER_STATE_ADAPTER = TypeAdapter(RunSwitchMemberState)
+_PROGRESS_STATE_ADAPTER = TypeAdapter(RunSwitchProgressState)
+_SUBPHASE_ADAPTER = TypeAdapter(RunSwitchSubphase)
+_REASON_SEVERITY_ADAPTER = TypeAdapter(RunSwitchReasonSeverity)
 
 
 class RunSwitchOperationConflict(RuntimeError):
@@ -169,8 +195,8 @@ class ArtifactInspection:
     missing_nas_bytes: int | None
     missing_spark_bytes: int | None
     reclaimable_bytes: int
-    nas_coverage: str
-    spark_coverage: str
+    nas_coverage: RunSwitchCoverage
+    spark_coverage: RunSwitchCoverage
     artifact_digests: tuple[str, ...] = ()
     reclaimable_digests: tuple[str, ...] = ()
     freshness: tuple[FreshnessEvidence, ...] = ()
@@ -249,6 +275,21 @@ class RunSwitchPhaseExecutor(Protocol):
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution: ...
+
+
+@runtime_checkable
+class _PhasePreflightGate(Protocol):
+    """Optional executor capability consulted before a phase is executed."""
+
+    def __call__(
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        actor: str,
+        request_key: str,
+        progress: Mapping[str, object],
+    ) -> tuple[LifecyclePreflightCheckpoint | None, str | None]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,8 +382,8 @@ def _as_reason(
     code: str,
     detail: str,
     *,
-    scope: str,
-    severity: str = "blocker",
+    scope: RunSwitchReasonScope,
+    severity: RunSwitchReasonSeverity = "blocker",
     node_ids: Sequence[str] = (),
     stale: bool = False,
 ) -> RunSwitchReason:
@@ -370,7 +411,9 @@ def _resource_reason(reason: object, *, node_ids: Sequence[str] = ()) -> RunSwit
         f"run-switch.{getattr(reason, 'code', 'resource.evidence_unknown')}",
         str(getattr(reason, "detail", "Resource planning evidence is unavailable.")),
         scope="node" if isinstance(node_id, str) else "operation",
-        severity=str(getattr(reason, "severity", "blocker")),
+        severity=_REASON_SEVERITY_ADAPTER.validate_python(
+            getattr(reason, "severity", "blocker"), strict=True
+        ),
         node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
     )
 
@@ -393,7 +436,9 @@ def _settings_view(settings: object) -> EffectiveSettingsSelection:
             backend=resolved.parallelism.backend,
         ),
         knobs=dict(resolved.knobs),
-        change_effects=dict(resolved.change_effects),
+        change_effects=_CHANGE_EFFECTS_ADAPTER.validate_python(
+            dict(resolved.change_effects), strict=True
+        ),
         identity_sha256=resolved.identity_digest,
     )
 
@@ -416,10 +461,19 @@ def _selected_model_bytes(
         model_ref = selection.get("model")
         if not isinstance(model_ref, Mapping):
             return None
-        reference = tuple(model_ref.get(name) for name in ("publisher", "slug", "content_sha256"))
-        if any(not isinstance(value, str) or not value for value in reference):
+        publisher = model_ref.get("publisher")
+        slug = model_ref.get("slug")
+        content_sha256 = model_ref.get("content_sha256")
+        if (
+            not isinstance(publisher, str)
+            or not publisher
+            or not isinstance(slug, str)
+            or not slug
+            or not isinstance(content_sha256, str)
+            or not content_sha256
+        ):
             return None
-        model_document = model_documents.get(reference)
+        model_document = model_documents.get((publisher, slug, content_sha256))
         if model_document is None:
             return None
         files = model_document.get("files")
@@ -511,6 +565,15 @@ def _planned_stop_releases(
     return tuple(releases)
 
 
+def _capability_evidence_state(value: object) -> RunSwitchCapabilityEvidenceState | None:
+    """Read one capability evidence label, or ``None`` when it is not declared."""
+
+    try:
+        return _CAPABILITY_EVIDENCE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
 def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityEvidence]:
     """Read only explicit capability metadata from one immutable document."""
 
@@ -537,7 +600,7 @@ def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityE
     for name in sorted(str(key) for key in raw):
         value = raw.get(name)
         declared: bool | None
-        evidence = "unknown"
+        evidence: RunSwitchCapabilityEvidenceState = "unknown"
         detail: str | None = None
         evidence_digest: str | None = None
         if isinstance(value, bool):
@@ -545,9 +608,9 @@ def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityE
         elif isinstance(value, Mapping):
             candidate = value.get("declared", value.get("supported"))
             declared = candidate if isinstance(candidate, bool) else None
-            candidate_evidence = value.get("evidence")
-            if candidate_evidence in {"tested", "observed", "not-tested", "unknown"}:
-                evidence = str(candidate_evidence)
+            candidate_evidence = _capability_evidence_state(value.get("evidence"))
+            if candidate_evidence is not None:
+                evidence = candidate_evidence
             if isinstance(value.get("detail"), str):
                 detail = str(value["detail"])[:256]
             if isinstance(value.get("evidence_digest"), str):
@@ -556,14 +619,18 @@ def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityE
             declared = None
         evidence_value = evidence_by_name.get(name)
         if isinstance(evidence_value, Mapping):
-            candidate_evidence = evidence_value.get("state", evidence_value.get("evidence"))
-            if candidate_evidence in {"tested", "observed", "not-tested", "unknown"}:
-                evidence = str(candidate_evidence)
+            candidate_evidence = _capability_evidence_state(
+                evidence_value.get("state", evidence_value.get("evidence"))
+            )
+            if candidate_evidence is not None:
+                evidence = candidate_evidence
             candidate_digest = evidence_value.get("digest", evidence_value.get("evidence_digest"))
             if isinstance(candidate_digest, str):
                 evidence_digest = candidate_digest
-        elif evidence_value in {"tested", "observed", "not-tested", "unknown"}:
-            evidence = str(evidence_value)
+        else:
+            candidate_evidence = _capability_evidence_state(evidence_value)
+            if candidate_evidence is not None:
+                evidence = candidate_evidence
         support = "unknown" if declared is None else "supported" if declared else "unsupported"
         facts.append(
             CapabilityEvidence(
@@ -631,7 +698,7 @@ def _summary_capability_facts(summary: object) -> list[CapabilityEvidence]:
             continue
         if support not in {"supported", "unsupported", "unknown"}:
             support = "unknown"
-        evidence_map = {
+        evidence_map: dict[str, RunSwitchCapabilityEvidenceState] = {
             "declared": "observed",
             "tested": "tested",
             "contradicted": "observed",
@@ -853,7 +920,7 @@ def _container_build_result(build: RecipeBuild) -> dict[str, object]:
             subphase="container-build",
             build_id=build.id,
             build_input_sha256=build.build_input_sha256,
-            state=build.state,
+            state=_CONTAINER_BUILD_STATE_ADAPTER.validate_python(build.state, strict=True),
             image_digest=build.image_digest if succeeded else None,
             oci_layout_sha256=build.oci_layout_sha256 if succeeded else None,
             image_bytes=build.image_bytes if succeeded else None,
@@ -1040,7 +1107,7 @@ class RecipeLifecyclePhaseExecutor:
             result = _container_build_result(persisted)
             if persisted.state == "succeeded":
                 return PhaseExecution(result=result)
-        return PhaseExecution(value.id, result)
+        return PhaseExecution(_started_operation_id(value), result)
 
     def execute(
         self,
@@ -1232,7 +1299,7 @@ class RecipeLifecyclePhaseExecutor:
                     f"run-switch.install-start-failed: {error}"
                 ) from error
             return PhaseExecution(
-                value.id,
+                _started_operation_id(value),
                 {"installation_id": installation_id},
             )
         if phase.kind == "prepare":
@@ -1417,7 +1484,7 @@ class RunSwitchOperationService:
                 ) from error
             installation = session.get(RecipeInstallation, run.installation_id)
             revision = _active_recipe_revision(
-                session, stored_run_plan.get("recipe_revision_id")
+                session, _string_or_none(stored_run_plan.get("recipe_revision_id"))
             )
             mapping = session.get(ClusterMapping, run.mapping_id)
             mapping_nodes = tuple(
@@ -1680,6 +1747,8 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             previous = progress.get("cancellation")
             if previous:
+                if not isinstance(previous, Mapping):
+                    raise RunSwitchOperationConflict("run-switch cancellation evidence is invalid")
                 if any(previous.get(key) != getattr(cancellation, key) for key in ("request_key", "actor", "reason")):
                     raise RunSwitchOperationConflict("run-switch cancellation request was already used differently")
                 return self._operation_view(job)
@@ -1687,7 +1756,7 @@ class RunSwitchOperationService:
                 raise RunSwitchOperationConflict("run-switch operation is not cancellable")
             plan = _load_plan(job.payload["plan"])
             phase = plan.phases[min(require_integer(progress.get("phase_index", 0), "phase index"), len(plan.phases) - 1)]
-            if "start" in progress.get("completed_phases", []) or (job.state == "running" and phase.kind in {"start", "final_verify"}):
+            if "start" in require_sequence(progress.get("completed_phases", []), "completed phases") or (job.state == "running" and phase.kind in {"start", "final_verify"}):
                 raise RunSwitchOperationConflict("run-switch runtime is starting or active; use the explicit Stop operation")
             progress["cancellation"] = cancellation.model_dump(mode="json")
             job.status_reason = "Cancellation requested; finishing the current preparation safely."
@@ -2244,13 +2313,18 @@ class RunSwitchOperationService:
                 candidate_item = getattr(resolved_item, "document", None)
                 if not isinstance(candidate_item, Mapping):
                     continue
-                reference = (
-                    getattr(resolved_item, "publisher", None),
-                    getattr(resolved_item, "slug", None),
-                    getattr(resolved_item, "content_digest", None),
-                )
-                if all(isinstance(value, str) and value for value in reference):
-                    model_documents[reference] = candidate_item
+                publisher = getattr(resolved_item, "publisher", None)
+                slug = getattr(resolved_item, "slug", None)
+                content_digest = getattr(resolved_item, "content_digest", None)
+                if (
+                    isinstance(publisher, str)
+                    and publisher
+                    and isinstance(slug, str)
+                    and slug
+                    and isinstance(content_digest, str)
+                    and content_digest
+                ):
+                    model_documents[(publisher, slug, content_digest)] = candidate_item
             candidate = getattr(resolved_model, "document", None)
             if isinstance(candidate, Mapping):
                 model_document = candidate
@@ -2646,7 +2720,6 @@ class RunSwitchOperationService:
         require_available: bool = True,
     ) -> tuple[
         RunSwitchBuildEvidence,
-    RunSwitchCancellation,
         RuntimeImageStorageImpact,
         list[RunSwitchReason],
         list[RunSwitchReason],
@@ -2959,7 +3032,7 @@ class RunSwitchOperationService:
                 )
         return (
             RunSwitchBuildEvidence(
-                state=state,
+                state=_BUILD_EVIDENCE_STATE_ADAPTER.validate_python(state, strict=True),
                 build_id=build.id if build is not None else candidate.id if candidate is not None else None,
                 build_input_sha256=(
                     build.build_input_sha256
@@ -3139,7 +3212,7 @@ class RunSwitchOperationService:
                     else max(
                         0,
                         image_bytes
-                        - _per_target_bytes(
+                        - _required_per_target_bytes(
                             runtime_storage.missing_image_distribution_bytes,
                             target_count,
                         )
@@ -3701,7 +3774,7 @@ class RunSwitchOperationService:
         return inspection
 
     @staticmethod
-    def _storage(inspection: ArtifactInspection, *, retention: str) -> ArtifactStorageImpact:
+    def _storage(inspection: ArtifactInspection, *, retention: RunSwitchRetention) -> ArtifactStorageImpact:
         return ArtifactStorageImpact(
             artifact_set_sha256=inspection.artifact_set_sha256,
             artifact_set_bytes=inspection.artifact_set_bytes,
@@ -3722,7 +3795,7 @@ class RunSwitchOperationService:
     def _phases(
         self,
         *,
-        action: str,
+        action: RunSwitchAction,
         group: SparkGroup,
         installation_id: str | None,
         installation_state: str | None,
@@ -3730,7 +3803,7 @@ class RunSwitchOperationService:
         stops: Sequence[StopImpact],
         inspection: ArtifactInspection,
         runtime_storage: RuntimeImageStorageImpact | None,
-        retention: str,
+        retention: RunSwitchRetention,
         blockers: Sequence[RunSwitchReason],
         stop_before_transfer: bool,
         stop_before_prepare: bool,
@@ -3804,7 +3877,7 @@ class RunSwitchOperationService:
             kind: RunSwitchPhaseKind,
             detail: str,
             *,
-            subphase: str | None = None,
+            subphase: RunSwitchSubphase | None = None,
         ) -> None:
             phases.append(
                 RunSwitchPhase(
@@ -3939,7 +4012,7 @@ class RunSwitchOperationService:
 
     @staticmethod
     def _finalize_plan(data: Mapping[str, object]) -> RunSwitchPlan:
-        plan = RunSwitchPlan(**data)
+        plan = RunSwitchPlan.model_validate(dict(data))
         identity = _plan_identity(plan.model_dump(mode="json"))
         return plan.model_copy(update={"plan_digest": _digest(identity)})
 
@@ -4063,19 +4136,23 @@ class RunSwitchOperationService:
                 return True
             plan = _load_plan(raw_plan)
             progress = _read_progress(job.result)
-            phase_index = progress.get("phase_index", 0)
-            item_index = progress.get("item_index", 0)
+            raw_phase_index = progress.get("phase_index", 0)
+            raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
             if progress.get("cancellation") and child_id is None:
                 _complete_cancellation(job, progress, now)
                 session.commit()
                 return True
-            if type(phase_index) is not int or type(item_index) is not int or phase_index < 0 or item_index < 0:
+            if type(raw_phase_index) is not int or type(raw_item_index) is not int or raw_phase_index < 0 or raw_item_index < 0:
                 job.state = "failed"
                 job.status_reason = "run-switch persisted progress is invalid"
                 job.updated_at = now
                 session.commit()
                 return True
+            # Declare the validated integers so the checkpoint closure below
+            # carries their exact type rather than the raw JSON union.
+            phase_index: int = raw_phase_index
+            item_index: int = raw_item_index
             if phase_index >= len(plan.phases):
                 job.state = "succeeded"
                 job.status_reason = None
@@ -4227,7 +4304,10 @@ class RunSwitchOperationService:
                     except RunSwitchOperationConflict as error:
                         self._mark_failed(job, str(error), now=now, progress=progress)
                         return True
-                    progress["phase_results"] = [*progress.get("phase_results", []), receipt]
+                    progress["phase_results"] = [
+                        *require_sequence(progress.get("phase_results", []), "phase results"),
+                        receipt,
+                    ]
                 item_total = len(persisted_plan.stops) if phase.kind == "stop" else 1
                 progress["child_operation_id"] = None
                 if item_index >= item_total:
@@ -4273,7 +4353,7 @@ class RunSwitchOperationService:
             actor = job.actor
             request_key = job.request_id
         gate = getattr(self._phase_executor, "preflight", None)
-        if callable(gate):
+        if isinstance(gate, _PhasePreflightGate):
             try:
                 checkpoint, blocked = gate(plan, phase, actor=actor, request_key=request_key, progress=progress)
             except (RuntimeError, ValueError, KeyError) as error:
@@ -4368,7 +4448,8 @@ class RunSwitchOperationService:
                 if phase.kind == "final_verify" and execution.operation_id is None:
                     started = progress.setdefault("final_verify_started_at", now.timestamp())
                     if (
-                        type(started) not in (int, float)
+                        isinstance(started, bool)
+                        or not isinstance(started, (int, float))
                         or not 0 <= now.timestamp() - started < 300
                     ):
                         self._mark_failed(
@@ -4561,7 +4642,7 @@ class RunSwitchOperationService:
             job.updated_at = _now(self._clock)
             return True
 
-    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False, checkpoint: tuple[int, int, str | None] | None = None) -> None:
+    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False, checkpoint: tuple[int, int, object] | None = None) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.state not in {"queued", "running"}:
@@ -4599,7 +4680,7 @@ class RunSwitchOperationService:
         )
         return RunSwitchOperation(
             operation_id=job.id,
-            kind=job.kind,
+            kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
             action=plan.action,
             state=job.state,
             plan_digest=plan.plan_digest,
@@ -4940,8 +5021,25 @@ def _progress_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
-def _progress_state(value: object) -> str | None:
-    return value if value in {"pending", "running", "succeeded", "failed", "unknown"} else None
+def _progress_state(value: object) -> RunSwitchMemberState | None:
+    try:
+        return _MEMBER_STATE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def _progress_operation_state(value: object) -> RunSwitchProgressState:
+    try:
+        return _PROGRESS_STATE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return "unknown"
+
+
+def _progress_subphase(value: object) -> RunSwitchSubphase | None:
+    try:
+        return _SUBPHASE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return None
 
 
 def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
@@ -5123,7 +5221,10 @@ def _progress_member_entries(value: object) -> list[Mapping[str, object]]:
 
 def _complete_cancellation(job: Job, progress: dict[str, object], now: datetime) -> None:
     job.state = "cancelled"
-    job.status_reason = progress["cancellation"]["reason"]
+    cancellation = _progress_mapping(progress.get("cancellation"))
+    if cancellation is None:
+        raise RunSwitchOperationConflict("run-switch cancellation evidence is invalid")
+    job.status_reason = _string_or_none(cancellation.get("reason"))
     progress["child_operation_id"] = None
     progress["retryable"] = False
     job.result = _persisted_result(progress)
@@ -5135,7 +5236,7 @@ def _checkpoint_matches(
     progress: Mapping[str, object],
     phase_index: int,
     item_index: int,
-    child_id: str | None,
+    child_id: object,
 ) -> bool:
     """Accept an out-of-transaction observation only for its original checkpoint."""
     return (
@@ -5341,11 +5442,15 @@ def _progress_view(
     """Build the stable operation progress DTO from durable JSON state."""
 
     if plan is None:
-        node_ids = [str(value) for value in raw.get("node_ids", []) if isinstance(value, str)]
+        node_ids = [
+            str(value)
+            for value in require_sequence(raw.get("node_ids", []), "node ids")
+            if isinstance(value, str)
+        ]
         phase_count = 1
         phase_index = 0
         phase = None
-        subphase = None
+        subphase: RunSwitchSubphase | None = None
         total = _progress_int(raw.get("total_bytes"))
         member_totals = {node_id: None for node_id in node_ids}
     else:
@@ -5357,15 +5462,8 @@ def _progress_view(
         phase = _progress_phase(raw.get("phase"))
         if phase is None and phase_index < len(plan.phases):
             phase = plan.phases[phase_index].kind
-        subphase = raw.get("subphase")
-        if subphase not in {
-            "container-build",
-            "model-download",
-            "runtime-image",
-            "runtime-plan",
-            "target-copy",
-            "runtime-install",
-        }:
+        subphase = _progress_subphase(raw.get("subphase"))
+        if subphase is None:
             subphase = (
                 plan.phases[phase_index].subphase
                 if phase_index < len(plan.phases)
@@ -5376,7 +5474,7 @@ def _progress_view(
             candidate_total = _progress_int(raw.get("total_bytes"))
             total = candidate_total
 
-    state = operation_state if operation_state in {"queued", "running", "succeeded", "failed", "cancelled"} else "unknown"
+    state = _progress_operation_state(operation_state)
     if state == "succeeded":
         phase = "final_verify"
         subphase = None
@@ -5425,7 +5523,8 @@ def _progress_view(
             else:
                 member_state = "unknown"
         member_phase = _progress_phase(item.get("phase")) or phase
-        error = item.get("error") if isinstance(item.get("error"), str) else None
+        raw_error = item.get("error")
+        error = raw_error if isinstance(raw_error, str) else None
         if state == "failed" and node_id in current_nodes and error is None:
             error = status_reason[:256] if isinstance(status_reason, str) else None
         members.append(
@@ -5667,7 +5766,7 @@ def _string_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _is_hex_digest(value: object) -> bool:
+def _is_hex_digest(value: object) -> TypeGuard[str]:
     return (
         isinstance(value, str)
         and len(value) == 64
@@ -5676,7 +5775,7 @@ def _is_hex_digest(value: object) -> bool:
     )
 
 
-def _is_oci_digest(value: object) -> bool:
+def _is_oci_digest(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and value.startswith("sha256:") and _is_hex_digest(value[7:])
 
 
@@ -5727,6 +5826,17 @@ def _per_target_bytes(value: int | None, target_count: int) -> int | None:
     return value // target_count
 
 
+def _required_per_target_bytes(value: int | None, target_count: int) -> int:
+    """Per-target bytes for arithmetic, failing closed when it is not exact."""
+
+    per_target = _per_target_bytes(value, target_count)
+    if per_target is None:
+        raise RunSwitchOperationConflict(
+            "run-switch.per-target-byte-evidence-invalid"
+        )
+    return per_target
+
+
 def _runtime_interface(document: Mapping[str, object]) -> str:
     interfaces = document.get("interfaces")
     if isinstance(interfaces, list):
@@ -5740,6 +5850,15 @@ def _required_string(value: object) -> str:
     if not isinstance(value, str) or not value:
         raise RunSwitchOperationConflict("run-switch persisted identity is invalid")
     return value
+
+
+def _started_operation_id(value: object) -> str:
+    """Read the identity of a started child operation without assuming its class."""
+
+    operation_id = getattr(value, "id", None)
+    if not isinstance(operation_id, str) or not operation_id:
+        raise RunSwitchOperationConflict("run-switch child operation identity is invalid")
+    return operation_id
 
 
 def _mapping_node(node: SparkGroupNode) -> Any:

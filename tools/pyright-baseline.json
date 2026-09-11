@@ -59,7 +59,6 @@
   "control/src/vonk_control/resource_planning.py": 18,
   "control/src/vonk_control/routes.py": 9,
   "control/src/vonk_control/run_switch_contract.py": 9,
-  "control/src/vonk_control/run_switch_operations.py": 82,
   "control/src/vonk_control/runtime_image_preparation.py": 17,
   "control/src/vonk_control/runtime_preflight.py": 3,
   "control/src/vonk_control/step_ca.py": 20,
