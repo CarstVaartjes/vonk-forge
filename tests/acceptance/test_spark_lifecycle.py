@@ -2440,6 +2440,29 @@ class SparkLifecycle:
                                     f"={job.get('state')} progress={reported}"
                                 )
                         job_detail = " | ".join(summary) or "none"
+                        # The agent operation is the claim that matters: a
+                        # queued one means the Spark never took the work, a
+                        # running one means it did and is not reporting.
+                        _, node_operations = self.control.request(
+                            "GET",
+                            "/api/operations",
+                            query={"node_id": node_id, "limit": 5},
+                        )
+                        operations = require_object(
+                            node_operations, "stalled operation list"
+                        ).get("operations")
+                        if isinstance(operations, list):
+                            detail_rows: list[str] = []
+                            for item in operations:
+                                op = require_object(item, "stalled operation")
+                                reported = json.dumps(
+                                    op.get("progress"), sort_keys=True
+                                )[:160]
+                                detail_rows.append(
+                                    f"{op.get('kind')}={op.get('state')}"
+                                    f"/{op.get('attempt')} {reported}"
+                                )
+                            job_detail += " || " + " | ".join(detail_rows)
                     except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
                         job_detail = f"unavailable: {type(error).__name__}"
                 raise LifecycleError(
