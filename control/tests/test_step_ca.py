@@ -8,7 +8,6 @@ import socket
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,12 +41,33 @@ CA_URL = "https://step-ca:9000"
 STEP_CA_IMAGE = "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270"
 
 
-@dataclass(frozen=True)
-class _CrlWithoutWindow:
-    """A CRL the builder refuses to sign: it has no next-update window."""
+def _der(tag: int, payload: bytes) -> bytes:
+    """Encode one definite-length DER element."""
+    if len(payload) < 0x80:
+        length = bytes([len(payload)])
+    else:
+        encoded = len(payload).to_bytes((len(payload).bit_length() + 7) // 8, "big")
+        length = bytes([0x80 | len(encoded)]) + encoded
+    return bytes([tag]) + length + payload
 
-    last_update_utc: datetime = NOW
-    next_update_utc: datetime | None = None
+
+def _crl_without_next_update() -> x509.CertificateRevocationList:
+    """A real CRL whose TBSCertList omits the optional ``nextUpdate`` field.
+
+    ``CertificateRevocationListBuilder.sign`` refuses to produce this shape, but
+    a CA that omits the window is exactly what the freshness check must reject,
+    so the bytes are encoded here rather than the input being faked.
+    """
+    ecdsa_with_sha256 = _der(0x06, bytes.fromhex("2a8648ce3d040302"))
+    algorithm = _der(0x30, ecdsa_with_sha256)
+    common_name = _der(0x06, bytes.fromhex("550403"))
+    issuer = _der(
+        0x30, _der(0x31, _der(0x30, common_name + _der(0x0C, b"Vonk Forge Test CA")))
+    )
+    this_update = _der(0x17, b"260804120000Z")
+    tbs_cert_list = _der(0x30, algorithm + issuer + this_update)
+    signature = _der(0x03, b"\x00" + bytes(64))
+    return x509.load_der_x509_crl(_der(0x30, tbs_cert_list + algorithm + signature))
 
 
 class _Material(TypedDict):
@@ -400,10 +420,8 @@ def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
 
 
 def test_revocation_bundle_rejects_missing_next_update_window() -> None:
-    # cryptography refuses to sign a CRL that has no next-update window, which
-    # is exactly the shape the freshness check must reject, so the input is a
-    # double carrying only the two fields the check reads.
-    crl_without_window = _CrlWithoutWindow()
+    crl_without_window = _crl_without_next_update()
+    assert crl_without_window.next_update_utc is None
     with pytest.raises(StepCAError, match="revocation bundle.*freshness"):
         _validate_crl_freshness(crl_without_window, NOW, timedelta(seconds=30))
 
