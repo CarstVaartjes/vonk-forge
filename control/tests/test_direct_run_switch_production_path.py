@@ -383,10 +383,38 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     return sessions, revision_id, recipe_digest, mapping_id
 
 
-def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | None = None):
+def _make_service(
+    tmp_path: Path,
+    *,
+    persist_db: bool = True,
+    tamper_db: str | None = None,
+    availability_key: str | None = None,
+):
     sessions, revision_id, recipe_digest, mapping_id = _seed()
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
     events: list[str] = []
+    if availability_key is not None:
+        # The availability operation prepares the image and records the
+        # recipe-level identity it admitted, before any launch runs.  The
+        # launch then prepares the same archive again and records the compiled
+        # identity the Spark agent compares against.
+        availability_receipt = prepare_runtime_image(
+            RecipeDefinition.model_validate(canonical_example("recipe-image.json")),
+            runtime={"architecture": "linux-arm64", "interface": "vonk.runtime.v1"},
+            storage=storage,
+            transport=_Transport(),
+            now=NOW,
+        )
+        with sessions.begin() as session:
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision_id,
+                original_content_digest=recipe_digest,
+                effective_execution_key=availability_key,
+                receipt=availability_receipt,
+                verified_at=NOW,
+            )
+        events.append("availability-receipt-recorded")
 
     def prepare_and_persist(document, runtime_spec, build):
         assert build is None
@@ -653,6 +681,67 @@ def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, install
             f"/agent/recipe-installations/{installation_id}/spec",
             headers=headers,
         )
+
+
+def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
+    tmp_path: Path,
+) -> None:
+    """A launch must run on the archive the availability operation prepared.
+
+    The availability operation records the recipe-level identity it admitted;
+    the launch then records the compiled identity the Spark agent compares the
+    plan against.  Both describe one verified archive, so the launch must
+    proceed and its own row must carry the compiled identity.  Refusing the
+    second identity left every prepared recipe unusable at apply time, which is
+    what stalled the Spark candidate lane.
+    """
+
+    availability_key = "a" * 64
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, events = _make_service(
+        tmp_path,
+        availability_key=availability_key,
+    )
+    request = _direct_request(revision_id)
+    preview = service.preview(request, actor="test")
+    assert preview.allowed is True
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        actor="test",
+    )
+    for _ in range(20):
+        service._advance(operation.operation_id)
+        with sessions() as session:
+            row = session.get(Job, operation.operation_id)
+            assert row is not None
+            if row.state in {"succeeded", "failed"}:
+                break
+            progress = row.result or {}
+            if progress.get("phase") == "prepare" and progress.get("subphase") == "runtime-install":
+                break
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        assert row.state == "running", (row.status_reason, events, row.result)
+        installation = session.scalar(select(RecipeInstallation))
+        assert installation is not None
+        installation_plan = require_mapping(installation.plan, "installation plan")
+        compiled_plans = require_mapping(
+            installation_plan["compiled_execution_plans"], "compiled execution plans"
+        )
+        compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
+        compiled_identity = require_mapping(compiled["identity"], "compiled identity")
+        launch_identity = compiled_identity["execution_sha256"]
+        receipts = list(session.scalars(select(RuntimeImageReceipt)))
+        assert {item.effective_execution_key for item in receipts} == {
+            availability_key,
+            launch_identity,
+        }
+        launch_row = next(
+            item for item in receipts if item.effective_execution_key != availability_key
+        )
+        # This is the equality the Spark agent authorizes the install with.
+        assert launch_row.effective_execution_key == launch_identity
+        assert launch_row.oci_archive_sha256 is not None
 
 
 def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(

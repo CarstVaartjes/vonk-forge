@@ -724,6 +724,86 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
     session.close()
 
 
+def test_one_verified_archive_serves_availability_and_launch_identities(
+    tmp_path: Path,
+) -> None:
+    """A prepared recipe records its artifact under more than one identity.
+
+    The availability operation records the recipe-level identity it admitted,
+    and the launch then records the compiled identity the Spark agent compares
+    against.  Both describe the same verified bytes, so the second must be
+    recorded instead of refused; refusing it left every prepared recipe
+    unusable at apply time.
+    """
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    recipe = _recipe("recipe-image.json")
+    receipt = prepare_runtime_image(
+        recipe,
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    availability_key = "a" * 64
+    launch_key = "b" * 64
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        _add_revision(session, "revision-direct", recipe)
+        session.flush()
+        availability_row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id="revision-direct",
+            original_content_digest=receipt.distribution_content_sha256,
+            effective_execution_key=availability_key,
+            receipt=receipt,
+            verified_at=now,
+        )
+        launch_row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id="revision-direct",
+            original_content_digest=receipt.distribution_content_sha256,
+            effective_execution_key=launch_key,
+            receipt=receipt,
+            verified_at=now,
+        )
+        session.flush()
+        availability_row_id = availability_row.id
+        launch_row_id = launch_row.id
+        assert launch_row.effective_execution_key == launch_key
+        session.commit()
+
+    assert availability_row_id != launch_row_id
+    with Session(engine) as session:
+        assert (
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id="revision-direct",
+                current_content_digest=receipt.distribution_content_sha256,
+                effective_execution_key=launch_key,
+                receipt=receipt,
+            ).id
+            == launch_row_id
+        )
+        assert (
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id="revision-direct",
+                current_content_digest=receipt.distribution_content_sha256,
+                effective_execution_key=availability_key,
+                receipt=receipt,
+            ).id
+            == availability_row_id
+        )
+        assert (
+            session.query(RuntimeImageReceiptRow)
+            .filter(RuntimeImageReceiptRow.original_content_digest == receipt.distribution_content_sha256)
+            .count()
+            == 2
+        )
+
+
 def test_notes_revision_reuses_original_receipt_with_separate_authorization(
     tmp_path: Path,
 ) -> None:
@@ -844,15 +924,35 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                 effective_execution_key="a" * 64,
                 receipt=receipt,
             )
-        with pytest.raises(RuntimeImagePreparationError, match="execution identity"):
-            persist_runtime_image_receipt(
+        # The same verified bytes under a second execution identity used to be
+        # refused as a conflict.  That is the normal shape of an apply: the
+        # availability operation records the recipe-level identity it admitted,
+        # and the launch records the compiled identity the Spark agent compares
+        # against, so the second identity is recorded instead of refused.
+        # Immutability is per identity: the same identity with different bytes
+        # still fails above.
+        launch_key = "b" * 64
+        launch_row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=new_id,
+            original_content_digest=old_digest,
+            effective_execution_key=launch_key,
+            receipt=receipt,
+            verified_at=now,
+        )
+        session.flush()
+        assert launch_row.effective_execution_key == launch_key
+        assert session.query(RuntimeImageReceiptRow).count() == 2
+        assert (
+            resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=new_id,
-                original_content_digest=old_digest,
-                effective_execution_key="b" * 64,
+                current_content_digest=new_digest,
+                effective_execution_key=launch_key,
                 receipt=receipt,
-                verified_at=now,
-            )
+            ).id
+            == launch_row.id
+        )
 
 
 def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(

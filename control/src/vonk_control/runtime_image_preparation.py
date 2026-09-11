@@ -434,31 +434,22 @@ def persist_runtime_image_receipt(
         )
     original_revision_id = original_revision.id
     _validate_revision_reuse_identity(current_revision, original_revision)
+    # One verified archive legitimately serves more than one execution
+    # identity: the availability operation records the recipe-level identity it
+    # admitted, and each placement then records the compiled identity that its
+    # launch and the Spark agent's receipt authorization actually compare.  A
+    # second identity for the same bytes is not a conflict, so the identity
+    # lookup below is the only one: it keeps the artifact immutable *per
+    # identity*, and ``_validate_revision_reuse_identity`` above keeps the
+    # revision an editorial successor with the same execution and artifact
+    # identity.  Direct published images prepared before any launch depend on
+    # this: refusing the second identity left every prepared recipe unusable.
     lookup = select(RuntimeImageReceiptRow).where(
         RuntimeImageReceiptRow.recipe_revision_id == original_revision_id,
         RuntimeImageReceiptRow.source == receipt.source,
         RuntimeImageReceiptRow.original_content_digest == original_content_digest,
         RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
     )
-    conflicting_artifact = session.scalar(
-        select(RuntimeImageReceiptRow).where(
-            RuntimeImageReceiptRow.recipe_revision_id == original_revision_id,
-            RuntimeImageReceiptRow.source == receipt.source,
-            RuntimeImageReceiptRow.original_content_digest == original_content_digest,
-            RuntimeImageReceiptRow.platform_manifest_digest == receipt.platform_manifest_digest,
-            RuntimeImageReceiptRow.local_image_config_id == receipt.local_image_config_id,
-            RuntimeImageReceiptRow.oci_archive_sha256 == receipt.oci_archive_sha256,
-            RuntimeImageReceiptRow.image_bytes == receipt.image_bytes,
-        )
-    )
-    if (
-        conflicting_artifact is not None
-        and conflicting_artifact.effective_execution_key != effective_execution_key
-    ):
-        raise RuntimeImagePreparationError(
-            "runtime_image.authorization_invalid",
-            "current recipe execution identity does not match the immutable receipt",
-        )
     row = session.scalar(lookup)
     identity = {
         "registry_manifest_digest": receipt.registry_manifest_digest,
