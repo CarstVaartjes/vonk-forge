@@ -37,6 +37,19 @@ def _stored_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def _subnet_of(network: _Network, other: _Network) -> bool:
+    """Return whether two same-family networks nest; mixed families never do."""
+    if isinstance(network, ipaddress.IPv4Network) and isinstance(
+        other, ipaddress.IPv4Network
+    ):
+        return network.subnet_of(other)
+    if isinstance(network, ipaddress.IPv6Network) and isinstance(
+        other, ipaddress.IPv6Network
+    ):
+        return network.subnet_of(other)
+    return False
+
+
 def _parse_networks(value: str, *, label: str, required: bool) -> tuple[_Network, ...]:
     if not value.strip():
         if required:
@@ -83,10 +96,7 @@ class ManagementAddressPolicy:
             required=False,
         )
         for network in allowed:
-            if any(
-                network.version == blocked.version and network.subnet_of(blocked)
-                for blocked in forbidden
-            ):
+            if any(_subnet_of(network, blocked) for blocked in forbidden):
                 raise PresenceError(f"management CIDR {network} is fully forbidden")
         return cls(allowed, forbidden)
 

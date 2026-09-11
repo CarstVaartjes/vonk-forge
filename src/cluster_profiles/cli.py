@@ -9,6 +9,7 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import overload
 
 from .cli_render import render_payload
 from .control_client import (
@@ -62,6 +63,14 @@ def _sanitize_text(value: object) -> str:
     if len(text) > _MAX_TEXT_CHARS:
         text = text[: _MAX_TEXT_CHARS - 15] + "... (truncated)"
     return text
+
+
+@overload
+def _sanitize(value: Mapping[str, object]) -> dict[str, object]: ...
+
+
+@overload
+def _sanitize(value: object) -> object: ...
 
 
 def _sanitize(value: object) -> object:

@@ -171,6 +171,12 @@ def compile_runtime_spec(
     if binding is None:
         raise RecipeRuntimeSpecError("canonical harness binding is missing")
     interface = parsed.interfaces[0]
+    telemetry = projection.telemetry
+    if telemetry is None:
+        # The canonical harness compiler always attaches the engine telemetry
+        # contract; a projection without one is an internal contract failure,
+        # not a runtime default.
+        raise RecipeRuntimeSpecError("canonical harness telemetry is missing")
     environment = writable_path_document(parsed.runtime.engine, projection.environment)
     compiled_arguments = _compiled_arguments(parsed, parameters)
     runtime: dict[str, object] = {
@@ -181,10 +187,10 @@ def compile_runtime_spec(
             "engine": parsed.runtime.engine,
             "engine_version": None,
             "metrics_format": (
-                None if projection.telemetry.path is None else
-                "comfyui-queue" if projection.telemetry.adapter == "comfyui" else "prometheus"
+                None if telemetry.path is None else
+                "comfyui-queue" if telemetry.adapter == "comfyui" else "prometheus"
             ),
-            "metrics_path": projection.telemetry.path,
+            "metrics_path": telemetry.path,
         },
         "image": projection.image,
         "architecture": projection.architecture,

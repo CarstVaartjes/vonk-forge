@@ -52,7 +52,12 @@ class FleetTelemetryEvent(_FleetStreamModel):
 class _FleetChangeBase(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
-    node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    # Required on the abstract base: every concrete change states whether it is
+    # node-scoped or explicitly node-less. A base default that a subclass
+    # removes is a legal Pydantic override but not something a dataclass-based
+    # checker accepts, and inlining a default here would change the changes'
+    # schemas.
+    node_id: Annotated[str, Field(min_length=1, max_length=128)] | None
     occurred_at: datetime
 
     @field_validator("occurred_at")

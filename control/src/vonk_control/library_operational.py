@@ -13,6 +13,7 @@ from .library_contract import (
     _MAX_CANDIDATE_NODES,
     _MAX_OPERATIONAL_MEMBERS,
     _MAX_OPERATIONAL_ROWS,
+    EvidenceCollection,
     PlacementEvidenceCounts,
     _utc,
 )
@@ -28,6 +29,18 @@ from .models import (
 
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _RUN_RANK_FRESH_SECONDS = 300
+
+# The bounded operational collections, named by the contract's own literal set
+# so the limits, the counts and the truncation evidence cannot drift.
+_EVIDENCE_COLLECTIONS: tuple[EvidenceCollection, ...] = (
+    "builds",
+    "mappings",
+    "mapping_members",
+    "installations",
+    "installation_members",
+    "runs",
+    "run_members",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,17 +403,9 @@ def load_placement_operational_evidence(
         "runs": _MAX_OPERATIONAL_ROWS,
         "run_members": _MAX_OPERATIONAL_MEMBERS,
     }
-    truncated_collections = [
+    truncated_collections: list[EvidenceCollection] = [
         name
-        for name in (
-            "builds",
-            "mappings",
-            "mapping_members",
-            "installations",
-            "installation_members",
-            "runs",
-            "run_members",
-        )
+        for name in _EVIDENCE_COLLECTIONS
         if observed_counts[name] > limits[name]
     ]
     counts = PlacementEvidenceCounts(

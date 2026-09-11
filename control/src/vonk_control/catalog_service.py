@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import BinaryIO
+from typing import IO
 
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, or_, select, update
@@ -112,7 +112,7 @@ class CatalogService:
         self.entities = CatalogEntityService(sessions, clock=clock, cursors=cursors)
 
     def store_source_bundle(
-        self, expected_sha256: str, payload: BinaryIO, actor: str
+        self, expected_sha256: str, payload: IO[bytes], actor: str
     ) -> SourceBundleView:
         del actor
         if self._source_bundles is None:
@@ -275,7 +275,7 @@ class CatalogService:
             raise CatalogValidationError("recipe_library.source_invalid", "recipe library publication identity is invalid")
         if (release_version is None) != (release_released_at is None):
             raise CatalogValidationError("recipe_library.release_invalid", "recipe library release metadata is invalid")
-        if release_version is not None and (_RELEASE_VERSION.fullmatch(release_version) is None or date.fromisoformat(release_released_at).isoformat() != release_released_at):
+        if release_version is not None and release_released_at is not None and (_RELEASE_VERSION.fullmatch(release_version) is None or date.fromisoformat(release_released_at).isoformat() != release_released_at):
             raise CatalogValidationError("recipe_library.release_invalid", "recipe library release metadata is invalid")
         if package_handle is not None:
             _package_handle_metadata(package_handle, recipe=recipe, package_sha256=package_sha256)

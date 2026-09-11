@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from vonk_agent_protocol import (
     AgentFailureResult,
     AgentInstallResult,
@@ -220,7 +220,7 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
                 raise ValueError("recipe operation evidence kind is invalid")
 
 
-def _model_accepts(model: type[LifecycleModel], value: Mapping[str, object]) -> bool:
+def _model_accepts(model: type[BaseModel], value: Mapping[str, object]) -> bool:
     try:
         model.model_validate(value)
     except (TypeError, ValueError):

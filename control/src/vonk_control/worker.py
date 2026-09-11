@@ -130,7 +130,7 @@ class Worker:
         housekeeping: Callable[[], object] | None = None,
         artifact_housekeeping: Callable[[], object] | None = None,
         recipes=None,
-        model_cache=None,
+        model_cache: object | None = None,
         background_services: Sequence[Callable[[], object]] = (),
         background_closers: Sequence[Callable[[], object]] = (),
         loop_heartbeat: Callable[[], object] | None = None,
@@ -191,10 +191,16 @@ class Worker:
         return advanced
 
     def _run_model_cache(self) -> bool:
+        # The model cache is consumed structurally, like the distribution
+        # executor does: either entry point is optional, so probe both rather
+        # than assume one shape.
         tick = getattr(self._model_cache, "tick", None)
         if callable(tick):
             return bool(tick())
-        return bool(self._model_cache.run_pending(limit=1))
+        run_pending = getattr(self._model_cache, "run_pending", None)
+        if callable(run_pending):
+            return bool(run_pending(limit=1))
+        raise RuntimeError("model cache service exposes no tick or run_pending")
 
     def _run_generic(self) -> bool:
         attempt = self._jobs.claim(self._worker_id, 30)

@@ -22,6 +22,7 @@ from .agent_upgrades import AgentUpgradeService
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .deployment_provenance_contract import DeploymentProvenance
+from .enrollment_bootstrap import accepted_installer_url
 from .fleet_projection import (
     FleetNode,
     FleetNodeIdentity,
@@ -201,7 +202,7 @@ class _AgentEnrollmentAdapter:
             ca_fingerprint=bootstrap.ca_fingerprint,
             controller_address=bootstrap.controller_address,
             service_hostnames=list(bootstrap.service_hostnames),
-            installer_url=bootstrap.installer_url,
+            installer_url=accepted_installer_url(bootstrap.installer_url),
         )
 
     def create_named(

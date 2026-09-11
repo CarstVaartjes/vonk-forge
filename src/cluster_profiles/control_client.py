@@ -370,8 +370,15 @@ def _validate_schema(value: object, schema: object, *, message: str) -> None:
         "components": _control_openapi().get("components", {}),
         "allOf": [schema],
     }
+    # The validator's instance type is the recursive JSON alias. A decoded
+    # payload is JSON by construction, so round-trip it through JSON rather
+    # than asserting a type the validator cannot check.
+    try:
+        instance = json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        raise ControlClientError(message) from None
     error = next(
-        _control_validator().evolve(schema=operation_schema).iter_errors(value),
+        _control_validator().evolve(schema=operation_schema).iter_errors(instance),
         None,
     )
     if error is not None:

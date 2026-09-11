@@ -204,9 +204,11 @@ class _ArtifactParameterBase(ArtifactContractModel):
     name: ParameterName
     minimum: int | float | None = None
     maximum: int | float | None = None
-    allowed_values: tuple[ParameterScalar, ...] = Field(
-        default_factory=tuple, max_length=128
-    )
+    # Required on the abstract base so each concrete parameter states its own
+    # empty default. A base default that a subclass removes is a legal Pydantic
+    # override but is not something a dataclass-based checker can accept, and
+    # inlining a default here would change the concrete schemas.
+    allowed_values: tuple[ParameterScalar, ...] = Field(max_length=128)
     pattern: str | None = Field(default=None, max_length=256)
 
     @field_validator("allowed_values", mode="before")
@@ -243,6 +245,9 @@ class StringParameter(_ArtifactParameterBase):
     default: str
     minimum: None = None
     maximum: None = None
+    allowed_values: tuple[ParameterScalar, ...] = Field(
+        default_factory=tuple, max_length=128
+    )
 
     @field_validator("default")
     @classmethod
@@ -257,6 +262,9 @@ class IntegerParameter(_ArtifactParameterBase):
     default: int
     minimum: int | None = None
     maximum: int | None = None
+    allowed_values: tuple[ParameterScalar, ...] = Field(
+        default_factory=tuple, max_length=128
+    )
 
 
 class FloatParameter(_ArtifactParameterBase):
@@ -264,6 +272,9 @@ class FloatParameter(_ArtifactParameterBase):
     default: float | int
     minimum: float | int | None = None
     maximum: float | int | None = None
+    allowed_values: tuple[ParameterScalar, ...] = Field(
+        default_factory=tuple, max_length=128
+    )
 
     @field_validator("default", "minimum", "maximum")
     @classmethod
@@ -278,6 +289,9 @@ class BooleanParameter(_ArtifactParameterBase):
     default: bool
     minimum: None = None
     maximum: None = None
+    allowed_values: tuple[ParameterScalar, ...] = Field(
+        default_factory=tuple, max_length=128
+    )
 
 
 class EnumParameter(_ArtifactParameterBase):

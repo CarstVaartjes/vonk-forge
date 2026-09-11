@@ -8,10 +8,19 @@ import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final, Literal, get_args
 from urllib.parse import urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+
+# The published installer channels. The response contract and the bootstrap
+# configuration both use this one set, and the runtime check derives from it.
+InstallerUrl = Literal[
+    "https://install.vonkforge.ai/spark",
+    "https://install.vonkforge.ai/dev/spark",
+]
+_INSTALLER_URLS: Final[frozenset[InstallerUrl]] = frozenset(get_args(InstallerUrl))
 
 _ONE_PEM_CERTIFICATE = re.compile(
     rb"\A[ \t\r\n]*-----BEGIN CERTIFICATE-----\r?\n"
@@ -23,6 +32,14 @@ _HOSTNAME = re.compile(
     r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
 )
+
+
+def accepted_installer_url(value: str) -> InstallerUrl:
+    """Return the accepted installer channel that *value* names or fail closed."""
+
+    if value not in _INSTALLER_URLS:
+        raise ValueError("installer URL is not an accepted publication channel")
+    return value
 
 
 def _fixed_https_origin(value: str, *, name: str) -> str:
@@ -65,12 +82,7 @@ class EnrollmentBootstrapConfig:
         enrollment_endpoint = _fixed_https_origin(
             self.enrollment_endpoint, name="enrollment endpoint"
         )
-        expected_installer_urls = {
-            "https://install.vonkforge.ai/spark",
-            "https://install.vonkforge.ai/dev/spark",
-        }
-        if self.installer_url not in expected_installer_urls:
-            raise ValueError("installer URL is not an accepted publication channel")
+        accepted_installer_url(self.installer_url)
         certificate, canonical_pem = _public_ca(self.ca_pem.encode("ascii"))
         fingerprint = certificate.fingerprint(hashes.SHA256()).hex()
         if self.ca_fingerprint != fingerprint:

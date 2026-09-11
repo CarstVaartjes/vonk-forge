@@ -108,7 +108,14 @@ class LifecyclePreflight:
                     current_fingerprint=fingerprint,
                     now=int(now.timestamp()),
                 )
-                if not blockers and checkpoint.pending_node_id != node_id:
+                # admission_blockers always reports a missing result, so the
+                # explicit check only states that a clean result is the one
+                # being receipted.
+                if (
+                    result is not None
+                    and not blockers
+                    and checkpoint.pending_node_id != node_id
+                ):
                     checkpoint.receipts[node_id] = result
                     continue
                 if checkpoint.pending_job_id:

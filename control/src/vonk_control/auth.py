@@ -10,11 +10,15 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final, Literal
 
 from starlette.responses import Response
 from starlette.types import Scope
 
+# The one definition of the administrator role. Browser sessions and their
+# response contract both refer to it, so the set cannot drift.
+AdministratorRole = Literal["administrator"]
+ADMIN_ROLE: Final[AdministratorRole] = "administrator"
 _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _AGENT_IDENTITY_SCOPE_KEY = "vonk.agent_identity"
@@ -203,6 +207,7 @@ class TrustedProxyAgentIdentityMiddleware:
             except (AuthError, KeyError):
                 pass
         path = safe_scope.get("path")
+        scoped_identity = agent_identity_from_scope(safe_scope)
         validator = (
             self._activation_identity_validator
             if path == "/agent/renew/activate"
@@ -213,9 +218,9 @@ class TrustedProxyAgentIdentityMiddleware:
             and path.startswith("/agent/")
             and path not in {"/agent/bootstrap", "/agent/enroll"}
             and (
-                agent_identity_from_scope(safe_scope) is None
+                scoped_identity is None
                 or validator is None
-                or not validator(agent_identity_from_scope(safe_scope))
+                or not validator(scoped_identity)
             )
         ):
             await Response(status_code=401)(safe_scope, receive, send)
