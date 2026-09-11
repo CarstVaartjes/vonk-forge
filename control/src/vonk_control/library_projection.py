@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select
@@ -19,6 +20,7 @@ from .library_contract import (
     FreshnessPolicy,
     LibraryCapabilityInventory,
     LibraryFacetValues,
+    LibraryFilterValues,
     LibraryLocalProgress,
     LibraryLocalState,
     LibraryModelIdentity,
@@ -63,6 +65,21 @@ class LibrarySelectorAmbiguous(ValueError):
 
 _LIBRARY_ORDER = "catalog"
 _LOCAL_STATE_PRIORITY = {"unknown": 0, "failed": 1, "preparing": 2, "cached": 3}
+
+type LibraryControllerState = Literal[
+    "cached", "preparing", "not_cached", "failed", "unknown"
+]
+
+
+def _controller_state(
+    states: Mapping[str, LibraryControllerState], value: str, detail: str
+) -> LibraryControllerState:
+    """Map a persisted state onto the projected controller vocabulary."""
+
+    controller = states.get(value)
+    if controller is None:
+        raise LibraryProjectionError(detail)
+    return controller
 
 
 def _filter_digest(filters: Mapping[str, object]) -> str:
@@ -196,9 +213,10 @@ class LibraryProjection:
         raw = snapshot.get(digest, {})
         if not isinstance(raw, Mapping):
             raise LibraryProjectionError(f"{kind} local state is not a mapping")
-        controller = raw.get("controller", "unknown")
-        if controller not in {"cached", "preparing", "not_cached", "failed", "unknown"}:
+        candidate = raw.get("controller", "unknown")
+        if not isinstance(candidate, str) or candidate not in _LOCAL_STATE_PRIORITY:
             raise LibraryProjectionError(f"{kind} local state is invalid")
+        controller = cast(LibraryControllerState, candidate)
         running = raw.get("running_on", [])
         if not isinstance(running, list) or not all(isinstance(item, str) for item in running):
             raise LibraryProjectionError(f"{kind} running state is invalid")
@@ -215,7 +233,7 @@ class LibraryProjection:
         result: dict[str, dict[str, object]],
         digest: str | None,
         *,
-        controller: str,
+        controller: LibraryControllerState,
         running_on: Sequence[str] = (),
         preparation: Mapping[str, object] | None = None,
     ) -> None:
@@ -225,7 +243,7 @@ class LibraryProjection:
             digest, {"controller": "unknown", "running_on": []}
         )
         if _LOCAL_STATE_PRIORITY[controller] > _LOCAL_STATE_PRIORITY[
-            str(current["controller"])
+            cast(LibraryControllerState, str(current["controller"]))
         ]:
             current["controller"] = controller
         nodes = current["running_on"]
@@ -234,9 +252,12 @@ class LibraryProjection:
         current["running_on"] = sorted(set(nodes) | set(running_on))
         if preparation is not None:
             previous = current.get("preparation")
-            if previous is None or str(preparation.get("operation_id", "")) >= str(
-                previous.get("operation_id", "")
-            ):
+            previous_operation = (
+                str(previous.get("operation_id", ""))
+                if isinstance(previous, Mapping)
+                else ""
+            )
+            if previous is None or str(preparation.get("operation_id", "")) >= previous_operation:
                 current["preparation"] = dict(preparation)
 
     @staticmethod
@@ -293,16 +314,18 @@ class LibraryProjection:
         revision_digests = {revision.id: revision.content_digest for revision in revisions}
         result: dict[str, dict[str, object]] = {}
         for cache_set in cache_sets:
-            controller = {
-                "cached": "cached",
-                "downloading": "preparing",
-                "verifying": "preparing",
-                "incomplete": "preparing",
-                "needs-repair": "failed",
-                "failed": "failed",
-            }.get(cache_set.state)
-            if controller is None:
-                raise LibraryProjectionError("persisted cache set state is invalid")
+            controller = _controller_state(
+                {
+                    "cached": "cached",
+                    "downloading": "preparing",
+                    "verifying": "preparing",
+                    "incomplete": "preparing",
+                    "needs-repair": "failed",
+                    "failed": "failed",
+                },
+                cache_set.state,
+                "persisted cache set state is invalid",
+            )
             self._merge_local(
                 result,
                 cache_set.model_content_sha256,
@@ -351,30 +374,34 @@ class LibraryProjection:
                     preparation=preparation,
                 )
         for build in builds:
-            controller = {
-                "planned": "preparing",
-                "building": "preparing",
-                "succeeded": "cached",
-                "failed": "failed",
-            }.get(build.state)
-            if controller is None:
-                raise LibraryProjectionError("persisted recipe build state is invalid")
+            controller = _controller_state(
+                {
+                    "planned": "preparing",
+                    "building": "preparing",
+                    "succeeded": "cached",
+                    "failed": "failed",
+                },
+                build.state,
+                "persisted recipe build state is invalid",
+            )
             self._merge_local(
                 result,
                 revision_digests.get(build.recipe_revision_id),
                 controller=controller,
             )
         for installation in installations:
-            controller = {
-                "planned": "preparing",
-                "installing": "preparing",
-                "installed": "cached",
-                "partial": "preparing",
-                "failed": "failed",
-                "uninstalled": "unknown",
-            }.get(installation.state)
-            if controller is None:
-                raise LibraryProjectionError("persisted installation state is invalid")
+            controller = _controller_state(
+                {
+                    "planned": "preparing",
+                    "installing": "preparing",
+                    "installed": "cached",
+                    "partial": "preparing",
+                    "failed": "failed",
+                    "uninstalled": "unknown",
+                },
+                installation.state,
+                "persisted installation state is invalid",
+            )
             self._merge_local(
                 result,
                 revision_digests.get(installation.recipe_revision_id),
@@ -411,9 +438,9 @@ class LibraryProjection:
                     )
                 self._merge_local(
                     result,
-                    revision_digests.get(
-                        installation.recipe_revision_id if installation is not None else None
-                    ),
+                    revision_digests.get(installation.recipe_revision_id)
+                    if installation is not None
+                    else None,
                     controller="cached",
                     running_on=nodes,
                 )
@@ -560,7 +587,9 @@ class LibraryProjection:
         return not selected or bool({value.casefold() for value in values} & {value.casefold() for value in selected})
 
     @staticmethod
-    def _resolve_selector(items: Sequence[object], selector: str, getter: Callable[[object], tuple[str, str]]) -> object:
+    def _resolve_selector[T](
+        items: Sequence[T], selector: str, getter: Callable[[T], tuple[str, str]]
+    ) -> T:
         wanted = selector.casefold()
         matches = [item for item in items if wanted in {
             "/".join(getter(item)).casefold(), getter(item)[1].casefold()
@@ -619,7 +648,7 @@ class LibraryProjection:
         alignment: Sequence[str] = (),
         search: str | None = None,
         updated_since: datetime | None = None,
-        sort: str = "updated",
+        sort: Literal["updated", "name"] = "updated",
         local_only: bool = False,
     ) -> ModelLibraryResponse:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
@@ -709,13 +738,13 @@ class LibraryProjection:
         return ModelLibraryResponse(
             generated_at=_utc(self._clock()), models=page,
             facets=self._facet_values(entries), next_cursor=next_cursor,
-            filters={
-                "usage": list(usage), "family": list(family), "version": list(version),
-                "quantization": list(quantization), "publisher": list(publisher),
-                "alignment": list(alignment), "search": search,
-                "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
-                "sort": sort, "local_only": local_only,
-            }, freshness_policy=self._freshness,
+            filters=LibraryFilterValues(
+                usage=list(usage), family=list(family), version=list(version),
+                quantization=list(quantization), publisher=list(publisher),
+                alignment=list(alignment), search=search,
+                updated_since=None if updated_since is None else _utc(updated_since).isoformat(),
+                sort=sort, local_only=local_only,
+            ), freshness_policy=self._freshness,
         )
 
     @staticmethod
@@ -765,7 +794,7 @@ class LibraryProjection:
         sparks: Sequence[int] = (),
         search: str | None = None,
         updated_since: datetime | None = None,
-        sort: str = "updated",
+        sort: Literal["updated", "name"] = "updated",
     ) -> RecipeLibraryResponse:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
             raise ValueError("recipe library limit is invalid")
@@ -884,14 +913,14 @@ class LibraryProjection:
         return RecipeLibraryResponse(
             generated_at=_utc(self._clock()), recipes=page,
             facets=self._recipe_facet_values(model_entries, entries), next_cursor=next_cursor,
-            filters={
-                "model": list(model_selectors), "all_models": all_models, "usage": list(usage),
-                "publisher": list(publisher), "alignment": list(alignment),
-                "sparks": [str(value) for value in sparks],
-                "search": search,
-                "updated_since": None if updated_since is None else _utc(updated_since).isoformat(),
-                "sort": sort,
-            }, freshness_policy=self._freshness,
+            filters=LibraryFilterValues(
+                model=list(model_selectors), all_models=all_models, usage=list(usage),
+                publisher=list(publisher), alignment=list(alignment),
+                sparks=list(sparks),
+                search=search,
+                updated_since=None if updated_since is None else _utc(updated_since).isoformat(),
+                sort=sort,
+            ), freshness_policy=self._freshness,
         )
 
     @staticmethod
@@ -944,38 +973,37 @@ class LibraryProjection:
                     active_head_revision(),
                 )
             )
+            if revision is None:
+                raise KeyError(recipe_id)
+            recipe_document = _canonical_recipe(revision)
             model_revisions: list[CatalogDocumentRevision] = []
-            if revision is not None:
-                recipe_document = _canonical_recipe(revision)
-                references = [selection.model for selection in recipe_document.models]
-                if references:
-                    active_models = list(
-                        session.scalars(
-                            select(CatalogDocumentRevision).where(
-                                CatalogDocumentRevision.kind == "model",
-                                CatalogDocumentRevision.state == "active",
-                            )
+            references = [selection.model for selection in recipe_document.models]
+            if references:
+                active_models = list(
+                    session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.state == "active",
                         )
                     )
-                    model_by_key = {
-                        (model.publisher, model.slug, model.content_digest): model
-                        for model in active_models
-                    }
-                    for reference in references:
-                        model_revision = model_by_key.get(
-                            (
-                                reference.publisher,
-                                reference.slug,
-                                reference.content_sha256,
-                            )
+                )
+                model_by_key = {
+                    (model.publisher, model.slug, model.content_digest): model
+                    for model in active_models
+                }
+                for reference in references:
+                    model_revision = model_by_key.get(
+                        (
+                            reference.publisher,
+                            reference.slug,
+                            reference.content_sha256,
                         )
-                        if model_revision is None:
-                            raise LibraryProjectionError(
-                                "active recipe references a missing active Model document"
-                            )
-                        model_revisions.append(model_revision)
-        if revision is None:
-            raise KeyError(recipe_id)
+                    )
+                    if model_revision is None:
+                        raise LibraryProjectionError(
+                            "active recipe references a missing active Model document"
+                        )
+                    model_revisions.append(model_revision)
         document = recipe_document
         model_documents = [
             LibraryRecipeModel(

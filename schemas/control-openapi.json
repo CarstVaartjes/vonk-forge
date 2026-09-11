@@ -6635,6 +6635,155 @@
         "title": "LibraryFacetValues",
         "type": "object"
       },
+      "LibraryFilterValues": {
+        "additionalProperties": false,
+        "description": "The filters that produced a Library page, echoed to the client.\n\nThis is a typed echo rather than a free-form map so the request and the\nresponse describe the same vocabulary. Every field is optional, so a page\nthat applied no filter stays valid without inventing values.",
+        "properties": {
+          "alignment": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Alignment",
+            "type": "array"
+          },
+          "all_models": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "All Models"
+          },
+          "family": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Family",
+            "type": "array"
+          },
+          "local_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Only"
+          },
+          "model": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Model",
+            "type": "array"
+          },
+          "publisher": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Publisher",
+            "type": "array"
+          },
+          "quantization": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Quantization",
+            "type": "array"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "updated",
+                  "name"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort"
+          },
+          "sparks": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 64,
+            "title": "Sparks",
+            "type": "array"
+          },
+          "updated_since": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated Since"
+          },
+          "usage": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Usage",
+            "type": "array"
+          },
+          "version": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Version",
+            "type": "array"
+          }
+        },
+        "title": "LibraryFilterValues",
+        "type": "object"
+      },
       "LibraryLocalProgress": {
         "additionalProperties": false,
         "description": "Observable progress for a Controller-local preparation operation.",
@@ -8300,28 +8449,7 @@
             "$ref": "#/components/schemas/LibraryFacetValues"
           },
           "filters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "maxProperties": 16,
-            "title": "Filters",
-            "type": "object"
+            "$ref": "#/components/schemas/LibraryFilterValues"
           },
           "freshness_policy": {
             "$ref": "#/components/schemas/FreshnessPolicy"
@@ -8363,7 +8491,6 @@
           "models",
           "facets",
           "next_cursor",
-          "filters",
           "freshness_policy"
         ],
         "title": "ModelLibraryResponse",
@@ -11824,28 +11951,7 @@
             "$ref": "#/components/schemas/LibraryFacetValues"
           },
           "filters": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "maxProperties": 16,
-            "title": "Filters",
-            "type": "object"
+            "$ref": "#/components/schemas/LibraryFilterValues"
           },
           "freshness_policy": {
             "$ref": "#/components/schemas/FreshnessPolicy"
@@ -11887,7 +11993,6 @@
           "recipes",
           "facets",
           "next_cursor",
-          "filters",
           "freshness_policy"
         ],
         "title": "RecipeLibraryResponse",
