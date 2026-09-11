@@ -394,7 +394,7 @@ class CatalogService:
         except (TypeError, ValueError) as error:
             raise CatalogValidationError("catalog.document_invalid", "recipe document is invalid") from error
         with self._sessions() as session:
-            return self._resolve_recipe(session, recipe, actor=actor)
+            return _resolve_recipe(session, recipe, actor=actor)
 
     def attach_test_report(self, recipe_id: str, report: Mapping[str, object], actor: str) -> dict[str, object]:
         del actor
@@ -489,7 +489,7 @@ def _release_version(document: Mapping[str, object]) -> str | None:
 
 def _package_handle_metadata(handle: object, *, recipe: RecipeDefinition, package_sha256: str | None) -> dict[str, object]:
     fields = ("publication_commit", "source_commit", "package_sha256", "package_size", "package_path", "recipe_content_sha256", "archive_path", "closure_path")
-    values = {field: getattr(handle, field, None) for field in fields}
+    values: dict[str, object] = {field: getattr(handle, field, None) for field in fields}
     for field in ("package_path", "archive_path", "closure_path"):
         if values[field] is not None:
             values[field] = str(values[field])
@@ -497,7 +497,12 @@ def _package_handle_metadata(handle: object, *, recipe: RecipeDefinition, packag
         raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle digest is invalid")
     if not isinstance(values["package_sha256"], str) or _SHA256.fullmatch(values["package_sha256"]) is None:
         raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle digest is invalid")
-    if values["recipe_content_sha256"] != content_sha256(recipe) or not isinstance(values["package_size"], int) or values["package_size"] <= 0:
+    package_size = values["package_size"]
+    if (
+        values["recipe_content_sha256"] != content_sha256(recipe)
+        or not isinstance(package_size, int)
+        or package_size <= 0
+    ):
         raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle identity is invalid")
     if not all(isinstance(values[field], str) and values[field] for field in ("publication_commit", "source_commit", "package_path", "archive_path", "closure_path")):
         raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle closure is invalid")

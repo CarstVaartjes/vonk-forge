@@ -596,7 +596,7 @@ class TelemetryRepository:
                     )
                     .limit(maximum_points)
                 ).all()
-                rows.reverse()
+                rows = list(reversed(rows))
                 return tuple(_view(row) for row in rows)
 
             resolution_seconds = _ROLLUP_SECONDS[resolution]
@@ -611,7 +611,7 @@ class TelemetryRepository:
                 .order_by(NodeTelemetryRollupBucket.bucket_start.desc())
                 .limit(maximum_points)
             ).all()
-            buckets.reverse()
+            buckets = list(reversed(buckets))
             starts = [_stored_utc(row.bucket_start) for row in buckets]
             metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
                 start: {} for start in starts
@@ -692,7 +692,7 @@ class TelemetryRepository:
                 .order_by(NodeTelemetryRollupBucket.bucket_start.desc())
                 .limit(source_limit)
             ).all()
-            buckets.reverse()
+            buckets = list(reversed(buckets))
             starts = [_stored_utc(row.bucket_start) for row in buckets]
             metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
                 value: {} for value in starts

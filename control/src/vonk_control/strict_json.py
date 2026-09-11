@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Mapping, Sequence
 from copy import copy
-from typing import Any
+from typing import Any, overload
 
 from fastapi import Response
 from fastapi.concurrency import run_in_threadpool
@@ -70,6 +70,18 @@ class StrictJSONModel(ProtocolStrictJSONModel):
     """Controller model using the shared protocol validation boundary."""
 
 
+@overload
+def serialize_json_value(value: RootModel, *, by_alias: bool = True) -> object: ...
+
+
+@overload
+def serialize_json_value(value: BaseModel, *, by_alias: bool = True) -> dict[str, object]: ...
+
+
+@overload
+def serialize_json_value(value: object, *, by_alias: bool = True) -> object: ...
+
+
 def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
     """Encode models while retaining required nullable fields at JSON egress."""
 
@@ -100,6 +112,7 @@ class ControllerAPIRoute(APIRoute):
     def get_route_handler(self):
         original_dependant = self.dependant
         original_call = original_dependant.call
+        assert original_call is not None
         original_response_param_name = original_dependant.response_param_name
         response_param_name = original_response_param_name or "__controller_response"
         response_field = self.secure_cloned_response_field

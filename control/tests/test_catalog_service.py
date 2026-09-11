@@ -117,3 +117,30 @@ def test_import_rejects_changed_recipe_digest(service: CatalogService, tmp_path:
             dependency_documents=item.dependencies,
         )
     client.close()
+
+
+def test_resolve_recipe_revision_resolves_active_model_references(
+    service: CatalogService, tmp_path: Path
+) -> None:
+    """A documented recipe resolves only while every model reference is active.
+
+    The service method previously called a ``_resolve_recipe`` attribute that
+    only exists as a module-level function, so the call raised ``AttributeError``
+    instead of resolving the pinned models.
+    """
+    client, item = _item(tmp_path)
+    try:
+        service.import_recipe_library(
+            "test",
+            library_commit=item.library_commit,
+            source_path=item.source_path,
+            document=item.document,
+            expected_content_sha256=item.content_sha256,
+            dependency_documents=item.dependencies,
+            package_handle=item.package_handle,
+            package_sha256=item.package_sha256,
+            source_bundle_sha256=item.source_bundle_sha256,
+        )
+    finally:
+        client.close()
+    assert service.resolve_recipe_revision(item.document, actor="test") == item.content_sha256
