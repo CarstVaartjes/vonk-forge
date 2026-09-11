@@ -1048,8 +1048,17 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
+        try:
+            items = [activity_detail(item) for item in page.items]
+        except (OSError, RuntimeError, TypeError, ValueError):
+            # A stored evidence decoration that no longer validates is the
+            # Controller's fault, so it stays a declared server fault rather
+            # than escaping as an undeclared 500.
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
         return OperationsResponse(
-            operations=[activity_detail(item) for item in page.items],
+            operations=items,
             next_cursor=page.next_cursor,
             total=page.total,
         )
@@ -1076,7 +1085,14 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
-        return activity_detail(item)
+        try:
+            return activity_detail(item)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            # A stored document that no longer validates is a declared server
+            # fault, not an undeclared 500 and not the caller's request fault.
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
 
     @app.get(
         "/api/audit",
@@ -1172,7 +1188,7 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="job cursor is invalid"
             ) from None
-        except (RuntimeError, TypeError, ValueError):
+        except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None

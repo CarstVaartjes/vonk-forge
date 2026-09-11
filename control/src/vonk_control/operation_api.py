@@ -817,29 +817,45 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
 
 
 def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
-    if not isinstance(value, Mapping) or not isinstance(
-        value.get("provenance"), Mapping
-    ):
+    """Project stored evidence provenance, keeping absence distinct.
+
+    A missing key or an explicit ``null`` means no provenance was attached.
+    A present value that is not the canonical document is corruption and must
+    not be reported as absent.
+    """
+
+    if not isinstance(value, Mapping) or "provenance" not in value:
         return None
+    stored = value["provenance"]
+    if stored is None:
+        return None
+    if not isinstance(stored, Mapping):
+        raise BoundedJSONError("operation provenance is invalid")
     try:
-        return OperationEvidenceProvenance.model_validate(
-            value["provenance"], strict=True
-        )
-    except (TypeError, ValueError):
-        return None
+        return OperationEvidenceProvenance.model_validate(stored, strict=True)
+    except ValidationError as error:
+        raise BoundedJSONError("operation provenance is invalid") from error
 
 
 def _evidence_download_projection(value: object) -> OperationEvidenceDownload | None:
-    if not isinstance(value, Mapping) or not isinstance(
-        value.get("evidence_download"), Mapping
-    ):
+    """Project the stored evidence download, keeping absence distinct.
+
+    A missing key or an explicit ``null`` means no download was attached. A
+    present value that is not the canonical document is corruption and must
+    not be reported as absent.
+    """
+
+    if not isinstance(value, Mapping) or "evidence_download" not in value:
         return None
+    stored = value["evidence_download"]
+    if stored is None:
+        return None
+    if not isinstance(stored, Mapping):
+        raise BoundedJSONError("operation evidence download is invalid")
     try:
-        return OperationEvidenceDownload.model_validate(
-            value["evidence_download"], strict=True
-        )
-    except (TypeError, ValueError):
-        return None
+        return OperationEvidenceDownload.model_validate(stored, strict=True)
+    except ValidationError as error:
+        raise BoundedJSONError("operation evidence download is invalid") from error
 
 
 def _operation_item(

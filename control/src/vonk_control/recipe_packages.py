@@ -421,6 +421,14 @@ class RecipePackageClient:
         self._candidate_active = False
 
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
+        """Read the offline index cache, or ``None`` when it is unusable.
+
+        This file is only a re-fetchable cache of the remote authoritative
+        index. A missing or corrupt cache is deliberately discarded so the
+        caller fails closed with "index is unavailable"; it is never served as
+        fresh data, so this is not the corruption-becomes-absent case.
+        """
+
         self._candidate_active = False
         try:
             # A candidate left by an interrupted process is never eligible for

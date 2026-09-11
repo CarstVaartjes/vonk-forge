@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+import pytest
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from vonk_control.agent_api import EnrollmentGrantResponse
 from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.deployment_provenance_contract import (
+    DeploymentProvenance,
+    PlatformObservation,
+)
 from vonk_control.operator_projection_api import (
     FleetOperatorServices,
+    _deployment_provenance,
     build_fleet_operator_services,
     install_operator_projection_routes,
 )
@@ -111,3 +117,57 @@ def test_production_service_builder_does_not_enable_missing_authorities() -> Non
     services = build_fleet_operator_services(agent_services=None, upgrades=None)
     assert services.enrollment is None
     assert services.upgrades is None
+
+
+def test_configured_provenance_document_that_no_longer_validates_fails_loudly() -> None:
+    """An unconfigured provider is absent; a corrupt document is a fault.
+
+    ``_deployment_provenance`` used to swallow the validation failure and the
+    routes reported ``provenance: null`` for a stored observation that no
+    longer satisfies its contract.
+    """
+
+    assert _deployment_provenance(None) is None
+
+    class _CorruptProvenance:
+        def snapshot(self) -> DeploymentProvenance:
+            # The same ValidationError ``stored_observation`` raises for a
+            # malformed stored observation.
+            PlatformObservation.model_validate({})
+            raise AssertionError("unreachable")
+
+    with pytest.raises(HTTPException) as error:
+        _deployment_provenance(_CorruptProvenance())
+    assert error.value.status_code == 422
+    assert "PlatformObservation" in str(error.value.detail)
+
+
+def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
+    """``/api/fleet/{selector}`` must not report a corrupt observation as absent."""
+
+    from vonk_control.fleet_projection import FleetSnapshot
+
+    from .test_metrics import NODE, _fleet_snapshot
+
+    class _Projection:
+        def read(self) -> FleetSnapshot:
+            return _fleet_snapshot()
+
+    class _CorruptProvenance:
+        def snapshot(self) -> DeploymentProvenance:
+            # The same ValidationError ``stored_observation`` raises for a
+            # malformed stored observation.
+            PlatformObservation.model_validate({})
+            raise AssertionError("unreachable")
+
+    app = FastAPI()
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        fleet_projection=_Projection(),
+        library_projection=None,
+        fleet_services=FleetOperatorServices(provenance=_CorruptProvenance()),
+    )
+    response = TestClient(app).get(f"/api/fleet/{NODE}")
+    assert response.status_code == 422
+    assert "PlatformObservation" in response.json()["detail"]

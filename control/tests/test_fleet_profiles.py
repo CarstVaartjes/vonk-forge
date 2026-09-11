@@ -34,6 +34,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
+    _operation_state,
     build_production_fleet_profile_service,
 )
 from vonk_control.models import (
@@ -2502,3 +2503,23 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     assert not any(
         reason.code == "profile.preparation_unavailable" for reason in preview.reasons
     )
+
+
+def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
+    """A stored state that no longer validates must not become "running".
+
+    The caller's default is only correct for a genuinely absent value; a
+    present but malformed state used to be reported as the default, inventing
+    an execution state.
+    """
+
+    assert _operation_state(None, default="running") == "running"
+    assert _operation_state("succeeded", default="queued") == "succeeded"
+    with pytest.raises(
+        FleetProfileConflict, match="child operation state is invalid"
+    ):
+        _operation_state("not-a-state", default="running")
+    with pytest.raises(
+        FleetProfileConflict, match="child operation state is invalid"
+    ):
+        _operation_state(7, default="running")

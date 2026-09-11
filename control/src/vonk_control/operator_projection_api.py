@@ -363,6 +363,24 @@ def _operator_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail="operator projection unavailable")
 
 
+def _deployment_provenance(
+    provider: FleetProvenanceProvider | None,
+) -> DeploymentProvenance | None:
+    """Read configured deployment provenance, keeping absence distinct.
+
+    ``None`` means the provenance feature is not configured. A configured
+    provider that returns a document which no longer validates is corruption
+    and must fail loudly instead of being reported as no provenance.
+    """
+
+    if provider is None:
+        return None
+    try:
+        return DeploymentProvenance.model_validate(provider.snapshot())
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        raise _operator_error(error) from None
+
+
 def _require_mutation(actor: Actor, method: str, route: str) -> None:
     """Use the shared role table for both cookie and bearer actors."""
 
@@ -414,14 +432,9 @@ def install_operator_projection_routes(
             )
 
     def provenance() -> DeploymentProvenance | None:
-        if fleet_services is None or fleet_services.provenance is None:
-            return None
-        try:
-            return DeploymentProvenance.model_validate(
-                fleet_services.provenance.snapshot()
-            )
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return None
+        return _deployment_provenance(
+            None if fleet_services is None else fleet_services.provenance
+        )
 
     def snapshot() -> FleetSnapshot:
         try:

@@ -114,12 +114,95 @@ def test_large_fleet_keeps_bounded_evidence_with_explicit_omissions(service):
     assert bundle.context.omitted_node_count == 896
 
 
-def test_corrupt_diagnostics_do_not_hide_primary_operation_failure(service):
+def test_corrupt_stored_evidence_is_not_reported_as_absent(service):
+    """A stored record that no longer validates must fail, not disappear.
+
+    ``decorate`` used to swallow the read failure and omit
+    ``evidence_download``/``provenance``. The standalone ``/evidence`` route
+    answers the same input with 503, so the operation detail must agree
+    instead of presenting the corruption as missing evidence.
+    """
+
     value = item()
     service.capture(value)
     with service.sessions.begin() as session:
-        session.get(FailureEvidenceRecord, (value["id"], 1)).content = b"corrupt"
-    assert service.decorate(value) == value
+        record = session.get(FailureEvidenceRecord, (value["id"], 1))
+        assert record is not None
+        record.content = b"corrupt"
+    with pytest.raises(ValueError, match="failure evidence digest mismatch"):
+        service.decorate(value)
+
+
+def test_corrupt_stored_evidence_fails_operation_detail_and_evidence_route_alike(
+    service,
+):
+    """The composed operation detail and the download route agree on corruption."""
+
+    from vonk_control.api import create_app
+    from vonk_control.audit import MemoryAuditStore
+    from vonk_control.auth import Actor, TokenCodec
+    from vonk_control.operation_api import (
+        OperationApiServices,
+        OperationListPage,
+        OperationPage,
+    )
+
+    from .test_api import Jobs
+
+    value: dict[str, object] = {
+        **item(),
+        "state": "failed",
+        "created_at": NOW.isoformat(),
+    }
+    # The composed API consumes the same nested diagnostics as AgentResult.
+    diagnostics = collect_failure(value, now=NOW).diagnostics
+    result = value["result"]
+    assert isinstance(result, dict)
+    result.pop("stderr")
+    result["diagnostics"] = diagnostics.model_dump(mode="json")
+    service.capture(value)
+    codec = TokenCodec(b"k" * 32)
+
+    def job_operations(
+        _job_id: str, _operation_cursor: str | None, _limit: int
+    ) -> OperationPage:
+        raise AssertionError("job operations are not projected in this test")
+
+    operations = OperationApiServices(
+        endpoint=lambda _: {},
+        agents=list,
+        job_operations=job_operations,
+        resume_job=lambda _: None,
+        get_operation=lambda _: value,
+        list_operations=lambda *_: OperationListPage([value], None, 1),
+    )
+    app = create_app(
+        jobs=Jobs(),
+        tokens=codec,
+        audits=MemoryAuditStore(),
+        now=lambda: 10,
+        operations=operations,
+        failure_evidence=service,
+    )
+    client = TestClient(app)
+    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"/api/operations/{value['id']}"
+
+    assert client.get(url, headers=headers).status_code == 200
+    with service.sessions.begin() as session:
+        record = session.get(FailureEvidenceRecord, (value["id"], 1))
+        assert record is not None
+        record.content = b"corrupt"
+
+    assert client.get(url, headers=headers).status_code == 503
+    assert client.get("/api/operations", headers=headers).status_code == 503
+    assert (
+        client.get(
+            f"{url}/evidence?attempt=1", headers=headers
+        ).status_code
+        == 503
+    )
 
 
 def test_redaction_handles_adversarial_values_before_persistence(service):

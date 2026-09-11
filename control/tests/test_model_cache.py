@@ -919,6 +919,32 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert all(item["state"] == "succeeded" for item in succeeded_page.items)
 
 
+def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -> None:
+    """A present but malformed boundary is not "no further page".
+
+    ``_next_cursor`` used to return ``None`` for any boundary that was not the
+    exact pair, which silently dropped pagination and reported the page as the
+    last one.
+    """
+
+    from vonk_control import operation_api
+
+    service, _sessions = cache
+    provider = ModelCacheOperationProvider(
+        service, TokenCodec(b"c" * 32).cursor_codec()
+    )
+
+    assert provider._next_cursor(None, state=None, node_id=None) is None
+    with pytest.raises(
+        operation_api.OperationProjectionError, match="boundary is invalid"
+    ):
+        provider._next_cursor(("only-one",), state=None, node_id=None)
+    with pytest.raises(
+        operation_api.OperationProjectionError, match="boundary is invalid"
+    ):
+        provider._next_cursor((1, "operation-id"), state=None, node_id=None)
+
+
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
     cache, tmp_path: Path
 ) -> None:
