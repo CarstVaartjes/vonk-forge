@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
     DistributionObject,
     canonical_message,
 )
+from vonk_forge_contracts import RecipeDefinition
 
 from .cached_file_verification import verified_files
 from .catalog_revision_contract import read_catalog_document
@@ -62,14 +63,17 @@ class VerifiedObject:
 class VerifiedObjectSource(Protocol):
     def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
         """Open a complete immutable object or raise DistributionError."""
+        ...
 
     def verify_artifact_set(
         self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
     ) -> bool:
         """Prove that the exact model objects belong to the cache manifest."""
+        ...
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
         """Prove the archive is the exact OCI image selected by the plan."""
+        ...
 
 
 def artifact_set_sha256(objects: tuple[DistributionObject, ...]) -> str:
@@ -158,8 +162,21 @@ class FilesystemVerifiedObjectSource:
 class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
     """Verified OCI source backed by succeeded Controller recipe builds."""
 
-    def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
-        super().__init__(artifact_root / IMAGE_CACHE_DIRECTORY, **kwargs)
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        artifact_root: Path,
+        *,
+        maximum_bytes: int = 16 * 1024**4,
+        artifact_manifests: dict[str, tuple[DistributionObject, ...]] | None = None,
+        runtime_images: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(
+            artifact_root / IMAGE_CACHE_DIRECTORY,
+            maximum_bytes=maximum_bytes,
+            artifact_manifests=artifact_manifests,
+            runtime_images=runtime_images,
+        )
         self.sessions = sessions
 
     def verify_artifact_set(
@@ -199,8 +216,22 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
     authorizes use of an archive in a target assignment.
     """
 
-    def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
-        super().__init__(sessions, artifact_root, **kwargs)
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        artifact_root: Path,
+        *,
+        maximum_bytes: int = 16 * 1024**4,
+        artifact_manifests: dict[str, tuple[DistributionObject, ...]] | None = None,
+        runtime_images: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(
+            sessions,
+            artifact_root,
+            maximum_bytes=maximum_bytes,
+            artifact_manifests=artifact_manifests,
+            runtime_images=runtime_images,
+        )
         self._runtime_storage = FilesystemRuntimeImageStorage(artifact_root)
 
     def _published_receipt_authorizes(
@@ -230,7 +261,7 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 if revision is None:
                     return False
                 recipe = read_catalog_document(revision)
-                execution = recipe.execution if hasattr(recipe, "execution") else None
+                execution = recipe.execution if isinstance(recipe, RecipeDefinition) else None
                 image = execution.image if execution is not None and execution.mode == "image" else None
                 raw_registry = image.digest if image is not None else None
                 expected_registry = f"sha256:{raw_registry}" if raw_registry is not None else None
@@ -292,7 +323,7 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             registry_digests: set[str] = set()
             for revision in revisions:
                 recipe = read_catalog_document(revision)
-                execution = recipe.execution if hasattr(recipe, "execution") else None
+                execution = recipe.execution if isinstance(recipe, RecipeDefinition) else None
                 image = execution.image if execution is not None and execution.mode == "image" else None
                 raw_digest = image.digest if image is not None else None
                 expected = f"sha256:{raw_digest}" if raw_digest is not None else None
@@ -392,6 +423,14 @@ class ModelCacheVerifiedObjectSource:
     or rewrites that digest; the cache worker remains its authority.
     """
 
+    # ``_service`` stays an opaque duck-typed component: the NAS worker's
+    # verified-object service is not importable from this module.
+    _service: object
+    _manifests: dict[str, tuple[DistributionObject, ...]]
+    _receipts: dict[str, tuple[dict[str, object], ...]]
+    _paths: dict[str, tuple[str, str, object]]
+    _open_verified: Callable[[str, int], VerifiedObject]
+
     def __init__(
         self,
         open_verified: Callable[[str, int], VerifiedObject],
@@ -426,10 +465,18 @@ class ModelCacheVerifiedObjectSource:
         try:
             # ModelCacheService validates its opaque digest against the full
             # canonical ArtifactSetManifest before exposing descriptors.
-            manifest = self._service.manifest_for_artifact_set(digest)
+            manifest_provider = getattr(self._service, "manifest_for_artifact_set", None)
+            descriptor_provider = getattr(
+                self._service, "resolve_verified_artifact_set", None
+            )
+            if not isinstance(manifest_provider, Callable) or not isinstance(
+                descriptor_provider, Callable
+            ):
+                raise TypeError("NAS cache manifest provider is unavailable")
+            manifest = manifest_provider(digest)
             if manifest.digest != digest:
                 raise ValueError("cache manifest identity changed")
-            descriptors = self._service.resolve_verified_artifact_set(digest)
+            descriptors = descriptor_provider(digest)
         except Exception as error:
             raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is unavailable") from error
         objects = []
@@ -474,9 +521,10 @@ class ModelCacheVerifiedObjectSource:
             raise DistributionError("distribution.object_unavailable", "NAS cache object was not authorized")
         set_digest, path, _ = entry
         try:
-            verified_path, size, verified_digest = self._service.verified_artifact_file(
-                set_digest, digest, path
-            )
+            file_provider = getattr(self._service, "verified_artifact_file", None)
+            if not isinstance(file_provider, Callable):
+                raise TypeError("NAS cache object provider is unavailable")
+            verified_path, size, verified_digest = file_provider(set_digest, digest, path)
             if size != expected_bytes or verified_digest != digest:
                 raise DistributionError("distribution.object_unavailable", "NAS cache object identity changed")
             return VerifiedObject(verified_path.open("rb"), size, digest)

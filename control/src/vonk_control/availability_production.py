@@ -162,14 +162,14 @@ def build_recipe_image_availability(
     transport = SkopeoOCIImageTransport()
 
     def authority(
-        revision_id: str,
+        recipe_revision_id: str,
         *,
         force: bool = False,
     ) -> tuple[RecipeDefinition, Mapping[str, object]]:
         with sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.id == revision_id,
+                    CatalogDocumentRevision.id == recipe_revision_id,
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.state == "active",
                 )
@@ -192,9 +192,9 @@ def build_recipe_image_availability(
             if recipe.execution.mode == "build":
                 resolution = None
                 resolve = getattr(recipe_builds, "resolve", None)
-                if callable(resolve):
+                if isinstance(resolve, Callable):
                     try:
-                        resolution = resolve(revision_id)
+                        resolution = resolve(recipe_revision_id)
                     except Exception as error:
                         raise RecipeImageAvailabilityError(
                             str(getattr(error, "code", "recipe_image.build_unavailable")),
@@ -271,7 +271,10 @@ def build_recipe_image_availability(
     ) -> Mapping[str, object]:
         del recipe
         revision_id = runtime.get("recipe_revision_id")
-        builder_node_id = runtime.get("builder_node_id")
+        raw_builder_node_id = runtime.get("builder_node_id")
+        builder_node_id: str | None = (
+            raw_builder_node_id if isinstance(raw_builder_node_id, str) else None
+        )
         if not isinstance(revision_id, str):
             raise RecipeImageAvailabilityError(
                 "recipe_image.build_input_missing",
@@ -337,8 +340,11 @@ def build_recipe_image_availability(
                                 job.kind == "recipe.image.availability.v2"
                                 and isinstance(job.payload, Mapping)
                                 and not isinstance(job.payload.get("image_result"), Mapping)
-                                and isinstance(job.payload.get("runtime"), Mapping)
-                                and job.payload["runtime"].get("builder_node_id") == node_id
+                                and isinstance(
+                                    (job_runtime := job.payload.get("runtime")),
+                                    Mapping,
+                                )
+                                and job_runtime.get("builder_node_id") == node_id
                             )
                         )
 
@@ -494,6 +500,11 @@ def build_recipe_image_availability(
                         str(error)[:512],
                     ) from error
                 builder_node_id = candidate_id
+                if selected_plan is None:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_unavailable",
+                        "selected Recipe build plan is unavailable",
+                    )
                 build_input_sha256 = selected_plan.build_input_sha256
                 assigned_runtime = (
                     dict(parent_runtime) if isinstance(parent_runtime, Mapping) else {}
@@ -506,7 +517,9 @@ def build_recipe_image_availability(
                     "identity_key": build_input_sha256,
                 }
                 parent.updated_at = clock()
-        if selected_plan is None and not isinstance(builder_node_id, str):
+        if builder_node_id is None:
+            # A resolved plan always carries the builder that produced it, so
+            # without one the operation can only wait for capacity.
             raise RecipeImageAvailabilityError(
                 "recipe_image.build_capacity_wait",
                 "no compatible Recipe builder is currently available",
@@ -531,6 +544,11 @@ def build_recipe_image_availability(
                     code or "recipe_image.build_unavailable",
                     str(error)[:512],
                 ) from error
+        if selected_plan is None:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_unavailable",
+                "reconstructed Recipe build plan is unavailable",
+            )
         plan = selected_plan
         if plan.build_input_sha256 != build_input_sha256:
             raise RecipeImageAvailabilityError(

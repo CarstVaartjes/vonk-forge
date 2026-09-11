@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 )
 
 from .agent_jobs import AgentJobService
+from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
@@ -118,28 +119,30 @@ def _child_receipt(
 
 def _evidence_projection(
     node_id: str, value: Mapping[str, object]
-) -> dict[str, object]:
+) -> ArtifactVerificationEvidence:
     """Keep the high-level evidence fields from an agent handoff receipt."""
 
-    return ArtifactVerificationEvidence(
-        node_id=node_id,
-        **{
-            key: value[key]
-            for key in (
-                "verified",
-                "verified_digests",
-                "downloaded_bytes",
-                "copied_bytes",
-                "verified_image_digest",
-                "imported_image_digest",
-                "verified_oci_layout_sha256",
-                "error",
-                "reason",
-                "uncertain",
-            )
-            if key in value
-        },
-    ).model_dump(mode="json", exclude_unset=True)
+    return ArtifactVerificationEvidence.model_validate(
+        {
+            "node_id": node_id,
+            **{
+                key: value[key]
+                for key in (
+                    "verified",
+                    "verified_digests",
+                    "downloaded_bytes",
+                    "copied_bytes",
+                    "verified_image_digest",
+                    "imported_image_digest",
+                    "verified_oci_layout_sha256",
+                    "error",
+                    "reason",
+                    "uncertain",
+                )
+                if key in value
+            },
+        }
+    )
 
 
 class DurableDistributionPhaseExecutor:
@@ -296,7 +299,7 @@ class DurableDistributionPhaseExecutor:
             measured_members = []
             evidence = []
             cached_nodes = tuple(
-                value for value in child.payload.get("cached_nodes", [])
+                value for value in sequence(child.payload.get("cached_nodes")) or ()
                 if isinstance(value, str)
             )
             cached_totals = child.payload.get("target_totals", {})
@@ -621,7 +624,7 @@ class DurableDistributionPhaseExecutor:
             raise TypeError("exact model preparation identity is unavailable")
         source = getattr(self._distribution.source, "model_source", self._distribution.source)
         getter = getattr(source, "objects_for_set", None)
-        if not callable(getter):
+        if not isinstance(getter, Callable):
             raise TypeError("verified model cache manifest provider is unavailable")
         objects = tuple(getter(model_set_digest))
         if not objects or any(item.kind != "model" for item in objects):
@@ -964,14 +967,14 @@ class DurableDistributionPhaseExecutor:
                         receipts[item_node_id] = item
         cached_nodes = set(cached)
         cached_nodes.update({
-            value for value in progress.get("cached_nodes", [])
+            value for value in sequence(progress.get("cached_nodes")) or ()
             if isinstance(value, str)
         })
         for candidate in phase_results:
             if isinstance(candidate, Mapping):
-                cached = candidate.get("cached_nodes")
-                if isinstance(cached, list):
-                    cached_nodes.update(value for value in cached if isinstance(value, str))
+                raw_cached = candidate.get("cached_nodes")
+                if isinstance(raw_cached, list):
+                    cached_nodes.update(value for value in raw_cached if isinstance(value, str))
         missing = set(targets) - cached_nodes
         if missing - receipts.keys():
             raise RuntimeError("verification requires terminal evidence from every target")
@@ -1076,7 +1079,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             raise RuntimeError("exact model preparation is unavailable")
         preview_method = getattr(self._model_cache, "download_preview", None)
         start_method = getattr(self._model_cache, "start_download", None)
-        if not callable(preview_method) or not callable(start_method):
+        if not isinstance(preview_method, Callable) or not isinstance(start_method, Callable):
             raise TypeError("model-cache download provider is unavailable")
         # An exact persisted set is sufficient to resolve the opaque manifest.
         # When a recipe revision ID is available, include the model pin as an
@@ -1162,7 +1165,10 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             return None
         if plan.recipe_revision_id is None or not plan.spark_group.nodes:
             raise RuntimeError("runtime image preparation identity is unavailable")
-        from .execution_plan_service import _bind_runtime_artifacts
+        from .execution_plan_service import (
+            ExecutionPlanCompilationError,
+            _bind_runtime_artifacts,
+        )
         from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
 
         node = min(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id))
@@ -1206,9 +1212,16 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 rank=node.rank,
                 package_handle=package_handle,
             )
+            resolved_models = sequence(entities["models"])
+            if resolved_models is None:
+                # The artifact binder reports the same canonical error for a
+                # non-array model projection.
+                raise ExecutionPlanCompilationError(
+                    "canonical model projection is invalid"
+                )
             runtime_spec = _bind_runtime_artifacts(
                 runtime_spec,
-                entities["models"],
+                resolved_models,
             )
         receipt = self._runtime_image_preparer(
             revision.document,
@@ -1246,7 +1259,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
 
     def get(self, operation_id: str) -> Any:
         getter = getattr(self._model_cache, "get_operation", None)
-        if callable(getter):
+        if isinstance(getter, Callable):
             try:
                 view = getter(operation_id)
                 return _ChildView(
