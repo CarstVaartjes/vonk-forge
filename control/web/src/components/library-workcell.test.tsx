@@ -68,7 +68,7 @@ test("refreshes the whole cached recipe set with an explicit scope", async () =>
 test("offers the same recipe filters as vonkctl recipe library", () => {
   const model = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
   render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(model.model)}} snapshot={libraryViewSnapshot}/>);
-  for (const name of ["Filter usage", "Filter family", "Filter version", "Filter quantization", "Filter creator", "Filter alignment", "Filter Sparks"]) {
+  for (const name of ["Filter usage", "Filter family", "Filter version", "Filter quantization", "Filter creator", "Filter alignment", "Filter Sparks", "Sort Library", "Filter updated"]) {
     expect(screen.getByRole("combobox", {name})).toBeVisible();
   }
 });

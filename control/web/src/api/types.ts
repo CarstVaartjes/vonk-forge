@@ -1,4 +1,4 @@
-import type {components} from "./generated";
+import type {components, paths} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
@@ -36,6 +36,9 @@ export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImage
 export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
 export type RecipeUpdateResponse = components["schemas"]["RecipeUpdateResponse"];
 export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse;
+// The library ordering vocabulary is the generated query parameter, so the UI
+// cannot offer a `sort` the API would reject as a 422.
+export type LibrarySort = NonNullable<NonNullable<paths["/api/model/library"]["get"]["parameters"]["query"]>["sort"]>;
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
 
 // UI-only projections combine the independent Model and Recipe list responses.
@@ -139,10 +142,10 @@ export interface CatalogApi {
 }
 export interface LibraryApi {
   modelStatus(signal?: AbortSignal): Promise<ModelStatus>;
-  modelLibrary(cursor?: string, signal?: AbortSignal): Promise<ModelLibrary>;
+  modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary>;
   modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
   recipeStatus(signal?: AbortSignal): Promise<RecipeStatus>;
-  recipeLibrary(cursor?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
+  recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
