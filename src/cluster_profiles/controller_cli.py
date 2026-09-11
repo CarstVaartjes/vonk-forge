@@ -20,6 +20,7 @@ from .cli_select import SelectorError
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
+MAX_PAGE_LIMIT = 512
 
 
 class ControllerClient(Protocol):
@@ -60,6 +61,27 @@ def _request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
     return str(parsed)
 
 
+def _page_limit(value: str) -> int:
+    """Accept a page size between 1 and 512.
+
+    The bound belongs in the conversion rather than in ``choices``: 512
+    choices turn every ``--help`` that lists a library command into a wall of
+    numbers that hides the real options.
+    """
+
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid page limit: {value!r} is not an integer"
+        ) from None
+    if not 1 <= number <= MAX_PAGE_LIMIT:
+        raise argparse.ArgumentTypeError(
+            f"page limit must be between 1 and {MAX_PAGE_LIMIT}"
+        )
+    return number
+
+
 def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
     parser.add_argument(name, metavar=name.upper(), help=help)
 
@@ -71,7 +93,13 @@ def _filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--updated-since")
     parser.add_argument("--sort", choices=("updated", "name"), default="updated")
     parser.add_argument("--cursor")
-    parser.add_argument("--limit", type=int, choices=range(1, 513), default=100)
+    parser.add_argument(
+        "--limit",
+        type=_page_limit,
+        default=100,
+        metavar="1-512",
+        help=f"Page size, 1 to {MAX_PAGE_LIMIT} (default: 100)",
+    )
 
 
 def _detail_filters(parser: argparse.ArgumentParser) -> None:
