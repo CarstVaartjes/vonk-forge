@@ -11,6 +11,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -149,7 +150,7 @@ def csr(node_id: str = NODE_ID) -> bytes:
     return (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, node_id)])
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
@@ -185,7 +186,7 @@ def rsa_csr() -> bytes:
     return (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_ID)])
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_ID)])
         )
         .add_extension(
             x509.SubjectAlternativeName(

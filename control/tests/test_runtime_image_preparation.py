@@ -408,8 +408,23 @@ def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manife
     (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
 
     class DifferentArchive(TinyTransport):
-        def inspect_archive(self, archive: Path, **kwargs: object) -> PulledImageEvidence:
-            return replace(super().inspect_archive(archive, **kwargs), manifest_digest=IMAGE_DIGEST)
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            evidence = super().inspect_archive(
+                archive,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_runtime_interface,
+                expected_archive_sha256=expected_archive_sha256,
+                expected_archive_bytes=expected_archive_bytes,
+            )
+            return replace(evidence, manifest_digest=IMAGE_DIGEST)
 
     receipt = prepare_runtime_image(
         _recipe("recipe-source-build.json"),

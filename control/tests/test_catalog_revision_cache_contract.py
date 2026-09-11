@@ -9,11 +9,15 @@ import pytest
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_revision_contract import (
     CatalogRevisionContractError,
+    ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
 )
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
-from vonk_control.model_cache_contract import parse_model_cache_payload
+from vonk_control.model_cache_contract import (
+    ModelCacheDownloadPayload,
+    parse_model_cache_payload,
+)
 from vonk_control.models import CatalogDocumentRevision, ModelCacheOperation
 from vonk_forge_contracts import ModelDefinition
 
@@ -38,6 +42,7 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
         assert stored is not None
         assert isinstance(read_catalog_document(stored), ModelDefinition)
         projection = read_catalog_projection(stored)
+        assert isinstance(projection, ModelRevisionProjection)
         assert projection.artifact_count == len(raw["files"])
         stored.projected = {**stored.projected, "artifact_count": "malformed"}
         with pytest.raises(CatalogRevisionContractError):
@@ -61,6 +66,7 @@ def test_model_cache_operation_payload_round_trips_through_database_and_rejects_
         stored = session.get(ModelCacheOperation, operation.id)
         assert stored is not None
         parsed = parse_model_cache_payload("download", stored.payload)
+        assert isinstance(parsed, ModelCacheDownloadPayload)
         assert parsed.schema_version == 2
         assert parsed.source_policy == "nas-first"
         assert parsed.manifest.model_content_sha256 is not None

@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
     DistributionError,
@@ -516,7 +517,13 @@ def test_empty_support_file_can_be_cached_and_served_as_an_immutable_object(
         assert entry["expected_bytes"] == 0
         assert entry["verified_bytes"] == 0
         assert entry["unique_bytes"] == 0
-        assert entry["artifacts"][0]["expected_bytes"] == 0
+        artifacts = require_sequence(
+            entry["artifacts"], "cache entry artifacts must be a sequence"
+        )
+        artifact_entry = require_mapping(
+            artifacts[0], "cache entry artifact must be an object"
+        )
+        assert artifact_entry["expected_bytes"] == 0
         descriptor = restarted_cache.resolve_verified_artifact_set(set_digest)[0]
         assert descriptor["bytes"] == 0
         assert descriptor["sha256"] == hashlib.sha256(b"").hexdigest()

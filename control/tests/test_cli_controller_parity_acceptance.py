@@ -304,7 +304,7 @@ class HTTPTransport:
         payload: dict[str, object] | None = None,
         *,
         extra_headers: dict[str, str] | None = None,
-        query: dict[str, object] | None = None,
+        query: dict[str, str] | None = None,
     ) -> dict[str, object]:
         _validate_request(path, method, payload)
         headers = dict(extra_headers or {})
@@ -378,7 +378,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "--json",
     ) == browser_transport.request("PUT", "/api/profile/1", profile_body)
 
-    load_request = {"request_key": REQUEST_KEY}
+    load_request: dict[str, object] = {"request_key": REQUEST_KEY}
     assert _cli(cli_transport, "--profile", "1", "profile", "load", "--json") == browser_transport.request(
         "POST", "/api/profile/1/load", load_request
     )

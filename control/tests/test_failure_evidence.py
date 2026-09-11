@@ -159,7 +159,10 @@ def test_redaction_handles_adversarial_values_before_persistence(service):
 def test_ring_buffer_preserves_last_lines_and_reports_loss():
     tail = log_tail("noise\n" * 20000 + "last useful error\n")
     assert tail.text.endswith("last useful error")
-    assert tail.truncated and tail.dropped_bytes > 0 and tail.dropped_lines > 0
+    dropped_bytes = tail.dropped_bytes
+    dropped_lines = tail.dropped_lines
+    assert isinstance(dropped_bytes, int) and isinstance(dropped_lines, int)
+    assert tail.truncated and dropped_bytes > 0 and dropped_lines > 0
     assert len(tail.text.encode()) <= 2048
     assert len(tail.text.splitlines()) <= 32
 
@@ -309,21 +312,37 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     from vonk_control.api import create_app
     from vonk_control.audit import MemoryAuditStore
     from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.operation_api import OperationApiServices, OperationListPage
+    from vonk_control.operation_api import (
+        OperationApiServices,
+        OperationListPage,
+        OperationPage,
+    )
 
     from .test_api import Jobs
 
-    value = dict(item(), state="failed", created_at=NOW.isoformat())
+    value: dict[str, object] = {
+        **item(),
+        "state": "failed",
+        "created_at": NOW.isoformat(),
+    }
     # The composed API consumes the same nested diagnostics as AgentResult.
     diagnostics = collect_failure(value, now=NOW).diagnostics
-    value["result"].pop("stderr")
-    value["result"]["diagnostics"] = diagnostics.model_dump(mode="json")
+    result = value["result"]
+    assert isinstance(result, dict)
+    result.pop("stderr")
+    result["diagnostics"] = diagnostics.model_dump(mode="json")
     service.capture(value)
     codec = TokenCodec(b"k" * 32)
+
+    def job_operations(
+        _job_id: str, _operation_cursor: str | None, _limit: int
+    ) -> OperationPage:
+        raise AssertionError("job operations are not projected in this test")
+
     operations = OperationApiServices(
         endpoint=lambda _: {},
         agents=list,
-        job_operations=lambda *_: None,
+        job_operations=job_operations,
         resume_job=lambda _: None,
         get_operation=lambda _: value,
         list_operations=lambda *_: OperationListPage([value], None, 1),

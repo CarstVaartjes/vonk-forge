@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_policy import dockerfile_base_images
+from vonk_forge_contracts import ModelDefinition
 
 from .canonical_recipe_fixtures import canonical_example
 
@@ -16,7 +18,7 @@ def _example(name: str) -> dict[str, object]:
 
 def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
     recipe = _example("recipe-source-build.json")
-    model = _example("model-definition.json")
+    model = ModelDefinition.model_validate(_example("model-definition.json"))
     context = ROOT / "control/tests/fixtures/recipes/dev-http-smoke/context"
     base_images = dockerfile_base_images((context / "Dockerfile").read_bytes())
     expected_base_image = (
@@ -38,7 +40,9 @@ def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
         rank=0,
     )
 
-    assert spec["runtime"]["entrypoint"] == [
+    runtime = spec["runtime"]
+    assert isinstance(runtime, Mapping)
+    assert runtime["entrypoint"] == [
         "/opt/vonk/bin/vllm",
         "serve",
         "/models",
@@ -51,8 +55,10 @@ def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
         "--port",
         "8000",
     ]
-    assert spec["runtime"]["image"] == f"localhost/vonk/build@sha256:{digest}"
-    assert spec["security"]["mounts"] == [
+    assert runtime["image"] == f"localhost/vonk/build@sha256:{digest}"
+    security = spec["security"]
+    assert isinstance(security, Mapping)
+    assert security["mounts"] == [
         {
             "source": "/run/vonk/models/primary",
             "target": "/models",

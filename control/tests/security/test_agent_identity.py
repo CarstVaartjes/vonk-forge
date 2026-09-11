@@ -39,8 +39,13 @@ def test_agent_scope_source_must_be_typed_and_bound_to_identity() -> None:
             ),
         }
     ) is None
+    # The raw mapping is deliberately the wrong type: the assertion is that the
+    # frozen dataclass refuses an untyped identity at runtime. This one pyright
+    # error is the point of the case, so it is recorded in the baseline rather
+    # than silenced; the `# type: ignore` that used to sit above it was on the
+    # wrong line and suppressed nothing.
     with pytest.raises(AuthError):
-        AgentSource(  # type: ignore[arg-type]
+        AgentSource(
             identity={"node_id": NODE},
             management_address="10.0.0.42",
         )

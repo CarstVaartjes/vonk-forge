@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -17,11 +18,12 @@ from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import AgentSource, TokenCodec
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.compiled_execution_plan import validate_compiled_launch_payload
-from vonk_control.distribution import DistributionService
+from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import InstallAdmissionService
@@ -79,13 +81,14 @@ NODE_ID = "spk_" + "1" * 32
 class _Transport:
     def pull_and_export(
         self,
-        _reference: str,
+        reference: str,
         destination: Path,
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
-        progress=None,
+        progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
+        del reference, progress
         destination.write_bytes(ARCHIVE)
         return PulledImageEvidence(
             manifest_digest=PLATFORM_DIGEST,
@@ -96,6 +99,21 @@ class _Transport:
             runtime_interface="v1",
             archive_sha256=ARCHIVE_DIGEST,
             archive_bytes=len(ARCHIVE),
+        )
+
+    def inspect_archive(self, *_args: object, **_kwargs: object) -> PulledImageEvidence:
+        # This double only exercises the published pull path; archive
+        # inspection belongs to the controller-build path.
+        raise NotImplementedError("published transport double does not inspect archives")
+
+
+class _ModelSource(MemoryVerifiedObjectSource):
+    """Verified source exposing the exact model set the plan selects."""
+
+    def objects_for_set(self, artifact_set_sha256: str) -> tuple[DistributionObject, ...]:
+        del artifact_set_sha256
+        return (
+            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
         )
 
 
@@ -131,7 +149,17 @@ class _ModelCache:
 
 
 class _Inspector:
-    def inspect(self, _session, **_kwargs: object) -> ArtifactInspection:
+    def inspect(
+        self,
+        session: Session,
+        *,
+        model_content_sha256: str,
+        recipe_revision_id: str,
+        node_ids: tuple[str, ...],
+        retention: str,
+        now: datetime,
+    ) -> ArtifactInspection:
+        del session, model_content_sha256, recipe_revision_id, node_ids, retention, now
         return ArtifactInspection(
             required_bytes=1024,
             reused_bytes=0,
@@ -192,11 +220,29 @@ class _Queue:
 class _TargetExecutor(CompositeDistributionPhaseExecutor):
     """Use production receipt/assignment logic with deterministic child evidence."""
 
-    def __init__(self, *args: object, events: list[str], tamper_db: str | None = None, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        operations: AgentJobService,
+        distribution: DistributionService,
+        *,
+        clock: Callable[[], datetime],
+        model_cache: object,
+        runtime_image_preparer: Callable[..., object] | None,
+        events: list[str],
+        tamper_db: str | None = None,
+    ) -> None:
+        super().__init__(
+            sessions,
+            operations,
+            distribution,
+            clock=clock,
+            model_cache=model_cache,
+            runtime_image_preparer=runtime_image_preparer,
+        )
         self.events = events
         self.assignments: dict[str, dict[str, object]] = {}
-        self._children: dict[str, object] = {}
+        self._children: dict[str, SimpleNamespace] = {}
         self._tamper_db = tamper_db
         self._did_tamper = False
 
@@ -383,6 +429,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
             )
             if row is None:
                 raise RuntimeError("missing durable direct receipt")
+            assert row.oci_archive_sha256 is not None
             return storage.read_receipt(row.oci_archive_sha256)
 
     compiler = ControllerExecutionPlanService(
@@ -404,14 +451,10 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
         clock=lambda: NOW,
         mappings=ClusterMappingService(sessions),
     )
-    source = SimpleNamespace(
-        objects_for_set=lambda digest: (
-            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
-        )
-    )
+    source = _ModelSource()
     executor = _TargetExecutor(
         sessions,
-        None,
+        AgentJobService(sessions, clock=lambda: NOW),
         DistributionService(source, sessions=sessions),
         clock=lambda: NOW,
         model_cache=model_cache,
@@ -468,11 +511,14 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         assert row is not None
         assert row.state == "running", (row.status_reason, events, row.result)
         progress = row.result or {}
-        results = progress.get("phase_results", [])
+        results = require_sequence(progress.get("phase_results", []), "phase results")
         assert events.index("runtime-image-db-committed") < events.index("target-copy")
         assert any(item.get("compiled_plan_persisted") is True for item in results if isinstance(item, dict))
-        runtime_result = next(item for item in results if isinstance(item, dict) and "runtime_image" in item)
-        runtime = runtime_result["runtime_image"]
+        runtime_result = require_mapping(
+            next(item for item in results if isinstance(item, dict) and "runtime_image" in item),
+            "runtime result",
+        )
+        runtime = require_mapping(runtime_result["runtime_image"], "runtime image")
         assert runtime["registry_manifest_digest"] == REGISTRY_DIGEST
         assert runtime["platform_manifest_digest"] == PLATFORM_DIGEST
         assert runtime["local_image_config_id"] == CONFIG_DIGEST
@@ -481,12 +527,20 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         installation = session.scalar(select(RecipeInstallation))
         assert installation is not None
         assert installation.recipe_build_id is None
-        compiled = installation.plan["compiled_execution_plans"][NODE_ID]
-        assert compiled["runtime_image"]["image_digest"] == PLATFORM_DIGEST
-        assert compiled["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
-        assert compiled["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
-        assert compiled["runtime_image"]["local_image_config_id"] == CONFIG_DIGEST
-        assert compiled["runtime_image"]["distribution_object"]["sha256"] == ARCHIVE_DIGEST
+        installation_plan = require_mapping(installation.plan, "installation plan")
+        compiled_plans = require_mapping(
+            installation_plan["compiled_execution_plans"], "compiled execution plans"
+        )
+        compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
+        compiled_runtime = require_mapping(compiled["runtime_image"], "compiled runtime image")
+        assert compiled_runtime["image_digest"] == PLATFORM_DIGEST
+        assert compiled_runtime["registry_manifest_digest"] == REGISTRY_DIGEST
+        assert compiled_runtime["platform_manifest_digest"] == PLATFORM_DIGEST
+        assert compiled_runtime["local_image_config_id"] == CONFIG_DIGEST
+        distribution_object = require_mapping(
+            compiled_runtime["distribution_object"], "compiled distribution object"
+        )
+        assert distribution_object["sha256"] == ARCHIVE_DIGEST
         assert session.query(RecipeBuild).count() == 0
         assert session.query(RuntimeImageReceipt).count() == 1
         persisted = session.scalar(select(RuntimeImageReceipt))
@@ -510,7 +564,11 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         assert child is not None and child.kind == "recipe.install"
         installation = session.scalar(select(RecipeInstallation))
         assert installation is not None and installation.state == "installing"
-        compiled = installation.plan["compiled_execution_plans"][NODE_ID]
+        installation_plan = require_mapping(installation.plan, "installation plan")
+        compiled_plans = require_mapping(
+            installation_plan["compiled_execution_plans"], "compiled execution plans"
+        )
+        compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
         assert validate_compiled_launch_payload(compiled) == compiled
         installation_id = installation.id
         compiled_spec = compiled
@@ -538,14 +596,17 @@ def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
 
 
 class _NoopJobs:
-    def list(self):
+    def list(self, *, limit: int = 100):
         return []
 
-    def get(self, _job_id):
-        raise KeyError(_job_id)
+    def get(self, job_id: str):
+        raise KeyError(job_id)
 
     def enqueue(self, *_args, **_kwargs):
         raise AssertionError("the installation spec route must not enqueue work")
+
+    def list_page(self, **_kwargs):
+        return [], None, 0
 
 
 def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, installation_id: str):
@@ -555,7 +616,11 @@ def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, install
         clock=lambda: NOW,
     )
     operations = AgentJobService(sessions, clock=lambda: NOW)
-    operations.set_contact_consumer(presence.observe_in_session)
+
+    def observe_contact(session: Session, source: AgentSource) -> None:
+        presence.observe_in_session(session, source)
+
+    operations.set_contact_consumer(observe_contact)
     root = tmp_path / "agent-api"
     services = AgentApiServices(
         enrollment=None,

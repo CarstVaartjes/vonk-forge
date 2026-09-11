@@ -19,6 +19,14 @@ from .test_catalog_entities import _model, _recipe
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
 
 
+def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
+    """Narrow one decoded JSON object member so a deliberate edit stays typed."""
+
+    section = document[key]
+    assert isinstance(section, dict)
+    return section
+
+
 @pytest.fixture(params=[False, True], ids=["forward-scan", "reverse-scan"])
 def catalog(tmp_path, request):
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
@@ -54,7 +62,9 @@ def _assert_current(catalog, first, expected):
     current = catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)])
     assert current[(first.publisher, first.slug)].content_sha256 == expected.content_digest
     with catalog._sessions() as session:
-        assert CatalogRepository().active_revision(session, first.document_id).id == expected.id
+        active = CatalogRepository().active_revision(session, first.document_id)
+        assert active is not None
+        assert active.id == expected.id
         assert ModelCacheService._latest_recipe_digest(session, first.content_digest) == expected.content_digest
 
 
@@ -97,7 +107,7 @@ def test_recipe_detail_keeps_its_exact_model_when_model_head_advances(catalog):
     first_model = _publish(catalog, model)
     recipe = _publish(catalog, _recipe(model))
     changed = copy.deepcopy(model)
-    changed["metadata"]["description"] = "New model metadata"
+    _document_section(changed, "metadata")["description"] = "New model metadata"
     candidate = catalog.entities.revise(first_model.document_id, changed, actor="test")
     catalog.entities.resolve(candidate.id, actor="test")
 

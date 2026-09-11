@@ -10,6 +10,7 @@ import secrets
 import ssl
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -448,9 +449,26 @@ def _jwk_thumbprint(value: dict[str, object]) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(canonical).digest()).rstrip(b"=").decode("ascii")
 
 
+class _CrlFreshnessSource(Protocol):
+    """The CRL fields the revocation freshness window is validated against."""
+
+    @property
+    def last_update_utc(self) -> datetime: ...
+
+    @property
+    def next_update_utc(self) -> datetime | None: ...
+
+
 def _validate_crl_freshness(
-    crl: x509.CertificateRevocationList, timestamp: datetime, clock_skew: timedelta,
+    crl: _CrlFreshnessSource, timestamp: datetime, clock_skew: timedelta,
 ) -> None:
+    """Reject a CRL whose validity window is absent, stale or unbounded.
+
+    The parameter carries only the two fields the check reads rather than a
+    whole ``x509.CertificateRevocationList``: a real builder refuses to sign a
+    CRL without a next-update window, so the absent-window case can only be
+    stated structurally.
+    """
     last_update = crl.last_update_utc
     next_update = crl.next_update_utc
     if (

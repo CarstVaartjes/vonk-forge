@@ -1,4 +1,6 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Literal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +10,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection import (
     CapacityReservations,
+    CertificateState,
     FleetNode,
     FleetSnapshot,
     InventoryState,
@@ -26,10 +29,10 @@ NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)
 
 def _fleet_snapshot(
     *,
-    inventory: str | None = "fresh",
-    telemetry: str | None = "live",
-    online_state: str = "online",
-    certificate_state: str = "valid",
+    inventory: Literal["fresh", "stale"] | None = "fresh",
+    telemetry: Literal["live", "delayed", "stale"] | None = "live",
+    online_state: Literal["online", "offline", "unregistered"] = "online",
+    certificate_state: CertificateState = "valid",
     gpu_utilization: float | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
@@ -163,8 +166,11 @@ def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
 
 
 def test_metrics_require_a_typed_fleet_snapshot() -> None:
+    # The point of the guard is a value the type checker already refuses; the
+    # callable is widened only so the runtime rejection can be exercised.
+    update_fleet: Callable[..., None] = MetricsRegistry().update_fleet
     with pytest.raises(TypeError, match="typed FleetSnapshot"):
-        MetricsRegistry().update_fleet({"nodes": []})
+        update_fleet({"nodes": []})
 
 
 def test_metrics_do_not_contain_request_content_or_credentials() -> None:
@@ -216,9 +222,10 @@ def test_job_count_snapshot_aggregates_unknown_kinds() -> None:
 
 def test_metrics_endpoint_is_separately_authenticated() -> None:
     class Jobs:
-        def list(self): return []
-        def get(self, _): raise KeyError
+        def list(self, *, limit: int = 100): return []
+        def get(self, job_id: str): raise KeyError
         def enqueue(self, *_args, **_kwargs): raise AssertionError
+        def list_page(self, **_kwargs): return [], None, 0
 
     metrics = MetricsRegistry()
     app = create_app(
@@ -239,21 +246,26 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
 
 def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
     class Jobs:
-        def list(self): return []
-        def get(self, _): raise KeyError
+        def list(self, *, limit: int = 100): return []
+        def get(self, job_id: str): raise KeyError
         def enqueue(self, *_args, **_kwargs): raise AssertionError
+        def list_page(self, **_kwargs): return [], None, 0
 
     refresh_fleet_metrics = getattr(control_api, "refresh_fleet_metrics", None)
     assert callable(refresh_fleet_metrics)
     metrics = MetricsRegistry()
     fleet_state = _fleet_snapshot()
+
+    def refresh() -> None:
+        refresh_fleet_metrics(metrics, fleet_state)
+
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
         metrics=metrics,
         metrics_token="metrics-token-long",
-        metrics_refresh=lambda: refresh_fleet_metrics(metrics, fleet_state),
+        metrics_refresh=refresh,
     )
 
     response = TestClient(app).get(

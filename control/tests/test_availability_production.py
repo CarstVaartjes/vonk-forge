@@ -20,6 +20,7 @@ from vonk_control.availability_production import (
     RecipeImageAvailabilityScheduler,
     build_recipe_image_availability,
 )
+from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
@@ -32,29 +33,41 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageReceipt,
 )
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
+from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityClaim,
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityService,
+)
 from vonk_control.runtime_image_preparation import PulledImageEvidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
-class _Claim:
-    pass
+class _Service(RecipeImageAvailabilityService):
+    """Scheduler double that never touches durable storage."""
 
-
-class _Service:
     def __init__(self) -> None:
         self.started = threading.Event()
         self.release = threading.Event()
         self.claimed = 0
 
-    def claim_pending(self, *, limit: int, owner_id: str):
+    def claim_pending(
+        self, *, limit: int = 4, owner_id: str | None = None
+    ) -> tuple[RecipeImageAvailabilityClaim, ...]:
         del owner_id
         if self.claimed:
             return ()
         self.claimed += 1
-        return (_Claim(),)[:limit]
+        return (
+            RecipeImageAvailabilityClaim(
+                operation_id="operation",
+                recipe_revision_id="revision",
+                image_identity=None,
+                build_input_sha256=None,
+                claim_owner="owner",
+            ),
+        )[:limit]
 
-    def run_claim(self, claim: _Claim) -> None:
+    def run_claim(self, claim: RecipeImageAvailabilityClaim) -> None:
         del claim
         self.started.set()
         self.release.wait(5)
@@ -338,6 +351,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         recipe_operations=Operations(),
         clock=lambda: now,
     )
+    assert production.service._builder is not None
     result = production.service._builder(
         recipe,
         {
@@ -386,6 +400,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
         recipe_operations=object(),
         clock=lambda: datetime.now(UTC),
     )
+    assert production.service._builder is not None
     with pytest.raises(RecipeImageAvailabilityError) as raised:
         production.service._builder(
             recipe,
@@ -566,6 +581,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
     )
 
     def dispatch(operation_id: str):
+        assert production.service._builder is not None
         return production.service._builder(
             recipe,
             {"recipe_revision_id": "revision-builder"},
@@ -590,10 +606,13 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         builds = tuple(session.scalars(select(RecipeBuild)))
     assert {build.builder_node_id for build in builds} == set(node_ids)
     with sessions() as session:
-        assigned = {
-            str(session.get(Job, operation_id).payload["runtime"]["builder_node_id"])
-            for operation_id in operation_ids
-        }
+        assigned: set[str] = set()
+        for operation_id in operation_ids:
+            job = session.get(Job, operation_id)
+            assert job is not None
+            payload = require_mapping(job.payload, "job payload")
+            runtime = require_mapping(payload["runtime"], "job runtime")
+            assigned.add(str(runtime["builder_node_id"]))
     assert assigned == set(node_ids)
     production.close()
 
@@ -799,7 +818,8 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     assert completed.failure is None
     assert completed.supported_actions == ()
     assert completed.result is not None
-    assert completed.result["model_child"]["state"] == "succeeded"
+    model_child = require_mapping(completed.result["model_child"], "model child")
+    assert model_child["state"] == "succeeded"
     with sessions() as session:
         receipt = session.scalar(select(RuntimeImageReceipt))
         assert receipt is not None
@@ -818,8 +838,8 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
     from vonk_control.models import AgentOperation, AgentOperationAttempt
 
     engine = create_engine("sqlite://")
-    AgentOperation.__table__.create(engine)
-    AgentOperationAttempt.__table__.create(engine)
+    AgentOperation.metadata.tables[AgentOperation.__tablename__].create(engine)
+    AgentOperationAttempt.metadata.tables[AgentOperationAttempt.__tablename__].create(engine)
     sessions = sessionmaker(bind=engine)
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -846,7 +866,9 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
         assert progress.total_bytes == 256
         assert availability_production._build_progress(session, "build-job", "other") is None
         current = session.get(AgentOperationAttempt, "attempt-2")
-        current.progress = {"completed_bytes": 128}
+        assert current is not None
+        stale_progress: dict[str, object] = {"completed_bytes": 128}
+        current.progress = stale_progress
         session.flush()
         with pytest.raises(ValueError):
             availability_production._build_progress(session, "build-job", "builder")

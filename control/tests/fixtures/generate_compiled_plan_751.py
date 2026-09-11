@@ -16,6 +16,20 @@ from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from control.tests.test_compiled_execution_plan import _image, _spec
 
 
+def _json_object(value: object) -> dict[str, object]:
+    """Narrow one decoded JSON object so the fixture build stays typed."""
+
+    assert isinstance(value, dict)
+    return value
+
+
+def _json_array(value: object) -> list[object]:
+    """Narrow one decoded JSON array so the fixture build stays typed."""
+
+    assert isinstance(value, list)
+    return value
+
+
 def main() -> None:
     runtime_spec = copy.deepcopy(_spec())
     role_names = [
@@ -80,8 +94,8 @@ def main() -> None:
             }
         )
     runtime_spec["artifacts"] = artifacts
-    runtime_spec["model_dependencies"][0]["content_sha256"] = model_digest
-    runtime_spec["identity"]["execution_sha256"] = execution_identity_sha256(runtime_spec)
+    _json_object(_json_array(runtime_spec["model_dependencies"])[0])["content_sha256"] = model_digest
+    _json_object(runtime_spec["identity"])["execution_sha256"] = execution_identity_sha256(runtime_spec)
     bound = _bind_runtime_artifacts(
         runtime_spec,
         [
@@ -114,7 +128,7 @@ def main() -> None:
     )
     output = Path(__file__).with_name("compiled_plan_751.json")
     output.write_bytes(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
-    print(output, output.stat().st_size, len(payload["artifacts"]))
+    print(output, output.stat().st_size, len(_json_array(payload["artifacts"])))
 
 
 if __name__ == "__main__":

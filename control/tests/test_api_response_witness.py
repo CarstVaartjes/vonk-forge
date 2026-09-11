@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.routing import Route
 from vonk_control.contract_graph import schema_application
 
 from .api_response_witness import ResponseWitnesses, install_observer
@@ -71,6 +72,7 @@ def test_transport_decoder_uses_declared_media(recorder, media, schema, body):
     # Rebind the declaration on an actual route only to test the observer decoder.
     app = schema_application(browser_auth=False)
     route = next(r for r in app.routes if getattr(r, "path", "") == "/api/healthz")
+    assert isinstance(route, Route)
     app.openapi()["paths"][route.path]["get"]["responses"]["200"] = {
         "content": {media: {"schema": schema}}
     }

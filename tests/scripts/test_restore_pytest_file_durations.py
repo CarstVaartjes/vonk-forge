@@ -79,7 +79,7 @@ def test_restore_fails_open_on_unsupported_or_stale_input(tmp_path):
 
     output = tmp_path / "empty.json"
     # A failed GitHub query still leaves a valid empty document for the selector.
-    module._gh = lambda *args: (_ for _ in ()).throw(
+    module.__dict__["_gh"] = lambda *args: (_ for _ in ()).throw(
         subprocess.CalledProcessError(1, args)
     )
     assert not module.restore("control", output, repo="o/r", now=now)

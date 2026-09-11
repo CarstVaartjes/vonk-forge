@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import base64
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.routing import Route
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -27,16 +32,41 @@ class Enqueued:
 
 class Jobs:
     def __init__(self) -> None:
-        self.calls = []
+        self.calls: list[
+            tuple[str, str, str, Sequence[str], Mapping[str, object], str]
+        ] = []
+        self.get = self._get
 
-    def enqueue(self, kind, actor, authority_revision, targets, payload, *, request_id):
+    def _get(self, job_id: str) -> Enqueued:
+        return Enqueued(id=job_id)
+
+    def enqueue(
+        self,
+        kind: str,
+        actor: str,
+        authority_revision: str,
+        targets: Sequence[str],
+        payload: Mapping[str, object],
+        *,
+        request_id: str,
+    ) -> Enqueued:
         self.calls.append(
             (kind, actor, authority_revision, targets, payload, request_id)
         )
         return Enqueued()
 
-    def get(self, job_id):
-        return Enqueued(id=job_id)
+    def list(self, *, limit: int = 100) -> list[Enqueued]:
+        return []
+
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        status: str | None = None,
+        target: str | None = None,
+    ) -> tuple[list[Enqueued], str | None, int]:
+        return [], None, 0
 
 
 def _client(role: str, *, agent_upgrades=None):
@@ -143,7 +173,7 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
 def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
     client, headers, jobs, _ = _client("viewer")
 
-    def fail(_job_id):
+    def fail(job_id):
         raise RuntimeError("private token and request body must stay server-side")
 
     jobs.get = fail
@@ -192,11 +222,16 @@ def test_removed_package_and_deployment_routes_are_not_registered() -> None:
     client, _, _, _ = _client("administrator")
     package_prefix = "/api/" + "packages/"
     deployment_prefix = "/api/" + "deployments"
+    app = client.app
+    assert isinstance(app, FastAPI)
     legacy_paths = {
         route.path
-        for route in client.app.routes
-        if route.path.startswith(package_prefix)
-        or route.path.startswith(deployment_prefix)
+        for route in app.routes
+        if isinstance(route, Route)
+        and (
+            route.path.startswith(package_prefix)
+            or route.path.startswith(deployment_prefix)
+        )
     }
     assert legacy_paths == set()
 

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Iterable
 from importlib.resources import files
 from pathlib import Path
+from typing import Literal, Protocol, overload
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
@@ -12,7 +14,18 @@ TYPESCRIPT_CLIENT = ROOT / "control/web/src/api/generated.d.ts"
 PACKAGED_CLI_OPENAPI = files("cluster_profiles.schemas").joinpath("control-openapi.json")
 
 
-def _operations(schema: dict[str, object]) -> dict[str, dict[str, object]]:
+class _JSONObject(Protocol):
+    """The decoded JSON object shape the operation walk reads."""
+
+    @overload
+    def __getitem__(self, key: Literal["operationId"]) -> str: ...
+    @overload
+    def __getitem__(self, key: str) -> _JSONObject: ...
+    def values(self) -> Iterable[_JSONObject]: ...
+    def items(self) -> Iterable[tuple[str, _JSONObject]]: ...
+
+
+def _operations(schema: _JSONObject) -> dict[str, _JSONObject]:
     return {
         operation["operationId"]: operation
         for path in schema["paths"].values()

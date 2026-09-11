@@ -47,6 +47,8 @@ def _supervisor(monkeypatch, root):
     spec = importlib.util.spec_from_file_location(
         "route_test_supervisor", ROOT / "deploy/compose/litellm/config_supervisor.py"
     )
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
@@ -261,7 +263,8 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
 
     marker = _publish(_publisher(tmp_path), expires_at=recipe_route_lease_expiry(NOW))
     supervisor = _supervisor(monkeypatch, tmp_path / "runtime")
-    supervisor.ACK = tmp_path / "supervisor/ack.json"
+    ack_path = tmp_path / "supervisor/ack.json"
+    monkeypatch.setattr(supervisor, "ACK", ack_path)
     request = supervisor._active_request(now=NOW)
     child = SimpleNamespace(pid=123, poll=lambda: None)
     elapsed = [0.0]
@@ -274,7 +277,7 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
             )
 
     FileSupervisorAcknowledger(
-        supervisor.ACK,
+        ack_path,
         clock=lambda: NOW + timedelta(seconds=elapsed[0]),
         monotonic=lambda: elapsed[0],
         sleep=sleep,

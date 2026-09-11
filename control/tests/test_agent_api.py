@@ -8,28 +8,34 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
+from typing import TypedDict, Unpack
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import Message
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol import (
+    ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostHelperGrantClaims,
     HostHelperSignature,
     InstallVonkDebOperation,
+    PackageRollbackAuthority,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -45,7 +51,7 @@ from vonk_control.agent_api import (
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
@@ -173,7 +179,7 @@ def _compiled_plan_fixture(
 def _controller_ca() -> tuple[str, str]:
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name(
-        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")]
+        [x509.NameAttribute(NameOID.COMMON_NAME, "controller-ca")]
     )
     certificate = (
         x509.CertificateBuilder()
@@ -191,13 +197,34 @@ def _controller_ca() -> tuple[str, str]:
 
 
 class Jobs:
-    def list(self):
-        return []
+    """Minimal current JobQueue stand-in for tests that exercise agent routes."""
 
-    def get(self, _):
+    def enqueue(
+        self,
+        kind: str,
+        actor: str,
+        authority_revision: str,
+        targets: Sequence[str],
+        payload: Mapping[str, object],
+        *,
+        request_id: str,
+    ) -> object:
+        raise AssertionError
+
+    def get(self, job_id: str) -> object:
         raise KeyError
 
-    def enqueue(self, *_args, **_kwargs):
+    def list(self, *, limit: int = 100) -> list[object]:
+        return []
+
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        status: str | None = None,
+        target: str | None = None,
+    ) -> tuple[list[object], str | None, int]:
         raise AssertionError
 
 
@@ -322,7 +349,11 @@ def agent_system(tmp_path):
         clock=clock,
     )
     operations = AgentJobService(sessions, clock=clock)
-    operations.set_contact_consumer(presence.observe_in_session)
+
+    def observe_contact(session: Session, source: AgentSource) -> None:
+        presence.observe_in_session(session, source)
+
+    operations.set_contact_consumer(observe_contact)
     controller_ca_pem, controller_ca_fingerprint = _controller_ca()
     services = AgentApiServices(
         enrollment=EnrollmentService(sessions, Authority(), clock=clock),
@@ -438,7 +469,7 @@ def chunked_asgi_telemetry(
             b'"}',
         ]
         reads = 0
-        sent: list[dict[str, object]] = []
+        sent: list[Message] = []
 
         async def receive() -> dict[str, object]:
             nonlocal reads
@@ -452,7 +483,7 @@ def chunked_asgi_telemetry(
                 "more_body": reads < len(chunks),
             }
 
-        async def send(message: dict[str, object]) -> None:
+        async def send(message: Message) -> None:
             sent.append(message)
 
         forwarded = tuple(
@@ -498,7 +529,10 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
 
     client, services, _, clock = agent_system
     payload = telemetry_payload(clock)
-    sampled = payload["samples"][0]
+    samples = payload["samples"]
+    assert isinstance(samples, list)
+    sampled = samples[0]
+    assert isinstance(sampled, dict)
     series = [
         {
             "key": f"device.metric_{index}",
@@ -769,6 +803,31 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+class _HostGrantKwargs(TypedDict):
+    node_id: str
+    job_id: str
+    operation_id: str
+    attempt: int
+    fence: str
+    action: ContainerRuntimeAction
+    request_sha256: str
+    certificate_serial: str
+    installation_id: str | None
+    expires_in_seconds: int
+
+
+class _HostUpgradeGrantKwargs(TypedDict):
+    node_id: str
+    job_id: str
+    operation_id: str
+    attempt: int
+    fence: str
+    package_sha256: str
+    package_signature: str
+    certificate_serial: str
+    expires_in_seconds: int
+
+
 def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     agent_system,
 ) -> None:
@@ -792,10 +851,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
     class RecordingHostAuthority:
         def __init__(self) -> None:
-            self.grant_calls: list[dict[str, object]] = []
-            self.upgrade_calls: list[dict[str, object]] = []
+            self.grant_calls: list[Mapping[str, object]] = []
+            self.upgrade_calls: list[Mapping[str, object]] = []
 
-        def issue_grant(self, **kwargs: object) -> object:
+        def issue_grant(self, **kwargs: Unpack[_HostGrantKwargs]) -> object:
             self.grant_calls.append(kwargs)
             operation = ExecuteContainerRuntimeRequestOperation(
                 type="execute-container-runtime-request",
@@ -812,14 +871,16 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
                 expires_in_seconds=kwargs["expires_in_seconds"],
             )
 
-        def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
+        def issue_agent_upgrade_grant(
+            self, **kwargs: Unpack[_HostUpgradeGrantKwargs]
+        ) -> object:
             self.upgrade_calls.append(kwargs)
             from .package_upgrade_fixtures import rollback_authority
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
                 package_sha256=kwargs["package_sha256"],
                 package_signature=kwargs["package_signature"],
-                rollback=rollback_authority(),
+                rollback=PackageRollbackAuthority.model_validate(rollback_authority()),
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -829,8 +890,8 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
     class RecordingPackageAuthority:
         def __init__(self) -> None:
-            self.grant_calls: list[dict[str, object]] = []
-            self.receipt_calls: list[dict[str, object]] = []
+            self.grant_calls: list[Mapping[str, object]] = []
+            self.receipt_calls: list[Mapping[str, object]] = []
             self.receipt_output: object | None = None
 
         def issue_grant(self, **kwargs: object) -> object:
@@ -853,11 +914,13 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             self.receipt_calls.append(kwargs)
             if self.receipt_output is not None:
                 return self.receipt_output  # type: ignore[return-value]
+            objects = kwargs["objects"]
+            assert isinstance(objects, list)
             return tuple(
                 receipt_issuer.issue_object_receipt(
                     object_digest=item["object_digest"], size=item["size"]
                 )
-                for item in kwargs["objects"]
+                for item in objects
             )
 
     host = RecordingHostAuthority()
@@ -1096,6 +1159,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     document, digest = _canonical_recipe_fixture("bundle-download")
+    recipe = RecipeDefinition.model_validate(document)
     with services.sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -1103,7 +1167,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
                 kind="recipe",
                 publisher="vonk-forge",
                 slug="bundle-download",
-                title=document["metadata"]["title"],
+                title=recipe.metadata.title,
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1179,6 +1243,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     layout_digest = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + "d" * 64
     document, digest = _canonical_recipe_fixture("image-upload")
+    recipe = RecipeDefinition.model_validate(document)
     with services.sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -1186,7 +1251,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
                 kind="recipe",
                 publisher="vonk-forge",
                 slug="image-upload",
-                title=document["metadata"]["title"],
+                title=recipe.metadata.title,
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1319,6 +1384,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
     payload = b"exact docker archive"
     layout_digest = hashlib.sha256(payload).hexdigest()
     document, digest = _canonical_recipe_fixture("nonblocking-image-upload")
+    recipe = RecipeDefinition.model_validate(document)
     with services.sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -1326,7 +1392,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
                 kind="recipe",
                 publisher="vonk-forge",
                 slug="nonblocking-image-upload",
-                title=document["metadata"]["title"],
+                title=recipe.metadata.title,
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1386,7 +1452,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         release.set()
         return responsive
 
-    async def exercise() -> tuple[object, object, bool]:
+    async def exercise() -> tuple[Response, Response, bool]:
         async with AsyncClient(
             transport=ASGITransport(app=client.app), base_url="http://testserver"
         ) as async_client:
@@ -1428,12 +1494,16 @@ def admin_headers(codec: TokenCodec, role: str = "administrator") -> dict[str, s
 
 
 def enrollment_grant(services: AgentApiServices) -> str:
-    return services.enrollment.create(NODE_C, "administrator", 60).token
+    enrollment = services.enrollment
+    assert enrollment is not None
+    return enrollment.create(NODE_C, "administrator", 60).token
 
 
 def assert_grant_consumed(services: AgentApiServices, token: str) -> None:
+    enrollment = services.enrollment
+    assert enrollment is not None
     with pytest.raises(EnrollmentDenied, match="consumed"):
-        services.enrollment.submit(token, b"", {})
+        enrollment.submit(token, b"", {})
 
 
 def valid_enrollment_body(token: str) -> bytes:
@@ -1441,7 +1511,7 @@ def valid_enrollment_body(token: str) -> bytes:
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_C)])
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
@@ -1485,7 +1555,7 @@ def asgi_post(
     app, path: str, body: bytes, *, content_type: str = "application/json"
 ) -> tuple[int, bytes]:
     async def request() -> tuple[int, bytes]:
-        sent: list[dict[str, object]] = []
+        sent: list[Message] = []
         delivered = False
 
         async def receive() -> dict[str, object]:
@@ -1495,7 +1565,7 @@ def asgi_post(
             delivered = True
             return {"type": "http.request", "body": body, "more_body": False}
 
-        async def send(message: dict[str, object]) -> None:
+        async def send(message: Message) -> None:
             sent.append(message)
 
         scope = {
@@ -1566,7 +1636,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
     )
-    sent: list[dict[str, object]] = []
+    sent: list[Message] = []
     body_reads = 0
 
     async def receive() -> dict[str, object]:
@@ -1574,7 +1644,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         body_reads += 1
         return {"type": "http.request", "body": b"untrusted", "more_body": False}
 
-    async def send(message: dict[str, object]) -> None:
+    async def send(message: Message) -> None:
         sent.append(message)
 
     scope = {
@@ -2609,22 +2679,24 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
 ) -> None:
     client, services, _, clock = agent_system
     document, digest = _canonical_recipe_fixture(f"agent-spec-{source}", source=source)
+    recipe = RecipeDefinition.model_validate(document)
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     mapping_id = str(uuid.uuid4())
     installation_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4()) if source == "controller-build" else None
     payload = _compiled_plan_fixture(digest, source=source, build_id=build_id)
-    image = payload["runtime_image"]
-    image_digest = image["image_digest"]
+    plan = AgentCompiledExecutionPlan.model_validate(payload)
+    image = plan.runtime_image
+    image_digest = image.image_digest
     with services.sessions.begin() as session:
         session.add(
             CatalogDocument(
                 id=recipe_id,
                 kind="recipe",
                 publisher="vonk-forge",
-                slug=document["identity"]["slug"],
-                title=document["metadata"]["title"],
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -2636,7 +2708,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                 document_id=recipe_id,
                 kind="recipe",
                 publisher="vonk-forge",
-                slug=document["identity"]["slug"],
+                slug=recipe.identity.slug,
                 revision_number=1,
                 schema_version=2,
                 state="active",
@@ -2650,7 +2722,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
             ClusterMapping(
                 id=mapping_id,
                 recipe_revision_id=revision_id,
-                topology_name=document["topology"]["name"],
+                topology_name=recipe.topology.name,
                 generation=1,
                 node_count=1,
                 state="ready",
@@ -2684,8 +2756,8 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                     policy_report={"passed": True},
                     plan={"schema_version": 2},
                     image_digest=image_digest,
-                    oci_layout_sha256=image["oci_layout_sha256"],
-                    image_bytes=image["image_bytes"],
+                    oci_layout_sha256=image.oci_layout_sha256,
+                    image_bytes=image.image_bytes,
                     created_at=clock.now,
                     updated_at=clock.now,
                 )
@@ -2765,15 +2837,15 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                 recipe_revision_id=revision_id,
                 source=source,
                 original_content_digest=digest,
-                effective_execution_key=payload["identity"]["execution_sha256"],
-                registry_manifest_digest=image["registry_manifest_digest"],
-                platform_manifest_digest=image["platform_manifest_digest"],
-                local_image_config_id=image["local_image_config_id"],
-                oci_archive_sha256=image["oci_layout_sha256"],
-                image_bytes=image["image_bytes"],
-                architecture=image["architecture"],
-                runtime_interface=image["runtime_interface"],
-                runtime_interface_label=image["runtime_interface_label"],
+                effective_execution_key=plan.identity.execution_sha256,
+                registry_manifest_digest=image.registry_manifest_digest,
+                platform_manifest_digest=image.platform_manifest_digest,
+                local_image_config_id=image.local_image_config_id,
+                oci_archive_sha256=image.oci_layout_sha256,
+                image_bytes=image.image_bytes,
+                architecture=image.architecture,
+                runtime_interface=image.runtime_interface,
+                runtime_interface_label=image.runtime_interface_label,
                 build_id=build_id,
                 verified_at=clock.now,
                 state="verified",
@@ -2785,12 +2857,12 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                 receipt_id=receipt_id,
                 source=source,
                 original_content_digest=digest,
-                effective_execution_key=payload["identity"]["execution_sha256"],
-                registry_manifest_digest=image["registry_manifest_digest"],
-                platform_manifest_digest=image["platform_manifest_digest"],
-                local_image_config_id=image["local_image_config_id"],
-                oci_archive_sha256=image["oci_layout_sha256"],
-                image_bytes=image["image_bytes"],
+                effective_execution_key=plan.identity.execution_sha256,
+                registry_manifest_digest=image.registry_manifest_digest,
+                platform_manifest_digest=image.platform_manifest_digest,
+                local_image_config_id=image.local_image_config_id,
+                oci_archive_sha256=image.oci_layout_sha256,
+                image_bytes=image.image_bytes,
                 build_id=build_id,
                 authorized_at=clock.now,
                 state="authorized",
@@ -2824,7 +2896,9 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     assert set(resolved_schema["properties"]) == set(canonical_schema["properties"])
 
     tampered = copy.deepcopy(payload)
-    tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64
+    tampered_image = tampered["runtime_image"]
+    assert isinstance(tampered_image, dict)
+    tampered_image["local_image_config_id"] = "sha256:" + "0" * 64
     with services.sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None
@@ -2886,7 +2960,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_C)])
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
@@ -2941,7 +3015,7 @@ def _csr_for(node_id: str) -> bytes:
     return (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, node_id)])
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
@@ -3275,7 +3349,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         )[0]
         == 200
     )
-    sent: list[dict[str, object]] = []
+    sent: list[Message] = []
     reads = 0
 
     async def receive() -> dict[str, object]:
@@ -3283,7 +3357,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         reads += 1
         return {"type": "http.request", "body": b"never-read", "more_body": False}
 
-    async def send(message: dict[str, object]) -> None:
+    async def send(message: Message) -> None:
         sent.append(message)
 
     scope = {

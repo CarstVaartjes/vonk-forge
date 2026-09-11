@@ -73,6 +73,7 @@ def test_retry_reconciles_partial_completion_and_survives_restart(tmp_path):
     assert failed.progress.step_results
     with sessions() as session:
         installation_id = session.scalar(select(RecipeInstallation.id))
+        assert installation_id is not None
     assert service.retry_eligible(original.id)
     retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
     assert retry.id != original.id
@@ -81,10 +82,11 @@ def test_retry_reconciles_partial_completion_and_survives_restart(tmp_path):
     assert retry.total_steps == 1
     assert retry.progress.intended_profile == failed.progress.intended_profile
     with sessions() as session:
-        assert [
-            step["kind"]
-            for step in session.get(FleetProfileApplication, retry.id).plan["steps"]
-        ] == ["start"]
+        stored = session.get(FleetProfileApplication, retry.id)
+        assert stored is not None
+        stored_steps = stored.plan["steps"]
+        assert isinstance(stored_steps, list)
+        assert [step["kind"] for step in stored_steps] == ["start"]
     assert not service.retry_eligible(original.id)
     with pytest.raises(FleetProfileConflict, match="superseded"):
         service.retry(original.id, request_key=_uuid(802), actor="admin")
@@ -102,6 +104,7 @@ def test_retry_reconciles_partial_completion_and_survives_restart(tmp_path):
     final = restarted.application(retry.id)
     assert final.state == "succeeded"
     assert operations.events == ["start"]
+    assert final.result is not None
     assert final.result.completed_steps == 1
     assert restarted.application(original.id) == failed
     with sessions() as session:
@@ -126,11 +129,15 @@ def test_failed_retry_can_itself_be_retried_without_replaying_completed_work(tmp
 def test_recovery_rejects_obsolete_intent_and_revoked_scope(tmp_path):
     sessions, _operations, service, profile, original = setup_recovery(tmp_path)
     with sessions.begin() as session:
-        session.get(AgentNode, _node_id(1)).revoked_at = NOW
+        node = session.get(AgentNode, _node_id(1))
+        assert node is not None
+        node.revoked_at = NOW
     with pytest.raises(FleetProfileConflict, match="blocks"):
         service.retry(original.id, request_key=_uuid(801), actor="admin")
     with sessions.begin() as session:
-        session.get(AgentNode, _node_id(1)).revoked_at = None
+        node = session.get(AgentNode, _node_id(1))
+        assert node is not None
+        node.revoked_at = None
     changed = _input(_uuid(2), name="New intent")
     service.update(profile.id, changed, actor="admin")
     assert not service.retry_eligible(original.id)
@@ -163,6 +170,7 @@ def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
     sessions, operations, service, _profile, original = setup_recovery(tmp_path)
     with sessions() as session:
         installation_id = session.scalar(select(RecipeInstallation.id))
+        assert installation_id is not None
     operations.fail = False
     plan = operations.preview_run(installation_id, "studio-chat")
     operations.start(
@@ -172,6 +180,7 @@ def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
     retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
     assert retry.state == "succeeded"
     assert retry.total_steps == 0
+    assert retry.result is not None
     assert retry.result.changed is False
     assert operations.events == []
 
@@ -200,9 +209,9 @@ def test_retry_does_not_abandon_a_still_active_child_after_poll_failure(tmp_path
     child_id = _uuid(820)
     operations.operations[child_id] = SimpleNamespace(id=child_id, state="running")
     with sessions.begin() as session:
-        session.get(
-            FleetProfileApplication, original.id
-        ).current_operation_id = child_id
+        application = session.get(FleetProfileApplication, original.id)
+        assert application is not None
+        application.current_operation_id = child_id
     with pytest.raises(FleetProfileConflict, match="still active"):
         service.retry(original.id, request_key=_uuid(801), actor="admin")
     del operations.operations[child_id]

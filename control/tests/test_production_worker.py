@@ -9,11 +9,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.settings import SettingsError, WorkerSettings
 from vonk_control.worker import Worker, assemble_production_worker
 
@@ -78,8 +81,11 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, c
             calls.append(coordinator)
             return True
 
-    class Routes:
-        def maintain(self, **_kwargs) -> bool:
+    class Routes(RecipeRouteService):
+        def __init__(self) -> None:
+            pass
+
+        def maintain(self, *, renew_before_seconds: int = 60) -> bool:
             calls.append("routes")
             return False
 
@@ -137,13 +143,18 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
 
-    assert worker._recipes._run_switches._lifecycle._distributed_start_timeout_seconds == 1800
+    assert isinstance(worker._recipes, RecipeOperationWorker)
+    run_switches = worker._recipes._run_switches
+    assert isinstance(run_switches, RunSwitchOperationService)
+    assert run_switches._lifecycle is not None
+    assert run_switches._lifecycle._distributed_start_timeout_seconds == 1800
     assert not hasattr(worker, "_updates")
     assert not hasattr(worker, "_packages")
     assert not hasattr(worker, "_validation")
-    assert isinstance(worker._recipes, RecipeOperationWorker)
     assert not hasattr(worker, "_reconciliations")
-    assert worker._recipes._routes._publisher._publisher is publisher
+    route_publisher = worker._recipes._routes._publisher
+    assert isinstance(route_publisher, AtomicRecipeRoutePublisher)
+    assert route_publisher._publisher is publisher
     assert isinstance(
         worker._housekeeping,
         telemetry_maintenance.TelemetryMaintenanceCadence,
@@ -161,9 +172,10 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         (tmp_path / "artifact-jobs" / "blobs" / ".maintenance.json").read_text()
     )
     assert maintenance_state["last_success_at"] == current.isoformat()
-    assert worker._recipes._fleet_profiles is not None
-    assert worker._recipes._fleet_profiles._recipe_operations is not None
-    assert worker._recipes._run_switches._artifact_phase_executor is not None
+    fleet_profiles = worker._recipes._fleet_profiles
+    assert isinstance(fleet_profiles, FleetProfileService)
+    assert fleet_profiles._recipe_operations is not None
+    assert run_switches._artifact_phase_executor is not None
     from vonk_control.failure_evidence import FailureEvidenceService
     assert any(isinstance(callback.__self__, FailureEvidenceService) for callback in worker._background_services)
     image_production = worker._background_closers[0].__self__

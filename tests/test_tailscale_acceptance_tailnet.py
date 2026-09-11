@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import email.message
 import importlib.machinery
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import stat
 import sys
 import urllib.error
 import urllib.parse
+from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Self
@@ -81,7 +83,7 @@ class _Response:
 
 
 class _Urlopen:
-    def __init__(self, responses: list[object]) -> None:
+    def __init__(self, responses: Sequence[object]) -> None:
         self.responses = iter(responses)
         self.requests: list[Any] = []
 
@@ -167,7 +169,7 @@ def _factory_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def _install_urlopen(
     lifecycle: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    responses: list[object],
+    responses: Sequence[object],
 ) -> _Urlopen:
     urlopen = _Urlopen(responses)
     monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
@@ -183,7 +185,7 @@ def _http_error(status: int) -> urllib.error.HTTPError:
         "https://api.tailscale.com/api/v2/tailnet/tailnet_ci_123",
         status,
         "test failure",
-        {},
+        email.message.Message(),
         None,
     )
 

@@ -40,19 +40,17 @@ def _recipe_document(settings: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _evidence(**overrides: object) -> ResourceEvidence:
-    values: dict[str, object] = {
-        "weights_bytes": 100,
-        "runtime_overhead_bytes": 20,
-        "baseline_context_tokens": 32_768,
-        "baseline_concurrency": 1,
-        "context_bytes_per_token": 2,
-        "concurrency_bytes_per_request": 50,
-        "evidence_state": "measured",
-        "evidence_digest": "a" * 64,
-    }
-    values.update(overrides)
-    return ResourceEvidence(**values)
+def _evidence(*, context_bytes_per_token: int | None = 2) -> ResourceEvidence:
+    return ResourceEvidence(
+        weights_bytes=100,
+        runtime_overhead_bytes=20,
+        baseline_context_tokens=32_768,
+        baseline_concurrency=1,
+        context_bytes_per_token=context_bytes_per_token,
+        concurrency_bytes_per_request=50,
+        evidence_state="measured",
+        evidence_digest="a" * 64,
+    )
 
 
 def test_text_settings_drive_demand_and_identity() -> None:

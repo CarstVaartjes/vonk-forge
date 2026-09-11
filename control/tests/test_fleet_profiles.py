@@ -7,16 +7,19 @@ from hashlib import sha256
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypedDict
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
+from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.cluster_mappings import ClusterMappingPlan
+from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileApplicationView,
+    FleetProfileAssignmentInput,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
@@ -25,6 +28,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchChildState,
+    FleetProfileVerificationResult,
 )
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -48,9 +52,30 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.recipe_operations import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
+
+
+def _json_object(value: object) -> dict[str, object]:
+    """Return a decoded JSON object as the very same mutable mapping."""
+
+    assert isinstance(value, dict)
+    return value
+
+
+def _nested_object(value: object, *path: str | int) -> dict[str, object]:
+    """Return one nested JSON object without copying any level of it."""
+
+    for key in path:
+        if isinstance(key, int):
+            assert isinstance(value, list)
+            value = value[key]
+        else:
+            assert isinstance(value, dict)
+            value = value[key]
+    return _json_object(value)
 
 
 def _uuid(value: int) -> str:
@@ -76,8 +101,9 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
             },
         }
     )
-    assert progress.step_results["0"].result is not None
-    assert progress.step_results["0"].result.verified is True
+    step_result = progress.step_results["0"].result
+    assert isinstance(step_result, FleetProfileVerificationResult)
+    assert step_result.verified is True
     assert FleetProfileApplicationResult(changed=True, completed_steps=1).model_dump(
         mode="json"
     ) == {"changed": True, "completed_steps": 1}
@@ -106,10 +132,12 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
 
 def test_profile_switch_state_rejects_malformed_persisted_progress() -> None:
     with pytest.raises(FleetProfileConflict, match="progress is invalid"):
-        RunSwitchFleetProfileAdapter._state(SimpleNamespace(progress="invalid"))
+        RunSwitchFleetProfileAdapter._state(
+            FleetProfileApplication(progress="invalid")
+        )
     with pytest.raises(FleetProfileConflict, match="progress is invalid"):
         RunSwitchFleetProfileAdapter._state(
-            SimpleNamespace(progress={"switch_adapter": "invalid"})
+            FleetProfileApplication(progress={"switch_adapter": "invalid"})
         )
 
 
@@ -137,7 +165,13 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
         row.plan = preview.model_dump(mode="json")
-        row.result = ["malformed"]
+        # A JSON array is never a valid stored result document; write it as the
+        # driver would have persisted it rather than through the typed attribute.
+        session.execute(
+            update(FleetProfileApplication)
+            .where(FleetProfileApplication.id == application.id)
+            .values(result=["malformed"])
+        )
     with pytest.raises(FleetProfileConflict, match="result is invalid"):
         service.application(application.id)
 
@@ -146,7 +180,7 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=object()
+        sessions, clock=lambda: NOW, recipe_operations=_UnreachedOperations()
     )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
@@ -174,7 +208,10 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
 
-    class Operations:
+    class Operations(RecipeOperationService):
+        def __init__(self) -> None:
+            pass
+
         def get(self, _operation_id):
             return FleetProfileChildOperation(id=_uuid(704), state="running")
 
@@ -194,7 +231,13 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
         row.current_operation_id = _uuid(706)
-        row.progress = "corrupt-json"
+        # Persisted JSON can be a string even though the contract requires an
+        # object; write what the driver stored rather than the typed attribute.
+        session.execute(
+            update(FleetProfileApplication)
+            .where(FleetProfileApplication.id == application.id)
+            .values(progress="corrupt-json")
+        )
 
     assert service.tick() is True
     with sessions() as session:
@@ -310,9 +353,20 @@ def _exact_preparation(
     )
 
 
+class _SwitchStart(TypedDict):
+    """One recorded call to the switch adapter, in the shape the tests read."""
+
+    application_id: str
+    assignment_ids: tuple[str, ...]
+    assignment_scopes: tuple[tuple[str, ...], ...]
+    scope_node_ids: tuple[str, ...]
+    actor: str
+    request_id: str
+
+
 class _SwitchAdapter:
     def __init__(self) -> None:
-        self.starts: list[dict[str, object]] = []
+        self.starts: list[_SwitchStart] = []
         self._states: dict[str, int] = {}
         self._operations: dict[str, list[FleetProfileChildOperation]] = {}
         self._by_request: dict[str, str] = {}
@@ -371,7 +425,7 @@ class _SwitchAdapter:
                 id=operation_id,
                 state="succeeded",
                 progress=progress[-1],
-                result={"verified": True},
+                result=FleetProfileVerificationResult(verified=True),
             )
         ]
         return self._operations[operation_id][0]
@@ -381,6 +435,13 @@ class _SwitchAdapter:
         index = min(self._states[operation_id] + 1, len(states) - 1)
         self._states[operation_id] = index
         return states[index]
+
+
+class _UnreachedOperations(RecipeOperationService):
+    """Placeholder boundary a malformed persisted document must never reach."""
+
+    def __init__(self) -> None:
+        pass
 
 
 def _database() -> sessionmaker[Session]:
@@ -422,27 +483,33 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                 last_seen_at=NOW,
             )
         )
-        session.add(
-            CatalogDocument(
-                id=recipe_id,
-                kind="recipe",
-                publisher=recipe.identity.publisher,
-                slug=recipe.identity.slug,
-                title=recipe.metadata.title,
-                created_by="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            ),
-            CatalogDocument(
-                id=model_id,
-                kind="model",
-                publisher=model.identity.publisher,
-                slug=model.identity.slug,
-                title=model.identity.model.title,
-                created_by="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            ),
+        # Both documents must be persisted: the revisions below reference these
+        # ids. This was `add(a, b)`, but Session.add takes one instance and a
+        # private `_warn` flag, so the model document was silently discarded
+        # while its revision row was still inserted.
+        session.add_all(
+            [
+                CatalogDocument(
+                    id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    title=recipe.metadata.title,
+                    created_by="admin",
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+                CatalogDocument(
+                    id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    title=model.identity.model.title,
+                    created_by="admin",
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+            ]
         )
         session.add_all(
             [
@@ -501,8 +568,13 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
     )
 
 
-class _ProfileLifecycleSimulator:
-    """Small operation boundary that materializes each accepted lifecycle effect."""
+class _ProfileLifecycleSimulator(RecipeOperationService):
+    """Small operation boundary that materializes each accepted lifecycle effect.
+
+    It replaces the whole operation surface, so it never initializes the
+    production service state and only implements the calls the profile
+    coordinator makes.
+    """
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self.sessions = sessions
@@ -532,15 +604,18 @@ class _ProfileLifecycleSimulator:
     def preview_mapping(self, revision_id, node_ids, *, parameters, actor):
         with self.sessions() as session:
             revision = session.get(CatalogDocumentRevision, revision_id)
-            topology = revision.document["topology"]
+            assert revision is not None
+            topology_name = RecipeDefinition.model_validate(
+                revision.document
+            ).topology.name
         return ClusterMappingPlan(
             recipe_revision_id=revision_id,
             recipe_content_sha256="a" * 64,
-            topology_name=topology["name"],
+            topology_name=topology_name,
             generation=1,
             parameters=dict(parameters),
             nodes=tuple(
-                SimpleNamespace(
+                ClusterMappingPlacement(
                     node_id=node_id,
                     rank=rank,
                     role=("entrypoint" if rank == 0 else "worker"),
@@ -634,6 +709,7 @@ class _ProfileLifecycleSimulator:
         with self.sessions() as session:
             mapping = session.get(ClusterMapping, mapping_id)
             build = session.get(RecipeBuild, build_id)
+            assert mapping is not None and build is not None
             nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode).where(
@@ -690,6 +766,7 @@ class _ProfileLifecycleSimulator:
     def preview_run(self, installation_id, alias):
         with self.sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
+            assert installation is not None
         return SimpleNamespace(
             installation_id=installation_id,
             alias=alias,
@@ -702,6 +779,7 @@ class _ProfileLifecycleSimulator:
         run_id = self._id()
         with self.sessions.begin() as session:
             installation = session.get(RecipeInstallation, plan.installation_id)
+            assert installation is not None
             nodes = tuple(
                 session.scalars(
                     select(InstallationNode).where(
@@ -749,6 +827,7 @@ class _ProfileLifecycleSimulator:
     def stop(self, run_id, *, plan_digest, actor, request_id):
         with self.sessions.begin() as session:
             run = session.get(RecipeRun, run_id)
+            assert run is not None
             run.state = "stopped"
             run.route_state = "withdrawn"
             run.stopped_at = NOW
@@ -766,9 +845,11 @@ def _seed_dual_solo_without_runtime_state(
     sessions: sessionmaker[Session],
 ) -> tuple[str, str]:
     _recipe_id, dual_revision_id = _seed(sessions)
+    revisions = CatalogDocumentRevision.__table__
+    assert isinstance(revisions, Table)
     dual_document = _recipe_document()
-    dual_topology = dual_document["topology"]
-    role_template = dict(dual_topology["roles"][0])
+    dual_topology = _nested_object(dual_document, "topology")
+    role_template = dict(_nested_object(dual_document, "topology", "roles", 0))
     dual_topology.update(
         {
             "name": "pair",
@@ -790,11 +871,14 @@ def _seed_dual_solo_without_runtime_state(
             "stop_order": ["entrypoint", "worker"],
         }
     )
-    dual_document["topology"]["roles"] = [
+    dual_topology["roles"] = [
         {**role_template, "name": "entrypoint", "endpoint_owner": True},
         {**role_template, "name": "worker", "endpoint_owner": False},
     ]
-    dual_document["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
+    _nested_object(dual_document, "models", 0, "files", 0)["roles"] = [
+        "entrypoint",
+        "worker",
+    ]
     RecipeDefinition.model_validate(dual_document)
     solo_revision_id = _uuid(5)
     solo_document = _recipe_document()
@@ -810,15 +894,15 @@ def _seed_dual_solo_without_runtime_state(
             )
         )
         session.execute(
-            CatalogDocumentRevision.__table__.update()
+            revisions.update()
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
                 content_digest=content_sha256(RecipeDefinition.model_validate(dual_document)),
             )
         )
-        solo_document["identity"]["slug"] = "synthetic-tiny-solo"
-        solo_document["metadata"]["title"] = "Synthetic Tiny Solo"
+        _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
+        _nested_object(solo_document, "metadata")["title"] = "Synthetic Tiny Solo"
         solo = RecipeDefinition.model_validate(solo_document)
         solo_root_id = _uuid(4)
         session.add(
@@ -855,7 +939,7 @@ def _seed_dual_solo_without_runtime_state(
 
 def _switch_profile(
     service: FleetProfileService, profile_id: str, request_key: str
-) -> FleetProfileApplication:
+) -> FleetProfileApplicationView:
     preview = service.preview(profile_id)
     assert preview.allowed
     application = service.apply(
@@ -968,6 +1052,7 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
                 RecipeInstallation.recipe_revision_id == solo_revision_id
             )
         )
+        assert solo_installation is not None
         solo_run = session.scalar(
             select(RecipeRun).where(RecipeRun.installation_id == solo_installation.id)
         )
@@ -983,10 +1068,12 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
                 RunNode.run_id == solo_run.id, RunNode.node_id == _node_id(2)
             )
         ) is None
-        assert (
-            session.get(RecipeInstallation, dual_installation_id).state == "installed"
-        )
-        assert session.get(RecipeBuild, dual_build_id).state == "succeeded"
+        dual_installation = session.get(RecipeInstallation, dual_installation_id)
+        assert dual_installation is not None
+        assert dual_installation.state == "installed"
+        dual_build = session.get(RecipeBuild, dual_build_id)
+        assert dual_build is not None
+        assert dual_build.state == "succeeded"
     assert operations.events == [
         "create-placement",
         "build",
@@ -1001,10 +1088,12 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
     assert [step.kind for step in preview_a_again.steps] == ["stop", "start"]
     _switch_profile(service, profile_a.id, _uuid(202))
     with sessions() as session:
-        assert (
-            session.get(RecipeInstallation, dual_installation_id).state == "installed"
-        )
-        assert session.get(RecipeBuild, dual_build_id).state == "succeeded"
+        restored_installation = session.get(RecipeInstallation, dual_installation_id)
+        assert restored_installation is not None
+        assert restored_installation.state == "installed"
+        restored_build = session.get(RecipeBuild, dual_build_id)
+        assert restored_build is not None
+        assert restored_build.state == "succeeded"
         restored = tuple(
             session.scalars(
                 select(RecipeRun)
@@ -1118,7 +1207,7 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
         "final-verify",
     ]
     step_result = service.application(application.id).progress.step_results["0"]
-    assert step_result.result is not None
+    assert isinstance(step_result.result, FleetProfileVerificationResult)
     assert step_result.result.verified is True
 
 
@@ -1687,16 +1776,16 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
             )
         )
     assignments = [
-        {
-            "recipe_selector": "vonk-forge/synthetic-tiny-image",
-            "spark_ids": [_node_id(2)],
-            "desired_state": "installed",
-        },
-        {
-            "recipe_selector": "vonk-forge/synthetic-tiny-image",
-            "spark_ids": [_node_id(1)],
-            "desired_state": "installed",
-        },
+        FleetProfileAssignmentInput(
+            recipe_selector="vonk-forge/synthetic-tiny-image",
+            spark_ids=[_node_id(2)],
+            desired_state="installed",
+        ),
+        FleetProfileAssignmentInput(
+            recipe_selector="vonk-forge/synthetic-tiny-image",
+            spark_ids=[_node_id(1)],
+            desired_state="installed",
+        ),
     ]
     service = FleetProfileService(
         sessions,
@@ -1828,9 +1917,11 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
 def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    revisions = CatalogDocumentRevision.__table__
+    assert isinstance(revisions, Table)
     document = _recipe_document()
-    topology = document["topology"]
-    leader = deepcopy(topology["roles"][0])
+    topology = _nested_object(document, "topology")
+    leader = deepcopy(_nested_object(document, "topology", "roles", 0))
     leader.update({"name": "leader", "count": 1, "endpoint_owner": True})
     worker = deepcopy(leader)
     worker.update({"name": "worker", "endpoint_owner": False})
@@ -1852,11 +1943,11 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
             "stop_order": ["leader", "worker"],
         }
     )
-    document["models"][0]["files"][0]["roles"] = ["leader", "worker"]
+    _nested_object(document, "models", 0, "files", 0)["roles"] = ["leader", "worker"]
     parsed_document = RecipeDefinition.model_validate(document)
     with sessions.begin() as session:
         session.execute(
-            CatalogDocumentRevision.__table__.update()
+            revisions.update()
             .where(CatalogDocumentRevision.id == revision_id)
             .values(
                 document=document,
@@ -1956,7 +2047,9 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
     assert application.total_steps == 4
     assert application.profile_digest == preview.profile_digest
     with sessions() as session:
-        stored_plan = session.get(FleetProfileApplication, application.id).plan
+        stored = session.get(FleetProfileApplication, application.id)
+        assert stored is not None
+        stored_plan = stored.plan
         assert stored_plan["scope"] == {
             "node_ids": [_node_id(1)],
             "idle_node_ids": [],
@@ -2011,7 +2104,10 @@ def test_profile_application_resumes_from_persisted_step_context() -> None:
         actor="admin",
     )
 
-    class Operations:
+    class Operations(RecipeOperationService):
+        def __init__(self) -> None:
+            pass
+
         def preview_mapping(self, *_args, **_kwargs):
             return SimpleNamespace(generation=3)
 
@@ -2041,9 +2137,11 @@ def test_profile_application_resumes_from_persisted_step_context() -> None:
 def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> None:
     sessions = _database()
     _recipe_id, dual_revision_id = _seed(sessions)
+    revisions = CatalogDocumentRevision.__table__
+    assert isinstance(revisions, Table)
     dual_document = _recipe_document()
-    dual_topology = dual_document["topology"]
-    role_template = dict(dual_topology["roles"][0])
+    dual_topology = _nested_object(dual_document, "topology")
+    role_template = dict(_nested_object(dual_document, "topology", "roles", 0))
     dual_topology.update(
         {
             "name": "pair",
@@ -2065,11 +2163,14 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             "stop_order": ["entrypoint", "worker"],
         }
     )
-    dual_document["topology"]["roles"] = [
+    dual_topology["roles"] = [
         {**role_template, "name": "entrypoint", "endpoint_owner": True},
         {**role_template, "name": "worker", "endpoint_owner": False},
     ]
-    dual_document["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
+    _nested_object(dual_document, "models", 0, "files", 0)["roles"] = [
+        "entrypoint",
+        "worker",
+    ]
     dual_recipe = RecipeDefinition.model_validate(dual_document)
     solo_revision_id = _uuid(5)
     with sessions.begin() as session:
@@ -2084,7 +2185,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             )
         )
         session.execute(
-            CatalogDocumentRevision.__table__.update()
+            revisions.update()
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
@@ -2092,8 +2193,8 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             )
         )
         solo_document = _recipe_document()
-        solo_document["identity"]["slug"] = "synthetic-tiny-solo"
-        solo_document["metadata"]["title"] = "Synthetic Tiny Solo"
+        _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
+        _nested_object(solo_document, "metadata")["title"] = "Synthetic Tiny Solo"
         solo_recipe = RecipeDefinition.model_validate(solo_document)
         solo_root_id = _uuid(4)
         session.add(
@@ -2245,8 +2346,10 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     assert switch_to_b.summary.uninstalls == 0
 
     with sessions.begin() as session:
-        session.get(RecipeRun, _uuid(17)).state = "stopped"
-        session.get(RecipeRun, _uuid(17)).route_state = "withdrawn"
+        run = session.get(RecipeRun, _uuid(17))
+        assert run is not None
+        run.state = "stopped"
+        run.route_state = "withdrawn"
     back_to_a = service.preview(profile_a.id)
     assert [step.kind for step in back_to_a.steps] == ["start"]
     assert back_to_a.summary.installs == 0
@@ -2271,7 +2374,13 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             del assignments[0]["spark_ids"]
         else:
             assignments[0]["undeclared"] = None
-        row.assignments = assignments
+        # The stored document can be any JSON value, so persist the damaged
+        # shape directly instead of through the typed ORM attribute.
+        session.execute(
+            update(FleetProfile)
+            .where(FleetProfile.id == created.id)
+            .values(assignments=assignments)
+        )
     with pytest.raises(
         FleetProfileConflict, match="persisted Fleet profile choices are invalid"
     ):

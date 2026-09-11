@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
+from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     CapacityReservations,
     FleetProjection,
@@ -17,6 +18,7 @@ from vonk_control.fleet_projection import (
     RecipePresence,
     TelemetryDetails,
     TelemetryPoint,
+    TelemetryRollupPoint,
     telemetry_point,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
@@ -45,7 +47,7 @@ from vonk_control.models import (
 from vonk_control.telemetry import TelemetryRepository
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .telemetry_fixtures import telemetry_metrics_document
+from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -55,6 +57,13 @@ NODE_C = "spk_" + "3" * 32
 NODE_D = "spk_" + "4" * 32
 EXTRA_NODE = "spk_" + "f" * 32
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def _raw_point(point: TelemetryPoint | TelemetryRollupPoint) -> TelemetryPoint:
+    """A ``raw`` history request can only return ``TelemetryPoint`` samples."""
+
+    assert isinstance(point, TelemetryPoint)
+    return point
 
 
 def _canonical_catalog_documents(
@@ -707,7 +716,7 @@ def test_read_captures_the_committed_cursor_before_repository_projection() -> No
             order.append("repository")
             return super().head()
 
-    class Events:
+    class Events(FleetEventRepository):
         def high_watermark(self) -> int:
             order.append("watermark")
             return 41
@@ -716,7 +725,7 @@ def test_read_captures_the_committed_cursor_before_repository_projection() -> No
         OrderedRepository({}),
         sessions,
         clock=lambda: NOW,
-        events=Events(),
+        events=Events(sessions, clock=lambda: NOW),
     ).read()
 
     assert order == ["watermark", "repository"]
@@ -727,11 +736,13 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
     None
 ):
     with pytest.raises(ValidationError, match="event_cursor"):
-        FleetSnapshot(
-            event_cursor="1",
-            generated_at=NOW,
-            authority_revision=COMMIT,
-            nodes=[],
+        FleetSnapshot.model_validate(
+            {
+                "event_cursor": "1",
+                "generated_at": NOW,
+                "authority_revision": COMMIT,
+                "nodes": [],
+            }
         )
     with pytest.raises(ValidationError, match="disk_bytes"):
         CapacityReservations(
@@ -742,13 +753,15 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
             port_count=0,
         )
     with pytest.raises(ValidationError, match="agent_state"):
-        NodeConnection(
-            agent_state="invented",
-            certificate_state="valid",
-            online_state="online",
-            offline_reason=None,
-            last_seen_at=NOW,
-            last_seen_age_seconds=0.0,
+        NodeConnection.model_validate(
+            {
+                "agent_state": "invented",
+                "certificate_state": "valid",
+                "online_state": "online",
+                "offline_reason": None,
+                "last_seen_at": NOW,
+                "last_seen_age_seconds": 0.0,
+            }
         )
     presence = {
         "installation_id": "00000000-0000-4000-8000-000000000001",
@@ -812,7 +825,7 @@ def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
             received_at=NOW,
             gap_samples=0,
             details=TelemetryDetails(),
-            metrics=telemetry_metrics_document(),
+            metrics=telemetry_metrics(),
         )
 
 
@@ -1710,7 +1723,9 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
     source_metrics = source.metrics.model_dump()
     direct_point = telemetry_point(source)
     assert source.metrics.model_dump() == source_metrics
-    point = projection.read().nodes[0].telemetry.sample
+    node_telemetry = projection.read().nodes[0].telemetry
+    assert node_telemetry is not None
+    point = node_telemetry.sample
     history = projection.telemetry_history(
         NODE_A,
         start=NOW - timedelta(minutes=1),
@@ -1718,7 +1733,7 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
         maximum_points=1,
         resolution="raw",
     )
-    for projected in (direct_point, point, history.points[0]):
+    for projected in (direct_point, point, _raw_point(history.points[0])):
         series = projected.metrics.series[0]
         assert series.node_id == NODE_A
         assert series.received_at == sample.received_at
@@ -1726,7 +1741,9 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
         assert series.value == 12.5
         assert projected.metrics.capabilities[0].node_id == NODE_A
     with sessions() as session:
-        assert session.get(NodeTelemetrySample, sample.id).metrics == source_document
+        stored = session.get(NodeTelemetrySample, sample.id)
+        assert stored is not None
+        assert stored.metrics == source_document
 
 
 def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
@@ -1767,8 +1784,10 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
         resolution="raw",
     )
 
-    assert snapshot.nodes[0].telemetry.sample.boot_id == NON_RFC_BOOT_ID
-    assert [point.boot_id for point in history.points] == [NON_RFC_BOOT_ID]
+    node_telemetry = snapshot.nodes[0].telemetry
+    assert node_telemetry is not None
+    assert node_telemetry.sample.boot_id == NON_RFC_BOOT_ID
+    assert [_raw_point(point).boot_id for point in history.points] == [NON_RFC_BOOT_ID]
 
 
 def test_projection_selects_only_the_latest_512_current_installation_groups() -> None:

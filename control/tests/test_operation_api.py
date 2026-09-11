@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -14,7 +16,12 @@ from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profile_contract import FleetProfilePreview
+from vonk_control.fleet_profile_contract import (
+    FleetProfilePlanStep,
+    FleetProfilePlanSummary,
+    FleetProfilePreview,
+    FleetProfileScopePreview,
+)
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.models import (
@@ -54,21 +61,25 @@ def _profile_operation_plan(
         profile_digest=profile_digest,
         generated_at=now,
         allowed=True,
-        scope={"node_ids": node_ids, "idle_node_ids": node_ids},
-        summary={
-            "already_correct": 0,
-            "placements": 0,
-            "builds": 0,
-            "distributions": 0,
-            "installs": 0,
-            "starts": 1,
-            "stops": 0,
-            "uninstalls": 0,
-            "blockers": 0,
-        },
+        scope=FleetProfileScopePreview(node_ids=node_ids, idle_node_ids=node_ids),
+        summary=FleetProfilePlanSummary(
+            already_correct=0,
+            placements=0,
+            builds=0,
+            distributions=0,
+            installs=0,
+            starts=1,
+            stops=0,
+            uninstalls=0,
+            blockers=0,
+        ),
         assignments=[],
         preparations=[],
-        steps=[{"index": 0, "kind": "start", "node_ids": node_ids, "label": "Start profile"}],
+        steps=[
+            FleetProfilePlanStep(
+                index=0, kind="start", node_ids=node_ids, label="Start profile"
+            )
+        ],
         reasons=[],
         plan_digest=plan_digest,
     ).model_dump(mode="json")
@@ -76,6 +87,16 @@ def _profile_operation_plan(
 
 def _encoded(document: object) -> bytes:
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _first_diagnostic_target(diagnostics: Mapping[str, object]) -> Mapping[str, object]:
+    """Return the first projected agent-upgrade target or fail loudly."""
+
+    targets = diagnostics["targets"]
+    assert isinstance(targets, list) and targets
+    target = targets[0]
+    assert isinstance(target, dict)
+    return target
 
 
 @dataclass
@@ -142,7 +163,9 @@ def _client(*, fleet_projection=None, operations=None, role="operator"):
 def test_openapi_exposes_only_current_document_contract() -> None:
     client, *_ = _client()
 
-    paths = client.app.openapi()["paths"]
+    application = client.app
+    assert isinstance(application, FastAPI)
+    paths = application.openapi()["paths"]
 
     assert not any(path.startswith("/api/profiles/") for path in paths)
     assert "/api/reconciliations/plan" not in paths
@@ -642,7 +665,9 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     assert outcomes.count("won") == 1
     assert outcomes.count("conflict") == 7
     with sessions() as session:
-        assert session.get(Job, job.id).state == "queued"
+        stored_job = session.get(Job, job.id)
+        assert stored_job is not None
+        assert stored_job.state == "queued"
 
 
 def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
@@ -848,6 +873,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     page = services.job_operations(job.id, None, 20)
     diagnostics = page.agent_upgrade_diagnostics
+    assert diagnostics is not None
 
     assert diagnostics == {
         "expected_identity": {
@@ -921,13 +947,16 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
 
     queued = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert queued is not None
-    assert queued["targets"][0]["retry_queued"] is True
+    queued_target = _first_diagnostic_target(queued)
+    assert queued_target["retry_queued"] is True
     assert (
-        queued["targets"][0]["retry_not_before"]
+        queued_target["retry_not_before"]
         == (now + timedelta(seconds=240)).isoformat()
     )
-    assert queued["next_action"] is not None
-    assert "controller-managed retry" in queued["next_action"]
+    queued_next_action = queued["next_action"]
+    assert queued_next_action is not None
+    assert isinstance(queued_next_action, str)
+    assert "controller-managed retry" in queued_next_action
 
     with sessions.begin() as session:
         operation = session.scalar(
@@ -946,28 +975,32 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         job.id, None, 20
     ).agent_upgrade_diagnostics
     assert matching_digests is not None
-    assert matching_digests["targets"][0]["target_proven"] is False
-    assert matching_digests["targets"][0]["retry_not_before"] is None
+    matching_target = _first_diagnostic_target(matching_digests)
+    assert matching_target["target_proven"] is False
+    assert matching_target["retry_not_before"] is None
 
     with sessions.begin() as session:
         operation = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
+        assert operation is not None
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
-        assert operation is not None and attempt is not None
+        assert attempt is not None
         attempt.result = {"reason": "agent upgrade helper is unavailable"}
 
     specific = services.job_operations(job.id, None, 20).agent_upgrade_diagnostics
     assert specific is not None
     assert specific["failure_details_unavailable"] is False
-    assert specific["next_action"] is not None
+    specific_next_action = specific["next_action"]
+    assert specific_next_action is not None
+    assert isinstance(specific_next_action, str)
     assert (
-        "Resume queues the retry behind a new safety delay" in specific["next_action"]
+        "Resume queues the retry behind a new safety delay" in specific_next_action
     )
 
 
@@ -1093,6 +1126,7 @@ def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) 
     second = services.job_operations(job.id, first.next_cursor, 1)
     for page in (first, second):
         aggregate = page.progress.operation
+        assert aggregate is not None
         assert aggregate.completed_bytes == 30
         assert aggregate.total_bytes == 300
         assert aggregate.bytes_per_second == 30.0

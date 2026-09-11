@@ -78,6 +78,7 @@ def test_generated_admin_upload_roundtrips_actual_canonical_bundle(tmp_path):
         )
     with sessions() as session:
         persisted = session.get(RecipeSourceBundle, bundle.sha256)
+        assert persisted is not None
         assert (
             SourceBundleManifest.model_validate_json(
                 canonical_message(persisted.manifest)

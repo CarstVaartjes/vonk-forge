@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
 from pathlib import Path
@@ -143,10 +144,12 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     )
 
     assert result == {"jobs": [], "total": 0, "next_cursor": None}
-    assert observed[0].full_url == (
+    request = observed[0]
+    assert isinstance(request, urllib.request.Request)
+    assert request.full_url == (
         "https://forge.example.test/api/jobs?cursor=next+page&status=waiting-for-operator"
     )
-    assert observed[0].get_header("Authorization") == "Bearer private-token"
+    assert request.get_header("Authorization") == "Bearer private-token"
 
 
 def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:

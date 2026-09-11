@@ -6,6 +6,7 @@ import re
 import subprocess
 import tarfile
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 import yaml
@@ -104,11 +105,25 @@ def development_step_run(step_name: str) -> str:
     return "\n".join(run_lines)
 
 
-def development_workflow() -> dict[str, object]:
+class _WorkflowStep(TypedDict):
+    name: str
+    parallel: list["_WorkflowStep"]
+
+
+class _WorkflowJob(TypedDict):
+    steps: list[_WorkflowStep]
+    permissions: dict[str, str]
+
+
+class _Workflow(TypedDict):
+    jobs: dict[str, _WorkflowJob]
+
+
+def development_workflow() -> _Workflow:
     return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
 
 
-def development_job_step(job_name: str, step_name: str) -> dict[str, str]:
+def development_job_step(job_name: str, step_name: str) -> _WorkflowStep:
     steps = development_workflow()["jobs"][job_name]["steps"]
     for entry in steps:
         candidates = entry.get("parallel", [entry])

@@ -33,11 +33,13 @@ def deployment(tmp_path):
     run_id = admission.accept_run(plan, actor="admin", now=now)
     with sessions.begin() as session:
         agent = session.get(AgentNode, node)
+        assert agent is not None
         agent.last_seen_at = now
         agent.semantic_version = "1.2.3"
         agent.build_digest = "sha256:" + "a" * 64
         agent.binary_digest = "b" * 64
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None
         rank.observed_run_generation = 1
         rank.observation_receipt_sha256 = "c" * 64
         rank.state = "running"
@@ -75,6 +77,7 @@ def test_running_image_metadata_supplies_source_without_inventing_digest(tmp_pat
     monkeypatch.delenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", raising=False)
     monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", metadata)
     observation = local_deployment_observations()
+    assert observation.controller is not None
     assert observation.controller.source_commit == "a" * 40
     assert observation.controller.image_digest is None
     assert observation.publication is None
@@ -129,6 +132,7 @@ def test_multi_rank_missing_observation_and_generation_mismatch(tmp_path):
     sessions, now, _, run_id = deployment(tmp_path)
     with sessions.begin() as session:
         installation = session.scalar(select(RecipeInstallation))
+        assert installation is not None
         session.add(
             AgentNode(node_id="spk_" + "2" * 32, state="active", capabilities=[])
         )
@@ -149,6 +153,7 @@ def test_multi_rank_missing_observation_and_generation_mismatch(tmp_path):
     assert [r.identity_agreement for r in result.ranks] == ["match", "unknown"]
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
+        assert run is not None
         run.run_generation = 2
     assert service.snapshot().workloads[0].rank_agreement == "mismatch"
 
@@ -243,7 +248,9 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
     service = DeploymentProvenanceService(sessions, clock=lambda: now)
     assert service.snapshot().agents[0].package_sha256 == "d" * 64
     with sessions.begin() as session:
-        session.get(AgentNode, node).binary_digest = "e" * 64
+        agent = session.get(AgentNode, node)
+        assert agent is not None
+        agent.binary_digest = "e" * 64
     assert service.snapshot().agents[0].package_sha256 is None
 
 
@@ -327,10 +334,15 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
             .where(AgentOperation.kind == "recipe.start")
             .order_by(AgentOperationAttempt.id)
         )
+        assert attempt is not None
+        result_payload = attempt.result
+        assert result_payload is not None
+        evidence = result_payload["evidence"]
+        assert isinstance(evidence, dict)
         attempt.result = {
-            **attempt.result,
+            **result_payload,
             "evidence": {
-                **attempt.result["evidence"],
+                **evidence,
                 "image_digest": "sha256:" + "f" * 64,
             },
         }

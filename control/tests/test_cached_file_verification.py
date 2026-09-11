@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 from vonk_control.cached_file_verification import CachedFileVerifier
@@ -61,14 +63,14 @@ def test_changed_during_verification_is_not_remembered(tmp_path: Path) -> None:
     verifier = CachedFileVerifier()
     digest = hashlib.sha256(content).hexdigest()
     with path.open("rb") as stream:
-        class ChangingReader:
-            def fileno(self):
+        class ChangingReader(io.RawIOBase, BinaryIO):
+            def fileno(self) -> int:
                 return stream.fileno()
 
-            def seek(self, offset):
-                return stream.seek(offset)
+            def seek(self, offset: int, whence: int = 0) -> int:
+                return stream.seek(offset, whence)
 
-            def read(self, amount):
+            def read(self, amount: int = -1) -> bytes:
                 data = stream.read(amount)
                 if data:
                     path.write_bytes(b"x" * len(content))

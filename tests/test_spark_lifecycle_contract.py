@@ -262,7 +262,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     return objects, candidate, baseline, common
 
 
-def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[object]:
+def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[str | Path]:
     return [
         sys.executable,
         ENTRY_POINT,

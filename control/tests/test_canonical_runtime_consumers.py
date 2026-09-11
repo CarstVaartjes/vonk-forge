@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 from types import SimpleNamespace
+from typing import TypedDict
 
 import pytest
+from sqlalchemy.orm import Session
 
 contracts = pytest.importorskip("vonk_forge_contracts")
 from vonk_control.agent_api import _runtime_image_receipt_matches
 from vonk_control.artifact_jobs import _active_recipe_revision
 from vonk_control.fleet_projection import _canonical_recipe
+from vonk_control.models import CatalogDocumentRevision
 from vonk_forge_contracts import content_sha256
 
 
@@ -23,18 +26,20 @@ def _document() -> dict[str, object]:
     )
 
 
-class _Session:
-    def __init__(self, revision: object | None) -> None:
+class _Session(Session):
+    """A one-revision Session stand-in that never opens a database."""
+
+    def __init__(self, revision: CatalogDocumentRevision | None) -> None:
         self.revision = revision
 
-    def get(self, _model: object, _revision_id: str) -> object | None:
+    def get(self, *args: object, **kwargs: object) -> object | None:
         return self.revision
 
 
-def _revision(*, state: str = "active", digest: str | None = None) -> object:
+def _revision(*, state: str = "active", digest: str | None = None) -> CatalogDocumentRevision:
     document = _document()
     recipe = contracts.RecipeDefinition.model_validate(document)
-    return SimpleNamespace(
+    return CatalogDocumentRevision(
         id="revision",
         kind="recipe",
         schema_version=2,
@@ -63,14 +68,28 @@ def test_active_canonical_revision_is_consumed() -> None:
         _revision(digest="0" * 64),
     ],
 )
-def test_missing_or_stale_revision_fails_closed(revision: object | None) -> None:
+def test_missing_or_stale_revision_fails_closed(revision: CatalogDocumentRevision | None) -> None:
     assert _active_recipe_revision(_Session(revision), "revision") is None
     assert revision is None or _canonical_recipe(revision) is None
 
 
+class _RuntimeImage(TypedDict):
+    source: str
+    build_id: str | None
+    registry_manifest_digest: str | None
+    platform_manifest_digest: str
+    local_image_config_id: str
+    image_digest: str
+    oci_layout_sha256: str
+    image_bytes: int
+    architecture: str
+    runtime_interface: str
+    runtime_interface_label: str
+
+
 def _runtime_receipt_fixture(
     *, source: str = "published", build_id: str | None = None
-) -> tuple[dict[str, object], dict[str, object], object]:
+) -> tuple[_RuntimeImage, dict[str, object], SimpleNamespace]:
     revision_id = "revision"
     revision_digest = "a" * 64
     platform_digest = "sha256:" + "b" * 64
@@ -94,19 +113,19 @@ def _runtime_receipt_fixture(
         "recipe_revision_sha256": revision_digest,
         "execution_sha256": receipt.effective_execution_key,
     }
-    runtime_image = {
-        "source": source,
-        "build_id": build_id,
-        "registry_manifest_digest": receipt.registry_manifest_digest,
-        "platform_manifest_digest": platform_digest,
-        "local_image_config_id": receipt.local_image_config_id,
-        "image_digest": platform_digest,
-        "oci_layout_sha256": receipt.oci_archive_sha256,
-        "image_bytes": receipt.image_bytes,
-        "architecture": receipt.architecture,
-        "runtime_interface": receipt.runtime_interface,
-        "runtime_interface_label": receipt.runtime_interface_label,
-    }
+    runtime_image = _RuntimeImage(
+        source=source,
+        build_id=build_id,
+        registry_manifest_digest=receipt.registry_manifest_digest,
+        platform_manifest_digest=platform_digest,
+        local_image_config_id=receipt.local_image_config_id,
+        image_digest=platform_digest,
+        oci_layout_sha256=receipt.oci_archive_sha256,
+        image_bytes=receipt.image_bytes,
+        architecture=receipt.architecture,
+        runtime_interface=receipt.runtime_interface,
+        runtime_interface_label=receipt.runtime_interface_label,
+    )
     return runtime_image, identity, receipt
 
 

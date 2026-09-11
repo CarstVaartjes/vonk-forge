@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 import pytest
 
@@ -564,7 +565,22 @@ def _serve_status(*, hermes: bool) -> dict[str, object]:
     return {"Services": services}
 
 
-def _tailscale_status(*, hermes: bool) -> dict[str, object]:
+class _TailscaleStatus(TypedDict):
+    BackendState: str
+    Self: dict[str, object]
+
+
+class _RequestKwargs(TypedDict):
+    server_hostname: str
+    timeout: float
+    accepted_statuses: set[int]
+    path: str
+    headers: dict[str, str]
+    client_certificate: Path | None
+    ca_file: Path
+
+
+def _tailscale_status(*, hermes: bool) -> _TailscaleStatus:
     service_addresses = {"svc:vonk-forge": ["100.64.0.10"]}
     if hermes:
         service_addresses.update(
@@ -929,9 +945,9 @@ def test_wait_for_tailnet_https_retries_with_service_hostname(
     tmp_path: Path, monkeypatch
 ) -> None:
     acceptance = _acceptance_module()
-    calls: list[tuple[list[str], dict[str, object]]] = []
+    calls: list[tuple[list[str], _RequestKwargs]] = []
 
-    def request(command: list[str], **kwargs: object) -> bytes:
+    def request(command: list[str], **kwargs: Unpack[_RequestKwargs]) -> bytes:
         calls.append((command, kwargs))
         if len(calls) == 1:
             raise AcceptanceError("HTTPS tunnel timed out")
@@ -975,7 +991,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         target = secrets / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(value)
-    calls: list[tuple[list[str], dict[str, object]]] = []
+    calls: list[tuple[list[str], _RequestKwargs]] = []
     monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(fixture))
 
     client_certificate = tmp_path / "client.pem"
@@ -988,7 +1004,7 @@ def test_routed_service_checks_require_authentication_and_expected_data(
         lambda *_: (client_certificate, client_key),
     )
 
-    def request(command: list[str], **kwargs: object) -> bytes:
+    def request(command: list[str], **kwargs: Unpack[_RequestKwargs]) -> bytes:
         calls.append((command, kwargs))
         path = kwargs["path"]
         headers = kwargs.get("headers", {})

@@ -106,7 +106,9 @@ def test_import_is_idempotent_and_persists_active_canonical_revision(service: Ca
 def test_import_rejects_changed_recipe_digest(service: CatalogService, tmp_path: Path) -> None:
     client, item = _item(tmp_path)
     changed = copy.deepcopy(item.document)
-    changed["metadata"]["description"] += " changed"
+    metadata = changed["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["description"] += " changed"
     with pytest.raises(CatalogValidationError, match="does not match"):
         service.import_recipe_library(
             "test",

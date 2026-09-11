@@ -11,6 +11,7 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.jobs import JobService
 from vonk_control.models import Base
 
 
@@ -24,7 +25,7 @@ def _client() -> tuple[TestClient, TokenCodec]:
     sessions = sessionmaker(engine, expire_on_commit=False)
     codec = TokenCodec(b"p" * 32)
     app = create_app(
-        jobs=object(),
+        jobs=JobService(sessions, clock=lambda: datetime(2026, 9, 10, tzinfo=UTC)),
         tokens=codec,
         audits=MemoryAuditStore(),
         now=lambda: 1,

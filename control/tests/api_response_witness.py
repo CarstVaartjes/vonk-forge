@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from jsonschema import Draft202012Validator, FormatChecker
+from starlette.types import Receive, Scope, Send
 from vonk_control.contract_graph import discover_contracts, schema_application
 
 _active_trace: ContextVar[dict | None] = ContextVar(
@@ -260,16 +261,16 @@ def install_observer(collector):
     original = FastAPI.__call__
     original_handle = APIRoute.handle
 
-    async def handled(route, scope, receive, send):
+    async def handled(self, scope: Scope, receive: Receive, send: Send) -> None:
         trace = _active_trace.get()
         if trace is not None and any(
-            route is candidate for candidate in trace["app"].routes
+            self is candidate for candidate in trace["app"].routes
         ):
-            trace["route"] = route
-        return await original_handle(route, scope, receive, send)
+            trace["route"] = self
+        return await original_handle(self, scope, receive, send)
 
-    async def observed(app, scope, receive, send):
-        return await collector.observe(original, app, scope, receive, send)
+    async def observed(self, scope: Scope, receive: Receive, send: Send) -> None:
+        return await collector.observe(original, self, scope, receive, send)
 
     FastAPI.__call__ = observed
     APIRoute.handle = handled

@@ -32,6 +32,14 @@ def _canonical_start_evidence(payload: dict[str, object]) -> dict[str, object]:
     return start_evidence(payload)
 
 
+def _recovery_phase_pair(item: object) -> tuple[object, dict[str, object]]:
+    phase = item
+    assert isinstance(phase, dict)
+    payload = phase["payload"]
+    assert isinstance(payload, dict)
+    return phase["node_id"], payload
+
+
 def _queued_recovery_restart(tmp_path: Path):
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, distributed_lifecycle=True
@@ -94,9 +102,12 @@ def _queued_recovery_restart(tmp_path: Path):
             )
         )
     assert stop_job is not None
+    recovery = stop_job.payload["recovery"]
+    assert isinstance(recovery, dict)
+    start_phases = recovery["start_phases"]
+    assert isinstance(start_phases, list)
     produced_phases = tuple(
-        tuple((item["node_id"], item["payload"]) for item in group)
-        for group in stop_job.payload["recovery"]["start_phases"]
+        tuple(_recovery_phase_pair(item) for item in group) for group in start_phases
     )
     for _node_id, payload in (item for group in produced_phases for item in group):
         RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
@@ -169,6 +180,7 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         installation = session.get(RecipeInstallation, run.installation_id)
         assert installation is not None
         persisted_plans = installation.plan["compiled_execution_plans"]
+        assert isinstance(persisted_plans, dict)
         children = tuple(
             session.scalars(
                 select(StoredAgentOperation)
@@ -227,6 +239,7 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert parsed.role == child.payload["role"]
         assert parsed.compiled_execution_plan is not None
         persisted = persisted_plans[child.node_id]
+        assert isinstance(persisted, dict)
         assert parsed.compiled_execution_plan["identity"] == persisted["identity"]
         placement = parsed.compiled_execution_plan["runtime"]["placement"]
         assert placement["rank"] == child.payload["rank"]

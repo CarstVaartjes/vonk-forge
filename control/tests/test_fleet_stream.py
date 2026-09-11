@@ -4,12 +4,13 @@ import asyncio
 import base64
 import json
 import uuid
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event, update
+from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -24,7 +25,7 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
     FleetReplayBatch,
 )
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
 from vonk_control.fleet_stream import FleetStream, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
     FleetChangeEvent,
@@ -57,7 +58,7 @@ NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 PASSWORD = "correct horse battery staple"
 
 
-class Projection:
+class Projection(FleetProjection):
     def __init__(self) -> None:
         self.cursors: list[int] = []
 
@@ -71,7 +72,15 @@ class Projection:
         )
 
 
-class Events:
+def _events(stream: FleetStream, last_event_id: int | None) -> AsyncGenerator[str, None]:
+    """``FleetStream.events`` is an async generator, so the caller owns ``aclose``."""
+
+    generator = stream.events(last_event_id)
+    assert isinstance(generator, AsyncGenerator)
+    return generator
+
+
+class Events(FleetEventRepository):
     def __init__(
         self,
         *,
@@ -112,7 +121,7 @@ class Events:
         )
 
 
-class Telemetry:
+class Telemetry(TelemetryRepository):
     def __init__(self, values: dict[str, TelemetrySampleView] | None = None) -> None:
         self.values = values or {}
         self.calls: list[tuple[str, ...]] = []
@@ -341,7 +350,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
     )
 
     async def read() -> tuple[str, str]:
-        generator = stream.events(5)
+        generator = _events(stream, 5)
         try:
             return await anext(generator), await anext(generator)
         finally:
@@ -443,7 +452,7 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     )
 
     async def read() -> tuple[str, str]:
-        generator = stream.events(None)
+        generator = _events(stream, None)
         try:
             return await anext(generator), await anext(generator)
         finally:
@@ -470,6 +479,7 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
         },
     }
     assert replay_fields == {"id": "6", "event": "operation-state"}
+    assert isinstance(replay_data, dict)
     assert replay_data["projection_refresh_required"] is True
     assert FleetSnapshotEvent.model_validate_json(
         json.dumps(snapshot_data)
@@ -565,7 +575,7 @@ def test_invalid_resume_window_resets_to_current_snapshot(
     )
 
     async def read() -> str:
-        generator = stream.events(cursor)
+        generator = _events(stream, cursor)
         try:
             return await anext(generator)
         finally:
@@ -579,6 +589,7 @@ def test_invalid_resume_window_resets_to_current_snapshot(
         "id": str(high_watermark),
         "event": "fleet-snapshot",
     }
+    assert isinstance(data, dict)
     assert data["reset_reason"] == reason
     assert data["snapshot"]["event_cursor"] == high_watermark
     assert projection.cursors == [high_watermark]
@@ -618,7 +629,7 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
     )
 
     async def read() -> str:
-        generator = stream.events(5)
+        generator = _events(stream, 5)
         try:
             return await anext(generator)
         finally:
@@ -631,6 +642,7 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
         "id": "9",
         "event": "fleet-snapshot",
     }
+    assert isinstance(data, dict)
     assert data["reset_reason"] == "missing-telemetry-sample"
     assert data["snapshot"]["event_cursor"] == 9
     assert projection.cursors == [9]
@@ -678,7 +690,7 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
     )
 
     async def read() -> str:
-        generator = stream.events(4)
+        generator = _events(stream, 4)
         try:
             return await anext(generator)
         finally:
@@ -691,6 +703,7 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
         "id": "6",
         "event": "fleet-snapshot",
     }
+    assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
     assert data["snapshot"]["event_cursor"] == 6
     assert projection.cursors == [6]
@@ -713,7 +726,7 @@ def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds()
     )
 
     async def read() -> str:
-        generator = stream.events(0)
+        generator = _events(stream, 0)
         try:
             return await anext(generator)
         finally:
@@ -750,7 +763,7 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
     )
 
     async def read() -> None:
-        generator = stream.events(4)
+        generator = _events(stream, 4)
         try:
             with pytest.raises(RuntimeError, match="database unavailable"):
                 await anext(generator)
@@ -827,7 +840,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     )
 
     async def read_one_and_close() -> str:
-        generator = stream.events(0)
+        generator = _events(stream, 0)
         frame = await anext(generator)
         assert probe.active == 0
         await generator.aclose()
@@ -841,6 +854,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
 
     assert fields["id"] == "1"
     assert fields["event"] == "node-telemetry"
+    assert isinstance(data, dict)
     assert data["sample"]["boot_id"] == NON_RFC_BOOT_ID
     assert FleetTelemetryEvent.model_validate_json(json.dumps(data)).node_id == NODE_ID
     assert sum("fleet_stream_events" in statement for statement in selects) == 1
@@ -875,7 +889,7 @@ def test_production_stream_cancellation_during_poll_await_leaves_no_resources() 
             clock=lambda: NOW,
             sleep=blocked_sleep,
         )
-        generator = stream.events(0)
+        generator = _events(stream, 0)
         consumer = asyncio.create_task(anext(generator))
         await asyncio.wait_for(sleep_entered.wait(), timeout=1)
 
@@ -918,11 +932,16 @@ def test_production_replay_advances_cursor_only_after_yield_resumes() -> None:
         repository.append_in_session(session, _operation_draft(1))
     calls: list[int] = []
 
-    class RecordingRepository:
+    class RecordingRepository(FleetEventRepository):
+        def __init__(self) -> None:
+            super().__init__(sessions, clock=lambda: NOW)
+
         def high_watermark(self) -> int:
             return repository.high_watermark()
 
-        def replay_after(self, last_id: int, now: datetime, *, limit: int):
+        def replay_after(
+            self, last_id: int, now: datetime, *, limit: int
+        ) -> FleetReplayBatch:
             calls.append(last_id)
             return repository.replay_after(last_id, now, limit=limit)
 
@@ -938,7 +957,7 @@ def test_production_replay_advances_cursor_only_after_yield_resumes() -> None:
     )
 
     async def read_two() -> tuple[str, str]:
-        generator = stream.events(0)
+        generator = _events(stream, 0)
         try:
             first = await anext(generator)
             assert calls == [0]
@@ -973,11 +992,13 @@ def test_production_replay_db_failure_terminates_and_releases_connection() -> No
     )
 
     async def fail_after_first() -> None:
-        generator = stream.events(0)
+        generator = _events(stream, 0)
+        table = FleetStreamEvent.__table__
+        assert isinstance(table, Table)
         try:
             assert _parsed_frame(await anext(generator))[0]["id"] == "1"
             assert probe.active == 0
-            FleetStreamEvent.__table__.drop(engine)
+            table.drop(engine)
             with pytest.raises(SQLAlchemyError):
                 await anext(generator)
             assert probe.active == 0
@@ -1052,7 +1073,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
     )
 
     async def read_reset() -> str:
-        generator = stream.events(0)
+        generator = _events(stream, 0)
         try:
             return await anext(generator)
         finally:
@@ -1060,6 +1081,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
 
     fields, data = _parsed_frame(asyncio.run(read_reset()))
     assert fields == {"retry": "2000", "id": "6", "event": "fleet-snapshot"}
+    assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
     assert projection.cursors == [6]
     assert probe.active == 0
@@ -1072,10 +1094,25 @@ class Job:
 
 
 class Jobs:
+    def enqueue(
+        self,
+        kind: str,
+        actor: str,
+        authority_revision: str,
+        targets: Sequence[str],
+        payload: Mapping[str, object],
+        *,
+        request_id: str,
+    ) -> Job:
+        raise AssertionError("fleet stream tests never enqueue a job")
+
     def get(self, job_id: str) -> Job:
         return Job(id=job_id)
 
-    def list_page(self, **_kwargs):
+    def list(self, *, limit: int = 100) -> list[Job]:
+        return []
+
+    def list_page(self, **_kwargs) -> tuple[list[Job], str | None, int]:
         return [], None, 0
 
 

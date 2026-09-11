@@ -76,6 +76,20 @@ def _canonical(path: Path, document: object) -> None:
     path.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def _input_mapping(inputs: dict[str, object], key: str) -> dict[str, object]:
+    value = inputs[key]
+    if not isinstance(value, dict):
+        raise TypeError(f"release input {key!r} is not a platform mapping")
+    return value
+
+
+def _input_path(inputs: dict[str, object], key: str) -> Path:
+    value = inputs[key]
+    if not isinstance(value, Path):
+        raise TypeError(f"release input {key!r} is not a path")
+    return value
+
+
 def _agent_package(tmp_path: Path, platform: str, version: str) -> Path:
     architecture = platform.removeprefix("linux-")
     root = tmp_path / f"package-root-{version}-{architecture}"
@@ -234,13 +248,13 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         "--output",
         str(tmp_path / "publication"),
     ]
-    for platform, path in inputs["nas"].items():
+    for platform, path in _input_mapping(inputs, "nas").items():
         command.extend(("--nas-setup", f"{platform}={path}"))
-    for platform, path in inputs["spark"].items():
+    for platform, path in _input_mapping(inputs, "spark").items():
         command.extend(("--spark-setup", f"{platform}={path}"))
-    for platform, path in inputs["packages"].items():
+    for platform, path in _input_mapping(inputs, "packages").items():
         command.extend(("--agent-package", f"{platform}={path}"))
-    for platform, path in inputs["baseline_packages"].items():
+    for platform, path in _input_mapping(inputs, "baseline_packages").items():
         command.extend(("--agent-baseline-package", f"{platform}={path}"))
     return command
 
@@ -733,6 +747,10 @@ def _spark_gate_report(
 ) -> Path:
     plan = json.loads((publication / "publication-plan.json").read_text())
     graph = _actual_publication_graph(publication, platform)
+    graph_packages = graph["packages"]
+    assert isinstance(graph_packages, dict)
+    package_record = graph_packages[platform]
+    assert isinstance(package_record, dict)
     node_id = "spk_0123456789abcdef0123456789abcdef"
     common_proof: dict[str, object] = {
         "controller_generation": plan["generation"],
@@ -757,7 +775,7 @@ def _spark_gate_report(
             "identity": {
                 "binary_sha256": "9" * 64,
                 "build_sha256": "a" * 64,
-                "package_sha256": graph["packages"][platform]["candidate_sha256"],
+                "package_sha256": package_record["candidate_sha256"],
                 "version": plan["version"],
             },
         },
@@ -1957,9 +1975,8 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     assert plan["schema_version"] == 2
     assert plan["channel"] == "stable"
     phases = [entry["phase"] for entry in plan["objects"]]
-    assert phases == sorted(
-        phases, key={"immutable": 0, "endpoint": 1, "pointer": 2}.get
-    )
+    phase_order = {"immutable": 0, "endpoint": 1, "pointer": 2}
+    assert phases == sorted(phases, key=lambda phase: phase_order[phase])
     assert phases[-1] == "pointer"
     assert phases.count("pointer") == 1
     keys = {entry["key"] for entry in plan["objects"]}
@@ -2004,10 +2021,10 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
                 "dgst",
                 "-sha256",
                 "-verify",
-                inputs["signing_public_key"],
+                str(inputs["signing_public_key"]),
                 "-signature",
                 raw_signature,
-                inputs["spark"][platform],
+                str(_input_mapping(inputs, "spark")[platform]),
             ],
             text=True,
             capture_output=True,
@@ -2097,13 +2114,16 @@ def test_bootstraps_pin_final_digests_and_immutable_generation_urls(
         / "objects"
         / f"artifacts/stable/releases/{generation}/bootstraps/spark"
     ).read_text()
-    for path in inputs["nas"].values():
+    for path in _input_mapping(inputs, "nas").values():
+        assert isinstance(path, Path)
         assert hashlib.sha256(path.read_bytes()).hexdigest() in nas
-    for path in inputs["spark"].values():
+    for path in _input_mapping(inputs, "spark").values():
+        assert isinstance(path, Path)
         assert hashlib.sha256(path.read_bytes()).hexdigest() in spark
-    for path in inputs["packages"].values():
+    for path in _input_mapping(inputs, "packages").values():
+        assert isinstance(path, Path)
         assert hashlib.sha256(path.read_bytes()).hexdigest() in spark
-    assert hashlib.sha256(inputs["payload"].read_bytes()).hexdigest() in nas
+    assert hashlib.sha256(_input_path(inputs, "payload").read_bytes()).hexdigest() in nas
 
 
 def test_development_uses_the_same_signed_channel_flow_under_dev_paths(
@@ -2134,11 +2154,10 @@ def test_assemble_rejects_incomplete_platform_matrix(
 ) -> None:
     inputs = _inputs(tmp_path)
     kind, platform = missing.split("-", 1)
-    collection = {
-        "nas": inputs["nas"],
-        "spark": inputs["spark"],
-        "package": inputs["packages"],
-    }[kind]
+    collection = _input_mapping(
+        inputs,
+        {"nas": "nas", "spark": "spark", "package": "packages"}[kind],
+    )
     collection.pop(platform)
 
     result = subprocess.run(
@@ -2198,7 +2217,7 @@ def test_assemble_rejects_package_metadata_from_another_release(tmp_path: Path) 
     wrong = _agent_package(tmp_path / "wrong", "linux-arm64", "1.2.2")
     renamed = tmp_path / "vonk-forge-agent_1.2.3_arm64.deb"
     renamed.write_bytes(wrong.read_bytes())
-    inputs["packages"]["linux-arm64"] = renamed
+    _input_mapping(inputs, "packages")["linux-arm64"] = renamed
 
     result = subprocess.run(
         _assemble_command(tmp_path, inputs),
@@ -2322,7 +2341,7 @@ def test_static_endpoints_do_not_change_between_release_generations(
     second_inputs["signing_key"] = first_inputs["signing_key"]
     second_inputs["signing_public_key"] = first_inputs["signing_public_key"]
     _canonical(
-        second_inputs["payload"],
+        _input_path(second_inputs, "payload"),
         {
             "docker_compose_yaml": "services:\n  control-api:\n    image: replacement\n",
             "schema_version": 2,
@@ -2474,7 +2493,8 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
 ) -> None:
     inputs = _inputs(tmp_path / "inputs")
     receipt = tmp_path / "receipt"
-    for setup in inputs["nas"].values():
+    for setup in _input_mapping(inputs, "nas").values():
+        assert isinstance(setup, Path)
         setup.write_text(
             '#!/bin/sh\nset -eu\nprintf \'%s\\n\' "$*" > "$VONK_TEST_RECEIPT"\n'
         )
@@ -2541,7 +2561,7 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
     if not probe:
         pytest.skip("VONK_INSTALLER_RELEASE_WIRE_PROBE requires the native Rust probe")
     from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
     from jsonschema import Draft202012Validator
     from pydantic import ValidationError
     from vonk_agent_protocol.installer_release import InstallerReleaseManifest
@@ -2560,9 +2580,11 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
         (ROOT / "schemas/install-release-manifest.schema.json").read_bytes()
     )
     validator = Draft202012Validator(schema)
-    signing_key = serialization.load_pem_private_key(
-        Path(inputs["signing_key"]).read_bytes(), password=None
+    loaded_signing_key = serialization.load_pem_private_key(
+        _input_path(inputs, "signing_key").read_bytes(), password=None
     )
+    assert isinstance(loaded_signing_key, rsa.RSAPrivateKey)
+    signing_key = loaded_signing_key
 
     def consume(path: Path, signature: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

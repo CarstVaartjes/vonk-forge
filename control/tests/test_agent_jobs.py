@@ -19,6 +19,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import RecipeOperationRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -30,6 +31,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.run_admission import RunAdmissionService
 
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -565,8 +567,8 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         }
     recipe_operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=jobs,
         clock=clock,
     )
@@ -1128,6 +1130,7 @@ def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(servi
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
     jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 10}, 60)
     first_time = clock.now
     for count in range(11, 100):
@@ -1152,6 +1155,7 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
                              {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
     capabilities = ["agent.runtime.rust.v1", kind]
     claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities)
+    assert claim is not None
     jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 100, "completed_items": 1}, 60)
     # Resume the same authorized, durable transfer after its prior attempt ended.
     with sessions.begin() as session:
@@ -1179,6 +1183,7 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(service
                  {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
     claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3,
                         capabilities=["agent.runtime.rust.v1", kind])
+    assert claim is not None
     jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 100, "total_bytes": 200,
                            "total_bytes_known": True, "completed_items": 1, "total_items": 2}, 60)
     jobs.succeed(claim, {
@@ -1231,6 +1236,7 @@ def test_lease_only_wire_heartbeat_retains_measured_progress(service, include_nu
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
     jobs.heartbeat(claim, {
         "phase": "transfer", "completed_bytes": 10, "total_bytes": 100,
         "total_bytes_known": True,

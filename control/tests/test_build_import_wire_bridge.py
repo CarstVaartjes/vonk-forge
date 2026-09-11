@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
+from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentOperation,
     ClusterMapping,
@@ -33,6 +34,7 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
     _record_image_import_evidence,
 )
+from vonk_control.run_admission import RunAdmissionService
 
 from .test_recipe_builds import RecordingQueue, setup
 
@@ -76,8 +78,8 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -183,7 +185,7 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             payload_digest=hashlib.sha256(
                 canonical_message(operation.payload)
             ).hexdigest(),
-            payload=operation.payload,
+            payload=RecipeImageImportRequest.model_validate(operation.payload),
             deadline=now,
         )
     import_wire = probe_claim(import_claim)

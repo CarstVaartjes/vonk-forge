@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import Select, create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -174,6 +174,10 @@ def test_rollup_bucket_flooring_is_utc_aware_and_exact() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         telemetry_maintenance.bucket_start(value.replace(tzinfo=None), 60)
     with pytest.raises(ValueError, match="resolution"):
+        # ``300`` is deliberately outside the declared ``RollupResolution``
+        # contract, which only an untyped caller can reach. The mismatch is the
+        # point of the case, so it stays recorded in the pyright baseline
+        # instead of being silenced; the runtime guard it exercises is real.
         telemetry_maintenance.bucket_start(value, 300)
 
 
@@ -391,7 +395,7 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
 
 def test_record_batch_locks_node_before_reading_latest_projection(telemetry) -> None:
     repository, sessions, _, _ = telemetry
-    observed: list[tuple[type[object], object]] = []
+    observed: list[tuple[type[object], Select]] = []
 
     def capture_statement(state) -> None:
         if not state.is_select:

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect, select
+from sqlalchemy import Table, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_entities import (
@@ -30,6 +30,28 @@ from vonk_forge_contracts import ModelDefinition, content_sha256
 NOW = datetime(2026, 9, 5, tzinfo=UTC)
 
 
+def _json_object(value: object) -> dict[str, object]:
+    """Narrow one decoded JSON object so a deliberate edit stays typed."""
+
+    assert isinstance(value, dict)
+    return value
+
+
+def _json_array(value: object) -> list[object]:
+    """Narrow one decoded JSON array so a deliberate edit stays typed."""
+
+    assert isinstance(value, list)
+    return value
+
+
+def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
+    return _json_object(document[key])
+
+
+def _selected_model_reference(recipe: dict[str, object]) -> dict[str, object]:
+    return _json_object(_json_object(_json_array(recipe["models"])[0])["model"])
+
+
 def _example(name: str) -> dict[str, object]:
     path = resources.files("vonk_forge_contracts").joinpath("examples", name)
     return json.loads(path.read_text())
@@ -37,9 +59,18 @@ def _example(name: str) -> dict[str, object]:
 
 @pytest.fixture
 def catalog(postgres_engine):
-    tables = [CatalogRecipeModelReference.__table__, CatalogDocumentHead.__table__, CatalogDocumentRevision.__table__, CatalogDocument.__table__]
+    tables = [
+        table
+        for table in (
+            CatalogRecipeModelReference.__table__,
+            CatalogDocumentHead.__table__,
+            CatalogDocumentRevision.__table__,
+            CatalogDocument.__table__,
+        )
+        if isinstance(table, Table)
+    ]
     Base.metadata.drop_all(postgres_engine, tables=tables)
-    Base.metadata.create_all(postgres_engine, tables=[CatalogDocument.__table__, CatalogDocumentRevision.__table__, CatalogDocumentHead.__table__, CatalogRecipeModelReference.__table__])
+    Base.metadata.create_all(postgres_engine, tables=tables)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     try:
         yield CatalogEntityService(sessions, clock=lambda: NOW)
@@ -53,7 +84,7 @@ def _model() -> dict[str, object]:
 
 def _recipe(model: dict[str, object]) -> dict[str, object]:
     recipe = _example("recipe-image.json")
-    recipe["models"][0]["model"]["content_sha256"] = content_sha256(ModelDefinition.model_validate(model))
+    _selected_model_reference(recipe)["content_sha256"] = content_sha256(ModelDefinition.model_validate(model))
     return recipe
 
 
@@ -103,7 +134,9 @@ def test_catalog_identity_is_unique_in_postgres(catalog) -> None:
 
 
 def test_postgres_persists_verified_zero_byte_model_artifact(postgres_engine) -> None:
-    Base.metadata.create_all(postgres_engine, tables=[ModelCacheArtifact.__table__])
+    artifact_table = ModelCacheArtifact.__table__
+    assert isinstance(artifact_table, Table)
+    Base.metadata.create_all(postgres_engine, tables=[artifact_table])
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     empty_digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     try:
@@ -132,7 +165,7 @@ def test_postgres_persists_verified_zero_byte_model_artifact(postgres_engine) ->
             with pytest.raises(IntegrityError):
                 session.flush()
     finally:
-        Base.metadata.drop_all(postgres_engine, tables=[ModelCacheArtifact.__table__])
+        Base.metadata.drop_all(postgres_engine, tables=[artifact_table])
 
 
 def test_active_canonical_json_cannot_be_mutated(catalog) -> None:
@@ -153,9 +186,9 @@ def test_recipe_resolution_rejects_wrong_or_missing_exact_model_fk(catalog, muta
     catalog.resolve(model_revision.id, actor="operator")
     recipe = _recipe(model)
     if mutation == "wrong_digest":
-        recipe["models"][0]["model"]["content_sha256"] = "f" * 64
+        _selected_model_reference(recipe)["content_sha256"] = "f" * 64
     else:
-        recipe["models"][0]["model"]["slug"] = "missing-model"
+        _selected_model_reference(recipe)["slug"] = "missing-model"
     candidate = catalog.create_draft(recipe, actor="operator")
     with pytest.raises(CatalogValidationError, match="model reference"):
         catalog.resolve(candidate.id, actor="operator")
@@ -190,8 +223,8 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(ca
     catalog.resolve(first.id, actor="operator")
 
     bad = copy.deepcopy(recipe)
-    bad["metadata"]["title"] = "candidate that fails"
-    bad["models"][0]["model"]["content_sha256"] = "f" * 64
+    _document_section(bad, "metadata")["title"] = "candidate that fails"
+    _selected_model_reference(bad)["content_sha256"] = "f" * 64
     failed = catalog.revise(first.document_id, bad, actor="operator", expected_revision=1)
     with pytest.raises(CatalogValidationError):
         catalog.resolve(failed.id, actor="operator")
@@ -199,7 +232,7 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(ca
     assert catalog.get_entity(first.document_id).id == first.id
 
     good = copy.deepcopy(recipe)
-    good["metadata"]["title"] = "accepted successor"
+    _document_section(good, "metadata")["title"] = "accepted successor"
     successor = catalog.revise(first.document_id, good, actor="operator", expected_revision=2)
     active = catalog.resolve(successor.id, actor="operator", expected_revision=3)
     assert active.id == successor.id
@@ -213,8 +246,8 @@ def test_capability_and_provenance_only_model_revision_reuses_artifact_key(catal
     first = catalog.create_draft(original, actor="operator")
     catalog.resolve(first.id, actor="operator")
     changed = copy.deepcopy(original)
-    changed["metadata"]["description"] = "updated capability documentation"
-    changed["provenance"]["evidence_digest"] = "a" * 64
+    _document_section(changed, "metadata")["description"] = "updated capability documentation"
+    _document_section(changed, "provenance")["evidence_digest"] = "a" * 64
     successor = catalog.revise(first.document_id, changed, actor="operator", expected_revision=1)
     catalog.resolve(successor.id, actor="operator", expected_revision=2)
     assert first.artifact_key == successor.artifact_key
@@ -230,14 +263,14 @@ def test_recipe_reuse_keys_follow_effective_execution_and_model_artifacts(catalo
     catalog.resolve(first_recipe.id, actor="operator")
 
     changed_model = copy.deepcopy(original)
-    changed_model["metadata"]["description"] = "updated capability documentation"
-    changed_model["provenance"]["evidence_digest"] = "a" * 64
+    _document_section(changed_model, "metadata")["description"] = "updated capability documentation"
+    _document_section(changed_model, "provenance")["evidence_digest"] = "a" * 64
     changed_model_revision = catalog.revise(model_revision.document_id, changed_model, actor="operator", expected_revision=1)
     catalog.resolve(changed_model_revision.id, actor="operator", expected_revision=2)
 
     changed_recipe = copy.deepcopy(_recipe(original))
-    changed_recipe["metadata"]["title"] = "successor recipe"
-    changed_recipe["models"][0]["model"]["content_sha256"] = changed_model_revision.content_digest
+    _document_section(changed_recipe, "metadata")["title"] = "successor recipe"
+    _selected_model_reference(changed_recipe)["content_sha256"] = changed_model_revision.content_digest
     successor = catalog.revise(first_recipe.document_id, changed_recipe, actor="operator", expected_revision=1)
     catalog.resolve(successor.id, actor="operator", expected_revision=2)
 

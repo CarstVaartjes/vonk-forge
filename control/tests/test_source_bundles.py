@@ -109,10 +109,12 @@ def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_eng
     assert store.get(bundle.sha256).manifest == first.manifest
     with sessions() as session:
         stored = session.get(RecipeSourceBundle, bundle.sha256)
+        assert stored is not None
         parsed = SourceBundleManifest.model_validate_json(canonical_message(stored.manifest))
         assert parsed == bundle.manifest
     with sessions.begin() as session:
         stored = session.get(RecipeSourceBundle, bundle.sha256)
+        assert stored is not None
         stored.manifest = {**stored.manifest, "total_bytes": None}
     for action in (
         lambda: store.get(bundle.sha256),

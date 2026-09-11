@@ -132,7 +132,9 @@ def model() -> ModelDefinition:
 
 
 def _recipe(slug: str) -> RecipeDefinition:
-    raw = _example("recipe-image.json" if slug in OPENAI_BUILTINS else "recipe-job.json")
+    raw = RecipeDefinition.model_validate(
+        _example("recipe-image.json" if slug in OPENAI_BUILTINS else "recipe-job.json")
+    ).model_dump(mode="json")
     raw["runtime"]["engine"] = slug
     raw["runtime"]["entrypoint"] = copy.deepcopy(ENTRYPOINTS[slug])
     raw["runtime"]["arguments"] = copy.deepcopy(ARGS[slug])

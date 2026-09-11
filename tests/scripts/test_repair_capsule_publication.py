@@ -5,7 +5,7 @@ import importlib.util
 import json
 import subprocess
 from pathlib import Path
-from typing import Self
+from typing import Self, TypedDict
 
 import pytest
 
@@ -84,8 +84,27 @@ def _assemble(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, by
     return bundle, raw
 
 
-def _bundle_files(bundle: Path) -> tuple[dict[str, object], Path, Path]:
-    plan = json.loads((bundle / "publication-plan.json").read_text())
+class _PlanObject(TypedDict):
+    key: str
+    kind: str
+    sha256: str
+    size: int
+
+
+class _PublicationPlan(TypedDict):
+    authority_sha256: str
+    binary_source_revision: str
+    kind: str
+    node_id: str
+    objects: list[_PlanObject]
+    package_sha256: str
+    packaging_source_revision: str
+    release_key_sha256: str
+    schema_version: int
+
+
+def _bundle_files(bundle: Path) -> tuple[_PublicationPlan, Path, Path]:
+    plan: _PublicationPlan = json.loads((bundle / "publication-plan.json").read_text())
     package = bundle / "objects" / plan["objects"][0]["key"]
     manifest = bundle / "objects" / plan["objects"][1]["key"]
     return plan, package, manifest
@@ -542,7 +561,9 @@ def test_rclone_operations_have_bounded_metadata_and_transfer_timeouts(
 
     def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         operation = arguments[1]
-        observed.append((operation, kwargs.get("timeout")))
+        timeout = kwargs.get("timeout")
+        assert timeout is None or isinstance(timeout, int)
+        observed.append((operation, timeout))
         target = arguments[-1] if operation == "copyto" else arguments[2]
         if operation == "lsf":
             return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
@@ -606,8 +627,10 @@ def test_public_verification_installs_a_strict_no_redirect_handler(
     monkeypatch.setattr(PUBLICATION.urllib.request, "build_opener", build_opener)
     assert PUBLICATION._public_bytes("exact", 1024) == b"exact bytes\n"
     assert len(handlers) == 1
-    assert isinstance(handlers[0], PUBLICATION._NoRedirect)
-    assert handlers[0].redirect_request(None, None, 302, "", None, "elsewhere") is None
+    handler = handlers[0]
+    no_redirect = PUBLICATION._NoRedirect
+    assert isinstance(handler, no_redirect)
+    assert no_redirect.redirect_request(handler, None, None, 302, "", None, "elsewhere") is None
 
 
 def test_apt_metadata_rejects_node_bound_repair_version() -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import Table
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.database_authority import (
@@ -23,8 +24,12 @@ from vonk_control.models import (
 @pytest.fixture
 def authority(postgres_engine: Engine):
     tables = [
-        ControlAuthorityHead.__table__,
-        ControlAuthorityRevision.__table__,
+        table
+        for table in (
+            ControlAuthorityHead.__table__,
+            ControlAuthorityRevision.__table__,
+        )
+        if isinstance(table, Table)
     ]
     Base.metadata.drop_all(postgres_engine, tables=tables)
     Base.metadata.create_all(postgres_engine, tables=list(reversed(tables)))

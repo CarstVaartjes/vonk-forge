@@ -7,13 +7,14 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 
 
 def _controller_ca() -> tuple[x509.Certificate, bytes]:
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name(
-        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")]
+        [x509.NameAttribute(NameOID.COMMON_NAME, "controller-ca")]
     )
     certificate = (
         x509.CertificateBuilder()
@@ -134,7 +135,7 @@ def test_installer_url_is_limited_to_published_spark_channels() -> None:
 def test_from_paths_rejects_a_non_ca_certificate(tmp_path: Path) -> None:
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name(
-        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-leaf")]
+        [x509.NameAttribute(NameOID.COMMON_NAME, "controller-leaf")]
     )
     certificate = (
         x509.CertificateBuilder()

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import CheckConstraint, Table, create_engine, event, func, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -207,6 +207,8 @@ def _telemetry_sample(
 def test_fleet_event_models_match_the_current_schema_contract() -> None:
     cursor = models.FleetEventCursor.__table__
     events = models.FleetStreamEvent.__table__
+    assert isinstance(cursor, Table)
+    assert isinstance(events, Table)
 
     assert [column.name for column in cursor.columns] == ["singleton_id", "last_id"]
     assert {constraint.name for constraint in cursor.constraints} == {
@@ -267,11 +269,14 @@ def test_database_rejects_payload_over_8192_utf8_bytes(sessions) -> None:
 
 
 def test_payload_constraint_compiles_to_postgresql_utf8_byte_length() -> None:
+    events = models.FleetStreamEvent.__table__
+    assert isinstance(events, Table)
     constraint = next(
         constraint
-        for constraint in models.FleetStreamEvent.__table__.constraints
+        for constraint in events.constraints
         if constraint.name == "ck_fleet_stream_events_payload_size"
     )
+    assert isinstance(constraint, CheckConstraint)
 
     compiled = str(
         constraint.sqltext.compile(
@@ -870,7 +875,9 @@ def test_production_session_factory_installs_the_recorder(tmp_path) -> None:
     models.Base.metadata.create_all(engine)
     production_sessions = session_factory(engine)
     with production_sessions() as session:
-        assert session.get(models.FleetEventCursor, 1).last_id == 0
+        cursor = session.get(models.FleetEventCursor, 1)
+        assert cursor is not None
+        assert cursor.last_id == 0
     with production_sessions.begin() as session:
         session.add(_job("job-production"))
 

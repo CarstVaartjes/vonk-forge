@@ -7,19 +7,26 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache import (
+    ArtifactSetManifest,
+    ArtifactSpec,
+    ModelCacheService,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -36,17 +43,29 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_control.operation_api import OperationQuery
 from vonk_control.recipe_builds import RecipeBuildPlan
+from vonk_control.recipe_operations import (
+    RecipeBuildService,
+    RecipeOperationService,
+    RecipeOperationView,
+)
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
+    RunSwitchOperation,
+    RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPhaseResult,
+    RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchRetention,
+    RunSwitchTargetTransferEvidenceResult,
     SparkGroup,
     SparkGroupNode,
 )
@@ -153,6 +172,21 @@ MODEL_ARTIFACT = "c" * 64
 MODEL_ARTIFACT_SET = "f" * 64
 
 
+def _result(view: RunSwitchOperation) -> RunSwitchOperationResult:
+    """Return the durable result a started Run/Switch operation recorded."""
+
+    assert view.result is not None
+    return view.result
+
+
+def _child_operation_id(view: RunSwitchOperation) -> str:
+    """Return the durable child operation a waiting view is bound to."""
+
+    child_id = _result(view).child_operation_id
+    assert child_id is not None
+    return child_id
+
+
 def _target_copy_evidence(plan, phase, progress=None) -> dict[str, object]:
     runtime_image = getattr(getattr(plan, "preparation", None), "runtime_image", None)
     image_digest = getattr(runtime_image, "image_digest", None) or getattr(
@@ -219,14 +253,15 @@ class CompleteArtifactInspector:
 
     def inspect(
         self,
-        _session,
+        session: Session,
         *,
-        model_content_sha256,
-        recipe_revision_id,
-        node_ids,
-        retention,
-        now,
+        model_content_sha256: str,
+        recipe_revision_id: str,
+        node_ids: tuple[str, ...],
+        retention: str,
+        now: datetime,
     ) -> ArtifactInspection:
+        del session, model_content_sha256, recipe_revision_id, retention, now
         required = 1024 * len(node_ids)
         missing_spark_bytes = self.missing_spark_bytes
         return ArtifactInspection(
@@ -245,7 +280,7 @@ class CompleteArtifactInspector:
         )
 
 
-class ModelCacheManifestProvider:
+class ModelCacheManifestProvider(ModelCacheService):
     def __init__(self, *, missing_nas_bytes: int = 1024, fail: bool = False) -> None:
         self.missing_nas_bytes = missing_nas_bytes
         self.fail = fail
@@ -365,7 +400,7 @@ class StopOnlyLifecycle:
         return SimpleNamespace(plan_digest="e" * 64)
 
 
-class PendingBuilds:
+class PendingBuilds(RecipeBuildService):
     """Small build planner double that preserves the real build contract."""
 
     def __init__(
@@ -588,11 +623,17 @@ class ColdStartPhaseExecutor:
         # in this focused driver; the asserted event ordering is the contract.
         return PhaseExecution(result={"prepared": True})
 
-    def get(self, _operation_id: str):
-        raise KeyError(_operation_id)
+    def get(self, operation_id: str):
+        raise KeyError(operation_id)
 
 
-def _request(sessions, node_id: str, *, action: str = "run", retention: str = "retain-cached"):
+def _request(
+    sessions,
+    node_id: str,
+    *,
+    action: Literal["run", "switch"] = "run",
+    retention: RunSwitchRetention = "retain-cached",
+):
     with sessions() as session:
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -687,7 +728,13 @@ def test_mapping_selection_rejects_malformed_persisted_parameters(
     with sessions.begin() as session:
         mapping = session.get(ClusterMapping, mapping_id)
         assert mapping is not None
-        mapping.parameters = ["malformed"]
+        # Persisted JSON can be an array; the mapper must reject it rather than
+        # treat it as an empty parameter map.
+        session.execute(
+            update(ClusterMapping)
+            .where(ClusterMapping.id == mapping_id)
+            .values(parameters=["malformed"])
+        )
 
     with sessions() as session:
         mapping = session.get(ClusterMapping, mapping_id)
@@ -908,9 +955,9 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert image_bytes is not None
 
     controller_storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
-    archive = b"canonical-runtime-image-archive"[:image_bytes]
-    assert hashlib.sha256(archive).hexdigest() == layout_digest
-    (controller_storage.root / layout_digest).write_bytes(archive)
+    expected_archive = b"canonical-runtime-image-archive"[:image_bytes]
+    assert hashlib.sha256(expected_archive).hexdigest() == layout_digest
+    (controller_storage.root / layout_digest).write_bytes(expected_archive)
 
     class ColdModelCache(_CanonicalModelCache):
         ready = False
@@ -923,21 +970,32 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     model_cache = ColdModelCache()
 
     class _BuildArchiveTransport:
+        def pull_and_export(
+            self,
+            reference: str,
+            destination: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            progress=None,
+        ) -> PulledImageEvidence:
+            raise AssertionError("the test runtime image archive is already stored")
+
         def inspect_archive(
             self,
-            archive_path: Path,
+            archive: Path,
             *,
             expected_architecture: str,
             expected_runtime_interface: str,
             expected_archive_sha256: str,
             expected_archive_bytes: int,
         ) -> PulledImageEvidence:
-            assert archive_path.read_bytes() == archive
+            assert archive.read_bytes() == expected_archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 requested_manifest_digest=None,
                 config_id="sha256:" + "4" * 64,
-                local_reference="oci-archive:" + str(archive_path),
+                local_reference="oci-archive:" + str(archive),
                 architecture=expected_architecture,
                 runtime_interface="v1",
                 archive_sha256=expected_archive_sha256,
@@ -1141,6 +1199,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert service.tick() is True
     planned = service.get(operation.operation_id)
     assert planned.progress.subphase == "target-copy"
+    assert planned.result is not None
     assert planned.result.child_operation_id is None
     with sessions() as session:
         installation = session.scalar(
@@ -1152,6 +1211,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             session.scalars(select(RecipeInstallation))
         )
         compiled_plans = installation.plan["compiled_execution_plans"]
+        assert isinstance(compiled_plans, dict)
         assert compiled_plans
         assert all(
             payload["schema_version"] == 2
@@ -1163,10 +1223,13 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert service.get(operation.operation_id).progress.subphase == "target-copy"
     assert service.tick() is True
     assert service.get(operation.operation_id).progress.subphase == "runtime-install"
-    assert service.get(operation.operation_id).result.child_operation_id is None
+    install_stage = service.get(operation.operation_id)
+    assert install_stage.result is not None
+    assert install_stage.result.child_operation_id is None
     assert service.tick() is True
     waiting = service.get(operation.operation_id)
     assert waiting.progress.subphase == "runtime-install"
+    assert waiting.result is not None
     install_child_id = waiting.result.child_operation_id
     assert install_child_id
     assert executor.events == [
@@ -1365,6 +1428,7 @@ def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: i
         """Advance one phase, answering any ordinary preflight probe."""
         service.tick()
         view = service.get(operation.operation_id)
+        assert view.result is not None
         checkpoint = view.result.preflight
         if checkpoint is not None and checkpoint.pending_job_id:
             _finish(sessions, checkpoint, clock.now)
@@ -1578,6 +1642,7 @@ def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
                     selected = latest_result(
                         session, node_id, requirements_sha256=receipt.request_sha256
                     )
+                assert selected is not None
                 assert selected.observed_at == int(stale_time.timestamp()), (
                     view.state, view.status_reason, switch.executor.events,
                     switch.compiler.compiles, receipt.request_sha256,
@@ -1649,18 +1714,27 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     build_start_calls: list[str] = []
     build_start_plans: list[RecipeBuildPlan] = []
 
-    def preview_build(_revision_id, _builder_id):
-        build_preview_calls.append(_builder_id)
+    def preview_build(recipe_revision_id, builder_node_id):
+        del recipe_revision_id
+        build_preview_calls.append(builder_node_id)
         return replace(
             build_plan,
             build_id=str(uuid.uuid4()),
             build_input_sha256="a" * 64,
         )
 
-    def start_build(build_plan, **_kwargs):
+    def start_build(plan, **_kwargs) -> RecipeOperationView:
         build_start_calls.append("start")
-        build_start_plans.append(build_plan)
-        return SimpleNamespace(id=child_id, state="building", owner_id=build_id)
+        build_start_plans.append(plan)
+        return RecipeOperationView(
+            id=child_id,
+            kind="recipe.build.v1",
+            owner_id=build_id,
+            state="building",
+            plan_digest=plan.build_input_sha256,
+            nodes=(),
+            result=None,
+        )
 
     lifecycle.preview_build = preview_build
     lifecycle.build = start_build
@@ -1701,6 +1775,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     waiting = service.get(operation.operation_id)
     assert waiting.current_phase == "prepare"
     assert waiting.progress.subphase == "container-build"
+    assert waiting.result is not None
     assert waiting.result.child_operation_id == child_id
     # Apply consumes the plan persisted during preview.  A fresh planner call
     # would admit mutable builder evidence and can derive a new identity.
@@ -1735,7 +1810,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     resumed = restarted.get(operation.operation_id)
     assert resumed.current_phase == "prepare"
     assert resumed.progress.subphase == "runtime-image"
-    receipt = effective_build_receipt(plan, resumed.result)
+    assert resumed.result is not None
+    receipt = effective_build_receipt(plan, resumed.result.model_dump(mode="json"))
     assert receipt == {
         "build_id": build_id,
         "build_input_sha256": build_plan.build_input_sha256,
@@ -1898,7 +1974,13 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         assert snapshot is not None
         snapshot.capabilities = ["recipe.build.v1"]
-    lifecycle_stub = SimpleNamespace()
+    class _LifecycleStub(RecipeOperationService):
+        """Only ``build`` is reached by the container-build subphase."""
+
+        def __init__(self) -> None:
+            pass
+
+    lifecycle_stub = _LifecycleStub()
     child_id = str(uuid.uuid4())
     build_plan = RecipeBuildPlan(
         build_id=build_id,
@@ -1918,10 +2000,20 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
             "build_input_sha256": build_plan.build_input_sha256,
         }
 
-    def start_build(*_args, **_kwargs):
+    def start_build(*_args, **_kwargs) -> RecipeOperationView:
         with sessions.begin() as session:
-            session.get(RecipeBuild, build_id).state = "building"
-        return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
+            build = session.get(RecipeBuild, build_id)
+            assert build is not None
+            build.state = "building"
+        return RecipeOperationView(
+            id=child_id,
+            kind="recipe.build.v1",
+            owner_id=build_id,
+            state="running",
+            plan_digest=build_plan.build_input_sha256,
+            nodes=(),
+            result=None,
+        )
 
     lifecycle_stub.build = start_build
     executor = RecipeLifecyclePhaseExecutor(
@@ -1956,6 +2048,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         "phase": "prepare",
         "subphase": "container-build",
     }
+    assert execution.result is not None
     assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A durable plan mutation is rejected before dispatch; execution never
@@ -2072,7 +2165,7 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
     assert service.tick() is True
     pending = service.get(operation.operation_id)
     assert pending.current_phase == "transfer"
-    child_id = pending.result.child_operation_id
+    child_id = _child_operation_id(pending)
     artifact_executor.children[child_id].state = "succeeded"
     artifact_executor.children[child_id].result = _target_copy_evidence(plan, plan.phases[0])
     assert service.tick() is True
@@ -2131,7 +2224,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     )
 
     assert service.tick() is True
-    child_id = service.get(operation.operation_id).result.child_operation_id
+    child_id = _child_operation_id(service.get(operation.operation_id))
     artifact_executor.children[child_id].state = "running"
     artifact_executor.children[child_id].result = {
         "progress": {
@@ -2172,6 +2265,9 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert resumed.progress.members[0].completed_bytes == 512
 
     artifact_executor.children[child_id].state = "succeeded"
+    assert plan.preparation is not None
+    runtime_image = plan.preparation.runtime_image
+    assert runtime_image is not None
     artifact_executor.children[child_id].result = {
         "copied_bytes": 1024,
         "evidence": [{
@@ -2180,7 +2276,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
             "verified_digests": [MODEL_ARTIFACT],
             "verified_image_digest": "sha256:" + "1" * 64,
             "imported_image_digest": "sha256:" + "1" * 64,
-            "verified_oci_layout_sha256": plan.preparation.runtime_image.oci_layout_sha256,
+            "verified_oci_layout_sha256": runtime_image.oci_layout_sha256,
         }],
     }
     assert restarted.tick() is True
@@ -2189,15 +2285,16 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert completed_transfer.progress.members[0].completed_bytes == 1024
     assert completed_transfer.progress.members[0].state == "succeeded"
     assert any(
-        item.node_id == nodes[0]
+        isinstance(item, RunSwitchTargetTransferEvidenceResult)
+        and item.node_id == nodes[0]
         and item.verified is True
-        for item in completed_transfer.result.phase_results
+        for item in _result(completed_transfer).phase_results
     )
     # The next durable tick consumes the persisted transfer receipts and runs
     # the real verify phase; no caller supplied progress is reconstructed.
     assert restarted.tick() is True
     verified = restarted.get(operation.operation_id)
-    assert "verify" in verified.result.completed_phases
+    assert "verify" in _result(verified).completed_phases
 
 
 def test_transient_distribution_failure_requeues_exact_plan_and_progress(
@@ -2230,7 +2327,7 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
         actor="admin",
     )
     assert service.tick() is True
-    child_id = service.get(operation.operation_id).result.child_operation_id
+    child_id = _child_operation_id(service.get(operation.operation_id))
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
@@ -2255,12 +2352,14 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
         row = session.get(Job, operation.operation_id)
         assert row is not None
         assert row.current_attempt == 2
+        assert row.result is not None
         assert row.result["child_operation_id"] is None
 
     assert service.tick() is True
     retried = service.get(operation.operation_id)
     assert retried.state == "running"
     assert retried.plan_digest == plan.plan_digest
+    assert retried.result is not None
     assert retried.result.child_operation_id != child_id
 
 
@@ -2296,7 +2395,7 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
 
     assert service.tick() is True
     for attempt in range(3):
-        child_id = service.get(operation.operation_id).result.child_operation_id
+        child_id = _child_operation_id(service.get(operation.operation_id))
         artifact_executor.children[child_id].state = "failed"
         artifact_executor.children[child_id].result = {
             "error_code": "agent.copy.timeout",
@@ -2318,11 +2417,16 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
         row = session.get(Job, retry.operation_id)
         assert row is not None
         assert row.current_attempt == 1
-        assert row.payload["retry"]["operator_retries"] == 1
+        retry_payload = row.payload["retry"]
+        assert isinstance(retry_payload, dict)
+        assert retry_payload["operator_retries"] == 1
 
     assert service.tick() is True
-    retried_child = service.get(retry.operation_id).result.child_operation_id
+    retried_child = _child_operation_id(service.get(retry.operation_id))
     artifact_executor.children[retried_child].state = "succeeded"
+    assert plan.preparation is not None
+    retried_image = plan.preparation.runtime_image
+    assert retried_image is not None
     artifact_executor.children[retried_child].result = {
         "copied_bytes": 1024,
         "evidence": [{
@@ -2331,7 +2435,7 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
             "verified_digests": [MODEL_ARTIFACT],
             "verified_image_digest": "sha256:" + "1" * 64,
             "imported_image_digest": "sha256:" + "1" * 64,
-            "verified_oci_layout_sha256": plan.preparation.runtime_image.oci_layout_sha256,
+            "verified_oci_layout_sha256": retried_image.oci_layout_sha256,
         }],
     }
     assert service.tick() is True
@@ -2445,21 +2549,30 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_pat
     )
     provider = RunSwitchOperationProvider(service)
     page = provider.list_operations(
-        SimpleNamespace(after=None, limit=10, state=None, node_id=None)
+        OperationQuery(after=None, limit=10, state=None, node_id=None)
     )
     assert page.total == 1
     item = page.items[0]
+    assert isinstance(item, dict)
+    progress = item["progress"]
+    assert isinstance(progress, dict)
+    checkpoint = progress["checkpoint"]
+    assert isinstance(checkpoint, dict)
+    attempt = item["attempt"]
+    assert isinstance(attempt, int)
+    created_at = item["created_at"]
+    assert isinstance(created_at, str)
     assert item["id"] == operation.operation_id
     assert item["job_id"] == operation.operation_id
     assert item["node_ids"] == list(nodes)
     assert item["node_id"] == nodes[0]
-    assert item["attempt"] >= 1
+    assert attempt >= 1
     assert item["supported_actions"] == ["cancel"]
-    assert item["progress"]["total_bytes_known"] is True
-    assert item["progress"]["members"][0]["member_id"] == nodes[0]
-    assert "phase_index" not in item["progress"]
-    assert item["progress"]["checkpoint"]["digest"] == operation.plan_digest
-    assert datetime.fromisoformat(item["created_at"]).tzinfo == UTC
+    assert progress["total_bytes_known"] is True
+    assert progress["members"][0]["member_id"] == nodes[0]
+    assert "phase_index" not in progress
+    assert checkpoint["digest"] == operation.plan_digest
+    assert datetime.fromisoformat(created_at).tzinfo == UTC
     assert provider.get_operation(operation.operation_id)["id"] == operation.operation_id
 
 
@@ -2555,7 +2668,13 @@ def test_operation_read_rejects_malformed_persisted_result(
     with sessions.begin() as session:
         job = session.get(Job, operation.operation_id)
         assert job is not None
-        job.result = invalid_result
+        # A stored result can be any JSON value; persist it the way the driver
+        # stored it rather than through the typed ORM attribute.
+        session.execute(
+            update(Job)
+            .where(Job.id == operation.operation_id)
+            .values(result=invalid_result)
+        )
         previous_state = job.state
     with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
         service.get(operation.operation_id)
@@ -2581,8 +2700,10 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
     # Resume the durable checkpoint written after the last phase of a retry.
     with sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
+        assert row is not None
         row.state = "running"
-        row.result = dict(row.result) | {
+        assert row.result is not None
+        row.result = row.result | {
             "phase_index": len(plan.phases),
             "completed_phases": [phase.kind for phase in plan.phases],
             "retryable": True,
@@ -2592,6 +2713,7 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
     assert restarted.tick() is True
     completed = restarted.get(operation.operation_id)
     assert completed.state == "succeeded"
+    assert completed.result is not None
     assert completed.result.retryable is False
     assert completed.result.failed_phase is None
     assert completed.status_reason is None
@@ -2602,6 +2724,7 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
         RunSwitchOperation.model_validate(completed.model_dump() | {"state": "failed"})
     with sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
+        assert row is not None
         row.result = None
     with pytest.raises(ValidationError, match="completed phase evidence"):
         restarted.get(operation.operation_id)
@@ -2623,7 +2746,9 @@ def test_nas_transfer_checkpoint_does_not_complete_unstarted_spark_copy(tmp_path
     progress = service.get(operation.operation_id).progress
     assert executor.events == ["model-download"]
     assert progress.completed_bytes == 1024
-    assert progress.total_bytes > progress.completed_bytes
+    total_bytes = progress.total_bytes
+    assert total_bytes is not None
+    assert total_bytes > progress.completed_bytes
     assert progress.members[0].completed_bytes == 0
 
 
@@ -2634,19 +2759,22 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_pa
 
     class InterleavedExecutor(RecordingArtifactExecutor):
         entered = False
-        service = None
+        service: RunSwitchOperationService | None = None
 
         def execute(self, *args, **kwargs):
             result = super().execute(*args, **kwargs)
             if not child_completion and not self.entered:
                 self.entered = True
+                assert self.service is not None
                 self.service.tick()
             return result
 
         def get(self, operation_id):
             result = super().get(operation_id)
+            assert result is not None
             if child_completion and result.state == "succeeded" and not self.entered:
                 self.entered = True
+                assert self.service is not None
                 self.service.tick()
             return result
 
@@ -2658,7 +2786,7 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_pa
     operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
     service.tick()
     if child_completion:
-        child_id = service.get(operation.operation_id).result.child_operation_id
+        child_id = _child_operation_id(service.get(operation.operation_id))
         child = executor.children[child_id]
         child.state = "succeeded"
         child.result = _target_copy_evidence(plan, plan.phases[0])
@@ -2678,7 +2806,7 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     plan = service.preview(request, actor="admin")
     operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
     service.tick()
-    child_id = service.get(operation.operation_id).result.child_operation_id
+    child_id = _child_operation_id(service.get(operation.operation_id))
     key = str(uuid.uuid4())
     pending = service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Stop preparation")
     assert pending.state == "running"
@@ -2692,13 +2820,16 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     restarted.tick()
     cancelled = restarted.get(operation.operation_id)
     assert cancelled.state == "cancelled"
-    assert cancelled.result.completed_phases == ["transfer"]
-    assert cancelled.result.phase_results
-    assert cancelled.result.child_operation_id is None
+    cancelled_result = _result(cancelled)
+    assert cancelled_result.completed_phases == ["transfer"]
+    assert cancelled_result.phase_results
+    assert cancelled_result.child_operation_id is None
     assert not restarted._advance(operation.operation_id)
     with sessions() as session:
         assert len(list(session.scalars(select(NodeArtifact)))) > 0
-        assert session.get(RecipeInstallation, plan.installation_id).state == "installed"
+        installed = session.get(RecipeInstallation, plan.installation_id)
+        assert installed is not None
+        assert installed.state == "installed"
 
 
 def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_path):
@@ -2723,8 +2854,6 @@ def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_
 
 def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tmp_path: Path) -> None:
     from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.recipe_builds import RecipeBuildService
-    from vonk_control.recipe_operations import RecipeOperationService
 
     from .test_recipe_builds import setup as setup_build
 
@@ -2733,14 +2862,18 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
     selected = builds.plan(revision.id, node_id, now=now)
     queue = AgentJobService(sessions, clock=lambda: now)
     lifecycle = RecipeOperationService(
-        sessions, install_admission=object(), run_admission=object(),
-        agent_jobs=queue, clock=lambda: now, builds=builds,
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=queue,
+        clock=lambda: now,
+        builds=builds,
     )
     executor = RecipeLifecyclePhaseExecutor(
         lifecycle, sessions, ClusterMappingService(sessions), lambda: now,
     )
     # This phase consumes only the build identities already selected by preview.
-    plan = SimpleNamespace(
+    plan = RunSwitchPlan.model_construct(
         recipe_build_id=selected.build_id,
         recipe_revision_id=selected.recipe_revision_id,
         build=SimpleNamespace(
@@ -2762,6 +2895,7 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
 
     scheduled = execute()
     assert scheduled.operation_id is not None
+    assert scheduled.result is not None
     assert lifecycle.get(scheduled.operation_id).state == "running"
     received = _phase_result(scheduled.result, phase=phase)
     assert received["state"] == "building"
@@ -2770,17 +2904,22 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
     assert "image_digest" not in received
     replay = execute()
     assert replay.operation_id == scheduled.operation_id
+    assert replay.result is not None
     assert _phase_result(replay.result, phase=phase) == received
 
     with sessions.begin() as session:
         build = session.get(RecipeBuild, selected.build_id)
+        assert build is not None
         build.state = "succeeded"
         build.image_digest = "sha256:" + "a" * 64
         build.oci_layout_sha256 = "b" * 64
         build.image_bytes = 123
-        session.get(Job, scheduled.operation_id).state = "succeeded"
+        job = session.get(Job, scheduled.operation_id)
+        assert job is not None
+        job.state = "succeeded"
     completed = execute()
     assert completed.operation_id is None
+    assert completed.result is not None
     receipt = _phase_result(completed.result, phase=phase)
     assert receipt["state"] == "succeeded"
     assert receipt["image_digest"] == "sha256:" + "a" * 64
@@ -2788,6 +2927,8 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
     assert receipt["image_bytes"] == 123
     # Success never substitutes defaults for incomplete immutable evidence.
     with sessions.begin() as session:
-        session.get(RecipeBuild, selected.build_id).image_bytes = None
+        stale = session.get(RecipeBuild, selected.build_id)
+        assert stale is not None
+        stale.image_bytes = None
     with pytest.raises(RunSwitchOperationConflict, match="container-build-evidence-invalid"):
         execute()

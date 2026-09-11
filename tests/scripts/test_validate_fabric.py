@@ -19,6 +19,7 @@ def validate_module():
     """Load the parser from the executable without running a live check."""
     loader = SourceFileLoader("validate_fabric", str(SCRIPT))
     spec = spec_from_loader(loader.name, loader)
+    assert spec is not None
     module = module_from_spec(spec)
     sys.modules[spec.name] = module
     loader.exec_module(module)

@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from types import ModuleType
 
 from cluster_profiles import glb_validation
 from cluster_profiles.qualification_fixtures import FixtureError, _glb_metadata
@@ -16,6 +17,53 @@ from cluster_profiles.qualification_fixtures import FixtureError, _glb_metadata
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS = ("platform",)
 VALIDATOR_SHA256 = "10e31294146186d3b2b5cf935dbac2eb1416dae07b379c2815b1deaf9cdb6f75"
+
+
+def _json_object(value: object) -> dict[str, object]:
+    """Return *value* as a mutable JSON object or fail the fixture loudly."""
+
+    if not isinstance(value, dict):
+        raise TypeError(f"expected a JSON object, got {type(value).__name__}")
+    return value
+
+
+def _json_array(value: object) -> list[object]:
+    """Return *value* as a mutable JSON array or fail the fixture loudly."""
+
+    if not isinstance(value, list):
+        raise TypeError(f"expected a JSON array, got {type(value).__name__}")
+    return value
+
+
+def _json_int(value: object) -> int:
+    """Return *value* as a JSON integer or fail the fixture loudly."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"expected a JSON integer, got {type(value).__name__}")
+    return value
+
+
+def _json_navigate(document: dict[str, object], *path: str | int) -> object:
+    current: object = document
+    for step in path:
+        if isinstance(step, str):
+            current = _json_object(current)[step]
+        else:
+            current = _json_array(current)[step]
+    return current
+
+
+def _json_at(document: dict[str, object], *path: str | int) -> dict[str, object]:
+    """Return the mutable JSON object at *path*."""
+
+    return _json_object(_json_navigate(document, *path))
+
+
+def _json_array_at(document: dict[str, object], *path: str | int) -> list[object]:
+    """Return the mutable JSON array at *path*."""
+
+    return _json_array(_json_navigate(document, *path))
+
 
 
 class Glb:
@@ -186,7 +234,7 @@ class Glb:
         )
 
 
-def load_validator(_context: str) -> object:
+def load_validator(_context: str) -> ModuleType:
     return glb_validation
 
 
@@ -231,11 +279,11 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             b"RIFF\x1c\0\0\0WEBPVP8L\x0f\0\0\0/\x01@\0\0\x07\x10"
             b"\xfd\x8f\xfe\x07\x22\xa2\xff\x01\0"
         )
-        document["images"][0] = {
+        _json_array_at(document, "images")[0] = {
             "bufferView": builder.view(webp),
             "mimeType": "image/webp",
         }
-        document["textures"][0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.validate(document, builder, "textured")
@@ -247,12 +295,12 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             b"RIFF\x1c\0\0\0WEBPVP8L\x0f\0\0\0/\x01@\0\0\x07\x10"
             b"\xfd\x8f\xfe\x07\x22\xa2\xff\x01\0"
         )
-        document["images"].append(
+        _json_array_at(document, "images").append(
             {"bufferView": builder.view(webp), "mimeType": "image/webp"}
         )
-        for index, texture in enumerate(document["textures"]):
-            texture["source"] = index
-            texture["extensions"] = {"EXT_texture_webp": {"source": 2}}
+        for index, texture in enumerate(_json_array_at(document, "textures")):
+            _json_object(texture)["source"] = index
+            _json_object(texture)["extensions"] = {"EXT_texture_webp": {"source": 2}}
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "distinct embedded images")
@@ -277,21 +325,21 @@ class ThreeDGlbValidationTests(unittest.TestCase):
     ) -> None:
         builder = Glb()
         document = builder.document()
-        index_view = builder.views[builder.accessors[1]["bufferView"]]
-        struct.pack_into("<I", builder.blob, int(index_view["byteOffset"]) + 8, 3)
+        index_view = builder.views[_json_int(builder.accessors[1]["bufferView"])]
+        struct.pack_into("<I", builder.blob, _json_int(index_view["byteOffset"]) + 8, 3)
         self.rejected(document, builder, "geometry", "exceeds POSITION")
 
         builder = Glb()
         document = builder.document()
-        position_view = builder.views[builder.accessors[0]["bufferView"]]
-        struct.pack_into("<f", builder.blob, int(position_view["byteOffset"]), math.nan)
+        position_view = builder.views[_json_int(builder.accessors[0]["bufferView"])]
+        struct.pack_into("<f", builder.blob, _json_int(position_view["byteOffset"]), math.nan)
         self.rejected(document, builder, "geometry", "non-finite")
 
         builder = Glb()
         document = builder.document()
-        position_view = builder.views[builder.accessors[0]["bufferView"]]
+        position_view = builder.views[_json_int(builder.accessors[0]["bufferView"])]
         struct.pack_into(
-            "<9f", builder.blob, int(position_view["byteOffset"]), *([0.0] * 9)
+            "<9f", builder.blob, _json_int(position_view["byteOffset"]), *([0.0] * 9)
         )
         builder.accessors[0]["max"] = [0.0, 0.0, 0.0]
         self.rejected(document, builder, "geometry", "zero-size")
@@ -304,7 +352,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document()
-        document["meshes"][0]["primitives"][0]["attributes"]["NORMAL"] = 99
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["NORMAL"] = 99
         self.rejected(document, builder, "geometry", "NORMAL accessor")
 
     def test_profile_checks_reject_missing_pbr_texture_and_invalid_skin_weights(
@@ -316,8 +364,8 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document("skinned")
-        weight_view = builder.views[builder.accessors[4]["bufferView"]]
-        struct.pack_into("<f", builder.blob, int(weight_view["byteOffset"]), -1.0)
+        weight_view = builder.views[_json_int(builder.accessors[4]["bufferView"])]
+        struct.pack_into("<f", builder.blob, _json_int(weight_view["byteOffset"]), -1.0)
         self.rejected(document, builder, "skinned", "invalid weights")
 
     def test_rejects_duplicate_json_keys_and_nonzero_bin_padding(self) -> None:
@@ -344,7 +392,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         builder = Glb()
         document = builder.document()
         content = bytearray(builder.bytes(document))
-        document["buffers"][0]["byteLength"] -= 1
+        _json_at(document, "buffers", 0)["byteLength"] = (
+            _json_int(_json_at(document, "buffers", 0)["byteLength"]) - 1
+        )
         content = bytearray(builder.bytes(document))
         content[-1] = 1
         self.raw_rejected(bytes(content), "geometry", "padding bytes must be zero")
@@ -421,7 +471,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document()
-        builder.views[builder.accessors[1]["bufferView"]]["byteStride"] = 4
+        builder.views[_json_int(builder.accessors[1]["bufferView"])]["byteStride"] = 4
         self.rejected(document, builder, "geometry", "indices must be unsigned")
 
         builder = Glb()
@@ -450,7 +500,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             count=1,
             target=34962,
         )
-        document["meshes"][0]["primitives"][0]["attributes"]["NORMAL"] = normal
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["NORMAL"] = normal
         self.rejected(document, builder, "geometry", "attribute counts")
 
         builder = Glb()
@@ -470,23 +520,23 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document()
-        document["nodes"][0]["matrix"] = [1.0] * 16
-        document["nodes"][0]["translation"] = [0.0, 0.0, 0.0]
+        _json_at(document, "nodes", 0)["matrix"] = [1.0] * 16
+        _json_at(document, "nodes", 0)["translation"] = [0.0, 0.0, 0.0]
         self.rejected(document, builder, "geometry", "combine matrix and TRS")
 
         builder = Glb()
         document = builder.document()
-        document["nodes"][0]["scale"] = [1.0, 0.0, 1.0]
+        _json_at(document, "nodes", 0)["scale"] = [1.0, 0.0, 1.0]
         self.rejected(document, builder, "geometry", "scale collapses")
 
         builder = Glb()
         document = builder.document()
-        document["nodes"][0]["matrix"] = [0.0] * 16
+        _json_at(document, "nodes", 0)["matrix"] = [0.0] * 16
         self.rejected(document, builder, "geometry", "matrix")
 
         builder = Glb()
         document = builder.document()
-        document["nodes"][0]["matrix"] = [
+        _json_at(document, "nodes", 0)["matrix"] = [
             1.0,
             0.0,
             0.0,
@@ -515,12 +565,12 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             count=3,
             target=34962,
         )
-        document["meshes"][0]["primitives"][0]["attributes"]["_CUSTOM"] = custom
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["_CUSTOM"] = custom
         self.rejected(document, builder, "geometry", "UNSIGNED_INT")
 
         builder = Glb()
         document = builder.document()
-        document["meshes"][0]["primitives"][0]["attributes"]["NORMAL"] = len(
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["NORMAL"] = len(
             builder.accessors
         )
         builder.accessors.append(
@@ -548,22 +598,22 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile, corruption="invalid secondary root"):
                 builder = Glb()
                 document = builder.document(profile)
-                document["scenes"].append({"nodes": [999]})
+                _json_array_at(document, "scenes").append({"nodes": [999]})
                 self.rejected(document, builder, profile, "scene node index is invalid")
 
             with self.subTest(profile=profile, corruption="duplicate secondary roots"):
                 builder = Glb()
                 document = builder.document(profile)
-                document["scenes"].append({"nodes": [0, 0]})
+                _json_array_at(document, "scenes").append({"nodes": [0, 0]})
                 self.rejected(document, builder, profile, "scene roots are invalid")
 
             with self.subTest(profile=profile, corruption="secondary root is a child"):
                 builder = Glb()
                 document = builder.document(profile)
-                parent = len(document["nodes"])
+                parent = len(_json_array_at(document, "nodes"))
                 child = parent + 1
-                document["nodes"].extend([{"children": [child]}, {"name": "child"}])
-                document["scenes"].append({"nodes": [parent, child]})
+                _json_array_at(document, "nodes").extend([{"children": [child]}, {"name": "child"}])
+                _json_array_at(document, "scenes").append({"nodes": [parent, child]})
                 self.rejected(document, builder, profile, "scene roots are invalid")
 
     def test_rejects_unsupported_scene_features_and_material_booleans(self) -> None:
@@ -571,7 +621,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile, corruption="boolean camera"):
                 builder = Glb()
                 document = builder.document(profile)
-                document["nodes"][0]["camera"] = False
+                _json_at(document, "nodes", 0)["camera"] = False
                 self.rejected(
                     document, builder, profile, "camera nodes are not supported"
                 )
@@ -579,7 +629,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile, corruption="boolean material"):
                 builder = Glb()
                 document = builder.document(profile)
-                document["meshes"][0]["primitives"][0]["material"] = False
+                _json_at(document, "meshes", 0, "primitives", 0)["material"] = False
                 self.rejected(
                     document, builder, profile, "primitive material index is invalid"
                 )
@@ -587,7 +637,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile, corruption="boolean morph accessor"):
                 builder = Glb()
                 document = builder.document(profile)
-                document["meshes"][0]["primitives"][0]["targets"] = [
+                _json_at(document, "meshes", 0, "primitives", 0)["targets"] = [
                     {"POSITION": False}
                 ]
                 self.rejected(
@@ -613,7 +663,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile):
                 builder = Glb()
                 document = builder.document(profile)
-                attributes = document["meshes"][0]["primitives"][0]["attributes"]
+                attributes = _json_at(document, "meshes", 0, "primitives", 0, "attributes")
                 normal = attributes.get("NORMAL")
                 if normal is None:
                     normal = builder.accessor(
@@ -624,9 +674,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
                         target=34962,
                     )
                     attributes["NORMAL"] = normal
-                normal_view = builder.views[builder.accessors[normal]["bufferView"]]
+                normal_view = builder.views[_json_int(builder.accessors[_json_int(normal)]["bufferView"])]
                 struct.pack_into(
-                    "<f", builder.blob, int(normal_view["byteOffset"]), math.nan
+                    "<f", builder.blob, _json_int(normal_view["byteOffset"]), math.nan
                 )
                 self.rejected(
                     document, builder, profile, "NORMAL accessor contains non-finite"
@@ -635,14 +685,14 @@ class ThreeDGlbValidationTests(unittest.TestCase):
     def test_rejects_texture_coordinate_image_and_extension_corruption(self) -> None:
         builder = Glb()
         document = builder.document("textured-pbr")
-        document["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"][
+        _json_at(document, "materials", 0, "pbrMetallicRoughness", "baseColorTexture")[
             "texCoord"
         ] = 1
         self.rejected(document, builder, "textured-pbr", "must use TEXCOORD_0")
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        document["images"][0]["mimeType"] = "image/jpeg"
+        _json_at(document, "images", 0)["mimeType"] = "image/jpeg"
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
@@ -652,50 +702,50 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        document["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"][
+        _json_at(document, "materials", 0, "pbrMetallicRoughness", "baseColorTexture")[
             "texCoord"
         ] = False
         self.rejected(document, builder, "textured-pbr", "must use TEXCOORD_0")
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        document["images"][0]["mimeType"] = "image/webp"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["mimeType"] = "image/webp"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "core texture source")
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        image_view = document["images"][0]["bufferView"]
+        image_view = _json_int(_json_at(document, "images", 0)["bufferView"])
         builder.views[image_view]["byteStride"] = 4
         self.rejected(document, builder, "textured-pbr", "byteStride bufferView")
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        image_view = document["images"][0]["bufferView"]
+        image_view = _json_int(_json_at(document, "images", 0)["bufferView"])
         raw_view = builder.views[image_view]
-        start = int(raw_view["byteOffset"])
-        length = int(raw_view["byteLength"])
+        start = _json_int(raw_view["byteOffset"])
+        length = _json_int(raw_view["byteLength"])
         bogus_jpeg = b"\xff\xd8\xff\xe0\x00\x04xx" + b"x" * (length - 10) + b"\xff\xd9"
         self.assertEqual(len(bogus_jpeg), length)
         builder.blob[start : start + length] = bogus_jpeg
-        document["images"][0]["mimeType"] = "image/jpeg"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["mimeType"] = "image/jpeg"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
         document = builder.document("textured-pbr")
         png_header = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + b"\0" * 8
-        document["images"][0]["bufferView"] = builder.view(png_header)
-        document["images"][0]["mimeType"] = "image/png"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(png_header)
+        _json_at(document, "images", 0)["mimeType"] = "image/png"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
         document = builder.document("textured-pbr")
         webp_header = b"RIFF\x08\0\0\0WEBPVP8 "
-        document["images"][0]["bufferView"] = builder.view(webp_header)
-        document["images"][0]["mimeType"] = "image/webp"
-        document["textures"][0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(webp_header)
+        _json_at(document, "images", 0)["mimeType"] = "image/webp"
+        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -714,9 +764,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             + webp_chunks
             + webp_chunks
         )
-        document["images"][0]["bufferView"] = builder.view(duplicate_webp)
-        document["images"][0]["mimeType"] = "image/webp"
-        document["textures"][0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(duplicate_webp)
+        _json_at(document, "images", 0)["mimeType"] = "image/webp"
+        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -731,9 +781,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             "EAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABgf/xAAUEQEAAAAA"
             "AAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCLAGVxf//Z"
         )
-        document["images"][0]["bufferView"] = builder.view(jpeg + jpeg)
-        document["images"][0]["mimeType"] = "image/jpeg"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(jpeg + jpeg)
+        _json_at(document, "images", 0)["mimeType"] = "image/jpeg"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
@@ -741,9 +791,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         fake_webp = (
             b"RIFF\x18\0\0\0WEBPVP8 \x0b\0\0\0\x20\0\0\x9d\x01\x2a\x01\0\x01\0\0\0"
         )
-        document["images"][0]["bufferView"] = builder.view(fake_webp)
-        document["images"][0]["mimeType"] = "image/webp"
-        document["textures"][0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(fake_webp)
+        _json_at(document, "images", 0)["mimeType"] = "image/webp"
+        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -766,9 +816,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             + png_chunk(b"IDAT", zlib.compress(b"\0\0\0\0"))
             + png_chunk(b"IEND", b"")
         )
-        document["images"][0]["bufferView"] = builder.view(critical_png)
-        document["images"][0]["mimeType"] = "image/png"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(critical_png)
+        _json_at(document, "images", 0)["mimeType"] = "image/png"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
@@ -780,15 +830,15 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             + b"\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00"
             + b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x00\xff\xd9"
         )
-        document["images"][0]["bufferView"] = builder.view(jpeg)
-        document["images"][0]["mimeType"] = "image/jpeg"
-        document["textures"][0] = {"source": 0}
+        _json_at(document, "images", 0)["bufferView"] = builder.view(jpeg)
+        _json_at(document, "images", 0)["mimeType"] = "image/jpeg"
+        _json_array_at(document, "textures")[0] = {"source": 0}
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        image_view = document["images"][0]["bufferView"]
-        document["meshes"][0]["primitives"][0]["attributes"]["_IMAGE_ALIAS"] = len(
+        image_view = _json_int(_json_at(document, "images", 0)["bufferView"])
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["_IMAGE_ALIAS"] = len(
             builder.accessors
         )
         builder.accessors.append(
@@ -803,20 +853,20 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document("textured-pbr")
-        image_view = document["images"][0]["bufferView"]
+        image_view = _json_int(_json_at(document, "images", 0)["bufferView"])
         builder.views[image_view]["target"] = 34962
         self.rejected(document, builder, "textured-pbr", "byteStride or target")
 
     def test_rejects_nonunit_rotation_and_swapped_buffer_targets(self) -> None:
         builder = Glb()
         document = builder.document()
-        document["nodes"][0]["rotation"] = [0.0, 0.0, 0.0, 2.0]
+        _json_at(document, "nodes", 0)["rotation"] = [0.0, 0.0, 0.0, 2.0]
         self.rejected(document, builder, "geometry", "quaternion is not normalized")
 
         builder = Glb()
         document = builder.document()
-        position_view = builder.accessors[0]["bufferView"]
-        index_view = builder.accessors[1]["bufferView"]
+        position_view = _json_int(builder.accessors[0]["bufferView"])
+        index_view = _json_int(builder.accessors[1]["bufferView"])
         builder.views[position_view]["target"] = 34963
         builder.views[index_view]["target"] = 34962
         self.rejected(document, builder, "geometry", "target must be ARRAY_BUFFER")
@@ -824,17 +874,17 @@ class ThreeDGlbValidationTests(unittest.TestCase):
     def test_rejects_skin_binding_joint_and_inverse_bind_corruption(self) -> None:
         builder = Glb()
         document = builder.document("skinned")
-        document["nodes"][0].pop("skin")
+        _json_at(document, "nodes", 0).pop("skin")
         self.rejected(document, builder, "skinned", "must bind a skin")
 
         builder = Glb()
         document = builder.document("skinned")
-        document["skins"].append(dict(document["skins"][0]))
+        _json_array_at(document, "skins").append(dict(_json_at(document, "skins", 0)))
         self.rejected(document, builder, "skinned", "exactly one skin")
 
         builder = Glb()
         document = builder.document("skinned")
-        document["skins"][0]["joints"] = [1, 1]
+        _json_at(document, "skins", 0)["joints"] = [1, 1]
         self.rejected(document, builder, "skinned", "duplicate joints")
 
         builder = Glb()
@@ -844,8 +894,8 @@ class ThreeDGlbValidationTests(unittest.TestCase):
 
         builder = Glb()
         document = builder.document("skinned")
-        joint_view = builder.views[builder.accessors[3]["bufferView"]]
-        struct.pack_into("<H", builder.blob, int(joint_view["byteOffset"]), 1)
+        joint_view = builder.views[_json_int(builder.accessors[3]["bufferView"])]
+        struct.pack_into("<H", builder.blob, _json_int(joint_view["byteOffset"]), 1)
         self.rejected(document, builder, "skinned", "unknown joint")
 
         builder = Glb()

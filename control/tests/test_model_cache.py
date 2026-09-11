@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -15,10 +16,13 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.auth import TokenCodec
+from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
+    MemoryVerifiedObjectSource,
     ModelCacheVerifiedObjectSource,
 )
+from vonk_control.jobs import JobService
 from vonk_control.model_cache import (
     _CHUNK_BYTES,
     ArtifactSetManifest,
@@ -55,6 +59,28 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
+
+
+def _required_text(value: object, detail: str) -> str:
+    """Return *value* as text or fail loudly at the fixture boundary."""
+
+    result = text(value)
+    assert result is not None, detail
+    return result
+
+
+def _first_manifest_artifact(document: dict[str, object]) -> dict[str, object]:
+    """Return a mutable copy of the first artifact of a manifest document."""
+
+    artifacts = document["artifacts"]
+    assert isinstance(artifacts, list) and artifacts
+    first = artifacts[0]
+    assert isinstance(first, dict)
+    return dict(first)
+
+
+def _distribution_object(item: Mapping[str, object]) -> Mapping[str, object]:
+    return require_mapping(item["distribution_object"], "distribution object")
 
 
 def _canonical_model(
@@ -221,7 +247,7 @@ def test_cache_manifest_rejects_coercible_artifact_types(
     tmp_path: Path, field: str, value: object
 ) -> None:
     document = _manifest_document(tmp_path)
-    artifact = dict(document["artifacts"][0])
+    artifact = _first_manifest_artifact(document)
     artifact[field] = value
     document["artifacts"] = [artifact]
 
@@ -234,7 +260,7 @@ def test_cache_manifest_artifact_dto_requires_exact_fields(
     tmp_path: Path, mutation: str
 ) -> None:
     document = _manifest_document(tmp_path)
-    artifact = dict(document["artifacts"][0])
+    artifact = _first_manifest_artifact(document)
     if mutation == "extra":
         artifact["unexpected"] = True
     else:
@@ -488,7 +514,13 @@ def test_canonical_dependency_closure_reaches_run_switch(cache, shared_object: b
     )
     primary_digest = content_sha256(primary)
     recipe_document = _canonical_recipe(primary_digest)
-    recipe_document["models"][0]["model"]["slug"] = "primary"
+    models = recipe_document["models"]
+    assert isinstance(models, list) and models
+    selection = models[0]
+    assert isinstance(selection, dict)
+    model_reference = selection["model"]
+    assert isinstance(model_reference, dict)
+    model_reference["slug"] = "primary"
     recipe = RecipeDefinition.model_validate(recipe_document)
     recipe_digest = content_sha256(recipe)
     with sessions.begin() as session:
@@ -611,7 +643,9 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     receipts = model_source.verified_model_objects_for_set(
         first.artifact_set_sha256 or ""
     )
-    composed_source = CompositeVerifiedObjectSource(model_source, object())
+    composed_source = CompositeVerifiedObjectSource(
+        model_source, MemoryVerifiedObjectSource()
+    )
     assert composed_source.verified_model_objects_for_set(
         first.artifact_set_sha256 or ""
     ) == receipts
@@ -620,7 +654,7 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
             item["model_content_sha256"],
             item["file_id"],
             item["path"],
-            tuple(item["roles"]),
+            tuple(require_sequence(item["roles"], "artifact roles")),
         )
         for item in receipts
     } == {
@@ -628,9 +662,9 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         (model_a, "tokenizer", "tokenizer.json", ("auxiliary",)),
     }
     assert all(
-        item["distribution_object"]["sha256"] == item["sha256"]
-        and item["distribution_object"]["bytes"] == item["bytes"]
-        and item["distribution_object"]["name"] == item["path"]
+        _distribution_object(item)["sha256"] == item["sha256"]
+        and _distribution_object(item)["bytes"] == item["bytes"]
+        and _distribution_object(item)["name"] == item["path"]
         for item in receipts
     )
     assert service.read_verified_artifact(
@@ -1072,7 +1106,10 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
 def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
     calls: list[str] = []
 
-    class Jobs:
+    class Jobs(JobService):
+        def __init__(self) -> None:
+            pass
+
         def claim(self, *_args, **_kwargs):
             raise AssertionError("generic jobs should not run before cache tick")
 
@@ -1182,7 +1219,10 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_pa
 def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer() -> None:
     calls: list[int] = []
 
-    class Jobs:
+    class Jobs(JobService):
+        def __init__(self) -> None:
+            pass
+
         def claim(self, *_args, **_kwargs):
             raise AssertionError("cache work should be selected before generic jobs")
 
@@ -1267,12 +1307,14 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     downloaded = _download(service, [small, artifact], model_content_sha256="a" * 64,
                            request_key="00000000-0000-4000-8000-000000001001")
     digest = downloaded.artifact_set_sha256
+    assert digest is not None
     preview = service.repair_preview(digest)
     repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001002",
                                   artifact_set_sha256=digest, plan_digest=preview["plan_digest"])
     service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
     assert service.get_operation(repair.id).state == "partial"
-    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    artifact_digest = _required_text(artifact["sha256"], "artifact digest")
+    assert service.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
     service.close()
     restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
     offsets = []
@@ -1286,7 +1328,7 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     restarted.run_pending()
     assert restarted.get_operation(repair.id).state == "succeeded"
     assert offsets == [1024 * 1024]
-    assert restarted.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    assert restarted.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
     restarted.close()
 
 
@@ -1396,12 +1438,21 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cac
     clock[0] += timedelta(seconds=1)
     checkpoint(restarted, 40)
     current = restarted.get_operation(operation.id).progress
-    assert current["measurement"]["bytes_per_second"] == 10
-    assert 10 < current["measurement"]["smoothed_bytes_per_second"] < 20
-    assert project_cache_progress(current, clock[0])["members"][0]["observed_at"] == clock[0].isoformat()
+    current_measurement = require_mapping(current["measurement"], "cache measurement")
+    assert current_measurement["bytes_per_second"] == 10
+    smoothed = current_measurement["smoothed_bytes_per_second"]
+    assert isinstance(smoothed, (int, float))
+    assert 10 < smoothed < 20
+    projected = project_cache_progress(current, clock[0])
+    projected_members = require_sequence(projected["members"], "cache measurement members")
+    projected_member = require_mapping(projected_members[0], "cache measurement member")
+    assert projected_member["observed_at"] == clock[0].isoformat()
     clock[0] += timedelta(seconds=0.1)
     checkpoint(restarted, 100, state="verifying", force=True)
-    verifying = restarted.get_operation(operation.id).progress["measurement"]
+    verifying = require_mapping(
+        restarted.get_operation(operation.id).progress["measurement"],
+        "cache measurement",
+    )
     assert verifying["completed_bytes"] == 100
     assert verifying["phase"] == "verify"
     assert "eta_seconds" not in verifying
@@ -1411,17 +1462,20 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cac
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
     from vonk_control.model_cache_progress import cache_progress, project_cache_progress
-    def snapshot(count, total=100):
+    def snapshot(count: int, total: int | None = 100) -> dict[str, object]:
         return {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1,
             "downloaded_bytes": count, "expected_bytes": total}
     first = cache_progress(snapshot(0), previous=None, now=NOW)
     second = cache_progress(snapshot(10), previous=first, now=NOW + timedelta(seconds=1))
-    assert second["measurement"]["eta_seconds"] == 9
+    second_measurement = require_mapping(second["measurement"], "cache measurement")
+    assert second_measurement["eta_seconds"] == 9
     restarted = cache_progress(snapshot(20), previous=second, now=NOW + timedelta(seconds=60))
-    assert "bytes_per_second" not in restarted["measurement"]
+    restarted_measurement = require_mapping(restarted["measurement"], "cache measurement")
+    assert "bytes_per_second" not in restarted_measurement
     unknown = cache_progress(snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61))
-    assert unknown["measurement"]["bytes_per_second"] == 10
-    assert "eta_seconds" not in unknown["measurement"]
+    unknown_measurement = require_mapping(unknown["measurement"], "cache measurement")
+    assert unknown_measurement["bytes_per_second"] == 10
+    assert "eta_seconds" not in unknown_measurement
     stale = project_cache_progress(unknown, NOW + timedelta(seconds=200))
     assert stale["activity"] == "possibly_stalled"
     assert "bytes_per_second" not in stale
@@ -1702,7 +1756,8 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(cache, tmp_path: Path
         preview = service.download_preview(model_content_sha256="b" * 64, artifacts=[artifact])
         operation = service.start_download(
             actor="test", request_key="00000000-0000-4000-8000-000000000995",
-            plan_digest=preview["plan_digest"], model_content_sha256="b" * 64,
+            plan_digest=_required_text(preview["plan_digest"], "preview plan digest"),
+            model_content_sha256="b" * 64,
             artifacts=[artifact],
         )
         service.run_pending()
@@ -1711,7 +1766,10 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(cache, tmp_path: Path
         assert fragments == [1, 2]
         assert sampled == [True]
         assert observed.progress["downloaded_bytes"] == 8192
-        part = service._partial_path(observed.artifact_set_sha256, artifact["sha256"])
+        set_digest = _required_text(observed.artifact_set_sha256, "artifact set digest")
+        part = service._partial_path(
+            set_digest, _required_text(artifact["sha256"], "artifact digest")
+        )
         assert part.read_bytes() == payload[:8192]
     finally:
         service.close()
@@ -1875,6 +1933,7 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
 
         failed = download(998)
         assert failed.state == "failed"
+        assert failed.last_error is not None
         assert "test durability failure" in failed.last_error
         assert failed.progress["downloaded_bytes"] == 0
         # A fresh attempt must not publish or request a range while retained
@@ -1889,7 +1948,9 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
             assert len(requests) == 1
         else:
             assert requests[-1].headers["range"] == "bytes=4096-"
-        assert service._object_path(artifact["sha256"]).read_bytes() == payload
+        assert service._object_path(
+            _required_text(artifact["sha256"], "artifact digest")
+        ).read_bytes() == payload
     finally:
         service.close()
         client.close()
@@ -1945,7 +2006,9 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cac
     try:
         service.run_pending()
         assert service.get_operation(operation.id).state == "cancelled"
-        assert not service._object_path(artifact["sha256"]).exists()
+        assert not service._object_path(
+            _required_text(artifact["sha256"], "artifact digest")
+        ).exists()
         partials = list((service.root / "partials").rglob("*.part"))
         assert len(partials) == 1
         assert partials[0].read_bytes() == payload
@@ -2069,7 +2132,9 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monke
         )
         assert operation.state == "succeeded", operation.last_error
         assert operation.progress["downloaded_bytes"] == len(payload)
-        assert service._object_path(artifact["sha256"]).read_bytes() == payload
+        assert service._object_path(
+            _required_text(artifact["sha256"], "artifact digest")
+        ).read_bytes() == payload
         assert len([request for request in requests if request]) == 4
         assert (None in requests) == (not range_supported)
         assert not list((service.root / "partials").rglob("*.range-*"))
@@ -2109,7 +2174,7 @@ def test_range_disk_reservation_falls_back_without_source_io(cache, tmp_path, mo
     import shutil
 
     service, _sessions = cache
-    spec = ArtifactSpec.from_manifest(_manifest_document(tmp_path)["artifacts"][0])
+    spec = ArtifactSpec.from_manifest(_first_manifest_artifact(_manifest_document(tmp_path)))
     partial = service._partial_path("b" * 64, spec.sha256)
     partial.parent.mkdir(parents=True)
     partial.write_bytes(b"m")

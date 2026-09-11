@@ -105,8 +105,12 @@ def _candidate_package(
     try:
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
             members = {member.name: member for member in tar.getmembers()}
-            manifest = json.loads(tar.extractfile(members["manifest.json"]).read())
-            recipe_bytes = tar.extractfile(members["recipe.json"]).read()
+            manifest_file = tar.extractfile(members["manifest.json"])
+            recipe_file = tar.extractfile(members["recipe.json"])
+            if manifest_file is None or recipe_file is None:
+                raise TypeError("package member cannot be read")
+            manifest = json.loads(manifest_file.read())
+            recipe_bytes = recipe_file.read()
             recipe = json.loads(recipe_bytes)
     except (
         KeyError,

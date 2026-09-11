@@ -190,7 +190,9 @@ def test_certificate_rotation_requires_explicit_node_identity(
     from vonk_agent_protocol.enrollment import ActivateRequest, RenewRequest
 
     client, _services, _sessions, _clock = agent_system
-    body = {"csr": _csr_for(NODE_A).decode()} if path.endswith("renew") else {"generation": 2}
+    body: dict[str, object] = (
+        {"csr": _csr_for(NODE_A).decode()} if path.endswith("renew") else {"generation": 2}
+    )
     if not missing:
         body["node_id"] = None
     response = client.post(

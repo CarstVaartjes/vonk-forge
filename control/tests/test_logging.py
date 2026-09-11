@@ -2,7 +2,7 @@ import logging
 
 import pytest
 import vonk_control.logging as control_logging
-from sqlalchemy import create_engine
+from sqlalchemy import Table, create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.logging import DatabaseJobLogStore, log_event, redact_text
 from vonk_control.models import Base, JobLogEntry
@@ -26,7 +26,9 @@ def test_structured_logger_redacts_secrets(caplog) -> None:
 
 def test_job_log_store_is_postgres_backed_content_addressed_and_sanitized() -> None:
     engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine, tables=[JobLogEntry.__table__])
+    log_entry_table = JobLogEntry.__table__
+    assert isinstance(log_entry_table, Table)
+    Base.metadata.create_all(engine, tables=[log_entry_table])
     store = DatabaseJobLogStore(sessionmaker(engine))
     job_id = "00000000-0000-4000-8000-000000000001"
     digest = store.save(job_id, b"started\nAuthorization: Bearer no\nfinished\n")
