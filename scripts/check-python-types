@@ -1,16 +1,22 @@
 #!/usr/bin/env -S uv run --python 3.12 --frozen --with pyright==1.1.408 python
-"""Fail when Python type errors grow beyond the checked-in baseline.
+"""Fail when a Python type error appears outside the reviewed exception list.
 
-The repository does not yet type-check cleanly. This gate makes the check
-enforceable now: every file's error count is pinned in
-`tools/pyright-baseline.json`, and a file may never exceed its pinned count.
-A file absent from the baseline counts as zero, so a new module that introduces
-errors fails immediately.
+The repository does not type-check cleanly yet, but every surviving error is a
+deliberate one. `tools/pyright-baseline.json` lists each of them by file and
+pyright rule, with the count and the reason it is accepted, so the check is a
+reviewed allowlist rather than a per-file budget:
 
-Only growth blocks. A reduction is reported so the author can record it with
-`--update`, but it does not fail the check: a count can legitimately differ
-between a developer host and CI on platform-conditional code, and a gate that
-failed on improvement would punish exactly the change it wants.
+* an error whose file and rule are not listed fails, so a new error cannot hide
+  behind an equal count in a file that already had one;
+* a listed error whose count changed fails in both directions, so a second
+  error of the same rule in the same file is caught and a fixed error must be
+  removed from the list;
+* a listed error that no longer occurs fails as stale, so the list cannot rot;
+* a listed error without a reason fails, so `--update` is not a way to accept an
+  error without saying why.
+
+Run `--update` to write the current errors, then write the reason for any new
+entry it adds.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tools/pyright-baseline.json"
 
 
-def _current_counts() -> dict[str, int]:
+def _diagnostics() -> list[dict[str, object]]:
     completed = subprocess.run(
         ["pyright", "--outputjson"],
         cwd=ROOT,
@@ -39,13 +45,105 @@ def _current_counts() -> dict[str, int]:
         print(completed.stdout[-4000:], file=sys.stderr)
         print(completed.stderr[-4000:], file=sys.stderr)
         raise SystemExit("pyright did not return a JSON report")
-    counts: dict[str, int] = {}
+    diagnostics = []
     for diagnostic in payload.get("generalDiagnostics", []):
         if diagnostic.get("severity") != "error":
             continue
-        relative = Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix()
-        counts[relative] = counts.get(relative, 0) + 1
+        diagnostics.append(
+            {
+                "file": Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix(),
+                "rule": diagnostic.get("rule") or "unknown",
+            }
+        )
+    return diagnostics
+
+
+def _counts(diagnostics: list[dict[str, object]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    for diagnostic in diagnostics:
+        key = (str(diagnostic["file"]), str(diagnostic["rule"]))
+        counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _load(path: Path) -> list[dict[str, object]]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        raise SystemExit(f"{path} is not a schema_version 1 exception list")
+    exceptions = document.get("exceptions")
+    if not isinstance(exceptions, list):
+        raise SystemExit(f"{path} has no exceptions list")
+    return exceptions
+
+
+def evaluate(
+    counts: dict[tuple[str, str], int], exceptions: list[dict[str, object]]
+) -> list[str]:
+    """Return one message per way the current errors and the list disagree."""
+
+    problems: list[str] = []
+    listed: set[tuple[str, str]] = set()
+    for entry in exceptions:
+        file = str(entry.get("file", ""))
+        rule = str(entry.get("rule", ""))
+        key = (file, rule)
+        if key in listed:
+            problems.append(f"duplicate exception: {file} {rule}")
+            continue
+        listed.add(key)
+        expected = entry.get("count")
+        if not isinstance(expected, int) or expected < 1:
+            problems.append(f"exception has no positive count: {file} {rule}")
+            continue
+        if not str(entry.get("reason", "")).strip():
+            problems.append(f"exception has no reason: {file} {rule}")
+        actual = counts.get(key, 0)
+        if actual > expected:
+            problems.append(
+                f"type errors increased: {file} {rule}: {expected} -> {actual}"
+            )
+        elif actual < expected:
+            problems.append(
+                f"stale exception (remove it with --update): {file} {rule}: "
+                f"{expected} -> {actual}"
+            )
+    for key in sorted(set(counts) - listed):
+        problems.append(f"unlisted type error: {key[0]} {key[1]} ({counts[key]})")
+    return problems
+
+
+def _write(counts: dict[tuple[str, str], int], previous: list[dict[str, object]]) -> None:
+    reasons = {
+        (str(entry.get("file", "")), str(entry.get("rule", ""))): str(
+            entry.get("reason", "")
+        )
+        for entry in previous
+    }
+    document = {
+        "schema_version": 1,
+        "exceptions": [
+            {
+                "file": file,
+                "rule": rule,
+                "count": count,
+                "reason": reasons.get((file, rule), ""),
+            }
+            for (file, rule), count in sorted(counts.items())
+        ],
+    }
+    BASELINE.write_text(
+        json.dumps(document, indent=2) + "\n", encoding="utf-8"
+    )
+    missing = sorted(
+        f"{entry['file']} {entry['rule']}"
+        for entry in document["exceptions"]
+        if not entry["reason"]
+    )
+    print(f"baseline updated: {sum(counts.values())} error(s) in {len(counts)} entry(s)")
+    if missing:
+        print("write a reason for:", file=sys.stderr)
+        for entry in missing:
+            print(f"  {entry}", file=sys.stderr)
 
 
 def main() -> int:
@@ -53,41 +151,24 @@ def main() -> int:
     parser.add_argument("--update", action="store_true", help="rewrite the baseline")
     args = parser.parse_args()
 
-    counts = _current_counts()
+    counts = _counts(_diagnostics())
     if args.update:
-        BASELINE.write_text(
-            json.dumps(dict(sorted(counts.items())), indent=2) + "\n", encoding="utf-8"
-        )
-        print(f"baseline updated: {sum(counts.values())} errors in {len(counts)} files")
+        _write(counts, _load(BASELINE))
         return 0
 
-    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    regressions = {
-        path: (baseline.get(path, 0), count)
-        for path, count in counts.items()
-        if count > baseline.get(path, 0)
-    }
-    fixed = {
-        path: (baseline[path], counts.get(path, 0))
-        for path in baseline
-        if counts.get(path, 0) < baseline[path]
-    }
-    for path, (was, now) in sorted(regressions.items()):
-        print(f"type errors increased: {path}: {was} -> {now}")
-    for path, (was, now) in sorted(fixed.items()):
-        print(f"type errors reduced:   {path}: {was} -> {now}")
-    if regressions:
+    problems = evaluate(counts, _load(BASELINE))
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if problems:
         print(
-            f"\nbaseline total {sum(baseline.values())}, current total "
-            f"{sum(counts.values())}"
+            f"\n{len(problems)} problem(s); {sum(counts.values())} current type "
+            f"error(s)",
+            file=sys.stderr,
         )
         return 1
-    # Improvements are informational. A count can differ between a developer
-    # host and CI on platform-conditional code, and only growth is a
-    # regression worth blocking. Run with --update to record a reduction.
     print(
-        f"python types: {sum(counts.values())} known errors, no regressions"
-        + (f" ({len(fixed)} file(s) improved)" if fixed else "")
+        f"python types: {sum(counts.values())} reviewed exception(s), "
+        "no unlisted errors"
     )
     return 0
 

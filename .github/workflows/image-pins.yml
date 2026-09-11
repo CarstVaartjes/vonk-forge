@@ -1,0 +1,29 @@
+name: Image pins
+
+# The lock records immutable digests, but the tags beside them keep moving, a
+# digest can be garbage collected upstream, and a used reference can go missing
+# from the inventory. None of that is caused by a commit here, so the inventory
+# is checked on a schedule as well as when the deployment inputs change.
+#
+# This job only reports. It never refreshes a pin: refreshing is a deliberate,
+# reviewed change - see docs/image-pin-refresh.md.
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC, off the hour to avoid the busiest registry window.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-pins:
+    name: Verify pinned image inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve every pin in the image lock
+        run: scripts/check-image-pins

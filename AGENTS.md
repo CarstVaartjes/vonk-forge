@@ -165,14 +165,18 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
 requires `ruff<0.14`; always lint through the root project. CI runs the same
 version via `uvx --from ruff==0.16.1 ruff check .`.
 
-The repository does not type-check cleanly yet. `scripts/check-python-types`
-enforces a per-file ratchet against `tools/pyright-baseline.json`: a file may
-never exceed its recorded error count, so the known-error set only shrinks as
-entries are lowered. Improvements are reported but do not fail the check,
-because platform-conditional code can legitimately differ between a developer
-host and CI; run `--update` to record a reduction. `pyright` runs over
-`control/src`, `src`, `tests` and `control/tests` in basic mode; generated
-clients and virtualenvs are excluded.
+The repository does not type-check cleanly yet, but every surviving error is a
+reviewed one. `scripts/check-python-types` treats
+`tools/pyright-baseline.json` as an allowlist: each entry names a file, a
+pyright rule, the accepted count and the reason it is accepted. An error that
+is not listed fails even when the file's total count is unchanged; a listed
+entry whose count moves in either direction fails, so a second error of the
+same rule cannot hide and a fixed error must be removed; an entry that no
+longer occurs fails as stale; and an entry without a reason fails, so
+`--update` is not a way to accept an error without saying why. Run `--update`
+to write the current errors, then write the reason for anything it adds.
+`pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
+mode; generated clients and virtualenvs are excluded.
 
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.
