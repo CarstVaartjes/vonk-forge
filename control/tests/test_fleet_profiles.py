@@ -1665,6 +1665,51 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert resumed.progress.switch_adapter.active_operation_id == child_id
 
 
+def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
+    """Return one real Run/Switch result document carrying a transfer phase."""
+
+    import datetime as _datetime
+
+    from vonk_agent_protocol import DistributionAssignment, DistributionObject
+
+    node_id = nodes[0]
+    archive_sha256 = "1" * 64
+    assignment = DistributionAssignment(
+        schema_version=2,
+        assignment_id=_uuid(648),
+        plan_digest="c" * 64,
+        generation=1,
+        node_id=node_id,
+        expires_at=_datetime.datetime(2026, 9, 12, tzinfo=UTC),
+        model_artifact_set_sha256="d" * 64,
+        objects=(
+            DistributionObject(name="model", sha256="e" * 64, bytes=10, kind="model"),
+            DistributionObject(
+                name="runtime.tar",
+                sha256=archive_sha256,
+                bytes=1024,
+                kind="oci-archive",
+            ),
+        ),
+        oci_image_digest="sha256:" + "f" * 64,
+        oci_archive_sha256=archive_sha256,
+    )
+    return {
+        "phase_index": 3,
+        "completed_phases": ["prepare", "transfer"],
+        "phase_results": [
+            {
+                "phase": "transfer",
+                "subphase": "target-copy",
+                "cached_nodes": [],
+                "assignments": {
+                    node_id: assignment.model_dump(mode="json"),
+                },
+            }
+        ],
+    }
+
+
 def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> None:
     """A finished profile step must persist the child's public result tree.
 
@@ -1741,15 +1786,15 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     assert isinstance(child_id, str)
 
     # The child finishes with its public Run/Switch result tree, exactly as the
-    # real service persists one.
+    # real service persists one.  A transfer phase result is part of it: its
+    # distribution objects are contract tuples that a JSON round trip decodes
+    # as arrays, which is where the receipt used to be lost on the way back.
     with sessions.begin() as session:
         job = session.get(Job, child_id)
         assert job is not None
         job.state = "succeeded"
         job.status_reason = None
-        job.result = _persisted_result(
-            {"phase_index": 1, "completed_phases": ["prepare", "final_verify"]}
-        )
+        job.result = _persisted_result(_transfer_result(nodes))
         job.updated_at = lifecycle._clock()
 
     assert service.tick() is True
@@ -1764,7 +1809,12 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     assert len(receipts) == 1
     receipt = receipts[0]
     assert receipt.run_switch_operation_id == child_id
-    assert receipt.run_switch.phase_index == 1
+    assert receipt.run_switch.phase_index == 3
+    completed_phase = receipt.run_switch.phase_results[0]
+    assert (completed_phase.phase, completed_phase.subphase) == (
+        "transfer",
+        "target-copy",
+    )
 
     # A restart reads the same receipt out of the persisted application.
     restarted = FleetProfileService(
