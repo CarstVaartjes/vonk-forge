@@ -31,6 +31,7 @@ import type {
   RecipeImageAvailabilityResponse,
   RecipeCacheOperation,
   RecipeOperatorResponse,
+  RecipeUpdateResponse,
   RecipeDetail,
   RecipeLibrary,
   RecipeStatus,
@@ -331,6 +332,16 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
       params: {path: {selector}},
       body: {request_key: requestKey, schema_version: 2, with_model: withModel},
+      signal,
+    }));
+  }
+
+  async updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse> {
+    // Refresh cached recipe images. The Controller requires either a selector
+    // or all, and refuses the combination, so the caller states the scope.
+    return resultData(await this.generated.POST("/api/recipe/update", {
+      params: {},
+      body: {all, selectors, request_key: requestKey, schema_version: 2},
       signal,
     }));
   }

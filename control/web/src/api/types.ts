@@ -34,6 +34,7 @@ export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
 export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
 export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
 export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
+export type RecipeUpdateResponse = components["schemas"]["RecipeUpdateResponse"];
 export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse;
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
 
@@ -159,6 +160,7 @@ export interface LibraryApi {
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
   removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }
 export interface ControlApi extends LibraryApi {

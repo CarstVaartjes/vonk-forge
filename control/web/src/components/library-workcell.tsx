@@ -7,6 +7,7 @@ import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-rout
 import {formatBytes} from "../lib/fleet";
 import {LibraryRecipeDownloadAction} from "./library-recipe-download-action";
 import {LibraryRecipeRemoveAction} from "./library-recipe-remove-action";
+import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
 
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
 // one-for-one: --model --usage --family --version --quantization --publisher
@@ -148,7 +149,7 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
       <label>Creator<select aria-label="Filter creator" value={filters.publisher} onChange={event => onFiltersChange({...filters, publisher: event.target.value})}><option value="">All creators</option>{[...new Set(records.map(record => record.recipe?.publisher).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Alignment<select aria-label="Filter alignment" value={filters.alignment} onChange={event => onFiltersChange({...filters, alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(records.flatMap(record => record.recipe?.recipe_document.metadata.alignment ? [record.recipe.recipe_document.metadata.alignment] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Sparks<select aria-label="Filter Sparks" value={filters.sparks} onChange={event => onFiltersChange({...filters, sparks: event.target.value})}><option value="">Any Sparks</option>{[...new Set(records.map(record => String(record.recipe?.recipe_document.topology.node_count ?? "")).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-    </div>
+    <LibraryRecipeUpdateAction api={api} onUpdated={refresh} /></div>
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
       <div className="library-paired-panes">

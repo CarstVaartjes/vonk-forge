@@ -52,6 +52,19 @@ test("removes a recipe only after an explicit model choice", async () => {
   expect(withModel).toBe(false);
 });
 
+test("refreshes the whole cached recipe set with an explicit scope", async () => {
+  const updateRecipes = vi.fn().mockResolvedValue({action: "update", schema_version: 2, updates: []});
+  const api = {updateRecipes} as unknown as ControlApi;
+  const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
+  render(<LibraryWorkcell api={api} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={libraryViewSnapshot}/>);
+
+  fireEvent.click(screen.getByRole("button", {name: "Update cached recipes"}));
+  await waitFor(() => expect(updateRecipes).toHaveBeenCalledTimes(1));
+  const [all, selectors] = (updateRecipes as unknown as {mock: {calls: [boolean, string[]][]}}).mock.calls[0]!;
+  expect(all).toBe(true);
+  expect(selectors).toEqual([]);
+});
+
 test("offers the same recipe filters as vonkctl recipe library", () => {
   const model = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
   render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(model.model)}} snapshot={libraryViewSnapshot}/>);
