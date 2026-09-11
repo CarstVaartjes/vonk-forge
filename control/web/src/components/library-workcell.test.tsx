@@ -1,4 +1,6 @@
-import {render, screen} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {vi} from "vitest";
+import type {ControlApi} from "../api/types";
 import {buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
 import {libraryViewSnapshot} from "../test-fixtures/library";
 import {modelKey} from "../lib/library-route";
@@ -32,6 +34,22 @@ test("keeps URL-selected Models in the paired right pane", () => {
   render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: key}} snapshot={libraryViewSnapshot}/>);
   expect(screen.getByText("No Recipe linked")).toBeVisible();
   expect(screen.getByLabelText("Recipes matching selected Model")).toHaveTextContent("No Recipe linked");
+});
+
+test("removes a recipe only after an explicit model choice", async () => {
+  const removeRecipe = vi.fn().mockResolvedValue({action: "remove", operation_id: "op", recipe_revision_id: "rev", reclaimed_bytes: 0, request_key: "k", schema_version: 2, selector: "s", state: "succeeded", progress: {phase: "complete"}});
+  const api = {removeRecipe} as unknown as ControlApi;
+  const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
+  render(<LibraryWorkcell api={api} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={libraryViewSnapshot}/>);
+
+  // The Controller fails closed without a model decision, so the web asks for
+  // one before issuing any request.
+  fireEvent.click(screen.getAllByRole("button", {name: "Remove recipe"})[0]!);
+  expect(removeRecipe).not.toHaveBeenCalled();
+  fireEvent.click(screen.getAllByRole("button", {name: "Keep the model"})[0]!);
+  await waitFor(() => expect(removeRecipe).toHaveBeenCalledTimes(1));
+  const [, , withModel] = (removeRecipe as unknown as {mock: {calls: [string, string, boolean][]}}).mock.calls[0]!;
+  expect(withModel).toBe(false);
 });
 
 test("offers the same recipe filters as vonkctl recipe library", () => {
