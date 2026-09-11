@@ -1486,7 +1486,11 @@ def assert_candidate_image_graph(services: dict, expected: dict) -> None:
     for name, service in services.items():
         image = service.get("image") if isinstance(service, dict) else None
         if name in expected:
-            if image != expected[name]["image"] or not is_immutable_image(image):
+            if (
+                not isinstance(image, str)
+                or image != expected[name]["image"]
+                or not is_immutable_image(image)
+            ):
                 raise AcceptanceError(
                     "candidate Compose image differs from publication"
                 )

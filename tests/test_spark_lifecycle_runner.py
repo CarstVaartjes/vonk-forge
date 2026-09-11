@@ -7,10 +7,20 @@ import os
 import subprocess
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
+from typing import TypedDict
 
 import pytest
 
 ENTRY_POINT = Path(__file__).parent / "acceptance/test_spark_lifecycle.py"
+
+
+class _Observed(TypedDict):
+    # Filled in by the `interactive` callback, which the code under test invokes
+    # before the test reads any key, so a read never observes a placeholder.
+    command: list[str]
+    responses: list[tuple[str, str]]
+    forbidden_values: list[str]
+    environment: dict[str, str]
 
 
 def _module():
@@ -56,7 +66,12 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     tmp_path: Path,
 ) -> None:
     lifecycle = _module()
-    observed: dict[str, object] = {}
+    observed: _Observed = {
+        "command": [],
+        "responses": [],
+        "forbidden_values": [],
+        "environment": {},
+    }
 
     def interactive(command, **kwargs):
         observed.update(command=command, **kwargs)
@@ -501,7 +516,7 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
         (command, cwd, timeout)
     )
 
-    lifecycle._agent_package_installed = lambda: False
+    lifecycle.__dict__["_agent_package_installed"] = lambda: False
     run._cleanup()
 
     assert observed == [

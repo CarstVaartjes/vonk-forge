@@ -112,5 +112,13 @@ def _library_detail(
     return {"summary": summary, "detail": detail}
 
 
+def _require_object(value: object) -> Mapping[str, object]:
+    """Return *value* as a JSON object, or the TypeError a subscript would raise."""
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{type(value).__name__!r} object is not subscriptable")
+    return value
+
+
 def _recipe_digest(slug: str = "tiny") -> str:
-    return str(_library_detail(_recipe(slug))["detail"]["recipe"]["content_sha256"])
+    detail = _require_object(_library_detail(_recipe(slug))["detail"])
+    return str(_require_object(detail["recipe"])["content_sha256"])

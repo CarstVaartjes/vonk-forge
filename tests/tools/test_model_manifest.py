@@ -4,7 +4,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
-from typing import Self
+from typing import NotRequired, Self, TypedDict
 
 import pytest
 
@@ -46,7 +46,39 @@ def _resolve_url(path: str) -> str:
     )
 
 
-def _repository_responses() -> tuple[dict[str, object], dict[str, bytes]]:
+class _Sibling(TypedDict):
+    rfilename: str
+    blobId: str
+    size: int
+    lfs: NotRequired[dict[str, object]]
+
+
+class _ModelMetadata(TypedDict):
+    sha: str
+    siblings: list[_Sibling]
+
+
+class _ManifestFile(TypedDict):
+    path: str
+    size: int
+    sha256: str
+    blob_id: str
+
+
+class _Manifest(TypedDict):
+    schema_version: int
+    repository: str
+    revision: str
+    encoder_path: str
+    weight_index_path: str
+    file_count: int
+    weight_shard_count: int
+    total_bytes: int
+    safetensors_bytes: int
+    files: list[_ManifestFile]
+
+
+def _repository_responses() -> tuple[_ModelMetadata, dict[str, bytes]]:
     shards = [f"model-{number:05d}-of-00048.safetensors" for number in range(1, 49)]
     index_content = json.dumps(
         {
@@ -64,7 +96,7 @@ def _repository_responses() -> tuple[dict[str, object], dict[str, bytes]]:
         "model.safetensors.index.json": index_content,
         **{f"extra-{number:02d}.txt": b"x" for number in range(24)},
     }
-    siblings: list[dict[str, object]] = [
+    siblings: list[_Sibling] = [
         {
             "rfilename": shard,
             "blobId": f"{number:040x}",
@@ -85,7 +117,7 @@ def _repository_responses() -> tuple[dict[str, object], dict[str, bytes]]:
         }
         for path, content in non_lfs.items()
     )
-    metadata: dict[str, object] = {"sha": REVISION, "siblings": siblings}
+    metadata: _ModelMetadata = {"sha": REVISION, "siblings": siblings}
     responses = {
         _api_url(): json.dumps(metadata, separators=(",", ":")).encode(),
         **{_resolve_url(path): content for path, content in non_lfs.items()},
@@ -93,7 +125,7 @@ def _repository_responses() -> tuple[dict[str, object], dict[str, bytes]]:
     return metadata, responses
 
 
-def _snapshot_manifest() -> tuple[dict[str, object], dict[str, bytes]]:
+def _snapshot_manifest() -> tuple[_Manifest, dict[str, bytes]]:
     files: dict[str, bytes] = {
         **{
             f"model-{number:05d}-of-00048.safetensors": f"shard-{number:02d}".encode()
@@ -103,7 +135,7 @@ def _snapshot_manifest() -> tuple[dict[str, object], dict[str, bytes]]:
         "model.safetensors.index.json": b"{}",
         **{f"extra-{number:02d}.txt": b"x" for number in range(24)},
     }
-    entries = [
+    entries: list[_ManifestFile] = [
         {
             "path": path,
             "size": len(content),
@@ -112,7 +144,7 @@ def _snapshot_manifest() -> tuple[dict[str, object], dict[str, bytes]]:
         }
         for path, content in sorted(files.items())
     ]
-    manifest: dict[str, object] = {
+    manifest: _Manifest = {
         "schema_version": 1,
         "repository": REPOSITORY,
         "revision": REVISION,

@@ -105,7 +105,9 @@ def test_schema_and_parser_both_reject_dot_path_segments(segment: str) -> None:
 def test_schema_and_parser_both_require_real_attestation_booleans(value: int) -> None:
     module = _load_script()
     document = _request_document()
-    document["attestations"]["provenance"] = value
+    attestations = document["attestations"]
+    assert isinstance(attestations, dict)
+    attestations["provenance"] = value
     schema = json.loads(SCHEMA.read_text())
 
     with pytest.raises(jsonschema.ValidationError):
