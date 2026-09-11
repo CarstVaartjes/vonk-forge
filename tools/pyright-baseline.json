@@ -45,7 +45,7 @@
   "control/src/vonk_control/models.py": 3,
   "control/src/vonk_control/node_leases.py": 2,
   "control/src/vonk_control/operation_api.py": 28,
-  "control/src/vonk_control/operation_contract.py": 11,
+  "control/src/vonk_control/operation_contract.py": 5,
   "control/src/vonk_control/operation_progress.py": 7,
   "control/src/vonk_control/operator_projection_api.py": 1,
   "control/src/vonk_control/presence.py": 2,
