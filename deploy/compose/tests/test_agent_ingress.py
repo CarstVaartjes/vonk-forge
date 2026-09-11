@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
 DEV_CADDY_IMAGE = (
     "caddy:2.11.4@sha256:"
-    "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+    "13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017"
 )
 
 
