@@ -25,7 +25,7 @@
   "control/src/vonk_control/distribution_executor.py": 18,
   "control/src/vonk_control/enrollment.py": 5,
   "control/src/vonk_control/execution_plan_service.py": 6,
-  "control/src/vonk_control/failure_evidence.py": 50,
+  "control/src/vonk_control/failure_evidence.py": 27,
   "control/src/vonk_control/fleet_event_contract.py": 3,
   "control/src/vonk_control/fleet_profile_contract.py": 2,
   "control/src/vonk_control/fleet_profiles.py": 49,
