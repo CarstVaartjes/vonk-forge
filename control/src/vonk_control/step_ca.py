@@ -16,7 +16,7 @@ import httpx
 import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 
 from .pki import (
@@ -183,7 +183,7 @@ class StepCertificateAuthority(CertificateAuthority):
         if crl.issuer != self._intermediate.subject:
             raise StepCAError("step-ca revocation bundle issuer is invalid")
         try:
-            self._intermediate.public_key().verify(crl.signature, crl.tbs_certlist_bytes)
+            _signature_verifying_key(self._intermediate).verify(crl.signature, crl.tbs_certlist_bytes)
         except Exception as error:
             raise StepCAError("step-ca revocation bundle signature is invalid") from error
         _validate_crl_freshness(crl, timestamp, self._clock_skew)
@@ -251,7 +251,7 @@ class StepCertificateAuthority(CertificateAuthority):
         if leaf.issuer != self._intermediate.subject:
             raise StepCAError("step-ca returned a mismatched certificate issuer")
         try:
-            self._intermediate.public_key().verify(leaf.signature, leaf.tbs_certificate_bytes)
+            _signature_verifying_key(self._intermediate).verify(leaf.signature, leaf.tbs_certificate_bytes)
         except Exception as error:
             raise StepCAError("step-ca returned a certificate with an invalid signature") from error
         request_key = request.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
@@ -362,6 +362,20 @@ class StepCertificateAuthority(CertificateAuthority):
             raise StepCAError("step-ca request failed") from error
 
 
+def _signature_verifying_key(certificate: x509.Certificate) -> ed25519.Ed25519PublicKey | ed448.Ed448PublicKey:
+    """Return the certificate key that verifies with only signature and data.
+
+    step-ca signs with Ed25519 keys, whose ``verify`` takes exactly the
+    signature and the signed bytes. A key that cannot verify that way is
+    rejected here instead of reaching an unsupported call.
+    """
+
+    key = certificate.public_key()
+    if isinstance(key, (ed25519.Ed25519PublicKey, ed448.Ed448PublicKey)):
+        return key
+    raise ValueError("certificate public key cannot verify a signature")
+
+
 def _one_certificate(pem: bytes, label: str, *, provider_error: bool = False) -> x509.Certificate:
     try:
         certificate = x509.load_pem_x509_certificate(pem)
@@ -383,7 +397,7 @@ def _verify_ca_chain(
     if root.subject != root.issuer:
         raise ValueError("root certificate must be self-issued")
     try:
-        root.public_key().verify(root.signature, root.tbs_certificate_bytes)
+        _signature_verifying_key(root).verify(root.signature, root.tbs_certificate_bytes)
     except Exception as error:
         raise ValueError("root certificate self-signature is invalid") from error
     try:
@@ -398,7 +412,7 @@ def _verify_ca_chain(
     if intermediate.issuer != root.subject:
         raise ValueError("intermediate certificate is not issued by configured root")
     try:
-        root.public_key().verify(intermediate.signature, intermediate.tbs_certificate_bytes)
+        _signature_verifying_key(root).verify(intermediate.signature, intermediate.tbs_certificate_bytes)
     except Exception as error:
         raise ValueError("intermediate certificate signature is invalid") from error
     try:

@@ -146,6 +146,8 @@ class HostHelperGrantIssuer:
         ):
             raise HostHelperAuthorityError("host helper grant expiry is invalid")
         now = self._now()
+        if not isinstance(node_id, str):
+            raise HostHelperAuthorityError("host helper grant binding is invalid")
         try:
             claims = HostHelperGrantClaims(
                 schema_version=1,
@@ -414,26 +416,31 @@ class HostRuntimeAuthorityService:
             raise HostHelperAuthorityError(
                 "recipe run observation receipt signature is invalid"
             ) from error
+        operation = grant.claims.operation
+        if not isinstance(operation, ExecuteContainerRuntimeRequestOperation):
+            raise HostHelperAuthorityError(
+                "recipe run observation grant operation is invalid"
+            )
         expected_operation = {
             "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
             "action": ContainerRuntimeAction.RUN_INSPECT.value,
             "job_id": identity["run_id"],
-            "operation_id": grant.claims.operation.operation_id,
+            "operation_id": operation.operation_id,
             "attempt": identity["run_generation"],
-            "fence": grant.claims.operation.fence,
-            "request_sha256": grant.claims.operation.request_sha256,
+            "fence": operation.fence,
+            "request_sha256": operation.request_sha256,
             "observation_identity_sha256": observation_identity,
         }
         observed_epoch = int(_aware(observed_at).timestamp())
         if (
             grant.claims.node_id != node_id
-            or grant.claims.operation.to_mapping() != expected_operation
+            or operation.to_mapping() != expected_operation
             or not grant.signature.key_id == self._issuer.key_id
             or not grant.claims.issued_at <= observed_epoch <= grant.claims.expires_at
             or int(now.timestamp()) > grant.claims.expires_at + 5
             or receipt.claims.node_id != node_id
             or receipt.claims.request_id != grant.claims.request_id
-            or receipt.claims.request_sha256 != grant.claims.operation.request_sha256
+            or receipt.claims.request_sha256 != operation.request_sha256
             or receipt.claims.observation_identity_sha256 != observation_identity
             or receipt.claims.observed_at != observed_epoch
             or not grant.claims.issued_at
