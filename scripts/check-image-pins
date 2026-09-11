@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """Audit the digest-pinned container images recorded in the image lock.
 
-This is a manual, read-only checker. It resolves every pin in
-``deploy/compose/images.lock.json`` against its registry and reports:
+It resolves every pin in ``deploy/compose/images.lock.json`` against its
+registry and reports:
 
-* pins that no longer resolve at all;
-* version tags that now point at a digest other than the recorded one;
-* digest-pinned references used by the build and Compose inputs that are
-  missing from the inventory.
+* ``missing`` - the recorded digest is gone, so every image build fails;
+* ``unlisted`` - a digest-pinned reference the build or Compose inputs use is
+  absent from the inventory;
+* ``moved`` - the tag still exists but now points at a different digest, which
+  is expected for a rolling tag and does not break anything;
+* ``unverified`` - the registry could not be read at all, which is a network
+  condition rather than a defect here.
 
 It performs registry reads only: it never writes a file, pulls layers, or
-mutates local image state. It is deliberately not wired into CI; run it by hand
-when reviewing or refreshing the pins. See ``docs/image-pin-refresh.md``.
+mutates local image state. ``missing`` and ``unlisted`` exit non-zero; ``moved``
+and ``unverified`` are reported but do not block, so the check can gate a pull
+request without flaking on the network. Run it by hand when reviewing or
+refreshing the pins. See ``docs/image-pin-refresh.md``.
 """
 
 from __future__ import annotations
@@ -68,10 +73,36 @@ def tag_reference(reference: str) -> str | None:
     return name if ":" in name.rsplit("/", 1)[-1] else None
 
 
-def resolve(reference: str, timeout: float) -> tuple[str | None, str | None]:
-    """Resolve a reference to its manifest digest through the registry."""
+# A registry read can fail because the reference is gone or because the
+# registry could not be reached. Only the first is this repository's problem:
+# an unreachable registry must not fail a gate, or the check flakes whenever
+# the network does. These markers identify the second case.
+_UNREACHABLE = (
+    "connection refused",
+    "dial tcp",
+    "i/o timeout",
+    "network is unreachable",
+    "no such host",
+    "proxyconnect",
+    "temporary failure",
+    "tls",
+    "timed out",
+    "timeout",
+    "unreachable",
+    "unexpected eof",
+)
+
+
+def resolve(reference: str, timeout: float) -> tuple[str | None, str | None, str]:
+    """Resolve a reference through the registry.
+
+    Returns ``(digest, error, kind)`` where ``kind`` is ``"missing"`` when the
+    registry answered that the reference does not exist, and ``"unverified"``
+    when it could not be read at all.
+    """
+
     if shutil.which("docker") is None:
-        return None, "docker is not available on PATH"
+        return None, "docker is not available on PATH", "unverified"
     try:
         result = subprocess.run(
             ["docker", "buildx", "imagetools", "inspect", "--raw", reference],
@@ -80,13 +111,16 @@ def resolve(reference: str, timeout: float) -> tuple[str | None, str | None]:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return None, f"registry read timed out after {timeout:g}s"
+        return None, f"registry read timed out after {timeout:g}s", "unverified"
     if result.returncode != 0:
         lines = result.stderr.decode("utf-8", "replace").strip().splitlines()
-        return None, lines[-1] if lines else f"exit status {result.returncode}"
+        detail = lines[-1] if lines else f"exit status {result.returncode}"
+        lowered = detail.lower()
+        kind = "unverified" if any(m in lowered for m in _UNREACHABLE) else "missing"
+        return None, detail, kind
     if not result.stdout:
-        return None, "registry returned an empty manifest"
-    return "sha256:" + hashlib.sha256(result.stdout).hexdigest(), None
+        return None, "registry returned an empty manifest", "unverified"
+    return "sha256:" + hashlib.sha256(result.stdout).hexdigest(), None, ""
 
 
 def load_inventory(root: Path) -> dict[str, list[str]]:
@@ -133,15 +167,15 @@ def audit(root: Path, timeout: float) -> dict[str, object]:
         tag = tag_reference(reference)
         if tag is not None:
             entry["tag"] = tag
-            tag_digest, tag_error = resolve(tag, timeout)
+            tag_digest, tag_error, _tag_kind = resolve(tag, timeout)
             if tag_error is None and tag_digest == recorded:
                 entry["tag_digest"] = tag_digest
                 continue
-            pinned_digest, pinned_error = resolve(reference, timeout)
+            pinned_digest, pinned_error, pinned_kind = resolve(reference, timeout)
             if pinned_error is not None:
                 findings.append(
                     {
-                        "kind": "unresolved",
+                        "kind": pinned_kind,
                         "reference": reference,
                         "inventory": entry["inventory"],
                         "detail": pinned_error,
@@ -163,11 +197,11 @@ def audit(root: Path, timeout: float) -> dict[str, object]:
                 }
             )
         else:
-            pinned_digest, pinned_error = resolve(reference, timeout)
+            pinned_digest, pinned_error, pinned_kind = resolve(reference, timeout)
             if pinned_error is not None:
                 findings.append(
                     {
-                        "kind": "unresolved",
+                        "kind": pinned_kind,
                         "reference": reference,
                         "inventory": entry["inventory"],
                         "detail": pinned_error,
@@ -194,7 +228,12 @@ def audit(root: Path, timeout: float) -> dict[str, object]:
         "inventoried": len(inventory),
         "checked": checked,
         "findings": findings,
-        "ok": not findings,
+        # A moved tag is expected -- upstream re-pushes rolling tags -- and an
+        # unreadable registry is not this repository's defect. Only a missing
+        # digest (the build will fail) or an unlisted pin blocks the gate.
+        "ok": not any(
+            finding["kind"] in {"missing", "unlisted"} for finding in findings
+        ),
     }
 
 

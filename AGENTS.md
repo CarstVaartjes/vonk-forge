@@ -84,10 +84,10 @@ socket under `tmp_path`, and the default `/private/var/folders/...` prefix plus 
 long test name exceeds the 104-byte `sun_path` limit, which fails the whole
 Tailscale group with `OSError: AF_UNIX path too long`.
 
-The `lane` marker is applied automatically at collection time from what a test
-actually needs: a PostgreSQL fixture, a `*_wire_bridge.py` Rust probe module, a
-Docker build, or a Linux host tool such as `dpkg`. New host-dependent tests are
-classified without further edits, so `-m "not lane"` stays honest. A fast-tier
+The `lane` marker is applied automatically at collection time for a PostgreSQL
+fixture or a `*_wire_bridge.py` Rust probe module. A test that starts Docker
+carries `@pytest.mark.lane` itself, so the reason stays visible where the
+container starts. Either way `-m "not lane"` stays honest. A fast-tier
 failure is a real defect; a lane-tier failure on macOS is usually a missing
 Linux dependency, not a regression.
 
@@ -165,14 +165,18 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
 requires `ruff<0.14`; always lint through the root project. CI runs the same
 version via `uvx --from ruff==0.16.1 ruff check .`.
 
-The repository does not type-check cleanly yet. `scripts/check-python-types`
-enforces a per-file ratchet against `tools/pyright-baseline.json`: a file may
-never exceed its recorded error count, so the known-error set only shrinks as
-entries are lowered. Improvements are reported but do not fail the check,
-because platform-conditional code can legitimately differ between a developer
-host and CI; run `--update` to record a reduction. `pyright` runs over
-`control/src`, `src`, `tests` and `control/tests` in basic mode; generated
-clients and virtualenvs are excluded.
+The repository does not type-check cleanly yet, but every surviving error is a
+reviewed one. `scripts/check-python-types` treats
+`tools/pyright-baseline.json` as an allowlist: each entry names a file, a
+pyright rule, the accepted count and the reason it is accepted. An error that
+is not listed fails even when the file's total count is unchanged; a listed
+entry whose count moves in either direction fails, so a second error of the
+same rule cannot hide and a fixed error must be removed; an entry that no
+longer occurs fails as stale; and an entry without a reason fails, so
+`--update` is not a way to accept an error without saying why. Run `--update`
+to write the current errors, then write the reason for anything it adds.
+`pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
+mode; generated clients and virtualenvs are excluded.
 
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.

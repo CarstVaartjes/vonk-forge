@@ -449,6 +449,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A pin this repository ships is resolved here, where the registry is
+      # reachable and the deployment inputs are the ones under review. Only a
+      # gone digest or an unlisted pin fails; a moved tag and an unreadable
+      # registry are reported by the weekly image-pins workflow instead.
+      - name: Verify the pinned container images
+        run: scripts/check-image-pins
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
