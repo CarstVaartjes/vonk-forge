@@ -4,7 +4,12 @@ import pytest
 import vonk_control.logging as control_logging
 from sqlalchemy import Table, create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.logging import DatabaseJobLogStore, log_event, redact_text
+from vonk_control.logging import (
+    DatabaseJobLogStore,
+    JobLogCorruptError,
+    log_event,
+    redact_text,
+)
 from vonk_control.models import Base, JobLogEntry
 
 
@@ -77,3 +82,29 @@ def test_persisted_failure_evidence_does_not_retain_signed_download_queries() ->
     )
     assert "signed-download-secret" not in str(safe)
     assert "https://cdn.example/model" in str(safe)
+
+
+def test_corrupt_retained_job_log_is_not_reported_as_missing() -> None:
+    """A log that no longer matches its digest is corruption, not absence.
+
+    The log routes answer a ``ValueError`` with 404 "job log not found", so
+    corruption has to arrive as something else or a tampered record reads as a
+    log that never existed.
+    """
+
+    engine = create_engine("sqlite://")
+    log_entry_table = JobLogEntry.__table__
+    assert isinstance(log_entry_table, Table)
+    Base.metadata.create_all(engine, tables=[log_entry_table])
+    sessions = sessionmaker(engine)
+    store = DatabaseJobLogStore(sessions)
+    job_id = "00000000-0000-4000-8000-000000000002"
+    digest = store.save(job_id, b"started\n")
+    with sessions.begin() as session:
+        row = session.get(JobLogEntry, (job_id, digest))
+        assert row is not None
+        row.content = b"tampered\n"
+
+    assert not issubclass(JobLogCorruptError, ValueError)
+    with pytest.raises(JobLogCorruptError, match="recorded digest"):
+        store.read(job_id, digest)
