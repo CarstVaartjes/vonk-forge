@@ -100,8 +100,10 @@ class InstallPlanConflict(RuntimeError):
 
 
 class InstallPreflightExpired(InstallPlanConflict):
-    """Only the runtime preflight receipts aged out; nothing else changed.
+    """Only runtime preflight evidence needs a fresh probe; nothing else changed.
 
+    The receipt aged out, the host fingerprint moved, or it does not cover this
+    recipe's requirements: each describes the evidence rather than the plan.
     Acceptance still refuses the plan, so callers that do not know about this
     narrower outcome keep the ordinary ``InstallPlanConflict`` behaviour.  A
     caller that owns a bounded preflight refresh may instead rerun its probe
@@ -646,7 +648,7 @@ class InstallAdmissionService:
             and fresh.mapping_generation == plan.mapping_generation
         )
         if not fresh.allowed or not identical:
-            if identical and _expired_preflight_is_the_only_blocker(plan, fresh):
+            if identical and _refreshable_preflight_is_the_only_blocker(plan, fresh):
                 raise InstallPreflightExpired("install.plan_stale_or_blocked")
             raise InstallPlanConflict("install.plan_stale_or_blocked")
         if (
@@ -754,27 +756,37 @@ class InstallAdmissionService:
         return installation.id
 
 
-def _expired_preflight_is_the_only_blocker(
+def _refreshable_preflight_is_the_only_blocker(
     plan: InstallPlan, fresh: InstallPlan
 ) -> bool:
-    """Recognise the single refusal a bounded preflight rerun can clear.
+    """Recognise the refusals a bounded preflight rerun can clear.
 
     The caller has already established that both plans carry the same
     ``plan_digest``, which binds the mapping generation, recipe revision and
     content digest, the recipe build, the image identity, the Controller-issued
     compiled launch documents and every per-node resource envelope.  What is
-    left to establish is that the admitted plan was clean and that expired
-    runtime preflight evidence is the *only* thing the fresh admission now
-    objects to.  Any other blocker — a changed fingerprint or requirement, a
-    failed native probe finding, missing or stale inventory, a read-only
-    artifact store, capacity, topology, licence or compiled-plan evidence —
-    keeps the opaque stale-or-blocked refusal.
+    left to establish is that the admitted plan was clean and that runtime
+    preflight *observation validity* is the only thing the fresh admission now
+    objects to.
+
+    These are exactly the codes ``LifecyclePreflight.ensure`` re-probes on its
+    own: evidence aged out, the host fingerprint moved, or the receipt does not
+    cover this recipe's requirements.  All three describe the evidence, not the
+    plan, so the caller may rerun the ordinary probe and re-present the
+    identical plan.  Every other blocker — a failed native probe finding,
+    missing or stale inventory, a read-only artifact store, capacity,
+    topology, licence or compiled-plan evidence — keeps the opaque
+    stale-or-blocked refusal.
     """
 
     if not plan.allowed:
         return False
     codes = {reason.code for node in fresh.nodes for reason in node.blockers}
-    return codes == {"runtime_preflight.stale"}
+    return bool(codes) and codes <= {
+        "runtime_preflight.stale",
+        "runtime_preflight.host_changed",
+        "runtime_preflight.requirements_changed",
+    }
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:

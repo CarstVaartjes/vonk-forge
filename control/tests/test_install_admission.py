@@ -927,11 +927,11 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
         assert installation.mapping_generation == plan.mapping_generation
 
 
-@pytest.mark.parametrize("change", ["inventory", "capacity", "fingerprint"])
-def test_expired_preflight_with_any_other_change_stays_an_opaque_conflict(
+@pytest.mark.parametrize("change", ["inventory", "capacity", "fingerprint-and-capacity"])
+def test_refreshable_preflight_with_any_other_change_stays_an_opaque_conflict(
     tmp_path, change
 ) -> None:
-    """Only a pure expired receipt is separable; anything else is stale-or-blocked."""
+    """Only preflight evidence separates; any other blocker stays opaque."""
 
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
@@ -941,8 +941,9 @@ def test_expired_preflight_with_any_other_change_stays_an_opaque_conflict(
     if change == "capacity":
         # Stale preflight and a second, unrelated blocker at the same time.
         _record_inventory(sessions, node, later, free=20)
-    elif change == "fingerprint":
-        _record_inventory(sessions, node, later)
+    elif change == "fingerprint-and-capacity":
+        # A moved fingerprint plus a second, unrelated blocker.
+        _record_inventory(sessions, node, later, free=20)
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
             assert host is not None
@@ -958,6 +959,51 @@ def test_expired_preflight_with_any_other_change_stays_an_opaque_conflict(
     assert str(raised.value) == "install.plan_stale_or_blocked"
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
+
+
+def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
+    tmp_path,
+) -> None:
+    """A fingerprint that moves after the probe must be re-probed, not fatal.
+
+    Installing the agent package changes the host policy the preflight receipt
+    was bound to, and the probe runner already re-probes on exactly this code
+    (``LifecyclePreflight.ensure``).  Admission must hand an identical plan back
+    to that bounded refresh instead of failing the whole operation, otherwise a
+    normal host transition wedges every prepared profile.
+    """
+
+    sessions, now, node, mapping, build = setup(tmp_path, free=200)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    plan = service.plan_install(mapping, build, now=now)
+    assert plan.allowed
+
+    later = now + timedelta(seconds=30)
+    _record_inventory(sessions, node, later)
+    with sessions.begin() as session:
+        host = session.get(AgentNode, node)
+        assert host is not None
+        host.capabilities = [
+            value
+            for value in host.capabilities
+            if not value.startswith("runtime.preflight.fingerprint.")
+        ] + ["runtime.preflight.fingerprint." + "b" * 64]
+
+    with pytest.raises(InstallPreflightExpired, match="install.plan_stale_or_blocked"):
+        service.accept_install(plan, actor="admin", now=later)
+    with sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+        assert list(session.scalars(select(ResourceReservation))) == []
+
+    # The bounded refresh re-probes the current host and the identical plan is
+    # then accepted, with nothing else about the request changed.
+    record_passing_preflight(sessions, later, floor=10)
+    installation_id = service.accept_install(plan, actor="admin", now=later)
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        assert installation.plan_digest == plan.plan_digest
+        assert installation.mapping_generation == plan.mapping_generation
 
 
 def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_path):

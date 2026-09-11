@@ -159,12 +159,13 @@ class RunSwitchOperationConflict(RuntimeError):
 
 
 class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
-    """A cold compile outlived the runtime preflight window it was admitted on.
+    """A compile needs a fresh runtime preflight probe before it is accepted.
 
-    Nothing was accepted.  ``_advance`` holds the runtime-plan checkpoint so the
-    next tick re-enters ``LifecyclePreflight.ensure`` for a bounded refresh;
-    any handler that does not know this subclass keeps
-    failing the phase, which is the safe reading.
+    The preflight window it was admitted on may have passed, or the host
+    fingerprint or requirements moved while it compiled.  Nothing was accepted.
+    ``_advance`` holds the runtime-plan checkpoint so the next tick re-enters
+    ``LifecyclePreflight.ensure`` for a bounded refresh; any handler that does
+    not know this subclass keeps failing the phase, which is the safe reading.
     """
 
 

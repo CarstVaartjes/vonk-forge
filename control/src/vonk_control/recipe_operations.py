@@ -136,11 +136,12 @@ class RecipeOperationConflict(RuntimeError):
 
 
 class RecipeInstallPreflightExpired(RecipeOperationConflict):
-    """Acceptance refused an otherwise identical plan on expired preflight.
+    """Acceptance refused an identical plan on runtime preflight evidence.
 
-    Nothing was persisted.  A caller that owns a bounded runtime preflight gate
-    may rerun its ordinary probe and re-present the same plan; every other
-    caller keeps treating this as the conflict it is.
+    The receipt aged out, the host fingerprint moved, or it does not cover this
+    recipe's requirements.  Nothing was persisted, so a caller that owns a
+    bounded runtime preflight gate may rerun its ordinary probe and re-present
+    the same plan; every other caller keeps treating this as the conflict it is.
     """
 
 
