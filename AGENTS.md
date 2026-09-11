@@ -71,10 +71,18 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
   uv run --python 3.12 --frozen --with pytest==9.1.1 \
     --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
 
-# Compose lane.
-UV_CACHE_DIR=/private/tmp/vonk-forge-compose-cache \
-  uv run --frozen pytest -q deploy/compose/tests
+# Compose lane. These tests import the Controller, so they run in the control
+# environment, not the root one.
+TMPDIR=/tmp/vk UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . pytest -q deploy/compose/tests
 ```
+
+The compose lane needs the control environment because the container config it
+loads imports `pydantic`; the root project deliberately has neither. On macOS,
+also point `TMPDIR` at a short directory: several of these tests bind a Unix
+socket under `tmp_path`, and the default `/private/var/folders/...` prefix plus a
+long test name exceeds the 104-byte `sun_path` limit, which fails the whole
+Tailscale group with `OSError: AF_UNIX path too long`.
 
 The `lane` marker is applied automatically at collection time from what a test
 actually needs: a PostgreSQL fixture, a `*_wire_bridge.py` Rust probe module, a

@@ -47,8 +47,11 @@ npm ci --prefix control/web
 npm test --prefix control/web -- --run
 npm run build --prefix control/web
 
-# Compose and ingress boundaries
-uv run --frozen pytest -q deploy/compose/tests
+# Compose and ingress boundaries. The control environment, not the root one,
+# because the container config imports pydantic. TMPDIR must be short on macOS:
+# see the note below.
+TMPDIR=/tmp/vk uv run --project control --frozen --with-editable . \
+  pytest -q deploy/compose/tests
 
 # Release evidence and generated supply-chain inventory
 scripts/verify-supply-chain --json
@@ -78,7 +81,12 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache uv run --project control \
 ```
 
 Only the Rust wire probes (`*_wire_bridge.py`) still require a Linux `cargo`
-build, so they stay in CI or a Linux container.
+build, so they stay in CI or a Linux container. The Compose lane likewise runs
+locally in OrbStack, but on macOS it needs `TMPDIR` pointed at a short directory:
+several tests bind a Unix socket under `tmp_path`, and the default
+`/private/var/folders/...` prefix plus a long test name exceeds the 104-byte
+`sun_path` limit, failing the whole Tailscale group with `OSError: AF_UNIX path
+too long`.
 
 Hardware-dependent lifecycle, thermal, NCCL, real model-quality, physical
 replacement, and encryption-drill evidence stays on the designated local
