@@ -653,6 +653,7 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     }
 
 
+@pytest.mark.lane  # Starts the pinned step-ca container.
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_path: Path, monkeypatch) -> None:
     """Exercise the tracked public config against the exact production image."""
     if shutil.which("docker") is None or subprocess.run(

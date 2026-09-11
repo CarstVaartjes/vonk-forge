@@ -84,10 +84,10 @@ socket under `tmp_path`, and the default `/private/var/folders/...` prefix plus 
 long test name exceeds the 104-byte `sun_path` limit, which fails the whole
 Tailscale group with `OSError: AF_UNIX path too long`.
 
-The `lane` marker is applied automatically at collection time from what a test
-actually needs: a PostgreSQL fixture, a `*_wire_bridge.py` Rust probe module, a
-Docker build, or a Linux host tool such as `dpkg`. New host-dependent tests are
-classified without further edits, so `-m "not lane"` stays honest. A fast-tier
+The `lane` marker is applied automatically at collection time for a PostgreSQL
+fixture or a `*_wire_bridge.py` Rust probe module. A test that starts Docker
+carries `@pytest.mark.lane` itself, so the reason stays visible where the
+container starts. Either way `-m "not lane"` stays honest. A fast-tier
 failure is a real defect; a lane-tier failure on macOS is usually a missing
 Linux dependency, not a regression.
 

@@ -103,6 +103,7 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
     assert "CONTROL_WORKER_IMAGE" in worker
 
 
+@pytest.mark.lane  # Builds and runs the worker image.
 def test_built_worker_image_contains_no_direct_transport_executable() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")

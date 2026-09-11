@@ -400,6 +400,7 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
     assert result.stdout.strip() == "True"
 
 
+@pytest.mark.lane  # Builds the root-context control image.
 def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
@@ -481,6 +482,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
     }
 
 
+@pytest.mark.lane  # Builds a throwaway image from the root build context.
 @pytest.mark.parametrize(
     "relative_path",
     [

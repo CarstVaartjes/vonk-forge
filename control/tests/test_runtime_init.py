@@ -141,6 +141,7 @@ def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -
     assert not destination.exists()
 
 
+@pytest.mark.lane  # Runs the module inside a Docker container.
 @pytest.mark.skipif(
     os.environ.get("RUN_ORBSTACK_CONTAINER_TESTS") != "1",
     reason="OrbStack container checks are opt-in",
