@@ -82,11 +82,13 @@ def _setup(tmp_path, *, node_count=1):
     _clear(sessions)
     clock = SimpleNamespace(now=NOW)
     with sessions() as session:
-        document = session.scalar(
+        revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe"
             )
-        ).document
+        )
+        assert revision is not None
+        document = revision.document
     arguments = {
         "document": document,
         "nodes": {nodes[0]: False},
@@ -102,6 +104,7 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from vonk_agent_protocol import (
         ContainerRuntimeAction,
+        ExecuteContainerRuntimeRequestOperation,
         host_helper_grant_signing_bytes,
     )
     from vonk_control.agent_api import HostRuntimeGrantRequest
@@ -147,9 +150,11 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         **{**request.model_dump(), "action": ContainerRuntimeAction.RUNTIME_PREFLIGHT},
         certificate_serial="serial-0",
     )
-    assert grant.claims.operation.job_id == claim.job_id
-    assert grant.claims.operation.operation_id == claim.operation_id
-    assert grant.claims.operation.fence == claim.fence
+    claims_operation = grant.claims.operation
+    assert isinstance(claims_operation, ExecuteContainerRuntimeRequestOperation)
+    assert claims_operation.job_id == claim.job_id
+    assert claims_operation.operation_id == claim.operation_id
+    assert claims_operation.fence == claim.fence
     issuer.public_key.verify(
         bytes.fromhex(grant.signature.value),
         host_helper_grant_signing_bytes(grant.claims),
@@ -199,6 +204,7 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
     if change == "fingerprint":
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
+            assert node is not None
             node.capabilities = [
                 v
                 for v in node.capabilities
@@ -227,6 +233,7 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     assert error is None and second.pending_node_id == nodes[1]
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
+        assert node is not None
         node.capabilities = [
             value for value in node.capabilities
             if not value.startswith("runtime.preflight.fingerprint.")
@@ -271,15 +278,25 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tm
     operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
     service.tick()
     pending = service.get(operation.operation_id)
-    assert pending.result.child_operation_id is None
-    assert pending.result.preflight.pending_job_id
+    pending_result = pending.result
+    assert pending_result is not None
+    assert pending_result.child_operation_id is None
+    pending_preflight = pending_result.preflight
+    assert pending_preflight is not None
+    assert pending_preflight.pending_job_id
     assert not artifacts.children
-    assert pending.progress.operation.phase == "runtime-preflight"
-    _finish(sessions, pending.result.preflight, NOW)
+    pending_progress = pending.progress.operation
+    assert pending_progress is not None
+    assert pending_progress.phase == "runtime-preflight"
+    _finish(sessions, pending_preflight, NOW)
     restarted = _service(sessions, NOW, lifecycle, artifacts, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
     restarted.tick()
     active = restarted.get(operation.operation_id)
+    active_result = active.result
+    assert active_result is not None
     assert active.progress.phase_index == 0
-    assert active.result.child_operation_id
-    assert active.result.preflight.pending_job_id is None
+    assert active_result.child_operation_id
+    active_preflight = active_result.preflight
+    assert active_preflight is not None
+    assert active_preflight.pending_job_id is None
     assert len(artifacts.children) == 1

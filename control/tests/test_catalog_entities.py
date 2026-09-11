@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from importlib import resources
 
@@ -32,22 +33,53 @@ def _example(name: str) -> dict[str, object]:
 
 
 def _model() -> dict[str, object]:
-    return _example("model-definition.json")
+    """Return the canonical model fixture as the mutable document it publishes."""
+
+    document = _example("model-definition.json")
+    ModelDefinition.model_validate(document)
+    return document
 
 
 def _recipe(
     model: dict[str, object], *, slug: str = "synthetic-tiny-image"
 ) -> dict[str, object]:
+    """Return a validated canonical recipe document bound to *model*."""
+
     recipe = _example("recipe-image.json")
-    recipe["identity"]["slug"] = slug
-    recipe["models"][0]["model"]["content_sha256"] = content_sha256(
+    identity = recipe["identity"]
+    assert isinstance(identity, dict)
+    identity["slug"] = slug
+    _model_reference(recipe)["content_sha256"] = content_sha256(
         ModelDefinition.model_validate(model)
     )
+    RecipeDefinition.model_validate(recipe)
     return recipe
 
 
+def _metadata(document: dict[str, object]) -> dict[str, object]:
+    metadata = document["metadata"]
+    assert isinstance(metadata, dict)
+    return metadata
+
+
+def _provenance(document: dict[str, object]) -> dict[str, object]:
+    provenance = document["provenance"]
+    assert isinstance(provenance, dict)
+    return provenance
+
+
+def _model_reference(recipe: dict[str, object]) -> dict[str, object]:
+    models = recipe["models"]
+    assert isinstance(models, list) and models
+    selection = models[0]
+    assert isinstance(selection, dict)
+    reference = selection["model"]
+    assert isinstance(reference, dict)
+    return reference
+
+
 @pytest.fixture
-def session() -> Session:
+def session() -> Iterator[Session]:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as value:
@@ -71,7 +103,9 @@ def test_active_canonical_revision_is_immutable(
 ) -> None:
     active = _resolve(service, _model())
 
-    active.document["metadata"]["description"] = "tampered"
+    metadata = active.document["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["description"] = "tampered"
 
     with pytest.raises(ValueError, match="immutable"):
         session.commit()
@@ -83,7 +117,7 @@ def test_exact_model_reference_does_not_fall_back_to_a_newer_digest(
     original = _model()
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
-    changed["metadata"]["description"] = "updated capability documentation"
+    _metadata(changed)["description"] = "updated capability documentation"
     successor = service.revise(first.document_id, changed, actor="operator")
     successor = service.resolve(successor.id, actor="operator")
 
@@ -118,10 +152,11 @@ def test_recipe_resolution_requires_an_exact_active_model_revision(
     model = _model()
     model_revision = _resolve(service, model)
     recipe = _recipe(model, slug=f"synthetic-tiny-{mutation.replace('_', '-')}")
+    reference = _model_reference(recipe)
     if mutation == "wrong_digest":
-        recipe["models"][0]["model"]["content_sha256"] = "f" * 64
+        reference["content_sha256"] = "f" * 64
     else:
-        recipe["models"][0]["model"]["slug"] = "missing-model"
+        reference["slug"] = "missing-model"
     candidate = service.create_draft(recipe, actor="operator")
 
     with pytest.raises(CatalogValidationError, match="model reference"):
@@ -156,8 +191,8 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     first = _resolve(service, recipe)
 
     bad = copy.deepcopy(recipe)
-    bad["metadata"]["title"] = "candidate that fails"
-    bad["models"][0]["model"]["content_sha256"] = "f" * 64
+    _metadata(bad)["title"] = "candidate that fails"
+    _model_reference(bad)["content_sha256"] = "f" * 64
     failed = service.revise(
         first.document_id, bad, actor="operator", expected_revision=1
     )
@@ -167,7 +202,7 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     assert service.get_entity(first.document_id).id == first.id
 
     good = copy.deepcopy(recipe)
-    good["metadata"]["title"] = "accepted successor"
+    _metadata(good)["title"] = "accepted successor"
     successor = service.revise(
         first.document_id, good, actor="operator", expected_revision=2
     )
@@ -187,8 +222,8 @@ def test_model_capability_revision_reuses_its_artifact_projection(
     original = _model()
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
-    changed["metadata"]["description"] = "updated capability documentation"
-    changed["provenance"]["evidence_digest"] = "a" * 64
+    _metadata(changed)["description"] = "updated capability documentation"
+    _provenance(changed)["evidence_digest"] = "a" * 64
     successor = service.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -207,8 +242,8 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
     first_recipe = _resolve(service, _recipe(original))
 
     changed_model = copy.deepcopy(original)
-    changed_model["metadata"]["description"] = "updated capability documentation"
-    changed_model["provenance"]["evidence_digest"] = "a" * 64
+    _metadata(changed_model)["description"] = "updated capability documentation"
+    _provenance(changed_model)["evidence_digest"] = "a" * 64
     changed_model_revision = service.revise(
         model_revision.document_id,
         changed_model,
@@ -220,7 +255,7 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
     )
 
     changed_recipe = _recipe(changed_model, slug="synthetic-tiny-successor")
-    changed_recipe["metadata"]["title"] = "successor recipe"
+    _metadata(changed_recipe)["title"] = "successor recipe"
     successor = _resolve(service, changed_recipe)
 
     assert first_recipe.artifact_key == successor.artifact_key
@@ -253,7 +288,7 @@ def test_resolve_checks_the_expected_canonical_revision_number(
     draft = service.create_draft(_model(), actor="operator")
     service.resolve(draft.id, actor="operator")
     changed = copy.deepcopy(draft.document)
-    changed["metadata"]["description"] = "updated capability documentation"
+    _metadata(changed)["description"] = "updated capability documentation"
     service.revise(
         draft.document_id,
         changed,

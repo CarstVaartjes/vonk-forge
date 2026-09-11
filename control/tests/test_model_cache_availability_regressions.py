@@ -5,6 +5,7 @@ import hashlib
 import json
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -14,8 +15,18 @@ from pathlib import Path
 import httpx
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from vonk_control.bounded_json import (
+    require_integer,
+    require_mapping,
+    require_sequence,
+    text,
+)
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
-from vonk_control.model_cache_contract import ModelCacheOperationProgress
+from vonk_control.model_cache_contract import (
+    ModelCacheDownloadPayload,
+    ModelCacheOperationProgress,
+    parse_model_cache_payload,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -25,6 +36,18 @@ from vonk_control.models import (
 from vonk_forge_contracts import ModelDefinition, content_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
+
+
+def _first_update(page: dict[str, object]) -> Mapping[str, object]:
+    """Return the first decoded update from a discovery page."""
+
+    updates = require_sequence(page["updates"], "cache update page")
+    assert updates
+    return require_mapping(updates[0], "cache update")
+
+
+def _update_detail(update: Mapping[str, object], key: str) -> Mapping[str, object]:
+    return require_mapping(update[key], f"cache update {key}")
 
 
 def _database(tmp_path: Path):
@@ -228,7 +251,10 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(tmp_path: Pat
     assert final.state == "failed"
     assert final.failure is not None
     assert final.failure["code"] == "integrity_mismatch"
-    assert final.progress["downloaded_bytes"] >= len(b"sibling")
+    downloaded_bytes = require_integer(
+        final.progress["downloaded_bytes"], "cache progress downloaded_bytes"
+    )
+    assert downloaded_bytes >= len(b"sibling")
     service.close()
     assert client is not None
     client.close()
@@ -505,11 +531,15 @@ def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(tmp_path: 
         service._ensure_set(session, manifest)
     newer = _model_document("source-revision-2", "2", supersedes=current_digest)
     _insert_model_revision(sessions, newer, created_at=NOW + timedelta(hours=1))
-    update = service.discover_updates(artifact_set_sha256=manifest.digest)["updates"][0]
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
     assert update["model_update_available"] is True
-    assert update["model_update_from"]["content_sha256"] == current_digest
-    assert update["model_update_to"]["publisher"] == "upstream"
-    assert update["model_update_to"]["slug"] == "source-revision-2"
+    model_update_from = _update_detail(update, "model_update_from")
+    assert model_update_from["content_sha256"] == current_digest
+    model_update_to = _update_detail(update, "model_update_to")
+    assert model_update_to["publisher"] == "upstream"
+    assert model_update_to["slug"] == "source-revision-2"
     service.close()
 
 
@@ -523,10 +553,21 @@ def test_update_discovery_reports_incomparable_lineage_candidates(tmp_path: Path
         service._ensure_set(session, manifest)
     _insert_model_revision(sessions, _model_document("candidate-a", "4"), created_at=NOW + timedelta(hours=1))
     _insert_model_revision(sessions, _model_document("candidate-b", "5"), created_at=NOW + timedelta(hours=2))
-    update = service.discover_updates(artifact_set_sha256=manifest.digest)["updates"][0]
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
     assert update["model_update_available"] is False
     assert update["model_update_ambiguous"] is True
-    assert {item["slug"] for item in update["model_update_candidates"]} == {"candidate-a", "candidate-b"}
+    candidates = require_sequence(
+        update["model_update_candidates"], "cache update candidates"
+    )
+    assert {
+        text(require_mapping(item, "cache update candidate")["slug"])
+        for item in candidates
+    } == {
+        "candidate-a",
+        "candidate-b",
+    }
     service.close()
 
 
@@ -669,17 +710,28 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         "shortfall_bytes",
         "artifact_key",
     }
-    assert "check_access_and_resume" in failed.failure["recovery_actions"]
-    assert failed.progress["downloaded_bytes"] >= len(public_data)
+    recovery_actions = require_sequence(
+        failed.failure["recovery_actions"], "cache failure recovery_actions"
+    )
+    assert "check_access_and_resume" in recovery_actions
+    downloaded_bytes = require_integer(
+        failed.progress["downloaded_bytes"], "cache progress downloaded_bytes"
+    )
+    assert downloaded_bytes >= len(public_data)
     assert len(requests) == 2
     with sessions() as session:
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
         assert persisted.state == failed.state
-        assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
-        assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"].get("next_retry_at") is None
-        assert persisted.payload["retry"].get("retry_after_seconds") is None
+        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
+        assert isinstance(payload, ModelCacheDownloadPayload)
+        failure = payload.failure
+        assert failure is not None
+        assert failure.artifact_key is not None
+        assert failure.artifact_key.endswith("z-hf")
+        assert failure.code == "access_denied"
+        assert payload.retry.next_retry_at is None
+        assert payload.retry.retry_after_seconds is None
     assert service._hf_cooldown_until is None
 
     # Terminal auth failures do not re-enter the automatic scheduler.
@@ -700,9 +752,13 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
         assert persisted.state == denied.state
-        assert persisted.payload["failure"]["code"] == "access_denied"
-        assert persisted.payload["retry"].get("next_retry_at") is None
-        assert persisted.payload["retry"].get("retry_after_seconds") is None
+        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
+        assert isinstance(payload, ModelCacheDownloadPayload)
+        failure = payload.failure
+        assert failure is not None
+        assert failure.code == "access_denied"
+        assert payload.retry.next_retry_at is None
+        assert payload.retry.retry_after_seconds is None
     assert service._hf_cooldown_until is None
     assert len(requests) == 3
     denied_repeat = service.check_access_and_resume(
@@ -732,19 +788,22 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     assert resumed.failure["recovery_actions"] == ["resume"]
     assert resumed.artifact_set_sha256 == first.artifact_set_sha256
     assert resumed.plan_digest == first.plan_digest
-    assert resumed.progress["downloaded_bytes"] >= len(public_data)
+    resumed_downloaded_bytes = require_integer(
+        resumed.progress["downloaded_bytes"], "cache progress downloaded_bytes"
+    )
+    assert resumed_downloaded_bytes >= len(public_data)
     with sessions() as session:
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
         assert persisted.state == "queued"
-        assert persisted.payload["failure"]["code"] == "rate_limited"
-        assert persisted.payload["failure"]["retry_time"] == NOW.replace(
-            second=30
-        ).isoformat()
-        assert persisted.payload["retry"]["next_retry_at"] == persisted.payload[
-            "failure"
-        ]["retry_time"]
-        assert persisted.payload["retry"]["retry_after_seconds"] == 30
+        payload = parse_model_cache_payload(persisted.kind, persisted.payload)
+        assert isinstance(payload, ModelCacheDownloadPayload)
+        failure = payload.failure
+        assert failure is not None
+        assert failure.code == "rate_limited"
+        assert failure.retry_time == NOW.replace(second=30).isoformat()
+        assert payload.retry.next_retry_at == failure.retry_time
+        assert payload.retry.retry_after_seconds == 30
     assert service._hf_cooldown_until == NOW.replace(second=30)
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)
@@ -861,7 +920,18 @@ def test_two_controller_services_share_one_upstream_object_transfer(tmp_path: Pa
     assert first.get_operation(one.id).state == "succeeded"
     assert second.get_operation(two.id).state == "succeeded"
     assert len(calls) == 1
-    assert first.read_verified_artifact(one.artifact_set_sha256, artifact["sha256"], artifact["path"]) == data
+    artifact_set_sha256 = one.artifact_set_sha256
+    assert artifact_set_sha256 is not None
+    artifact_sha256 = text(artifact["sha256"])
+    assert artifact_sha256 is not None
+    artifact_path = text(artifact["path"])
+    assert artifact_path is not None
+    assert (
+        first.read_verified_artifact(
+            artifact_set_sha256, artifact_sha256, artifact_path
+        )
+        == data
+    )
     first.close()
     second.close()
 
@@ -880,24 +950,32 @@ def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) 
     service, _ = _service(tmp_path, sessions, handler=handler)
     current_doc = _model_document("source-revision-1", "1")
     # Two immutable files from one repository need one metadata request.
-    current_doc["files"].append(dict(current_doc["files"][0], id="extra", path="extra.json"))
+    files = current_doc["files"]
+    assert isinstance(files, list) and files
+    first_file = files[0]
+    assert isinstance(first_file, dict)
+    files.append({**first_file, "id": "extra", "path": "extra.json"})
     current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
     manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
-    assert service.discover_updates()["updates"][0]["upstream_revisions"] == []
+    assert _first_update(service.discover_updates())["upstream_revisions"] == []
     assert calls == []
-    update = service.discover_updates(check_upstream=True)["updates"][0]
+    update = _first_update(service.discover_updates(check_upstream=True))
     assert len(calls) == 1
-    assert update["upstream_revisions"][0]["latest_revision"] == latest
-    assert update["upstream_revisions"][0]["pinned_revision"] == "1" * 40
-    assert update["upstream_revisions"][0]["status"] == "update-available"
+    revisions = require_sequence(
+        update["upstream_revisions"], "cache update upstream revisions"
+    )
+    revision = require_mapping(revisions[0], "cache update upstream revision")
+    assert revision["latest_revision"] == latest
+    assert revision["pinned_revision"] == "1" * 40
+    assert revision["status"] == "update-available"
     assert update["model_update_available"] is False
     assert service.manifest_for_artifact_set(manifest.digest) == manifest
     newer = _model_document("source-revision-2", "2", supersedes=current_digest)
     new_digest = _insert_model_revision(sessions, newer, created_at=NOW + timedelta(hours=1))
     assert service.resolve_artifact_set(model_content_sha256=new_digest).digest != manifest.digest
-    assert service.discover_updates()["updates"][0]["model_update_available"] is True
+    assert _first_update(service.discover_updates())["model_update_available"] is True
     service.close()
 
 
@@ -910,11 +988,15 @@ def test_failed_upstream_metadata_check_does_not_hide_catalog_update(tmp_path: P
         service._ensure_set(session, manifest)
     _insert_model_revision(sessions, _model_document("new", "2", supersedes=current_digest),
                            created_at=NOW + timedelta(hours=1))
-    update = service.discover_updates(check_upstream=True)["updates"][0]
+    update = _first_update(service.discover_updates(check_upstream=True))
     assert update["model_update_available"] is True
-    assert update["upstream_revisions"][0]["status"] == "check-failed"
-    assert update["upstream_revisions"][0]["latest_revision"] is None
-    assert update["upstream_revisions"][0]["error_code"]
+    revisions = require_sequence(
+        update["upstream_revisions"], "cache update upstream revisions"
+    )
+    revision = require_mapping(revisions[0], "cache update upstream revision")
+    assert revision["status"] == "check-failed"
+    assert revision["latest_revision"] is None
+    assert revision["error_code"]
     service.close()
 
 
@@ -923,12 +1005,27 @@ def test_inventory_cursor_survives_unchanged_storage_reconciliation(tmp_path: Pa
     service, _ = _service(tmp_path, sessions)
     for index in ("1", "2"):
         artifact = _artifact(index, index.encode())
-        manifest = service.resolve_artifact_set(model_content_sha256=artifact["model_content_sha256"], artifacts=[artifact])
+        model_digest = text(artifact["model_content_sha256"])
+        assert model_digest is not None
+        manifest = service.resolve_artifact_set(
+            model_content_sha256=model_digest, artifacts=[artifact]
+        )
         with sessions.begin() as session:
             service._ensure_set(session, manifest)
     page = service.inventory(limit=1)
-    following = service.inventory(limit=1, boundary=page["_next_boundary"])
-    assert following["entries"][0]["artifact_set_sha256"] != page["entries"][0]["artifact_set_sha256"]
+    boundary = page["_next_boundary"]
+    assert isinstance(boundary, tuple) and len(boundary) == 2
+    following = service.inventory(limit=1, boundary=boundary)
+    following_entries = require_sequence(
+        following["entries"], "cache inventory entries"
+    )
+    page_entries = require_sequence(page["entries"], "cache inventory entries")
+    following_entry = require_mapping(following_entries[0], "cache inventory entry")
+    page_entry = require_mapping(page_entries[0], "cache inventory entry")
+    assert (
+        following_entry["artifact_set_sha256"]
+        != page_entry["artifact_set_sha256"]
+    )
     assert following["_next_boundary"] is None
     service.close()
 

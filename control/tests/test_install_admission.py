@@ -1,9 +1,10 @@
 import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
@@ -363,12 +364,18 @@ def _compiled_plan(
     return CompiledExecutionPlan.model_validate(payload).model_dump(mode="json")
 
 
-def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
-    mapping_nodes = kwargs["mapping_nodes"]
-    revision = kwargs["revision"]
-    build = kwargs["build"]
-    resolved_entities = kwargs["resolved_entities"]
-    model_revision = resolved_entities["models"][0]
+def _compiled_plan_provider(
+    *,
+    mapping_nodes: Sequence[ClusterMappingNode],
+    revision: CatalogDocumentRevision,
+    build: RecipeBuild | None,
+    resolved_entities: Mapping[str, object],
+    **_unused: object,
+) -> dict[str, dict[str, object]]:
+    raw_models = resolved_entities.get("models")
+    assert isinstance(raw_models, Sequence) and raw_models
+    model_revision = raw_models[0]
+    assert isinstance(model_revision, CatalogDocumentRevision)
     build_input = build.build_input_sha256 if build is not None else None
     execution = revision.document.get("execution", {})
     image = execution.get("image") if isinstance(execution, dict) else None
@@ -531,9 +538,22 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
     sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
     captured: dict[str, object] = {}
 
-    def provider(**kwargs: object) -> dict[str, dict[str, object]]:
-        captured["parameters"] = kwargs["parameters"]
-        return _compiled_plan_provider(**kwargs)
+    def provider(
+        *,
+        mapping_nodes: Sequence[ClusterMappingNode],
+        revision: CatalogDocumentRevision,
+        build: RecipeBuild | None,
+        resolved_entities: Mapping[str, object],
+        parameters: object,
+        **_unused: object,
+    ) -> dict[str, dict[str, object]]:
+        captured["parameters"] = parameters
+        return _compiled_plan_provider(
+            mapping_nodes=mapping_nodes,
+            revision=revision,
+            build=build,
+            resolved_entities=resolved_entities,
+        )
 
     with sessions.begin() as session:
         mapping = session.get(ClusterMapping, mapping_id)
@@ -571,9 +591,11 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
 def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None:
     sessions, now, _node, mapping_id, _build = setup(tmp_path, recipe_mode="image")
     with sessions.begin() as session:
-        mapping = session.get(ClusterMapping, mapping_id)
-        assert mapping is not None
-        mapping.parameters = ["malformed"]
+        session.execute(
+            update(ClusterMapping)
+            .where(ClusterMapping.id == mapping_id)
+            .values(parameters=["malformed"])
+        )
 
     plan = _service(
         sessions, inventory_max_age=300, disk_floor_bytes=10
@@ -662,11 +684,13 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
     installation_id = service.accept_install(plan, actor="admin", now=now)
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
         reservation = session.scalar(
             select(ResourceReservation).where(
                 ResourceReservation.owner_id == installation_id
             )
         )
+        assert reservation is not None
         assert installation.mapping_id == mapping
         assert installation.recipe_build_id == build
         assert installation.mapping_generation == 1
@@ -881,7 +905,7 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
     with sessions.begin() as session:
         session.delete(session.get(RecipeInstallation, warm_id))
         session.execute(
-            ResourceReservation.__table__.delete().where(
+            delete(ResourceReservation).where(
                 ResourceReservation.owner_id == warm_id
             )
         )
@@ -898,6 +922,7 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
     installation_id = service.accept_install(plan, actor="admin", now=later)
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
         assert installation.plan_digest == plan.plan_digest
         assert installation.mapping_generation == plan.mapping_generation
 
@@ -920,6 +945,7 @@ def test_expired_preflight_with_any_other_change_stays_an_opaque_conflict(
         _record_inventory(sessions, node, later)
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
+            assert host is not None
             host.capabilities = [
                 value
                 for value in host.capabilities
@@ -943,6 +969,7 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     assert service.plan_install(mapping, None, now=now).allowed
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
+        assert node is not None
         node.capabilities = ["runtime.vonk.v1", "runtime.preflight.fingerprint." + "b" * 64]
     blocked = service.plan_install(mapping, None, now=now)
     assert "runtime_preflight.host_changed" in {reason.code for reason in blocked.nodes[0].blockers}
