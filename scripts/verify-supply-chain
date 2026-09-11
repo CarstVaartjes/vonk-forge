@@ -173,6 +173,7 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profile_contract.py",
         "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/fleet_projection.py",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "control/src/vonk_control/harnesses/canonical.py",
         "control/src/vonk_control/source_bundles.py",

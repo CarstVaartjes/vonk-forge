@@ -5,15 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
 )
 from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.telemetry import (
+    TelemetryMeasurementKind,
+    TelemetryRunState,
+    TelemetryWorkloadState,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .fleet_events import FleetEventDraft, FleetEventRepository
@@ -82,7 +88,11 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     except (TypeError, ValueError):
         return None
     return recipe if content_sha256(recipe) == revision.content_digest else None
-_RUNTIME_CAPABILITY_LEDGER = (
+
+
+_RUNTIME_CAPABILITY_LEDGER: tuple[
+    tuple[str, str, TelemetryMeasurementKind], ...
+] = (
     ("runtime.decode_tokens_per_second", "tokens/s", "derived"),
     ("runtime.prefill_tokens_per_second", "tokens/s", "derived"),
     ("runtime.prefill_cached_tokens_per_second", "tokens/s", "derived"),
@@ -156,6 +166,45 @@ RunDegradedReason = Literal[
     "rank-stale",
     "route-not-published",
 ]
+
+# Database rows and decoded JSON carry these closed values as plain strings, so
+# they are read back through the declared alias instead of an unchecked
+# assignment into the typed projection model.
+_AGENT_STATE_ADAPTER = TypeAdapter(AgentState)
+_INSTALL_DEGRADED_REASON_ADAPTER = TypeAdapter(InstallDegradedReason)
+_RUN_DEGRADED_REASON_ADAPTER = TypeAdapter(RunDegradedReason)
+_CERTIFICATE_OFFLINE_REASONS: Mapping[CertificateState, OfflineReason | None] = {
+    "valid": None,
+    "missing": "certificate-missing",
+    "not-yet-valid": "certificate-not-yet-valid",
+    "expired": "certificate-expired",
+    "revoked": "certificate-revoked",
+    "inactive": "certificate-inactive",
+}
+
+
+def _install_degraded_reason(
+    value: str | None,
+) -> InstallDegradedReason | None:
+    """Read one shared group reason as an installation degraded reason."""
+
+    if value is None:
+        return None
+    return _INSTALL_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
+
+
+def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
+    """Read one shared group reason as a run degraded reason."""
+
+    if value is None:
+        return None
+    return _RUN_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
+
+
+class _AuthorityRevisionSource(Protocol):
+    """The revision head the projection binds its snapshot to."""
+
+    def head(self) -> str: ...
 
 
 class _StrictModel(StrictJSONModel):
@@ -510,7 +559,7 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def _run_readiness(run: RecipeRun, nodes: Sequence[RunNode]) -> str:
+def _run_readiness(run: RecipeRun, nodes: Sequence[RunNode]) -> TelemetryRunState:
     if run.state == "planned":
         return "queued"
     if run.state == "starting":
@@ -526,7 +575,7 @@ def _run_readiness(run: RecipeRun, nodes: Sequence[RunNode]) -> str:
     return "unknown"
 
 
-def _artifact_workload_state(value: str) -> str:
+def _artifact_workload_state(value: str) -> TelemetryWorkloadState:
     if value in {"draft", "ready", "queued", "waiting-for-operator"}:
         return "queued"
     if value in {"running", "cancelling"}:
@@ -636,7 +685,7 @@ class FleetProjection:
 
     def __init__(
         self,
-        authority: object,
+        authority: _AuthorityRevisionSource,
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -946,7 +995,7 @@ class FleetProjection:
             observed_at=point.observed_at,
             received_at=point.received_at,
             freshness=self._telemetry_freshness(point.observed_at),
-            capabilities=[item.model_dump(mode="json") for item in metrics.capabilities],
+            capabilities=list(metrics.capabilities),
         )
 
     def telemetry_workloads(
@@ -977,14 +1026,14 @@ class FleetProjection:
             freshness=self._telemetry_freshness(point.observed_at),
             run_id=run_id,
             state=state,
-            runtimes=[item.model_dump(mode="json") for item in runtimes],
-            workloads=[item.model_dump(mode="json") for item in workloads],
+            runtimes=list(runtimes),
+            workloads=list(workloads),
         )
 
     @staticmethod
     def _telemetry_run_rows(
         session: Session, node_id: str
-    ) -> tuple[tuple[RunNode, RecipeRun], ...]:
+    ) -> tuple[Row[tuple[RunNode, RecipeRun]], ...]:
         selected = (
             select(RecipeRun.id)
             .join(RunNode, RunNode.run_id == RecipeRun.id)
@@ -1418,7 +1467,7 @@ class FleetProjection:
         fleet_node_ids: frozenset[str],
     ) -> dict[str, tuple[RecipePresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
-        grouped: dict[str, list[object]] = {}
+        grouped: dict[str, list[InstallationPresenceRow]] = {}
         for row in rows:
             node = row[0]
             grouped.setdefault(node.installation_id, []).append(row)
@@ -1433,11 +1482,13 @@ class FleetProjection:
             if _canonical_recipe(revision) is None:
                 continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
-            reason = self._exact_group_reason(
-                expected_count=mapping.node_count,
-                expected=mappings.get(mapping.id, ()),
-                actual=nodes,
-                fleet_node_ids=fleet_node_ids,
+            reason = _install_degraded_reason(
+                self._exact_group_reason(
+                    expected_count=mapping.node_count,
+                    expected=mappings.get(mapping.id, ()),
+                    actual=nodes,
+                    fleet_node_ids=fleet_node_ids,
+                )
             )
             if reason is None and installation.state != "installed":
                 reason = "installation-not-installed"
@@ -1483,7 +1534,7 @@ class FleetProjection:
         current: datetime,
     ) -> dict[str, tuple[RunPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
-        grouped: dict[str, list[object]] = {}
+        grouped: dict[str, list[RunPresenceRow]] = {}
         for row in rows:
             node = row[0]
             grouped.setdefault(node.run_id, []).append(row)
@@ -1500,11 +1551,13 @@ class FleetProjection:
             if _canonical_recipe(revision) is None:
                 continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
-            reason = self._exact_group_reason(
-                expected_count=mapping.node_count,
-                expected=mappings.get(mapping.id, ()),
-                actual=nodes,
-                fleet_node_ids=fleet_node_ids,
+            reason = _run_degraded_reason(
+                self._exact_group_reason(
+                    expected_count=mapping.node_count,
+                    expected=mappings.get(mapping.id, ()),
+                    actual=nodes,
+                    fleet_node_ids=fleet_node_ids,
+                )
             )
             freshness: dict[str, tuple[float, bool]] = {}
             for node in nodes:
@@ -1762,11 +1815,11 @@ class FleetProjection:
             else max(0.0, (current - last_seen).total_seconds())
         )
         if value.state == "revoked" or value.revoked_at is not None:
-            offline_reason = "agent-revoked"
+            offline_reason: OfflineReason | None = "agent-revoked"
         elif value.state != "active":
             offline_reason = "agent-inactive"
         elif certificate_state != "valid":
-            offline_reason = f"certificate-{certificate_state}"
+            offline_reason = _CERTIFICATE_OFFLINE_REASONS[certificate_state]
         elif last_seen is None:
             offline_reason = "never-seen"
         elif current - last_seen < timedelta(0):
@@ -1776,7 +1829,7 @@ class FleetProjection:
         else:
             offline_reason = None
         return NodeConnection(
-            agent_state=value.state,
+            agent_state=_AGENT_STATE_ADAPTER.validate_python(value.state, strict=True),
             certificate_state=certificate_state,
             online_state="online" if offline_reason is None else "offline",
             offline_reason=offline_reason,
@@ -1785,7 +1838,7 @@ class FleetProjection:
         )
 
     @staticmethod
-    def _certificate_state(value: AgentCertificate | None, current: datetime) -> str:
+    def _certificate_state(value: AgentCertificate | None, current: datetime) -> CertificateState:
         if value is None:
             return "missing"
         if (
