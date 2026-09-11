@@ -914,6 +914,20 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
     assert "control enrollment failed for <redacted>" in str(failure)
     assert "helper request rejected for <redacted>" in str(failure)
     assert observed == [
+        # Service states first: they are what tells a stuck queue apart from a
+        # worker that is not draining it.
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "vonk-spark-42-arm64",
+            "ps",
+            "--all",
+            "--format",
+            "json",
+        ],
+        # Then each service's own log tail, worker first, rather than one
+        # interleaved tail whose last lines are whatever is noisiest.
         [
             "docker",
             "compose",
@@ -922,11 +936,19 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
             "logs",
             "--no-color",
             "--tail",
-            "120",
-            "control-api",
+            "80",
             "control-worker",
-            "step-ca",
-            "caddy",
+        ],
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "vonk-spark-42-arm64",
+            "logs",
+            "--no-color",
+            "--tail",
+            "80",
+            "control-api",
         ],
         [
             "sudo", "journalctl", "--no-pager", "--lines=40",
