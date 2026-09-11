@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
-from .bounded_json import integer, require_integer
+from .bounded_json import integer, require_integer, require_sequence
 from .model_cache_contract import Digest
 from .operation_api import bounded_error_responses
 from .operation_contract import (
@@ -23,6 +23,19 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityView,
 )
 from .strict_json import StrictJSONModel
+
+# One named type per closed set, shared by the contract field and every
+# helper that produces the value, so the vocabulary cannot drift apart.
+RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
+RecipeImageAvailabilityState = Literal[
+    "queued", "running", "partial", "succeeded", "failed", "cancelled"
+]
+RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
+RecipeOperatorState = Literal[
+    "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
+]
+RecipeOperatorAction = Literal["remove"]
+RecipeUpdateAction = Literal["update"]
 
 
 class RecipeImageAvailabilityArtifact(StrictJSONModel):
@@ -44,10 +57,10 @@ class RecipeImageAvailabilityArtifact(StrictJSONModel):
 class RecipeImageAvailabilityChild(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    kind: Literal["model-cache", "runtime-image"]
+    kind: RecipeImageAvailabilityChildKind
     id: str
     request_key: str | None = None
-    state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
+    state: RecipeImageAvailabilityState
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     model_content_digests: list[Digest]
@@ -98,8 +111,8 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
     request_id: str = Field(min_length=1, max_length=128)
-    kind: Literal["recipe.image.availability.v2"]
-    state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
+    kind: RecipeImageAvailabilityKind
+    state: RecipeImageAvailabilityState
     attempt: int = Field(ge=0)
     recipe_revision_id: str
     recipe_content_sha256: str
@@ -134,12 +147,12 @@ class RecipeOperatorResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    action: Literal["remove"]
+    action: RecipeOperatorAction
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(min_length=1, max_length=128)
     operation_id: str = Field(min_length=1, max_length=128)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
-    state: Literal["accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"]
+    state: RecipeOperatorState
     progress: OperationProgress
     reclaimed_bytes: int = Field(ge=0)
     preserved: list[str] = Field(default_factory=list, max_length=32)
@@ -162,7 +175,7 @@ class RecipeUpdateResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    action: Literal["update"] = "update"
+    action: RecipeUpdateAction = "update"
     updates: list[RecipeImageAvailabilityResponse] = Field(max_length=100)
 
 
@@ -196,7 +209,7 @@ def _progress(value: object) -> OperationProgress:
     })
 
 
-def _child(value: object, *, kind: Literal["model-cache", "runtime-image"]) -> RecipeImageAvailabilityChild:
+def _child(value: object, *, kind: RecipeImageAvailabilityChildKind) -> RecipeImageAvailabilityChild:
     raw = dict(value) if isinstance(value, dict) else {}
     if kind == "runtime-image":
         raw["model_content_digests"] = []
@@ -239,18 +252,31 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             "progress": view.image_progress,
             "failure": view.image_failure,
         }, kind="runtime-image"))
-    return RecipeImageAvailabilityResponse(
-        id=str(document["id"]), request_id=str(document["request_id"]), kind=str(document["kind"]),
-        state=str(document["state"]), attempt=require_integer(document["attempt"], "attempt"),
-        recipe_revision_id=str(document["recipe_revision_id"]),
-        recipe_content_sha256=str(document["recipe_content_sha256"]),
-        progress=_progress(document.get("progress")),
-        children=children,
-        result=result_model,
-        failure=AvailabilityOperationFailure.model_validate(failure) if isinstance(failure, dict) else None,
-        actions=[RecipeImageAvailabilityAction(key=str(item)) for item in document.get("supported_actions", [])],
-        created_at=str(document["created_at"]), updated_at=str(document["updated_at"]),
-    )
+    return RecipeImageAvailabilityResponse.model_validate({
+        "id": str(document["id"]),
+        "request_id": str(document["request_id"]),
+        "kind": document["kind"],
+        "state": document["state"],
+        "attempt": require_integer(document["attempt"], "attempt"),
+        "recipe_revision_id": str(document["recipe_revision_id"]),
+        "recipe_content_sha256": str(document["recipe_content_sha256"]),
+        "progress": _progress(document.get("progress")),
+        "children": children,
+        "result": result_model,
+        "failure": (
+            AvailabilityOperationFailure.model_validate(failure)
+            if isinstance(failure, dict)
+            else None
+        ),
+        "actions": [
+            RecipeImageAvailabilityAction.model_validate({"key": item})
+            for item in require_sequence(
+                document.get("supported_actions", []), "supported actions"
+            )
+        ],
+        "created_at": str(document["created_at"]),
+        "updated_at": str(document["updated_at"]),
+    })
 
 
 def _service(service: RecipeImageAvailabilityService | None) -> RecipeImageAvailabilityService:
@@ -291,29 +317,49 @@ def install_recipe_operator_routes(
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
     def removal_document(result: Mapping[str, object]) -> RecipeOperatorResponse:
-        return RecipeOperatorResponse(
-            schema_version=integer(result.get("schema_version"), default=2),
-            action="remove",
-            selector=str(result["selector"]),
-            request_key=str(result["request_key"]),
-            operation_id=str(result["operation_id"]),
-            recipe_revision_id=str(result["recipe_revision_id"]),
-            state=str(result["state"]),
-            progress=OperationProgress(
-                phase="completed",
-                completed_bytes=integer(result.get("reclaimed_bytes"), default=0),
-                total_bytes=integer(result.get("reclaimed_bytes"), default=0),
-                total_bytes_known=True,
-                completed_items=len(result.get("cancelled_operations", [])),
-                total_items=len(result.get("cancelled_operations", [])),
-            ),
-            reclaimed_bytes=integer(result.get("reclaimed_bytes"), default=0),
-            preserved=[str(item) for item in result.get("preserved", [])],
-            next_actions=[str(item) for item in result.get("next_actions", [])],
-            cancelled_operations=[str(item) for item in result.get("cancelled_operations", [])],
-            cancelled_builds=[str(item) for item in result.get("cancelled_builds", [])],
-            model_removals=[str(item) for item in result.get("model_removals", [])],
+        reclaimed_bytes = integer(result.get("reclaimed_bytes"), default=0) or 0
+        cancelled_operations = require_sequence(
+            result.get("cancelled_operations", []), "cancelled operations"
         )
+        return RecipeOperatorResponse.model_validate({
+            "schema_version": integer(result.get("schema_version"), default=2),
+            "action": "remove",
+            "selector": str(result["selector"]),
+            "request_key": str(result["request_key"]),
+            "operation_id": str(result["operation_id"]),
+            "recipe_revision_id": str(result["recipe_revision_id"]),
+            "state": result["state"],
+            "progress": OperationProgress(
+                phase="completed",
+                completed_bytes=reclaimed_bytes,
+                total_bytes=reclaimed_bytes,
+                total_bytes_known=True,
+                completed_items=len(cancelled_operations),
+                total_items=len(cancelled_operations),
+            ),
+            "reclaimed_bytes": reclaimed_bytes,
+            "preserved": [
+                str(item)
+                for item in require_sequence(result.get("preserved", []), "preserved")
+            ],
+            "next_actions": [
+                str(item)
+                for item in require_sequence(result.get("next_actions", []), "next actions")
+            ],
+            "cancelled_operations": [str(item) for item in cancelled_operations],
+            "cancelled_builds": [
+                str(item)
+                for item in require_sequence(
+                    result.get("cancelled_builds", []), "cancelled builds"
+                )
+            ],
+            "model_removals": [
+                str(item)
+                for item in require_sequence(
+                    result.get("model_removals", []), "model removals"
+                )
+            ],
+        })
 
     @app.get(
         "/api/recipe/operations/{operation_id}",
