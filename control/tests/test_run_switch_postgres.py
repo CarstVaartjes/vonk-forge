@@ -144,6 +144,7 @@ def _awaiting_final_verification(tmp_path, engine):
         pytest.fail("Run did not reach final verification")
     with sessions() as session:
         run = session.scalar(select(RecipeRun))
+        assert run is not None
         assert run.state == "running" and run.route_state == "pending"
         run_id = run.id
     mark_current_exact_observations(sessions, run_id, NOW)

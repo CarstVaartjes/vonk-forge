@@ -1,3 +1,4 @@
+from vonk_control.bounded_json import text
 from vonk_control.resource_planning import (
     resolve_effective_settings,
 )
@@ -135,4 +136,4 @@ def test_run_switch_resource_view_binds_canonical_identity_and_evidence() -> Non
     assert evidence.declared_total_bytes == 1_200
     assert evidence.evidence_state == "declared"
     assert _resource_evidence_digest("b" * 64) == "b" * 64
-    assert _resource_evidence_digest(recipe.get("identity_sha256")) is None
+    assert _resource_evidence_digest(text(recipe.get("identity_sha256"))) is None

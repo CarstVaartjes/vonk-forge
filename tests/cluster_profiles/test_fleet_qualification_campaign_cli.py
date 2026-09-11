@@ -349,10 +349,9 @@ def test_preview_writes_both_private_plans_and_evidence(
         assert stat.S_IMODE(plan_path.stat().st_mode) == 0o600
         ledger = EvidenceLedger(tmp_path / "evidence" / f"{lane_name}.jsonl")
         assert ledger.records[-1]["event"] == "plan.generated"
-        assert (
-            ledger.records[-1]["payload"]["campaign_digest"]
-            == result["campaign_digest"]
-        )
+        payload = ledger.records[-1]["payload"]
+        assert isinstance(payload, dict)
+        assert payload["campaign_digest"] == result["campaign_digest"]
 
 
 def test_apply_checks_global_digest_before_starting_either_lane(

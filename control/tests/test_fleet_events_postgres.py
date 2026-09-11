@@ -116,4 +116,6 @@ def test_postgres_cursor_lock_makes_ids_follow_commit_order(
             (1, "job-first"),
             (2, "job-second"),
         ]
-        assert session.get(FleetEventCursor, 1).last_id == 2
+        cursor = session.get(FleetEventCursor, 1)
+        assert cursor is not None
+        assert cursor.last_id == 2
