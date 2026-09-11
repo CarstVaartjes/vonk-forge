@@ -156,10 +156,11 @@ def evaluate_job_result(result: Mapping[str, object], check: Mapping[str, object
         state = result.get("state", result.get("status"))
         if state != "succeeded":
             raise ServingExecutionError("job result does not show a successful completion")
+    declared_outputs = result.get("outputs")
     return {
         "response_shape": "job.result",
         "result_fields": sorted(str(key) for key in result),
-        "output_count": len(result.get("outputs", [])) if isinstance(result.get("outputs"), list) else 0,
+        "output_count": len(declared_outputs) if isinstance(declared_outputs, list) else 0,
     }
 
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -18,6 +19,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
+from .litellm import LiteLlmGeneration
 from .models import (
     AgentNode,
     AgentOperation,
@@ -80,9 +82,11 @@ class _RecoveryJobQueue(Protocol):
 
 
 class _RecoveryRoutes(Protocol):
-    def publication_transaction(self): ...
+    def publication_transaction(self) -> AbstractContextManager[Session]: ...
 
-    def withdraw_run_in_session(self, session: Session, run_id: str): ...
+    def withdraw_run_in_session(
+        self, session: Session, run_id: str
+    ) -> LiteLlmGeneration: ...
 
 
 class DistributedRecoveryCoordinator:

@@ -161,8 +161,8 @@ def _profile_edit_flags(parser: argparse.ArgumentParser) -> None:
     _add_output(parser)
 
 
-def add_controller_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
     """Register only Fleet, Model, Recipe and Profile command namespaces."""
     fleet = commands.add_parser("fleet", help="Show and operate enrolled Sparks")

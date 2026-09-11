@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -20,7 +20,7 @@ _OWNER_KINDS = frozenset({"reconciliation"})
 class NodeLeaseConflict(RuntimeError):
     """The requested nodes are already owned or the supplied fence is stale."""
 
-    def __init__(self, node_ids: Sequence[str]) -> None:
+    def __init__(self, node_ids: Iterable[str]) -> None:
         self.node_ids = tuple(sorted(set(node_ids)))
         super().__init__(
             "node mutation lease conflict: " + ", ".join(self.node_ids)

@@ -368,8 +368,9 @@ class RecipePackageClient:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry is invalid")
             publisher, slug, digest = package_entry.get("publisher"), package_entry.get("slug"), package_entry.get("recipe_content_sha256")
             package_digest, location, size, source_path = package_entry.get("package_sha256"), package_entry.get("location"), package_entry.get("size"), package_entry.get("source_path")
+            document = package_entry.get("document")
             location_url = urlsplit(str(location))
-            if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or not _safe_path(str(source_path)) or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
+            if not isinstance(document, Mapping) or not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or not _safe_path(str(source_path)) or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry identity is invalid")
             key = f"{publisher}/{slug}"
             if key in packages:
@@ -377,7 +378,7 @@ class RecipePackageClient:
             packages[key] = dict(package_entry)
             packages[key]["publication_commit"] = resolved_publication
             tags = package_entry.get("tags", [])
-            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(package_entry.get("title", "")), description=str(package_entry.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document=package_entry["document"]))
+            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(package_entry.get("title", "")), description=str(package_entry.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document=dict(document)))
         if [(item.publisher, item.slug) for item in items] != sorted((item.publisher, item.slug) for item in items):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is not sorted")
         return RecipeLibrarySnapshot(
@@ -600,7 +601,11 @@ class RecipePackageClient:
             raise RecipePackageError("recipe_package.package_invalid", "recipe package identity or contents are invalid") from error
         metadata = recipe.metadata
         package_digest = str(package.get("package_sha256")) if package is not None else _sha256(archive)
-        package_size = integer(package.get("size"), default=len(archive)) if package is not None else len(archive)
+        package_size = len(archive)
+        if package is not None:
+            declared_size = integer(package.get("size"), default=package_size)
+            if declared_size is not None:
+                package_size = declared_size
         package_path = str(package.get("location", "")) if package is not None else ""
         publication_commit = str(package.get("publication_commit", item.library_commit)) if package is not None else item.library_commit
         if archive_path is None:

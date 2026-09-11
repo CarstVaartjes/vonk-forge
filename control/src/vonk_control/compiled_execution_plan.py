@@ -539,6 +539,15 @@ class CompiledExecutionPlan(_StrictModel):
                 raise CompiledExecutionPlanError(f"{label} is invalid")
             return value
 
+        raw_devices = security.get("devices", ())
+        if not isinstance(raw_devices, Sequence) or isinstance(raw_devices, (str, bytes)):
+            raise CompiledExecutionPlanError("compiled security devices are invalid")
+        raw_capabilities = security.get("capabilities", ())
+        if not isinstance(raw_capabilities, Sequence) or isinstance(
+            raw_capabilities, (str, bytes)
+        ):
+            raise CompiledExecutionPlanError("compiled security capabilities are invalid")
+
         if "port" not in placement:
             raise CompiledExecutionPlanError("runtime port is missing")
         raw_port = placement["port"]
@@ -623,8 +632,8 @@ class CompiledExecutionPlan(_StrictModel):
             "artifacts": artifacts,
             "runtime_image": runtime_image,
             "security": {
-                "devices": list(security.get("devices", ())),
-                "capabilities": list(security.get("capabilities", ())),
+                "devices": list(raw_devices),
+                "capabilities": list(raw_capabilities),
                 "network_mode": network_mode,
                 "host_network": security.get("host_network"),
                 "privileged": security.get("privileged"),
@@ -893,7 +902,8 @@ def compile_verified_execution_plan(
             )
         path = item.get("path")
         if (
-            path != source.path
+            not isinstance(path, str)
+            or path != source.path
             or item.get("sha256") != source.sha256
             or item.get("bytes") != source.bytes
         ):

@@ -88,7 +88,7 @@ from .enrollment import (
     EnrollmentService,
     RenewalInProgress,
 )
-from .enrollment_bootstrap import EnrollmentBootstrapConfig
+from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -338,10 +338,7 @@ class EnrollmentGrantResponse(StrictJSONModel):
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     controller_address: str | None = None
     service_hostnames: list[str] = Field(default_factory=list, max_length=16)
-    installer_url: Literal[
-        "https://install.vonkforge.ai/spark",
-        "https://install.vonkforge.ai/dev/spark",
-    ]
+    installer_url: InstallerUrl
 
 
 class AgentGrantRequest(StrictJSONModel):

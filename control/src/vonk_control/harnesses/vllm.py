@@ -244,7 +244,11 @@ class VllmHarnessCompiler:
                 if isinstance(implementation, Mapping)
                 else None
             )
-            distributed_backend = _DISTRIBUTED_BACKENDS.get(mechanism)
+            distributed_backend = (
+                _DISTRIBUTED_BACKENDS.get(mechanism)
+                if isinstance(mechanism, str)
+                else None
+            )
             parallelism = topology.get("parallelism")
             node_count = topology.get("node_count")
             if (

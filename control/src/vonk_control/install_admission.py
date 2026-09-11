@@ -230,6 +230,11 @@ class InstallAdmissionService:
                     )
                 except KeyError:
                     inventory_by_node[mapping_node.node_id] = None
+            known_inventory = {
+                node_id: inventory
+                for node_id, inventory in inventory_by_node.items()
+                if inventory is not None
+            }
             document = revision.document
             try:
                 resolved_entities = resolve_recipe_entities(session, document)
@@ -281,6 +286,23 @@ class InstallAdmissionService:
                 operation="install",
             )
             topology_reason: AdmissionReason | None = None
+            capabilities_by_node = {
+                node.node_id: tuple(
+                    sorted(
+                        {
+                            capability
+                            for capability in node.capabilities
+                            if not capability.startswith("fabric.")
+                        }
+                        | set(
+                            known_inventory[node.node_id].capabilities
+                            if node.node_id in known_inventory
+                            else ()
+                        )
+                    )
+                )
+                for node in nodes
+            }
             try:
                 validate_topology(
                     document,
@@ -293,23 +315,7 @@ class InstallAdmissionService:
                         )
                         for mapping_node in mapping_nodes
                     ),
-                    {
-                        node.node_id: tuple(
-                            sorted(
-                                {
-                                    capability
-                                    for capability in node.capabilities
-                                    if not capability.startswith("fabric.")
-                                }
-                                | set(
-                                    inventory_by_node[node.node_id].capabilities
-                                    if inventory_by_node.get(node.node_id) is not None
-                                    else ()
-                                )
-                            )
-                        )
-                        for node in nodes
-                    },
+                    capabilities_by_node,
                 )
             except TopologyError as error:
                 topology_reason = AdmissionReason(error.code, str(error))
@@ -326,6 +332,8 @@ class InstallAdmissionService:
                 if build is not None
                 else _compiled_image_bytes(compiled_plan_by_node)
             )
+            if image_digest is None:
+                raise ValueError("recipe install image digest is unavailable")
         topology = recipe_topology(document)
         roles = topology.get("roles")
         if not isinstance(roles, list):

@@ -109,6 +109,12 @@ def _object(value: object, label: str) -> Mapping[str, object]:
     return value
 
 
+def _object_list(value: object, label: str) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        raise QualificationError(f"campaign manifest {label} must be an array")
+    return [_object(item, label) for item in value]
+
+
 def _exact_keys(
     value: Mapping[str, object], *, required: set[str], optional: set[str], label: str
 ) -> None:
@@ -279,15 +285,12 @@ def _load_authority(path: Path) -> CampaignAuthority:
         optional=set(),
         label="qualification authority disposition",
     )
-    if any(
-        not isinstance(disposition[field], int)
-        or isinstance(disposition[field], bool)
-        or disposition[field] < 0
-        for field in disposition_fields
-    ):
-        raise QualificationError(
-            f"qualification authority counts are invalid: {authority_id}"
-        )
+    for field in disposition_fields:
+        count = disposition[field]
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise QualificationError(
+                f"qualification authority counts are invalid: {authority_id}"
+            )
     category_keys: dict[str, tuple[str, ...]] = {}
     for field in sorted(category_fields):
         values = _recipe_keys(root[field], f"authority {field}", allow_empty=True)
@@ -576,8 +579,9 @@ def _prepare_lanes(
             )
         planned_keys = {
             str(item.get("key"))
-            for item in plan.get("recipes", [])
-            if isinstance(item, Mapping)
+            for item in _object_list(
+                plan.get("recipes"), f"lane {lane.name} plan recipes"
+            )
         }
         if planned_keys != set(lane.recipes):
             raise QualificationError(

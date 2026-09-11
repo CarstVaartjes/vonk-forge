@@ -51,8 +51,13 @@ def _validate_manifest_contract(document: Mapping[str, object]) -> None:
         .joinpath("schemas", "qualification-manifest-v2.schema.json")
         .read_text(encoding="utf-8")
     )
+    # The validator's instance type is the recursive JSON alias. The manifest
+    # was decoded from JSON, so round-trip it rather than asserting a type the
+    # validator cannot check.
     errors = sorted(
-        Draft202012Validator(schema).iter_errors(document),
+        Draft202012Validator(schema).iter_errors(
+            json.loads(json.dumps(document))
+        ),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
     if errors:

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from .audit import AuditRecord
-from .auth import Actor, TokenCodec
+from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
 from .browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,
@@ -47,7 +47,7 @@ class AuthSession(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     subject: str = Field(min_length=1, max_length=64)
-    role: Literal["administrator"]
+    role: AdministratorRole
     expires_at: datetime
 
 
@@ -78,9 +78,16 @@ def install_auth_routes(
     authenticated = actor_dependency
 
     def summary(identity: BrowserIdentity) -> AuthSession:
+        actor = identity.actor
+        # BrowserAuthService only issues a browser identity for the sole
+        # administrator, so this guard states the session contract's invariant
+        # and refuses anything else instead of emitting a non-administrator
+        # session or an opaque response-model failure.
+        if actor.role != ADMIN_ROLE:
+            raise HTTPException(status_code=401, detail="authentication failed")
         return AuthSession(
-            subject=identity.actor.subject,
-            role=identity.actor.role,
+            subject=actor.subject,
+            role=actor.role,
             expires_at=identity.expires_at,
         )
 

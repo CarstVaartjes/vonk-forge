@@ -18,13 +18,13 @@ from typing import Literal
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .auth import Actor
+from .auth import ADMIN_ROLE, Actor
 from .models import LoginSession, User
 from .passwords import hash_password, verify_password
 from .user_authority import serialize_user_authority
 
 _ADMIN_SUBJECT = "admin"
-_ADMIN_ROLE = "administrator"
+_ADMIN_ROLE = ADMIN_ROLE
 _SESSION_LIFETIME = timedelta(hours=12)
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _EXPIRED_CLEANUP_LIMIT = 100
@@ -245,7 +245,7 @@ class BrowserAuthService:
                     or user.password_verifier is None
                     or not verify_password(user.password_verifier, password).valid
                 )
-                if authenticated:
+                if authenticated and user is not None:
                     token = self._opaque_token()
                     csrf = self._opaque_token()
                     expires_at = now + _SESSION_LIFETIME

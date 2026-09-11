@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import TYPE_CHECKING, BinaryIO, Protocol, runtime_checkable
+from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.source_bundles import (
@@ -88,7 +88,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
 
 
 def inspect_source_bundle(
-    payload: BinaryIO, limits: BundleLimits | None = None
+    payload: IO[bytes], limits: BundleLimits | None = None
 ) -> SourceBundleManifest:
     active = limits or BundleLimits()
     return _inspect_archive(_read_archive(payload, active), active)
@@ -99,7 +99,7 @@ class SourceBundleStore:
         self._root = root.resolve()
         self._limits = limits or BundleLimits()
 
-    def put(self, expected_sha256: str, payload: BinaryIO) -> StoredBundle:
+    def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
         if (
             len(expected_sha256) != 64
             or expected_sha256.lower() != expected_sha256
@@ -178,7 +178,7 @@ class SourceBundleStoreProtocol(Protocol):
     other.
     """
 
-    def put(self, expected_sha256: str, payload: BinaryIO) -> StoredBundle: ...
+    def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle: ...
 
     def get(self, sha256: str) -> GeneratedSourceBundle: ...
 
@@ -195,7 +195,7 @@ class DatabaseSourceBundleStore:
         self._sessions = sessions
         self._limits = limits or BundleLimits()
 
-    def put(self, expected_sha256: str, payload: BinaryIO) -> StoredBundle:
+    def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
         _validate_digest(expected_sha256, "bundle.digest_invalid")
         archive = _read_archive(payload, self._limits)
         manifest = _inspect_archive(archive, self._limits)
@@ -288,7 +288,7 @@ def _generated_bundle(
     return GeneratedSourceBundle(MappingProxyType(files), archive, manifest)
 
 
-def _read_archive(payload: BinaryIO, limits: BundleLimits) -> bytes:
+def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
     archive = payload.read(limits.max_archive_bytes + 1)
     if not isinstance(archive, bytes):
         raise SourceBundleError("bundle.read_failed", "source bundle is not binary")
