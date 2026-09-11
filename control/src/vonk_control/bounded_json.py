@@ -65,3 +65,25 @@ def require_mapping(value: object, detail: str) -> Mapping[str, object]:
     if result is None:
         raise BoundedJSONError(detail)
     return result
+
+
+def require_sequence(value: object, detail: str) -> Sequence[object]:
+    """Return *value* as a JSON array or raise :class:`BoundedJSONError`."""
+
+    result = sequence(value)
+    if result is None:
+        raise BoundedJSONError(detail)
+    return result
+
+
+def require_integer(value: object, detail: str) -> int:
+    """Return *value* as an integer or raise :class:`BoundedJSONError`.
+
+    Use this instead of a default whenever the value is persisted contract
+    data: malformed state must fail loudly rather than become a default.
+    """
+
+    result = integer(value)
+    if result is None:
+        raise BoundedJSONError(detail)
+    return result

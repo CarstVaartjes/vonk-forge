@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .bounded_json import require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
@@ -4179,7 +4180,7 @@ class RunSwitchOperationService:
                     else None
                 )
                 if isinstance(child_receipts, list):
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.extend(
                         _phase_result(receipt, phase=phase)
                         for receipt in child_receipts
@@ -4199,7 +4200,7 @@ class RunSwitchOperationService:
                         job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     if not any(
                         isinstance(item, Mapping)
                         and item.get("build_id") == receipt["build_id"]
@@ -4230,7 +4231,7 @@ class RunSwitchOperationService:
                 item_total = len(persisted_plan.stops) if phase.kind == "stop" else 1
                 progress["child_operation_id"] = None
                 if item_index >= item_total:
-                    completed = list(progress.get("completed_phases", []))
+                    completed = list(require_sequence(progress.get("completed_phases", []), "completed phases"))
                     completed.append(phase.kind)
                     progress["completed_phases"] = completed
                     _complete_phase_progress(progress, persisted_plan, phase)
@@ -4379,7 +4380,7 @@ class RunSwitchOperationService:
                     # Repeated polling must not grow durable phase receipts.
                     progress["final_observation"] = _phase_result(execution.result or {}, phase=phase)
                 elif execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             elif execution.operation_id is not None:
@@ -4387,12 +4388,12 @@ class RunSwitchOperationService:
                 progress["phase"] = phase.kind
                 progress["subphase"] = phase.subphase
                 if execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             else:
                 if execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
                 if phase.subphase == "container-build":
@@ -4405,7 +4406,7 @@ class RunSwitchOperationService:
                         job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     if not any(
                         isinstance(item, Mapping)
                         and item.get("build_id") == receipt["build_id"]
@@ -4414,7 +4415,7 @@ class RunSwitchOperationService:
                     ):
                         results.append(_phase_result(receipt, phase=phase))
                         progress["phase_results"] = results
-                completed = list(progress.get("completed_phases", []))
+                completed = list(require_sequence(progress.get("completed_phases", []), "completed phases"))
                 completed.append(phase.kind)
                 progress["completed_phases"] = completed
                 _complete_phase_progress(progress, plan, phase)
