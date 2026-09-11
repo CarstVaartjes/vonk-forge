@@ -31,6 +31,7 @@ reference and will fail if only the lock changes.
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
 | `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG PYTHON_IMAGE`) |
 | `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
+| _(no lock key — developer lane)_ | `ubuntu` | `scripts/dev-agent-wire-linux.Dockerfile` (`FROM`, pinned by index digest) |
 
 `build_bases.litellm` and `build_bases.hermes` are the upstream bases of the
 patched `vonk-forge-litellm` and `vonk-forge-hermes` release images; see

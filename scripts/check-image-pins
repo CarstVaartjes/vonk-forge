@@ -41,6 +41,17 @@ SCAN_PATHS = (
     "deploy/compose/hermes-agent/Dockerfile",
     "deploy/compose/litellm/Dockerfile",
     "scripts/verify-controller-skopeo",
+    "scripts/dev-agent-wire-linux.Dockerfile",
+)
+
+# Pinned on purpose without a lock entry. The lock inventories deployment and
+# build inputs; this one is the base of the developer wire-contract lane, so it
+# has no lock key and would otherwise be reported as unlisted forever. Listing
+# it here keeps that finding meaningful for a genuinely forgotten reference.
+INTENTIONALLY_LOCKLESS = frozenset(
+    {
+        "ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254",
+    }
 )
 
 PIN = re.compile(
@@ -166,6 +177,8 @@ def audit(root: Path, timeout: float) -> dict[str, object]:
             entry["pinned_digest"] = pinned_digest or ""
 
     for reference, location in sorted(used.items()):
+        if reference in INTENTIONALLY_LOCKLESS:
+            continue
         if reference not in inventory:
             findings.append(
                 {
