@@ -1163,3 +1163,94 @@ def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) 
         assert aggregate.bytes_per_second == 30.0
         assert aggregate.eta_seconds == 9.0
         assert len(aggregate.members) == 2
+
+
+def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> None:
+    """A present but unreadable decoration must not be reported as absent.
+
+    The projections used to swallow a validation failure into ``None``, which
+    the operation detail then surfaced as an omitted field.
+    """
+
+    identifier = "11111111-1111-4111-8111-111111111111"
+
+    assert operation_api._provenance_projection(None, identifier) is None
+    assert operation_api._provenance_projection({}, identifier) is None
+    assert (
+        operation_api._provenance_projection({"provenance": None}, identifier)
+        is None
+    )
+    with pytest.raises(
+        BoundedJSONError, match="provenance for operation .* is invalid"
+    ):
+        operation_api._provenance_projection(
+            {"provenance": {"source": 7}}, identifier
+        )
+    with pytest.raises(
+        BoundedJSONError, match="provenance for operation .* is invalid"
+    ):
+        operation_api._provenance_projection(
+            {"provenance": ["not", "an", "object"]}, identifier
+        )
+
+    assert operation_api._evidence_download_projection(None, identifier) is None
+    assert operation_api._evidence_download_projection({}, identifier) is None
+    assert (
+        operation_api._evidence_download_projection(
+            {"evidence_download": None}, identifier
+        )
+        is None
+    )
+    with pytest.raises(
+        BoundedJSONError, match="evidence download for operation .* is invalid"
+    ):
+        operation_api._evidence_download_projection(
+            {"evidence_download": {"media_type": "application/json"}}, identifier
+        )
+
+
+def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None:
+    """The operation detail route must not answer a corrupt decoration with 200.
+
+    The route declares 503, so a stored provenance document that no longer
+    validates is reported there instead of escaping as an undeclared 500.
+    """
+
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    value: dict[str, object] = {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "attempt": 1,
+        "kind": "node.probe",
+        "node_ids": [NODE_ID],
+        "state": "succeeded",
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+        "result": {"provenance": {"source": 7}},
+    }
+
+    def unavailable(*_args: object) -> NoReturn:
+        raise AssertionError("not used")
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=unavailable,
+        resume_job=lambda _job_id: None,
+        # The list route decorates each item, so it reaches the same corrupt
+        # document through the projection rather than through a failing call.
+        list_operations=lambda *_args: OperationListPage((value,), None, 1),
+        get_operation=lambda _operation_id: value,
+    )
+    client, operator, *_ = _client(operations=services)
+
+    detail = client.get(f"/api/operations/{value['id']}", headers=operator)
+    assert detail.status_code == 503
+    assert detail.json()["detail"] == (
+        f"stored provenance for operation {value['id']} is invalid"
+    )
+
+    listed = client.get("/api/operations", headers=operator)
+    assert listed.status_code == 503
+    assert listed.json()["detail"] == (
+        f"stored provenance for operation {value['id']} is invalid"
+    )

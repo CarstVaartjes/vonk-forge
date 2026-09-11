@@ -195,12 +195,21 @@ class FleetProfileConflict(RuntimeError):
 def _operation_state(
     value: object, *, default: FleetProfileOperationState
 ) -> FleetProfileOperationState:
-    """Read one child operation state, keeping the caller's deliberate default."""
+    """Read one stored child operation state, keeping absence distinct.
 
+    ``None`` is genuinely absent, so the caller's deliberate default stands.
+    Any other value is a stored state that must satisfy the closed contract;
+    inventing a state for a malformed one would hide corruption.
+    """
+
+    if value is None:
+        return default
     try:
         return _OPERATION_STATE_ADAPTER.validate_python(value, strict=True)
-    except ValidationError:
-        return default
+    except ValidationError as error:
+        raise FleetProfileConflict(
+            "persisted profile child operation state is invalid"
+        ) from error
 
 
 def _string_items(value: object, detail: str) -> list[str]:
@@ -2634,6 +2643,11 @@ class FleetProfileService:
 
     @staticmethod
     def _model_title(session: Session, document: Mapping[str, object]) -> str | None:
+        # Both call paths validate the same persisted recipe document through
+        # ``recipe_topology`` before this projection runs, so a corrupt
+        # document already raises there. The only resolution failure reachable
+        # here is a referenced model revision that is not currently active,
+        # for which a missing display title is deliberate.
         try:
             models = resolve_recipe_entities(session, document).get("models")
         except (KeyError, RuntimeError, TypeError, ValueError):

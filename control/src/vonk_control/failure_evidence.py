@@ -444,7 +444,11 @@ class FailureEvidenceService:
                 _required_text(item["id"], "operation id"),
                 require_integer(item["attempt"], "operation attempt"),
             )
-        except (KeyError, ValueError, OSError):
+        except KeyError:
+            # No retained evidence for this attempt; omission stays correct.
+            # A record that exists but no longer validates raises out of
+            # ``read`` and must not be reported as absent, matching the
+            # standalone /evidence route's validation failure.
             return dict(item)
         result["evidence_download"] = OperationEvidenceDownload(
             media_type="application/json",
