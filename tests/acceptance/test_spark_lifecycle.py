@@ -2418,31 +2418,32 @@ class SparkLifecycle:
                 # The Controller's own view separates a job that was never
                 # handed to the Spark from a transfer that is running there: a
                 # queued job is a dispatch stall, a running one is not.
+                # Ask the Controller about the stalled child. Each call is
+                # reported separately with its own failure text: a probe that
+                # discards the status tells us nothing, and one failing call
+                # must not hide the answer from the other.
                 job_detail = "unavailable"
                 if self.control is not None:
+                    parts: list[str] = []
                     try:
                         _, listed = self.control.request(
                             "GET", "/api/jobs", query={"target": node_id, "limit": 5}
                         )
                         rows = require_object(listed, "stalled job list").get("jobs")
-                        summary: list[str] = []
                         if isinstance(rows, list):
                             for row in rows:
                                 job = require_object(row, "stalled job")
-                                # The agent's own progress names the phase it
-                                # believes it is in, which separates "waiting
-                                # for the Controller" from "copying slowly".
-                                reported = json.dumps(
-                                    job.get("progress"), sort_keys=True
-                                )[:200]
-                                summary.append(
+                                parts.append(
                                     f"{job.get('id')} {job.get('kind')}"
-                                    f"={job.get('state')} progress={reported}"
+                                    f"={job.get('state')}"
+                                    f" progress={json.dumps(job.get('progress'), sort_keys=True)[:160]}"
                                 )
-                        job_detail = " | ".join(summary) or "none"
-                        # The agent operation is the claim that matters: a
-                        # queued one means the Spark never took the work, a
-                        # running one means it did and is not reporting.
+                    except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
+                        parts.append(
+                            "jobs unavailable: "
+                            + self._redact_diagnostics(str(error), limit=200)
+                        )
+                    try:
                         _, node_operations = self.control.request(
                             "GET",
                             "/api/operations",
@@ -2452,19 +2453,20 @@ class SparkLifecycle:
                             node_operations, "stalled operation list"
                         ).get("operations")
                         if isinstance(operations, list):
-                            detail_rows: list[str] = []
                             for item in operations:
-                                op = require_object(item, "stalled operation")
-                                reported = json.dumps(
-                                    op.get("progress"), sort_keys=True
-                                )[:160]
-                                detail_rows.append(
-                                    f"{op.get('kind')}={op.get('state')}"
-                                    f"/{op.get('attempt')} {reported}"
+                                operation = require_object(item, "stalled operation")
+                                parts.append(
+                                    f"op {operation.get('kind')}"
+                                    f"={operation.get('state')}"
+                                    f"/{operation.get('attempt')}"
+                                    f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
                                 )
-                            job_detail += " || " + " | ".join(detail_rows)
                     except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
-                        job_detail = f"unavailable: {type(error).__name__}"
+                        parts.append(
+                            "operations unavailable: "
+                            + self._redact_diagnostics(str(error), limit=200)
+                        )
+                    job_detail = " | ".join(parts) or "none"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "
