@@ -6,6 +6,7 @@ import io
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from dataclasses import replace
 from importlib import resources
 from pathlib import Path
@@ -82,7 +83,9 @@ def _current_image_job_detail() -> dict[str, object]:
         .joinpath("examples", "recipe-job.json")
         .read_text(encoding="utf-8")
     )
-    return _library_detail(recipe)["detail"]
+    detail = _library_detail(recipe)["detail"]
+    assert isinstance(detail, dict)
+    return detail
 
 
 def test_glb_fixture_validation_rejects_header_only_transport_stub() -> None:
@@ -298,20 +301,18 @@ def test_registry_fails_closed_for_missing_changed_and_special_fixtures() -> Non
 
     recipe, blocker = registry.resolve("vonk-forge/image", "a" * 64, "image-job")
     assert recipe is not None and blocker is None
-    assert (
-        registry.resolve("vonk-forge/image", "c" * 64, "image-job")[1]["code"]
-        == "fixture.recipe_digest_mismatch"
-    )
-    assert (
-        registry.resolve("vonk-forge/missing", "a" * 64, "image-job")[1]["code"]
-        == "fixture.missing"
-    )
+    _recipe, digest_blocker = registry.resolve("vonk-forge/image", "c" * 64, "image-job")
+    assert digest_blocker is not None
+    assert digest_blocker["code"] == "fixture.recipe_digest_mismatch"
+    _recipe, missing_blocker = registry.resolve("vonk-forge/missing", "a" * 64, "image-job")
+    assert missing_blocker is not None
+    assert missing_blocker["code"] == "fixture.missing"
 
 
 class _DownloadClient:
     def download_file(
         self,
-        _path: str,
+        path: str,
         destination: Path,
         *,
         media_type: str,
@@ -319,6 +320,7 @@ class _DownloadClient:
         expected_size: int,
         overwrite: bool,
     ) -> dict[str, object]:
+        del path
         assert media_type in {"application/octet-stream", "image/png"}
         assert expected_sha256 == hashlib.sha256(PNG).hexdigest()
         assert expected_size == len(PNG)
@@ -345,7 +347,9 @@ def test_output_assertions_download_and_validate_exact_artifacts() -> None:
 
     evidence = validate_outputs(recipe, result, _DownloadClient())
 
-    assert evidence["output_files"][0]["sha256"] == digest
+    output_files = evidence["output_files"]
+    assert isinstance(output_files, list)
+    assert output_files[0]["sha256"] == digest
     assert evidence["output_manifest_sha256"] == "c" * 64
 
 
@@ -381,15 +385,16 @@ class _ArtifactClient(_DownloadClient):
         self,
         method: str,
         path: str,
-        payload: object = None,
+        payload: Mapping[str, object] | None = None,
         *,
-        extra_headers: object = None,
-        query: object = None,
+        extra_headers: Mapping[str, str] | None = None,
+        query: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append((method, path))
         if path == "/api/artifact-jobs/capabilities":
             return {"schema_version": 1, "transport": {}, "storage": {}}
         if path.endswith("/artifact-jobs"):
+            assert isinstance(extra_headers, Mapping)
             assert extra_headers == {"X-Request-ID": extra_headers["X-Request-ID"]}
             self.request_ids.append(extra_headers["X-Request-ID"])
             self.created += 1
@@ -515,8 +520,10 @@ def test_artifact_adapter_runs_each_digest_bound_case_with_distinct_evidence(
     )
 
     assert result["case_count"] == 2
-    assert [case["case_id"] for case in result["cases"]] == ["default", "alternate"]
-    assert [case["job_id"] for case in result["cases"]] == ["job-1", "job-2"]
+    cases = result["cases"]
+    assert isinstance(cases, list)
+    assert [case["case_id"] for case in cases] == ["default", "alternate"]
+    assert [case["job_id"] for case in cases] == ["job-1", "job-2"]
     assert len(set(client.request_ids)) == 2
     events = {row["event"] for row in ledger.records}
     assert "artifact-job.case.default.completed" in events

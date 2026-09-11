@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import uuid
@@ -11,6 +12,16 @@ import pytest
 from cluster_profiles import cli
 from cluster_profiles.cli_select import SelectorError, select_exact
 from cluster_profiles.controller_cli import _operation_progress_line
+
+
+def _subparser_choices(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+    """Return the parser's subcommands through the argparse group it created."""
+
+    group = parser._subparsers
+    assert group is not None, "parser has no subcommands"
+    action = group._group_actions[0]
+    assert isinstance(action, argparse._SubParsersAction), "parser subcommands are unavailable"
+    return action.choices
 
 
 class FakeClient:
@@ -145,7 +156,7 @@ def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, objec
 
 def test_parser_exposes_only_current_singular_operator_roots() -> None:
     parser = cli._parser()
-    assert set(parser._subparsers._group_actions[0].choices) == {
+    assert set(_subparser_choices(parser)) == {
         "fleet",
         "model",
         "recipe",
@@ -168,8 +179,8 @@ def test_parser_exposes_only_current_singular_operator_roots() -> None:
 
 def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> None:
     parser = cli._parser()
-    fleet = parser._subparsers._group_actions[0].choices["fleet"]
-    loginfo = fleet._subparsers._group_actions[0].choices["loginfo"]
+    fleet = _subparser_choices(parser)["fleet"]
+    loginfo = _subparser_choices(fleet)["loginfo"]
 
     for accepted in ("1", "1000"):
         assert loginfo.parse_args(["Atlas", "--lines", accepted]).lines == int(accepted)
@@ -268,7 +279,9 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
         }
     )
     status, payload = run(("model", "detail", "qwen", "--technical", "--json"), detail)
-    assert status == 0 and payload["technical"]["artifact_set_sha256"] == "digest"
+    technical = payload["technical"]
+    assert isinstance(technical, dict)
+    assert status == 0 and technical["artifact_set_sha256"] == "digest"
     assert detail.calls[0][3] == {"technical": True}
     output = StringIO()
     with redirect_stdout(output):
@@ -303,7 +316,9 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         ("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client
     )[0] == 0
     assert client.calls[1][1] == "/api/recipe/vision/remove"
-    assert client.calls[1][2]["with_model"] is True
+    recipe_remove = client.calls[1][2]
+    assert recipe_remove is not None
+    assert recipe_remove["with_model"] is True
 
 
 def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> None:
@@ -433,7 +448,9 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     )
 
     assert status == 2
-    assert "ambiguous spark selector" in payload["error"]
+    ambiguous_error = payload["error"]
+    assert isinstance(ambiguous_error, str)
+    assert "ambiguous spark selector" in ambiguous_error
     assert [call[1] for call in client.calls] == ["/api/profile/1", "/api/fleet"]
 
 
@@ -469,7 +486,9 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
 
     assert status == 0
     assert payload["revision"] == 4
-    assert client.calls[-1][2]["assignments"] == []
+    profile_write = client.calls[-1][2]
+    assert profile_write is not None
+    assert profile_write["assignments"] == []
 
 
 def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
@@ -577,7 +596,9 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
         client,
     )
     assert status == 0
-    assert client.calls[0][2]["request_key"] == "22222222-2222-4222-8222-222222222222"
+    download_request = client.calls[0][2]
+    assert download_request is not None
+    assert download_request["request_key"] == "22222222-2222-4222-8222-222222222222"
 
 
 def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
@@ -618,7 +639,9 @@ def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
     client = AmbiguousClient({})
     status, payload = run(("model", "download", "qwen", "--json"), client)
     assert status == 2
-    assert "ambiguous model selector" in payload["error"]
+    ambiguous_model_error = payload["error"]
+    assert isinstance(ambiguous_model_error, str)
+    assert "ambiguous model selector" in ambiguous_model_error
     assert len(client.calls) == 1
 
 
@@ -782,14 +805,18 @@ def test_watch_repaints_detail_and_stops_on_terminal_snapshot() -> None:
 def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
     model = FakeClient({})
     status, payload = run(("model", "remove", "qwen", "--json"), model)
-    assert status == 2 and "requires --yes" in payload["error"]
+    removal_error = payload["error"]
+    assert isinstance(removal_error, str)
+    assert status == 2 and "requires --yes" in removal_error
     assert model.calls == []
 
     recipe = FakeClient({})
     status, payload = run(
         ("recipe", "remove", "qwen-code", "--yes", "--json"), recipe
     )
-    assert status == 2 and "--with-model or --keep-model" in payload["error"]
+    model_choice_error = payload["error"]
+    assert isinstance(model_choice_error, str)
+    assert status == 2 and "--with-model or --keep-model" in model_choice_error
     assert recipe.calls == []
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import http.client
 import io
@@ -20,7 +21,7 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple, Protocol, Self
 
@@ -182,7 +183,7 @@ def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
         raise LifecycleError("retired agent private key is invalid")
     try:
         der = base64.b64decode(b"".join(lines[1:-1]), validate=True)
-    except (ValueError, base64.binascii.Error) as error:
+    except (ValueError, binascii.Error) as error:
         raise LifecycleError("retired agent private key is invalid") from error
     if (
         len(der) != 83
@@ -375,8 +376,12 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
                 or recipe_member.size > 12 * 1024 * 1024
             ):
                 raise tarfile.TarError("canonical package entrypoint is not a file")
-            manifest = json.loads(archive.extractfile(manifest_member).read())
-            packaged_recipe = json.loads(archive.extractfile(recipe_member).read())
+            manifest_stream = archive.extractfile(manifest_member)
+            recipe_stream = archive.extractfile(recipe_member)
+            if manifest_stream is None or recipe_stream is None:
+                raise tarfile.TarError("canonical package entrypoint is not a file")
+            manifest = json.loads(manifest_stream.read())
+            packaged_recipe = json.loads(recipe_stream.read())
     except (KeyError, OSError, tarfile.TarError, AttributeError, json.JSONDecodeError) as error:
         raise LifecycleError("canonical synthetic canary package closure is invalid") from error
     if (
@@ -470,7 +475,12 @@ def _configure_acceptance_renewal(
     ca_path = bundle / "secrets/step-ca/ca.json"
     ca = _read_document(ca_path, "Step CA configuration")
     try:
-        provisioners = ca["authority"]["provisioners"]
+        authority = ca["authority"]
+        if not isinstance(authority, dict):
+            raise TypeError("Step CA authority configuration is invalid")
+        provisioners = authority["provisioners"]
+        if not isinstance(provisioners, list):
+            raise TypeError("Step CA provisioners are invalid")
         provisioner = next(
             value for value in provisioners if value.get("name") == "vonk-forge-agent"
         )
@@ -937,7 +947,7 @@ class SparkLifecycle:
 
     def _run_command(
         self,
-        command: list[str],
+        command: Sequence[str | Path],
         *,
         cwd: Path,
         timeout: int = 300,
@@ -1853,6 +1863,7 @@ class SparkLifecycle:
         if (
             not isinstance(grant_id, str)
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
+            or not isinstance(enrollment, str)
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
             or grant.get("controller_address") != CONTROLLER_ADDRESS
@@ -2214,6 +2225,9 @@ class SparkLifecycle:
             self._await_canary_endpoint(fixture.slug, published=False)
             completed.append("route-withdrawn")
             fleet = self._fleet_snapshot()
+            fleet_nodes = fleet.get("nodes", [])
+            if not isinstance(fleet_nodes, list):
+                fleet_nodes = []
             if any(
                 isinstance(node, dict)
                 and any(
@@ -2221,8 +2235,7 @@ class SparkLifecycle:
                     for run in node.get("loaded", [])
                     if isinstance(node.get("loaded"), list)
                 )
-                for node in fleet.get("nodes", [])
-                if isinstance(fleet.get("nodes"), list)
+                for node in fleet_nodes
             ):
                 raise LifecycleError("synthetic canary route cleanup left a loaded run")
             completed.append("uninstalled")
@@ -2479,14 +2492,16 @@ class SparkLifecycle:
             except (SliceError, LifecycleError):
                 fleet = None
             runs: list[dict[str, object]] = []
-            if isinstance(fleet, dict) and isinstance(fleet.get("nodes"), list):
-                for node in fleet["nodes"]:
-                    if not isinstance(node, dict) or not isinstance(node.get("loaded"), list):
-                        continue
-                    runs.extend(
-                        run for run in node["loaded"]
-                        if isinstance(run, dict) and run.get("alias") == alias
-                    )
+            if isinstance(fleet, dict):
+                fleet_nodes = fleet.get("nodes")
+                if isinstance(fleet_nodes, list):
+                    for node in fleet_nodes:
+                        if not isinstance(node, dict) or not isinstance(node.get("loaded"), list):
+                            continue
+                        runs.extend(
+                            run for run in node["loaded"]
+                            if isinstance(run, dict) and run.get("alias") == alias
+                        )
             if published and any(
                 run.get("route_state") == "published" and run.get("healthy") is True
                 for run in runs
@@ -2815,6 +2830,8 @@ class SparkLifecycle:
                     )
                 _, response = self.control.request("GET", "/api/fleet")
                 nodes = require_object(response, "Fleet snapshot").get("nodes")
+                if not isinstance(nodes, list):
+                    nodes = []
                 matching = [
                     node
                     for node in nodes

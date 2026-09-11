@@ -385,6 +385,8 @@ def https_over_command(
     )
     assert process.stdin is not None
     assert process.stdout is not None
+    stdin = process.stdin
+    stdout = process.stdout
     incoming = ssl.MemoryBIO()
     outgoing = ssl.MemoryBIO()
     context = ssl.create_default_context(cafile=os.fspath(ca_file) if ca_file else None)
@@ -395,19 +397,19 @@ def https_over_command(
 
     def flush_tls() -> None:
         while data := outgoing.read():
-            write_all(process.stdin.write, data)
-            process.stdin.flush()
+            write_all(stdin.write, data)
+            stdin.flush()
 
     def receive_tls() -> None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise AcceptanceError("HTTPS tunnel timed out")
-        readable, _, _ = select.select([process.stdout], [], [], remaining)
+        readable, _, _ = select.select([stdout], [], [], remaining)
         if not readable:
             if process.poll() is not None:
                 raise AcceptanceError("HTTPS tunnel exited before completing TLS")
             raise AcceptanceError("HTTPS tunnel timed out")
-        data = os.read(process.stdout.fileno(), 64 * 1024)
+        data = os.read(stdout.fileno(), 64 * 1024)
         if data:
             incoming.write(data)
         else:

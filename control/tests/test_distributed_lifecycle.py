@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TypedDict
 
 import pytest
 from vonk_control.distributed_lifecycle import (
@@ -8,6 +9,12 @@ from vonk_control.distributed_lifecycle import (
     canonical_distributed_readiness,
     recover_distributed_runtime,
 )
+
+
+class _Authority(TypedDict):
+    lifecycle: dict[str, object]
+    topology: dict[str, object]
+    interfaces: list[dict[str, object]]
 
 
 def _policy() -> dict[str, object]:
@@ -34,7 +41,7 @@ def _interfaces() -> list[dict[str, object]]:
     return [{"adapter": "openai", "health_path": "/v1/models"}]
 
 
-def _authority() -> dict[str, object]:
+def _authority() -> _Authority:
     return {
         "lifecycle": _policy(),
         "topology": _topology(),
@@ -176,7 +183,7 @@ def test_recovery_refuses_unbound_lifecycle_metadata(
     mutation: Callable[[dict[str, object]], None], message: str
 ) -> None:
     authority = _authority()
-    mutation(authority)
+    mutation(dict(authority))
 
     with pytest.raises(DistributedLifecycleError, match=message):
         recover_distributed_runtime(
