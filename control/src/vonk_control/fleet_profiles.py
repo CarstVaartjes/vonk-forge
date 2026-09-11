@@ -7,7 +7,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, select
@@ -89,6 +89,9 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
+
+if TYPE_CHECKING:
+    from .operation_api import OperationProviderProtocol
 
 _STORED_ASSIGNMENTS = TypeAdapter(
     list[FleetProfileAssignmentInput], config=ConfigDict(strict=True)
@@ -1988,7 +1991,7 @@ class FleetProfileService:
                                        operation_kind=operation_kind,
                                        retry_of_application_id=application_id)
 
-    def operation_provider(self) -> object:
+    def operation_provider(self) -> OperationProviderProtocol:
         """Project profile applications into the global Activity provider contract."""
 
         # Keep this import local so the profile domain remains usable by the

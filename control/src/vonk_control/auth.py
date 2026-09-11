@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from starlette.responses import Response
+from starlette.types import Scope
 
 _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -157,7 +158,7 @@ class TrustedProxyAgentIdentityMiddleware:
         self._agent_identity_validator = agent_identity_validator
         self._activation_identity_validator = activation_identity_validator
 
-    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+    async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return

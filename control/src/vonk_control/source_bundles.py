@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, BinaryIO, Protocol, runtime_checkable
 
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.source_bundles import (
@@ -165,6 +165,22 @@ class SourceBundleStore:
                 "bundle.storage_collision", "stored source bundle is inconsistent"
             )
         return _generated_bundle(archive, manifest, self._limits)
+
+
+@runtime_checkable
+class SourceBundleStoreProtocol(Protocol):
+    """Structural surface shared by the file and database bundle stores.
+
+    Both :class:`SourceBundleStore` and :class:`DatabaseSourceBundleStore` back
+    the same content-addressed contract, and every consumer calls only ``put``
+    and ``get``.  Annotating consumers with this protocol keeps the two
+    implementations interchangeable without pretending one is a subclass of the
+    other.
+    """
+
+    def put(self, expected_sha256: str, payload: BinaryIO) -> StoredBundle: ...
+
+    def get(self, sha256: str) -> GeneratedSourceBundle: ...
 
 
 class DatabaseSourceBundleStore:

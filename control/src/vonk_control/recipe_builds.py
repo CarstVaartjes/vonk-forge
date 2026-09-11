@@ -44,7 +44,7 @@ from .recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from .source_bundles import SourceBundleError, SourceBundleStore
+from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .source_policy import (
     SourcePolicyError,
     SourcePolicyReport,
@@ -376,7 +376,7 @@ class RecipeBuildService:
         self,
         sessions: sessionmaker[Session],
         *,
-        bundles: SourceBundleStore,
+        bundles: SourceBundleStoreProtocol,
         inventory_max_age: int = 300,
     ) -> None:
         self._sessions = sessions

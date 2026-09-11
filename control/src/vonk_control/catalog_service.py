@@ -39,7 +39,7 @@ from .models import (
 from .schema_resources import read_runtime_schema
 from .source_bundles import (
     SourceBundleError,
-    SourceBundleStore,
+    SourceBundleStoreProtocol,
     parse_source_bundle_manifest,
 )
 
@@ -102,7 +102,7 @@ class CatalogService:
         clock: Callable[[], datetime],
         cursors: CursorCodec,
         repository: object | None = None,
-        source_bundles: SourceBundleStore | None = None,
+        source_bundles: SourceBundleStoreProtocol | None = None,
     ) -> None:
         del repository
         self._sessions = sessions
