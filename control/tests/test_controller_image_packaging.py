@@ -6,21 +6,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "control/Dockerfile"
 
-SKOPEO_INDEX = "sha256:545723edab7793112a5c8fc36963f5cad43c6f27c0bda63c5fbc8b5d4d336036"
-SKOPEO_AMD64 = "sha256:ab6d8bc7b5985581d69d143e7e57606bcee6796757b9147bcc37f1df6b73d820"
-SKOPEO_ARM64 = "sha256:2dada7d8c2bf3cb87677da0ca57eba620394eaa4a0827f6b21cffeedbf3a68ea"
+SKOPEO_IMAGE = (
+    "quay.io/skopeo/stable:v1.22.2-immutable@sha256:"
+    "4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810"
+)
+SKOPEO_INDEX = "sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810"
+SKOPEO_AMD64 = "sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362"
+SKOPEO_ARM64 = "sha256:807f42a95c0f05f397eb505b577b6de49048b865c4e29146d1231324c27e1e59"
 
 
 def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert f"ARG SKOPEO_IMAGE=quay.io/skopeo/stable@{SKOPEO_INDEX}" in dockerfile
+    assert f"ARG SKOPEO_IMAGE={SKOPEO_IMAGE}" in dockerfile
     assert f"ARG SKOPEO_INDEX_DIGEST={SKOPEO_INDEX}" in dockerfile
     assert f"ARG SKOPEO_AMD64_DIGEST={SKOPEO_AMD64}" in dockerfile
     assert f"ARG SKOPEO_ARM64_DIGEST={SKOPEO_ARM64}" in dockerfile
     assert "FROM ${SKOPEO_IMAGE} AS skopeo" in dockerfile
     assert "ARG TARGETARCH" in dockerfile
     assert "skopeo inspect --tls-verify=true --raw" in dockerfile
+    # skopeo rejects a reference carrying both a tag and a digest, so the
+    # in-image resolution check must use the bare repository and index digest.
+    assert "docker://quay.io/skopeo/stable@${SKOPEO_INDEX_DIGEST}" in dockerfile
+    # The pinned skopeo image ships /etc/ssl/certs as a symlink, which COPY
+    # cannot place over the Python base's directory.
+    assert "rm -rf /etc/ssl/certs" in dockerfile
     assert "architecture" in dockerfile
     assert '"$TARGETARCH"' in dockerfile
     assert "expected_child=\"$SKOPEO_ARM64_DIGEST\"" in dockerfile

@@ -1,16 +1,19 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
-ARG SKOPEO_IMAGE=quay.io/skopeo/stable@sha256:545723edab7793112a5c8fc36963f5cad43c6f27c0bda63c5fbc8b5d4d336036
-ARG SKOPEO_INDEX_DIGEST=sha256:545723edab7793112a5c8fc36963f5cad43c6f27c0bda63c5fbc8b5d4d336036
-ARG SKOPEO_AMD64_DIGEST=sha256:ab6d8bc7b5985581d69d143e7e57606bcee6796757b9147bcc37f1df6b73d820
-ARG SKOPEO_ARM64_DIGEST=sha256:2dada7d8c2bf3cb87677da0ca57eba620394eaa4a0827f6b21cffeedbf3a68ea
+ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.2-immutable@sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
+ARG SKOPEO_INDEX_DIGEST=sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
+ARG SKOPEO_AMD64_DIGEST=sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362
+ARG SKOPEO_ARM64_DIGEST=sha256:807f42a95c0f05f397eb505b577b6de49048b865c4e29146d1231324c27e1e59
 
 FROM ${SKOPEO_IMAGE} AS skopeo
 ARG TARGETARCH
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
+# skopeo rejects a reference that carries both a tag and a digest, so this
+# resolution check uses the bare repository plus the index digest. The tag is
+# carried on the FROM above.
 RUN test -x /usr/bin/skopeo \
     && /usr/bin/skopeo --version \
     && test -f /etc/containers/policy.json \
@@ -101,11 +104,15 @@ ARG VONK_SOURCE_COMMIT
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
+# The pinned skopeo image ships /etc/ssl/certs as a symlink into /etc/pki/tls,
+# while the Python base has a real directory there; COPY cannot replace a
+# directory with a symlink, so drop the base directory before the copy below.
 RUN groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
-    && install -d -o 10001 -g 10001 -m 1777 /var/tmp
+    && install -d -o 10001 -g 10001 -m 1777 /var/tmp \
+    && rm -rf /etc/ssl/certs
 COPY --from=build /install /usr/local
 RUN if [ -n "$VONK_SOURCE_COMMIT" ]; then \
         install -d -m 0755 /usr/local/share/vonk-forge \
