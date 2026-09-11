@@ -2413,6 +2413,30 @@ class SparkLifecycle:
                         else child.phase
                     )
                     child_bytes = f"{child.bytes}/{child.total_bytes}"
+                # The Controller's own answer for the stalled child: whether
+                # the agent job was ever handed out separates a Controller-side
+                # dispatch stall from a transfer that is running on the Spark.
+                job_detail = "unavailable"
+                operation_id = typed.current_operation_id
+                if operation_id is not None and self.control is not None:
+                    try:
+                        _, stalled = self.control.request(
+                            "GET", f"/api/operations/{operation_id}"
+                        )
+                        job_id = require_object(stalled, "stalled operation").get(
+                            "parent_id"
+                        )
+                        if isinstance(job_id, str):
+                            _, job = self.control.request("GET", f"/api/jobs/{job_id}")
+                            job_object = require_object(job, "stalled job")
+                            job_detail = (
+                                f"{job_id} state={job_object.get('state')} "
+                                + json.dumps(
+                                    job_object.get("progress"), sort_keys=True
+                                )[:300]
+                            )
+                    except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
+                        job_detail = f"unavailable: {type(error).__name__}"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "
@@ -2420,6 +2444,7 @@ class SparkLifecycle:
                     f"label={progress.current_label or 'none'} "
                     f"operation={typed.current_operation_id or 'none'} "
                     f"child={child_detail} child_bytes={child_bytes} "
+                    f"agent_job={job_detail} "
                     f"reason={typed.status_reason or 'none'}"
                 )
             time.sleep(1)
