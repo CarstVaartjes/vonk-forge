@@ -72,6 +72,22 @@ def _index(value: object, length: int, name: str) -> int:
     return value
 
 
+def _finite_numbers(value: object) -> list[float] | None:
+    """Return a JSON number array's finite floats, or None if it is not one."""
+
+    if not isinstance(value, list):
+        return None
+    numbers: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        number = float(item)
+        if not math.isfinite(number):
+            return None
+        numbers.append(number)
+    return numbers
+
+
 @dataclass(frozen=True)
 class Accessor:
     blob: bytes
@@ -251,7 +267,11 @@ def _accessors(
         ):
             raise ValueError("GLB bufferView byteStride is invalid")
         target = view.get("target")
-        if target is not None and target not in {34962, 34963}:
+        if target is not None and (
+            isinstance(target, bool)
+            or not isinstance(target, int)
+            or target not in {34962, 34963}
+        ):
             raise ValueError("GLB bufferView target is invalid")
         views.append((start, length))
         strides.append(stride)
@@ -268,7 +288,13 @@ def _accessors(
         component_type = accessor.get("componentType")
         kind = accessor.get("type")
         count = accessor.get("count")
-        if component_type not in COMPONENT_TYPES or kind not in COMPONENTS:
+        if (
+            isinstance(component_type, bool)
+            or not isinstance(component_type, int)
+            or not isinstance(kind, str)
+            or component_type not in COMPONENT_TYPES
+            or kind not in COMPONENTS
+        ):
             raise ValueError("GLB accessor componentType or type is invalid")
         if accessor.get("normalized") is True and component_type not in {5120, 5121, 5122, 5123}:
             raise ValueError("GLB normalized accessor must use an 8-bit or 16-bit integer component")
@@ -277,8 +303,8 @@ def _accessors(
             or not 1 <= count <= MAX_ACCESSOR_COUNT
         ):
             raise ValueError("GLB accessor count is invalid")
-        component_size, fmt = COMPONENT_TYPES[int(component_type)]
-        component_count = COMPONENTS[str(kind)]
+        component_size, fmt = COMPONENT_TYPES[component_type]
+        component_count = COMPONENTS[kind]
         element_size = component_size * component_count
         offset = accessor.get("byteOffset", 0)
         if (
@@ -294,7 +320,7 @@ def _accessors(
             raise ValueError("GLB accessor exceeds its bufferView")
 
         result.append(Accessor(
-            blob, view_start + offset, stride, count, int(component_type), str(kind),
+            blob, view_start + offset, stride, count, component_type, kind,
             component_size, component_count, fmt, strides[view_index] is not None,
             _bound(accessor, component_count, "min"),
             _bound(accessor, component_count, "max"),
@@ -724,42 +750,44 @@ def _reachable_meshes(
                 )
             ):
                 raise ValueError(f"GLB node {field} transform is invalid")
-        if isinstance(node.get("rotation"), list) and not math.isclose(
-            sum(float(item) ** 2 for item in node["rotation"]),
+        rotation = _finite_numbers(node.get("rotation"))
+        if rotation is not None and not math.isclose(
+            sum(item ** 2 for item in rotation),
             1.0,
             rel_tol=1e-6,
             abs_tol=1e-6,
         ):
             raise ValueError("GLB node rotation quaternion is not normalized")
-        scale = node.get("scale")
-        if isinstance(scale, list) and any(abs(float(item)) <= 1e-12 for item in scale):
+        scale = _finite_numbers(node.get("scale"))
+        if scale is not None and any(abs(item) <= 1e-12 for item in scale):
             raise ValueError("GLB node scale collapses reachable geometry")
-        if isinstance(matrix, list):
+        matrix_values = _finite_numbers(matrix)
+        if matrix_values is not None:
             if (
-                any(abs(float(matrix[index])) > 1e-12 for index in (3, 7, 11))
-                or not math.isclose(float(matrix[15]), 1.0, abs_tol=1e-12)
+                any(abs(matrix_values[index]) > 1e-12 for index in (3, 7, 11))
+                or not math.isclose(matrix_values[15], 1.0, abs_tol=1e-12)
             ):
                 raise ValueError("GLB node matrix is not an affine transform")
             determinant = (
-                float(matrix[0]) * (
-                    float(matrix[5]) * float(matrix[10])
-                    - float(matrix[6]) * float(matrix[9])
+                matrix_values[0] * (
+                    matrix_values[5] * matrix_values[10]
+                    - matrix_values[6] * matrix_values[9]
                 )
-                - float(matrix[4]) * (
-                    float(matrix[1]) * float(matrix[10])
-                    - float(matrix[2]) * float(matrix[9])
+                - matrix_values[4] * (
+                    matrix_values[1] * matrix_values[10]
+                    - matrix_values[2] * matrix_values[9]
                 )
-                + float(matrix[8]) * (
-                    float(matrix[1]) * float(matrix[6])
-                    - float(matrix[2]) * float(matrix[5])
+                + matrix_values[8] * (
+                    matrix_values[1] * matrix_values[6]
+                    - matrix_values[2] * matrix_values[5]
                 )
             )
             if abs(determinant) <= 1e-12:
                 raise ValueError("GLB node matrix collapses reachable geometry")
             basis = (
-                tuple(float(matrix[index]) for index in (0, 1, 2)),
-                tuple(float(matrix[index]) for index in (4, 5, 6)),
-                tuple(float(matrix[index]) for index in (8, 9, 10)),
+                tuple(matrix_values[index] for index in (0, 1, 2)),
+                tuple(matrix_values[index] for index in (4, 5, 6)),
+                tuple(matrix_values[index] for index in (8, 9, 10)),
             )
             lengths = [math.sqrt(sum(item * item for item in column)) for column in basis]
             for first, second in ((0, 1), (0, 2), (1, 2)):
@@ -823,7 +851,7 @@ def _reachable_meshes(
         seen.add(index)
         node = nodes[index]
         if "mesh" in node:
-            reachable.add(int(node["mesh"]))
+            reachable.add(_index(node["mesh"], mesh_count, "node mesh"))
         pending.extend(children[index])
     if not reachable:
         raise ValueError("GLB default scene does not reach a mesh")
@@ -1049,8 +1077,11 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
                     raise ValueError("GLB skin skeleton must be one of its joints")
                 parents: dict[int, int] = {}
                 for parent, node in enumerate(nodes):
-                    for child in node.get("children", []):
-                        parents[int(child)] = parent
+                    raw_children = node.get("children", [])
+                    if not isinstance(raw_children, list):
+                        raise ValueError("GLB node children must be an array")  # noqa: TRY004
+                    for child in raw_children:
+                        parents[_index(child, len(nodes), "node child")] = parent
                 for joint in joints:
                     cursor = int(joint)
                     while cursor != skeleton and cursor in parents:
