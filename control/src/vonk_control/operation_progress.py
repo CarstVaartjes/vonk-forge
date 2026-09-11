@@ -12,7 +12,7 @@ from math import exp
 
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 
-from .bounded_json import integer
+from .bounded_json import BoundedJSONError, integer
 
 TRANSFER_PHASES = frozenset(
     {
@@ -30,6 +30,19 @@ WAITING_PHASES = frozenset({"queued", "pending", "waiting", "waiting-for-operato
 STALE_AFTER_SECONDS = 45.0
 STALL_AFTER_SECONDS = 120.0
 PROGRESS_INTERVAL_SECONDS = 1.0
+
+
+def _counter(value: object) -> int:
+    """One durable progress counter; an absent key is the declared zero."""
+    count = integer(value, default=0)
+    return 0 if count is None else count
+
+
+def _measurement(value: object, detail: str) -> float:
+    """Read a numeric measurement; a wrong JSON type is malformed state."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BoundedJSONError(detail)
+    return float(value)
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -65,9 +78,16 @@ def observe_progress(
     result = dict(current)
     prior_time = _timestamp(old.get("observed_at"))
     delta_time = max(0.0, (now - prior_time).total_seconds()) if prior_time else 0.0
-    elapsed = float(old.get("elapsed_seconds") or 0.0) + delta_time
+    prior_elapsed = old.get("elapsed_seconds")
+    elapsed = (
+        0.0
+        if not prior_elapsed
+        else _measurement(
+            prior_elapsed, "operation progress elapsed_seconds is invalid"
+        )
+    ) + delta_time
     advanced = any(
-        integer(result.get(key), default=0) > integer(old.get(key), default=0)
+        _counter(result.get(key)) > _counter(old.get(key))
         for key in ("completed_bytes", "completed_items")
     ) or result["phase"] != old.get("phase")
     result.update(
@@ -87,11 +107,18 @@ def observe_progress(
     ):
         delta = max(
             0,
-            integer(result.get("completed_bytes"), default=0)
-            - integer(old.get("completed_bytes"), default=0),
+            _counter(result.get("completed_bytes"))
+            - _counter(old.get("completed_bytes")),
         )
         rate = min(10**15, delta / delta_time)
-        prior_rate = old.get("smoothed_bytes_per_second")
+        prior_rate_value = old.get("smoothed_bytes_per_second")
+        prior_rate = (
+            None
+            if prior_rate_value is None
+            else _measurement(
+                prior_rate_value, "operation progress smoothed rate is invalid"
+            )
+        )
         # Time-aware exponential smoothing, with a ten-second time constant.
         alpha = 1.0 - exp(-delta_time / 10.0)
         smoothed = (
@@ -106,7 +133,8 @@ def observe_progress(
                 10**9,
                 max(
                     0.0,
-                    (integer(total, default=0) - integer(result.get("completed_bytes"), default=0)) / smoothed,
+                    (_counter(total) - _counter(result.get("completed_bytes")))
+                    / smoothed,
                 ),
             )
     return project_progress(OperationProgress.model_validate(result), now).model_dump(

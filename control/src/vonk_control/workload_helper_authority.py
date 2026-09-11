@@ -167,21 +167,23 @@ class WorkloadHelperGrantIssuer:
         try:
             if request_id is None:
                 request_id = str(self._request_id_factory())
-            claims = PackageHelperGrantClaims(
-                schema_version=1,
-                authority=PACKAGE_HELPER_AUTHORITY,
-                request_id=request_id,
-                node_id=node_id,
-                job_id=job_id,
-                operation_id=operation_id,
-                attempt=attempt,
-                fence=fence,
-                release_digest=release_digest,
-                generation=generation,
-                operation=operation,
-                request_digest=request_digest,
-                issued_at=now,
-                expires_at=now + expires_in_seconds,
+            claims = PackageHelperGrantClaims.model_validate(
+                {
+                    "schema_version": 1,
+                    "authority": PACKAGE_HELPER_AUTHORITY,
+                    "request_id": request_id,
+                    "node_id": node_id,
+                    "job_id": job_id,
+                    "operation_id": operation_id,
+                    "attempt": attempt,
+                    "fence": fence,
+                    "release_digest": release_digest,
+                    "generation": generation,
+                    "operation": operation,
+                    "request_digest": request_digest,
+                    "issued_at": now,
+                    "expires_at": now + expires_in_seconds,
+                }
             )
         except (AgentProtocolError, TypeError, ValueError) as error:
             raise WorkloadHelperAuthorityError(
@@ -248,12 +250,14 @@ class WorkloadObjectReceiptIssuer:
         self, *, object_digest: object, size: object
     ) -> SignedPackageObjectReceipt:
         try:
-            claims = PackageObjectReceiptClaims(
-                schema_version=1,
-                authority=PACKAGE_HELPER_AUTHORITY,
-                object_digest=object_digest,
-                size=size,
-                relative_name=f"objects/sha256/{object_digest}",
+            claims = PackageObjectReceiptClaims.model_validate(
+                {
+                    "schema_version": 1,
+                    "authority": PACKAGE_HELPER_AUTHORITY,
+                    "object_digest": object_digest,
+                    "size": size,
+                    "relative_name": f"objects/sha256/{object_digest}",
+                }
             )
         except (AgentProtocolError, TypeError, ValueError) as error:
             raise WorkloadHelperAuthorityError(

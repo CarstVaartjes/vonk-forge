@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
@@ -53,6 +54,11 @@ ResultConsumer = Callable[
     [Session, StoredOperation, AgentOperationAttempt, AgentResult], None
 ]
 ContactConsumer = Callable[[Session, AgentSource], None]
+# The protocol owns this closed set; the Controller aliases it locally so
+# ``_finish`` cannot be handed any string.
+AgentResultState = Literal[
+    "succeeded", "failed", "cancelled", "waiting-for-operator"
+]
 
 
 _RECIPE_CAPABILITIES = frozenset(
@@ -610,18 +616,20 @@ class AgentJobService:
                 progress=resumable_progress,
             )
             session.add(attempt)
-            return AgentClaim(
-                schema_version=1,
-                job_id=operation.parent_job_id,
-                operation_id=operation.id,
-                attempt=attempt.attempt,
-                fence=attempt.fence,
-                node_id=operation.node_id,
-                operation=AgentOperation(operation.kind),
-                authority_revision=operation.authority_revision,
-                payload_digest=operation.payload_digest,
-                payload=operation.payload,
-                deadline=deadline,
+            return AgentClaim.model_validate(
+                {
+                    "schema_version": 1,
+                    "job_id": operation.parent_job_id,
+                    "operation_id": operation.id,
+                    "attempt": attempt.attempt,
+                    "fence": attempt.fence,
+                    "node_id": operation.node_id,
+                    "operation": AgentOperation(operation.kind),
+                    "authority_revision": operation.authority_revision,
+                    "payload_digest": operation.payload_digest,
+                    "payload": operation.payload,
+                    "deadline": deadline,
+                }
             )
 
     def _reconcile_agent_upgrade(
@@ -727,16 +735,18 @@ class AgentJobService:
             "running", "waiting-for-operator", "expired", "failed",
         }:
             return
-        message = AgentResult(
-            schema_version=1,
-            job_id=operation.parent_job_id,
-            operation_id=operation.id,
-            attempt=attempt.attempt,
-            fence=attempt.fence,
-            node_id=operation.node_id,
-            deadline=max(_aware(attempt.lease_deadline), _aware(now)),
-            state="succeeded",
-            result=evidence,
+        message = AgentResult.model_validate(
+            {
+                "schema_version": 1,
+                "job_id": operation.parent_job_id,
+                "operation_id": operation.id,
+                "attempt": attempt.attempt,
+                "fence": attempt.fence,
+                "node_id": operation.node_id,
+                "deadline": max(_aware(attempt.lease_deadline), _aware(now)),
+                "state": "succeeded",
+                "result": evidence,
+            }
         )
         # Preserve explicit helper failures as truthful attempt audit. Exact
         # contact reconciles the operation projection, not the historical fact
@@ -804,16 +814,18 @@ class AgentJobService:
                 session,
                 operation,
                 attempt,
-                AgentResult(
-                    schema_version=1,
-                    job_id=operation.parent_job_id,
-                    operation_id=operation.id,
-                    attempt=attempt.attempt,
-                    fence=fence,
-                    node_id=operation.node_id,
-                    deadline=_aware(now),
-                    state="failed",
-                    result=reason,
+                AgentResult.model_validate(
+                    {
+                        "schema_version": 1,
+                        "job_id": operation.parent_job_id,
+                        "operation_id": operation.id,
+                        "attempt": attempt.attempt,
+                        "fence": fence,
+                        "node_id": operation.node_id,
+                        "deadline": _aware(now),
+                        "state": "failed",
+                        "result": reason,
+                    }
                 ),
             )
         self._aggregate_parent(session, operation.parent_job_id)
@@ -975,15 +987,17 @@ class AgentJobService:
                 _aware(attempt.lease_deadline),
                 _aware(now) + timedelta(seconds=lease_seconds),
             )
-            message = AgentProgress(
-                schema_version=1,
-                job_id=operation.parent_job_id,
-                operation_id=operation.id,
-                attempt=attempt.attempt,
-                fence=attempt.fence,
-                node_id=operation.node_id,
-                deadline=deadline,
-                progress=progress,
+            message = AgentProgress.model_validate(
+                {
+                    "schema_version": 1,
+                    "job_id": operation.parent_job_id,
+                    "operation_id": operation.id,
+                    "attempt": attempt.attempt,
+                    "fence": attempt.fence,
+                    "node_id": operation.node_id,
+                    "deadline": deadline,
+                    "progress": progress,
+                }
             )
             write_progress = message.progress is None
             if message.progress is not None:
@@ -1070,7 +1084,7 @@ class AgentJobService:
     def _finish(
         self,
         fence: AgentFence,
-        state: str,
+        state: AgentResultState,
         *,
         result: Mapping[str, object] | None,
         reason: str | None,
@@ -1090,16 +1104,18 @@ class AgentJobService:
                 canonical_result = (
                     result if result is not None else {"reason": self._reason(reason)}
                 )
-                message = AgentResult(
-                    schema_version=1,
-                    job_id=operation.parent_job_id,
-                    operation_id=operation.id,
-                    attempt=attempt.attempt,
-                    fence=attempt.fence,
-                    node_id=operation.node_id,
-                    deadline=_aware(attempt.lease_deadline),
-                    state=state,
-                    result=canonical_result,
+                message = AgentResult.model_validate(
+                    {
+                        "schema_version": 1,
+                        "job_id": operation.parent_job_id,
+                        "operation_id": operation.id,
+                        "attempt": attempt.attempt,
+                        "fence": attempt.fence,
+                        "node_id": operation.node_id,
+                        "deadline": _aware(attempt.lease_deadline),
+                        "state": state,
+                        "result": canonical_result,
+                    }
                 )
             validate_result_for_operation(
                 operation.kind,
@@ -1117,10 +1133,9 @@ class AgentJobService:
                         # Preserve the typed output manifest and process receipt.
                         # Generic log truncation must not rewrite their structure.
                         message_result = raw_result
-                        if isinstance(message_result.get("reason"), str):
-                            message_result["reason"] = safe_text(
-                                message_result["reason"]
-                            )
+                        raw_reason = message_result.get("reason")
+                        if isinstance(raw_reason, str):
+                            message_result["reason"] = safe_text(raw_reason)
                     else:
                         message_result = sanitize_failure_evidence(raw_result)
                     if diagnostics is not None:
@@ -1333,6 +1348,9 @@ class AgentJobService:
         observed = _aware(now)
         if current is None or observed > current:
             node.last_seen_at = observed
+        contact_time = node.last_seen_at
+        if contact_time is None:
+            raise ValueError("agent contact timestamp is unavailable")
         if protocol_version is not None:
             node.protocol_version = protocol_version
         if capabilities is not None:
@@ -1372,7 +1390,7 @@ class AgentJobService:
                         "certificate_fingerprint": certificate.fingerprint,
                         "certificate_serial": certificate.serial,
                         "node_id": node.node_id,
-                        "observed_at": _aware(node.last_seen_at).isoformat(),
+                        "observed_at": _aware(contact_time).isoformat(),
                         "hostname": hostname,
                         "runtime_identity": runtime_identity,
                     }
