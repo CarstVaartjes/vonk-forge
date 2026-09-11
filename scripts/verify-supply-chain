@@ -206,6 +206,7 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/operation_contract.py",
         "control/src/vonk_control/operation_progress.py",
         "control/src/vonk_control/operation_api.py",
+        "control/src/vonk_control/download_contract.py",
         "control/src/vonk_control/failure_evidence.py",
         "control/src/vonk_control/failure_evidence_api.py",
         "control/src/vonk_control/failure_evidence_models.py",
