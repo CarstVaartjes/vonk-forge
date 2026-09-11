@@ -35,6 +35,7 @@ from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
+from .bounded_json import require_integer, require_sequence
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
@@ -885,7 +886,7 @@ def _same_model_artifact_identity(
     """Compare selected file bytes while ignoring revision/editorial facts."""
     try:
         current = {
-            str(item["id"]): (str(item["path"]), str(item["sha256"]), int(item["download_bytes"]))
+            str(item["id"]): (str(item["path"]), str(item["sha256"]), require_integer(item["download_bytes"], "download bytes"))
             for item in _canonical_model_artifacts(row)
         }
     except (KeyError, TypeError, ValueError, ModelCacheResolutionError):
@@ -1443,7 +1444,7 @@ class ModelCacheService:
         preview = self._download_preview_for_manifest(manifest)
         if preview["blockers"]:
             raise ModelCacheConflict(
-                "model_cache.download_blocked", "; ".join(str(item) for item in preview["blockers"])
+                "model_cache.download_blocked", "; ".join(str(item) for item in require_sequence(preview["blockers"], "download blockers"))
             )
         return self.start_download(
             actor=actor,
@@ -1762,7 +1763,7 @@ class ModelCacheService:
             if not isinstance(raw_roles, list):
                 raise TypeError
             digest = str(value["sha256"])
-            expected_bytes = int(value["download_bytes"])
+            expected_bytes = require_integer(value["download_bytes"], "download bytes")
         except (KeyError, TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
                 "model_cache.artifact_invalid", "cache artifact input is invalid"
@@ -1841,7 +1842,7 @@ class ModelCacheService:
         if preview["blockers"]:
             raise ModelCacheConflict(
                 "model_cache.download_blocked",
-                "; ".join(str(item) for item in preview["blockers"]),
+                "; ".join(str(item) for item in require_sequence(preview["blockers"], "download blockers")),
             )
         transfer = None if force else preview.get("_transfer")
         if not isinstance(transfer, Mapping):
@@ -1893,7 +1894,7 @@ class ModelCacheService:
                     progress=self._progress(
                         manifest,
                         phase="queued",
-                        expected_bytes=int(transfer["total_bytes"]),
+                        expected_bytes=require_integer(transfer["total_bytes"], "transfer total bytes"),
                     ),
                     actor=actor,
                     created_at=now,
@@ -1965,7 +1966,7 @@ class ModelCacheService:
             if self._object_is_verified(spec):
                 already_cached += spec.expected_bytes
         transfer = self._transfer_state_for_manifest(manifest, force=False)
-        new_bytes = int(transfer["total_bytes"])
+        new_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
         storage = self.storage_summary()
         blockers = []
         if new_bytes > storage.available_bytes:
@@ -3180,7 +3181,7 @@ class ModelCacheService:
                 row.verified_bytes = self._verified_bytes(session, set_digest)
                 all_valid = all(
                     self._object_is_verified(ArtifactSpec.from_manifest(item))
-                    for item in manifest.document()["artifacts"]
+                    for item in require_sequence(manifest.document()["artifacts"], "artifact manifest")
                 )
                 row.state = "cached" if all_valid else "needs-repair"
                 row.updated_at = now
@@ -3888,7 +3889,7 @@ class ModelCacheService:
                     len(
                         [
                             future
-                            for future in record.get("futures", [])
+                            for future in require_sequence(record.get("futures", []), "futures")
                             if isinstance(future, Future) and not future.done()
                         ]
                     )
@@ -3922,7 +3923,7 @@ class ModelCacheService:
                 for operation_id in list(self._background_operations):
                     before = self._available_transfer_slots()
                     record = self._background_operations.get(operation_id, {})
-                    futures = record.get("futures", []) if isinstance(record, Mapping) else []
+                    futures = require_sequence(record.get("futures", []), "futures") if isinstance(record, Mapping) else []
                     pending = sum(
                         1
                         for future in futures
@@ -3945,7 +3946,7 @@ class ModelCacheService:
                 len(
                     [
                         future
-                        for future in record.get("futures", [])
+                        for future in require_sequence(record.get("futures", []), "futures")
                         if isinstance(future, Future) and not future.done()
                     ]
                 )
@@ -4012,9 +4013,9 @@ class ModelCacheService:
             futures = []
             record["futures"] = futures
         pending = sum(1 for future in futures if isinstance(future, Future) and not future.done())
-        while pending < capacity and int(record["next_index"]) < len(specs):
-            spec = specs[int(record["next_index"])]
-            record["next_index"] = int(record["next_index"]) + 1
+        while pending < capacity and require_integer(record["next_index"], "next index") < len(specs):
+            spec = specs[require_integer(record["next_index"], "next index")]
+            record["next_index"] = require_integer(record["next_index"], "next index") + 1
             future = self._executor.submit(
                 self._download_one_unique,
                 spec,
@@ -4033,7 +4034,7 @@ class ModelCacheService:
         self._renew_background_claims()
         finished = 0
         for operation_id, record in list(self._background_operations.items()):
-            futures = record.get("futures", [])
+            futures = require_sequence(record.get("futures", []), "futures")
             if not isinstance(futures, list):
                 futures = []
             done = [future for future in futures if isinstance(future, Future) and future.done()]
@@ -4086,7 +4087,7 @@ class ModelCacheService:
                 finished += 1
                 continue
             specs = record.get("specs", [])
-            if int(record.get("next_index", 0)) >= len(specs) and not futures:
+            if require_integer(record.get("next_index", 0), "next index") >= len(specs) and not futures:
                 manifest = record["manifest"]
                 if isinstance(manifest, ArtifactSetManifest):
                     self._finish_background_success(
@@ -4331,7 +4332,7 @@ class ModelCacheService:
             "schema_version": SCHEMA_VERSION,
             "kind": "repair",
             "artifact_set_sha256": digest,
-            "artifacts": [item["sha256"] for item in entry["artifacts"]],
+            "artifacts": [item["sha256"] for item in require_sequence(entry["artifacts"], "artifacts")],
             "source_policy": SOURCE_POLICY,
         }
         plan_digest = _sha256_json(plan)
@@ -4375,7 +4376,7 @@ class ModelCacheService:
                 return self._operation_view(existing)
         manifest = self._manifest_for_set(digest)
         transfer = self._transfer_state_for_manifest(manifest, force=True)
-        if int(transfer["total_bytes"]) > self.storage_summary().available_bytes:
+        if require_integer(transfer["total_bytes"], "transfer total bytes") > self.storage_summary().available_bytes:
             raise ModelCacheConflict(
                 "model_cache.download_blocked", "insufficient-reserved-storage"
             )
@@ -4416,7 +4417,7 @@ class ModelCacheService:
                     progress=self._progress(
                         manifest,
                         phase="queued",
-                        expected_bytes=int(transfer["total_bytes"]),
+                        expected_bytes=require_integer(transfer["total_bytes"], "transfer total bytes"),
                     ),
                     actor=actor,
                     created_at=self._clock(),
@@ -4473,8 +4474,8 @@ class ModelCacheService:
             for value in manifest.model_content_digests
             if value != manifest.model_content_sha256
         )
-        expected_bytes = int(entry["expected_bytes"])
-        verified_bytes = int(entry["verified_bytes"])
+        expected_bytes = require_integer(entry["expected_bytes"], "expected bytes")
+        verified_bytes = require_integer(entry["verified_bytes"], "verified bytes")
         complete = entry["coverage"] == "complete"
         state = str(entry["state"])
         controller_state = {

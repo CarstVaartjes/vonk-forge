@@ -39,7 +39,7 @@
   "control/src/vonk_control/install_admission.py": 3,
   "control/src/vonk_control/library_operational.py": 1,
   "control/src/vonk_control/lifecycle_preflight.py": 1,
-  "control/src/vonk_control/model_cache.py": 66,
+  "control/src/vonk_control/model_cache.py": 37,
   "control/src/vonk_control/model_cache_api.py": 5,
   "control/src/vonk_control/model_cache_progress.py": 10,
   "control/src/vonk_control/models.py": 3,
