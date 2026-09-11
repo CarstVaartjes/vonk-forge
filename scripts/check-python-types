@@ -70,14 +70,20 @@ def main() -> int:
     for path, (was, now) in sorted(regressions.items()):
         print(f"type errors increased: {path}: {was} -> {now}")
     for path, (was, now) in sorted(fixed.items()):
-        print(f"type errors reduced:   {path}: {was} -> {now} (lower its baseline entry)")
-    if regressions or fixed:
+        print(f"type errors reduced:   {path}: {was} -> {now}")
+    if regressions:
         print(
             f"\nbaseline total {sum(baseline.values())}, current total "
             f"{sum(counts.values())}"
         )
         return 1
-    print(f"python types: {sum(counts.values())} known errors, no regressions")
+    # Improvements are informational. A count can differ between a developer
+    # host and CI on platform-conditional code, and only growth is a
+    # regression worth blocking. Run with --update to record a reduction.
+    print(
+        f"python types: {sum(counts.values())} known errors, no regressions"
+        + (f" ({len(fixed)} file(s) improved)" if fixed else "")
+    )
     return 0
 
 

@@ -134,11 +134,12 @@ version via `uvx --from ruff==0.16.1 ruff check .`.
 
 The repository does not type-check cleanly yet. `scripts/check-python-types`
 enforces a per-file ratchet against `tools/pyright-baseline.json`: a file may
-never exceed its recorded error count, and a file that improves must lower its
-entry in the same change, so the known-error set only shrinks. `pyright` runs
-over `control/src`, `src`, `tests` and `control/tests` in basic mode; generated
-clients and virtualenvs are excluded. Pass `--update` only to record a
-reduction.
+never exceed its recorded error count, so the known-error set only shrinks as
+entries are lowered. Improvements are reported but do not fail the check,
+because platform-conditional code can legitimately differ between a developer
+host and CI; run `--update` to record a reduction. `pyright` runs over
+`control/src`, `src`, `tests` and `control/tests` in basic mode; generated
+clients and virtualenvs are excluded.
 
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.
