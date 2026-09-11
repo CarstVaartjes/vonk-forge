@@ -6,6 +6,8 @@ import uuid
 from contextlib import redirect_stdout
 from io import StringIO
 
+import pytest
+
 from cluster_profiles import cli
 from cluster_profiles.cli_select import SelectorError, select_exact
 from cluster_profiles.controller_cli import _operation_progress_line
@@ -162,6 +164,27 @@ def test_parser_exposes_only_current_singular_operator_roots() -> None:
             pass
         else:
             raise AssertionError(f"retired command accepted: {argv}")
+
+
+def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> None:
+    parser = cli._parser()
+    fleet = parser._subparsers._group_actions[0].choices["fleet"]
+    loginfo = fleet._subparsers._group_actions[0].choices["loginfo"]
+
+    for accepted in ("1", "1000"):
+        assert loginfo.parse_args(["Atlas", "--lines", accepted]).lines == int(accepted)
+    for rejected in ("0", "1001", "not-a-number"):
+        with pytest.raises(cli._UsageError):
+            loginfo.parse_args(["Atlas", "--lines", rejected])
+        output = StringIO()
+        with redirect_stdout(output):
+            status = cli.main(("fleet", "loginfo", "Atlas", "--lines", rejected, "--json"))
+        assert status == 2
+        assert json.loads(output.getvalue())["error_type"] == "arguments"
+
+    help_text = loginfo.format_help()
+    assert "--lines 1-1000" in help_text
+    assert "{1,2," not in help_text
 
 
 def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None:
