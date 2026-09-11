@@ -8,6 +8,7 @@ import socket
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,6 +40,14 @@ NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 8, 4, 12, tzinfo=UTC)
 CA_URL = "https://step-ca:9000"
 STEP_CA_IMAGE = "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270"
+
+
+@dataclass(frozen=True)
+class _CrlWithoutWindow:
+    """A CRL the builder refuses to sign: it has no next-update window."""
+
+    last_update_utc: datetime = NOW
+    next_update_utc: datetime | None = None
 
 
 class _Material(TypedDict):
@@ -391,14 +400,10 @@ def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
 
 
 def test_revocation_bundle_rejects_missing_next_update_window() -> None:
-    issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Test CA")])
-    crl_without_window = (
-        x509.CertificateRevocationListBuilder()
-        .issuer_name(issuer)
-        .last_update(NOW)
-        .sign(ed25519.Ed25519PrivateKey.generate(), algorithm=None)
-    )
-    assert crl_without_window.next_update_utc is None
+    # cryptography refuses to sign a CRL that has no next-update window, which
+    # is exactly the shape the freshness check must reject, so the input is a
+    # double carrying only the two fields the check reads.
+    crl_without_window = _CrlWithoutWindow()
     with pytest.raises(StepCAError, match="revocation bundle.*freshness"):
         _validate_crl_freshness(crl_without_window, NOW, timedelta(seconds=30))
 
