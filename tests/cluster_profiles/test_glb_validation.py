@@ -258,6 +258,17 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         self.rejected(document, builder, "textured-pbr", "distinct embedded images")
 
     def test_validator_has_cross_repository_byte_identity(self) -> None:
+        """The validator is one file copied verbatim into the recipe library.
+
+        The sibling checkout under ``VONK_RECIPE_LIBRARY_ROOT`` carries five
+        byte-identical copies, one per 3-D adapter, and its
+        ``tests/test_three_d_glb_validation.py`` pins this same digest. So
+        editing ``glb_validation.py`` at all -- including a comment or a type
+        annotation -- means changing all five copies and both pinned digests
+        together, across two repositories. Do that as a deliberate, coordinated
+        change rather than as a drive-by tidy-up.
+        """
+
         content = (ROOT / "src/cluster_profiles/glb_validation.py").read_bytes()
         self.assertEqual(hashlib.sha256(content).hexdigest(), VALIDATOR_SHA256)
 
