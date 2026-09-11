@@ -77,6 +77,7 @@ class OCIImageTransport(Protocol):
         closed, and must hash the archive while it is copied or exactly once
         after the copy has completed.
         """
+        ...
 
     def inspect_archive(
         self,
@@ -88,6 +89,7 @@ class OCIImageTransport(Protocol):
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
         """Inspect an already stored final image without pulling a registry image."""
+        ...
 
 
 class SkopeoLayerMetadata(BaseModel):
@@ -261,6 +263,16 @@ class SkopeoOCIImageTransport:
 
 ImageDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
+# The runtime image receipt declares one supported platform identity.  These
+# named aliases are the single definition used by both the receipt fields and
+# the transport-evidence narrowing below, so the two cannot drift.
+RuntimeArchitecture = Literal["linux-arm64"]
+RuntimeInterface = Literal["vonk.runtime.v1"]
+RuntimeInterfaceLabel = Literal["v1"]
+_RUNTIME_ARCHITECTURE: RuntimeArchitecture = "linux-arm64"
+_RUNTIME_INTERFACE: RuntimeInterface = "vonk.runtime.v1"
+_RUNTIME_INTERFACE_LABEL: RuntimeInterfaceLabel = "v1"
+
 
 class RuntimeImageReceipt(WireModel):
     """Strict schema-2 receipt persisted by the Controller image cache.
@@ -283,12 +295,12 @@ class RuntimeImageReceipt(WireModel):
     image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
     local_image_config_id: ImageDigest | None
     local_image_reference: str | None = Field(min_length=1, max_length=512)
-    architecture: Literal["linux-arm64"]
-    runtime_interface: Literal["vonk.runtime.v1"]
+    architecture: RuntimeArchitecture
+    runtime_interface: RuntimeInterface
     archive_path: str = Field(min_length=1, max_length=4096)
     recorded_at: str = Field(min_length=1, max_length=128)
     build_id: str | None = Field(min_length=1, max_length=128)
-    runtime_interface_label: Literal["v1"]
+    runtime_interface_label: RuntimeInterfaceLabel
 
     @model_validator(mode="after")
     def receipt_identity_is_consistent(self) -> RuntimeImageReceipt:
@@ -596,9 +608,8 @@ def _authorize_current_revision(
             "runtime_image.authorization_invalid",
             "current recipe document is not valid persisted contract JSON",
         ) from error
-    execution = recipe.execution if hasattr(recipe, "execution") else None
-    mode = execution.mode if execution is not None else None
-    if mode == "image":
+    execution = recipe.execution if isinstance(recipe, RecipeDefinition) else None
+    if execution is not None and execution.mode == "image":
         image = execution.image
         raw_digest = image.digest
         expected = f"sha256:{raw_digest}"
@@ -607,7 +618,7 @@ def _authorize_current_revision(
                 "runtime_image.authorization_invalid",
                 "current recipe image authority does not match the verified receipt",
             )
-    elif mode == "build":
+    elif execution is not None and execution.mode == "build":
         if receipt.source != "controller-build" or receipt.build_id is None:
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
@@ -723,9 +734,11 @@ def _validate_revision_reuse_identity(
 class RuntimeImageStorage(Protocol):
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
         """Read the current receipt or raise a preparation error."""
+        ...
 
     def prepare_path(self) -> Path:
         """Return a private path for a new export."""
+        ...
 
     def commit(
         self,
@@ -734,11 +747,13 @@ class RuntimeImageStorage(Protocol):
         receipt: RuntimeImageReceipt,
     ) -> RuntimeImageReceipt:
         """Verify and atomically publish an archive and its receipt."""
+        ...
 
     def verify_existing(
         self, archive_sha256: str, expected_bytes: int
     ) -> Path:
         """Return an existing verified archive or raise."""
+        ...
 
     def find_published(
         self,
@@ -748,6 +763,7 @@ class RuntimeImageStorage(Protocol):
         expected_runtime_interface: str,
     ) -> RuntimeImageReceipt | None:
         """Find and verify a previously published image by immutable identity."""
+        ...
 
     def find_verified(
         self,
@@ -757,6 +773,7 @@ class RuntimeImageStorage(Protocol):
         expected_runtime_interface: str,
     ) -> RuntimeImageReceipt | None:
         """Find and verify a prepared image without invoking a transport."""
+        ...
 
 
 class FilesystemRuntimeImageStorage:
@@ -1098,6 +1115,9 @@ def _prepare_from_registry(
             expected_requested_manifest=expected_manifest,
         )
         image_bytes, archive_sha = evidence.archive_bytes, evidence.archive_sha256
+        architecture, runtime_interface, runtime_interface_label = (
+            _receipt_runtime_identity(evidence, expected_interface)
+        )
         receipt = RuntimeImageReceipt(
             schema_version=2,
             source="published",
@@ -1115,9 +1135,9 @@ def _prepare_from_registry(
             # is not a post-import Spark start reference; the helper derives
             # that only after inspecting the imported config digest.
             local_image_reference=None,
-            architecture=_wire_architecture(evidence.architecture),
-            runtime_interface=expected_interface,
-            runtime_interface_label=evidence.runtime_interface,
+            architecture=architecture,
+            runtime_interface=runtime_interface,
+            runtime_interface_label=runtime_interface_label,
             archive_path=str(staged),
             recorded_at=_timestamp(now),
         )
@@ -1194,6 +1214,9 @@ def _prepare_from_build(
         expected_interface_label,
         expected_requested_manifest=None,
     )
+    architecture, runtime_interface, runtime_interface_label = _receipt_runtime_identity(
+        observed, expected_interface
+    )
     receipt = RuntimeImageReceipt(
         schema_version=2,
         source="controller-build",
@@ -1214,9 +1237,9 @@ def _prepare_from_build(
         # ``docker-archive:...`` is a Controller transport path, never a
         # runnable Spark image reference.
         local_image_reference=None,
-        architecture=_wire_architecture(observed.architecture),
-        runtime_interface=expected_interface,
-        runtime_interface_label=observed.runtime_interface,
+        architecture=architecture,
+        runtime_interface=runtime_interface,
+        runtime_interface_label=runtime_interface_label,
         archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
         recorded_at=_timestamp(now),
         build_id=build_id,
@@ -1244,7 +1267,8 @@ def _canonical_recipe(value: RecipeDefinition | Mapping[str, object] | object) -
 
 def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str, str]:
     """Read image verification expectations from the current compiler projection."""
-    raw = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    dump = getattr(value, "model_dump", None)
+    raw: object = dump(mode="json") if callable(dump) else value
     if not isinstance(raw, Mapping):
         raise RuntimeImagePreparationError(
             "runtime_image.runtime_invalid", "canonical runtime projection is unavailable"
@@ -1276,8 +1300,30 @@ def _runtime_interface_label(value: str) -> str:
 
 def _wire_architecture(value: str) -> str:
     if value in {"linux/arm64", "linux-aarch64", "arm64", "aarch64"}:
-        return "linux-arm64"
+        return _RUNTIME_ARCHITECTURE
     return value
+
+
+def _receipt_runtime_identity(
+    evidence: PulledImageEvidence, expected_interface: str
+) -> tuple[RuntimeArchitecture, RuntimeInterface, RuntimeInterfaceLabel]:
+    """Narrow validated transport evidence to the receipt's declared identity.
+
+    ``_validate_evidence`` has already compared the evidence with the compiled
+    runtime expectations; these checks make the same comparison explicit as the
+    single supported literal set.  A mismatch is a validation failure, exactly
+    as the receipt model previously reported it.
+    """
+
+    architecture = _wire_architecture(evidence.architecture)
+    if architecture != _RUNTIME_ARCHITECTURE:
+        raise ValueError("runtime image architecture is not supported")
+    if expected_interface != _RUNTIME_INTERFACE:
+        raise ValueError("runtime image interface is not supported")
+    interface_label = evidence.runtime_interface
+    if interface_label != _RUNTIME_INTERFACE_LABEL:
+        raise ValueError("runtime image interface label is not supported")
+    return architecture, expected_interface, interface_label
 
 
 def _recipe_image(recipe: RecipeDefinition) -> tuple[str, str]:
@@ -1546,9 +1592,12 @@ __all__ = [
     "FilesystemRuntimeImageStorage",
     "OCIImageTransport",
     "PulledImageEvidence",
+    "RuntimeArchitecture",
     "RuntimeImagePreparationError",
     "RuntimeImageReceipt",
     "RuntimeImageStorage",
+    "RuntimeInterface",
+    "RuntimeInterfaceLabel",
     "SkopeoOCIImageTransport",
     "persist_runtime_image_receipt",
     "prepare_runtime_image",

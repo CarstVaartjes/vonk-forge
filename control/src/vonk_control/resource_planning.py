@@ -12,12 +12,39 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
 from .bounded_json import require_integer
+from .run_switch_contract import RunSwitchChangeEffect
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
+_CHANGE_EFFECTS: frozenset[RunSwitchChangeEffect] = frozenset(get_args(RunSwitchChangeEffect))
+
+
+@runtime_checkable
+class _ParallelismProjection(Protocol):
+    """The structural shape of one typed parallelism projection."""
+
+    world_size: int
+    tensor: int
+    pipeline: int
+    data: int
+    backend: str
+
+
+@runtime_checkable
+class _EffectiveSettingsProjection(Protocol):
+    """The structural shape of one typed effective-settings projection."""
+
+    kind: Literal["generation", "embedding", "job"]
+    context_tokens: int | None
+    concurrency: int | None
+    batch_tokens: int | None
+    knobs: Mapping[str, object]
+    change_effects: Mapping[str, str]
+    identity_digest: str
+    parallelism: _ParallelismProjection
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,8 +293,9 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
     if type(world_size) is not int or world_size < 1:
         reasons.append(_reason("resource.parallelism_type", "Canonical topology parallelism world_size is invalid."))
         world_size = None
-    if all(dimensions[name] is not None for name in ("tensor", "pipeline", "data")):
-        product = dimensions["tensor"] * dimensions["pipeline"] * dimensions["data"]
+    tensor, pipeline, data = dimensions["tensor"], dimensions["pipeline"], dimensions["data"]
+    if tensor is not None and pipeline is not None and data is not None:
+        product = tensor * pipeline * data
         if world_size is not None and product != world_size:
             reasons.append(_reason("resource.parallelism_inconsistent", "Topology parallelism product does not equal declared world_size."))
         if node_count is not None and world_size is not None and world_size != node_count:
@@ -288,10 +316,14 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
     }
     canonical_digest = raw.get("identity_sha256")
     digest = canonical_digest if _is_digest(canonical_digest) else _digest(identity)
+    if world_size is None or tensor is None or pipeline is None or data is None:
+        # Unreachable: an invalid dimension records a blocker reason and returns
+        # above, so the explicit narrowing never discards a valid resolution.
+        return SettingsResolution(None, tuple(reasons))
     return SettingsResolution(
         EffectiveResourceSettings(
             kind, context, concurrency, batch,
-            ParallelismSettings(world_size, dimensions["tensor"], dimensions["pipeline"], dimensions["data"], backend),
+            ParallelismSettings(world_size, tensor, pipeline, data, backend),
             knobs, effects, digest,
         ),
         (),
@@ -349,15 +381,25 @@ def plan_capacity(requirements: Mapping[str, ResourceDemand], capacities: Sequen
             node_reasons.append(_reason("resource.capacity_unknown", "Capacity evidence is unavailable for the selected rank.", node_id=node_id))
             nodes.append(NodeCapacityPlan(node_id, demand.total_bytes, None, None, None, False, False, tuple(node_reasons)))
             continue
-        for name, value in (("available", capacity.available_bytes), ("occupied", capacity.occupied_bytes), ("reserved", capacity.reserved_bytes)):
+        available = capacity.available_bytes
+        occupied = capacity.occupied_bytes
+        reserved = capacity.reserved_bytes
+        for name, value in (("available", available), ("occupied", occupied), ("reserved", reserved)):
             if type(value) is not int or value < 0:
                 node_reasons.append(_reason("resource.capacity_unknown", f"Current {name} capacity evidence is missing or invalid.", node_id=node_id))
         if capacity.evidence_state in {"unknown", "stale"}:
             node_reasons.append(_reason("resource.capacity_unknown", "Current capacity evidence is missing or stale.", node_id=node_id))
-        if demand.total_bytes is None or node_reasons:
+        total_bytes = demand.total_bytes
+        if (
+            not isinstance(available, int)
+            or not isinstance(occupied, int)
+            or not isinstance(reserved, int)
+            or total_bytes is None
+            or node_reasons
+        ):
             nodes.append(NodeCapacityPlan(node_id, demand.total_bytes, None, None, None, False, False, tuple(node_reasons)))
             continue
-        current = capacity.available_bytes - capacity.occupied_bytes - capacity.reserved_bytes - demand.total_bytes
+        current = available - occupied - reserved - total_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max((value for (candidate, kind), value in releases.items() if candidate == node_id and _same_memory_kind(kind, capacity.memory_kind)), default=0)
@@ -392,7 +434,7 @@ def classify_preparation_effects(previous: EffectiveResourceSettings | object | 
     changed = {key for key in current_identity if previous_identity is None or current_identity[key] != previous_identity.get(key)}
     effects = dict(current_resolution.change_effects)
     effects.update(parameter_effects or {})
-    if any(effect not in {"none", "restart", "reprepare", "reinstall", "rebuild"} for effect in effects.values()):
+    if any(effect not in _CHANGE_EFFECTS for effect in effects.values()):
         raise ValueError("parameter change effects are invalid")
     active = {key: effect for key, effect in effects.items() if effect != "none"}
     rebuild = "rebuild" in active.values()
@@ -424,7 +466,7 @@ def _as_mapping(value: object) -> Mapping[str, object] | None:
     if callable(model_dump):
         dumped = model_dump(mode="python")
         return dumped if isinstance(dumped, Mapping) else None
-    if all(hasattr(value, name) for name in ("context_tokens", "concurrency", "parallelism", "kind")):
+    if isinstance(value, _EffectiveSettingsProjection):
         parallel = value.parallelism
         return {
             "settings": {
@@ -441,9 +483,9 @@ def _as_mapping(value: object) -> Mapping[str, object] | None:
     return None
 
 
-def _effect(value: object) -> str | None:
-    value = getattr(value, "value", value)
-    return value if value in {"none", "restart", "reprepare", "reinstall", "rebuild"} else None
+def _effect(value: object) -> RunSwitchChangeEffect | None:
+    candidate = getattr(value, "value", value)
+    return candidate if candidate in _CHANGE_EFFECTS else None
 
 
 def _same_memory_kind(left: str, right: str) -> bool:
@@ -466,5 +508,5 @@ def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(_canonical(value), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _is_digest(value: object) -> bool:
+def _is_digest(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
