@@ -32,6 +32,33 @@ _POSTGRES_PORT_TEMPLATE = (
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def hermetic_git_config() -> Iterator[None]:
+    """Keep a developer's global git config out of throwaway test repositories.
+
+    Tests that ``git init`` a temporary repository must behave the same on a
+    laptop as in CI. Without this, global settings such as ``commit.gpgsign``,
+    ``tag.gpgsign``, hooks, or ``init.defaultBranch`` leak into fixtures and
+    turn an environment preference into a test error.
+    """
+
+    overrides = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    previous = {name: os.environ.get(name) for name in overrides}
+    os.environ.update(overrides)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def postgres_database_name() -> str:
     return f"vonk_test_{uuid.uuid4().hex}"
 
