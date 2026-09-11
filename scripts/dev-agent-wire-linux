@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Run the Controller/Spark wire-contract tier in a local Linux container.
+#
+# Thin shell entrypoint kept separately so ``shellcheck scripts/dev-agent-wire-linux``
+# validates the documented developer command while the CI parity check and
+# container orchestration remain unit-testable in scripts/dev_agent_wire_linux.py.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 "$repo_root/scripts/dev_agent_wire_linux.py" "$@"

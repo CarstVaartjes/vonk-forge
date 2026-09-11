@@ -9,17 +9,23 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from threading import Event
 from types import SimpleNamespace
+from typing import Literal, TypedDict
 
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     RecipeJobFile,
+    RecipeJobRunResult,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
+from vonk_control.artifact_blob_store import (
+    ArtifactBlobStore,
+    ArtifactBlobStoreError,
+    StoredArtifactBlob,
+)
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
     ArtifactJobResultEvidence,
@@ -44,6 +50,29 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
 )
+
+
+class _ArtifactCreateRequest(TypedDict):
+    """The keyword arguments :meth:`ArtifactJobService.create` accepts."""
+
+    run_id: str
+    interface: str
+    parameters: dict[str, object]
+    inputs: list[dict[str, object]]
+    output_limits: dict[str, object]
+    timeout_seconds: int
+    actor: str
+    request_id: str
+
+
+def _mapping(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _sequence(value: object) -> list[object]:
+    assert isinstance(value, list)
+    return value
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -163,7 +192,9 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
             },
         }
     ]
-    document["runtime"]["arguments"].extend([
+    runtime = _mapping(document["runtime"])
+    arguments = _sequence(runtime["arguments"])
+    arguments.extend([
         {"name": "prompt", "value": None, "setting": "prompt"},
         {"name": "seed", "value": None, "setting": "seed"},
     ])
@@ -211,7 +242,7 @@ def running_artifact_service(tmp_path, *, recipe_transform=None):
     )
 
 
-def artifact_create_request(run_id: str, request_id: str) -> dict[str, object]:
+def artifact_create_request(run_id: str, request_id: str) -> _ArtifactCreateRequest:
     content = b"png"
     return {
         "run_id": run_id,
@@ -272,7 +303,13 @@ def submitted_artifact_job(
     )
 
 
-def cancellation_result(claim, artifact_job, *, state: str, reason: str) -> AgentResult:
+def cancellation_result(
+    claim,
+    artifact_job,
+    *,
+    state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"],
+    reason: str,
+) -> AgentResult:
     empty: tuple[RecipeJobFile, ...] = ()
     return AgentResult(
         schema_version=1,
@@ -283,7 +320,7 @@ def cancellation_result(claim, artifact_job, *, state: str, reason: str) -> Agen
         node_id=claim.node_id,
         deadline=claim.deadline,
         state=state,
-        result={
+        result=RecipeJobRunResult.model_validate({
             "schema_version": 1,
             "job_id": artifact_job.id,
             "run_id": artifact_job.run_id,
@@ -297,7 +334,7 @@ def cancellation_result(claim, artifact_job, *, state: str, reason: str) -> Agen
                 "peak_memory_bytes": None,
             },
             "reason": reason,
-        },
+        }),
     )
 
 
@@ -310,7 +347,7 @@ def test_artifact_job_create_idempotency_compares_canonical_semantics(
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000114")
     first = service.create(**request)
 
-    replay = dict(request)
+    replay = copy.deepcopy(request)
     replay["parameters"] = {"seed": 0, "prompt": "fox"}
     replayed = service.create(**replay)
 
@@ -361,10 +398,16 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
     service.create(**request)
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
+        assert run is not None
         installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
         document = copy.deepcopy(revision.document)
-        document["settings"]["knobs"]["seed"]["value"] = 99
+        settings = _mapping(document["settings"])
+        knobs = _mapping(settings["knobs"])
+        seed = _mapping(knobs["seed"])
+        seed["value"] = 99
         parsed = RecipeDefinition.model_validate(document)
         replacement = CatalogDocumentRevision(
             document_id=revision.document_id,
@@ -520,11 +563,14 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
+        assert operation is not None
         assert operation.kind == "recipe.job.run.v1"
         assert operation.payload["reserved_memory_bytes"] == 225
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         assert operation.payload["contract_sha256"] == job.contract_sha256
-        assert "fox / meadow" in operation.payload["compiled_execution_plan"]["runtime"]["argv"]
+        compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
+        plan_runtime = _mapping(compiled_plan["runtime"])
+        assert "fox / meadow" in _sequence(plan_runtime["argv"])
         assert operation.payload["output_mappings"] == [
             {
                 "slot": "image",
@@ -572,6 +618,7 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
     }
     with sessions.begin() as session:
         stored_operation = session.get(AgentOperation, operation.id)
+        assert stored_operation is not None
         service.consume_agent_result(
             session,
             stored_operation,
@@ -598,9 +645,12 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         4,
     )
     with sessions() as session:
-        assert session.get(RecipeRun, run_id).state == "running"
+        run_row = session.get(RecipeRun, run_id)
+        assert run_row is not None
+        assert run_row.state == "running"
     with sessions.begin() as session:
         row = session.get(ArtifactJob, job.id)
+        assert row is not None
         row.output_manifest_sha256 = None
     with pytest.raises(ValidationError, match="requires output manifest"):
         service.result_metadata(job.id)
@@ -707,7 +757,9 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
     tmp_path, media_type: str, extension: str
 ) -> None:
     def transform(document: dict[str, object]) -> None:
-        slot = document["interfaces"][0]["output"]["slots"][0]
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        output = _mapping(interface["output"])
+        slot = _mapping(_sequence(output["slots"])[0])
         slot["media_types"] = [media_type]
         slot["extensions"] = [extension]
 
@@ -740,6 +792,7 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
+        assert operation is not None
         assert operation.payload["output_mappings"] == [
             {
                 "slot": "image",
@@ -751,7 +804,9 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
 
 def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> None:
     def transform(document: dict[str, object]) -> None:
-        slot = document["interfaces"][0]["output"]["slots"][0]
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        output = _mapping(interface["output"])
+        slot = _mapping(_sequence(output["slots"])[0])
         slot["media_types"] = ["image/avif", "image/png"]
         slot["extensions"] = [".avif", ".png"]
 
@@ -767,7 +822,10 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
 
 def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) -> None:
     def transform(document: dict[str, object]) -> None:
-        duplicate = copy.deepcopy(document["interfaces"][0]["output"]["slots"][0])
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        output = _mapping(interface["output"])
+        slots = _sequence(output["slots"])
+        duplicate = copy.deepcopy(_mapping(slots[0]))
         duplicate.update(
             {
                 "id": "receipt",
@@ -776,7 +834,7 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
                 "media_types": ["application/json"],
             }
         )
-        document["interfaces"][0]["output"]["slots"].append(duplicate)
+        slots.append(duplicate)
 
     _sessions, _operations, _queue, service, run_id, _node_id = (
         running_artifact_service(tmp_path, recipe_transform=transform)
@@ -793,8 +851,10 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
 ) -> None:
     def transform(document: dict[str, object]) -> None:
         media_type = "application/vnd.example.custom"
-        output = document["interfaces"][0]["output"]
-        short = output["slots"][0]
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        output = _mapping(interface["output"])
+        slots = _sequence(output["slots"])
+        short = _mapping(slots[0])
         short.update(
             {
                 "id": "binary",
@@ -813,10 +873,12 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
                 "min_files": 1,
             }
         )
-        output["slots"].append(detailed)
-        document["validation"]["serving"]["checks"][0]["request"]["output_slot"] = (
-            "detailed"
-        )
+        slots.append(detailed)
+        validation = _mapping(document["validation"])
+        serving = _mapping(validation["serving"])
+        check = _mapping(_sequence(serving["checks"])[0])
+        request = _mapping(check["request"])
+        request["output_slot"] = "detailed"
 
     sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, recipe_transform=transform
@@ -876,6 +938,7 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
+        assert operation is not None
         service.consume_agent_result(
             session,
             operation,
@@ -939,6 +1002,7 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
+        assert operation is not None
         operation.state = "running"
     cancelling = service.cancel(
         first.id,
@@ -1045,11 +1109,13 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
 
     view = service.get(submitted.id)
     assert view.state == "waiting-for-operator"
-    assert ArtifactJobResultEvidence.model_validate(view.result_evidence) == ArtifactJobResultEvidence(
-        failure_kind="cancellation-stop-uncertain",
-        recoverable=True,
-        active_scope_may_remain=True,
-        elapsed_milliseconds=10,
+    assert ArtifactJobResultEvidence.model_validate(view.result_evidence) == ArtifactJobResultEvidence.model_validate(
+        {
+            "failure_kind": "cancellation-stop-uncertain",
+            "recoverable": True,
+            "active_scope_may_remain": True,
+            "elapsed_milliseconds": 10,
+        }
     )
     with pytest.raises(Exception, match="active job"):
         recipe_operations.preview_stop(run_id)
@@ -1152,7 +1218,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
     first_store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=6)
     second_store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=6)
 
-    async def exercise() -> list[object]:
+    async def exercise() -> list[StoredArtifactBlob]:
         first_streaming = asyncio.Event()
         release_first = asyncio.Event()
         second_consumed = False
@@ -1259,6 +1325,7 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
     )
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, job.id)
+        assert stored is not None
         stored.completed_at = NOW - timedelta(days=8)
     report = service.reconcile_storage()
     assert report["expired_jobs"] == 1
@@ -1345,13 +1412,18 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(tmp_pa
     assert service.get(created.id).input_declarations == created.input_declarations
     with sessions.begin() as session:
         row = session.get(ArtifactJob, created.id)
+        assert row is not None
         manifest = dict(row.input_manifest)
         if damage == "missing-files":
             del manifest["files"]
         elif damage == "invalid-file":
-            manifest["files"] = [*manifest["files"], "invalid"]
+            files = manifest["files"]
+            assert isinstance(files, list)
+            manifest["files"] = [*files, "invalid"]
         elif damage == "wrong-total":
-            manifest["total_bytes"] += 1
+            total_bytes = manifest["total_bytes"]
+            assert isinstance(total_bytes, int)
+            manifest["total_bytes"] = total_bytes + 1
         elif damage == "wrong-digest":
             row.input_manifest_sha256 = "f" * 64
         else:
@@ -1369,11 +1441,13 @@ def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(tmp_path,
     created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152"))
     with sessions.begin() as session:
         row = session.get(ArtifactJob, created.id)
+        assert row is not None
         row.result_evidence = evidence
     with pytest.raises(ArtifactJobError, match="stored artifact result evidence"):
         service.cancel(created.id, actor="operator", request_id="cancel-corrupt", reason="stop")
     with sessions() as session:
         row = session.get(ArtifactJob, created.id)
+        assert row is not None
         assert row.result_evidence == evidence
         assert row.state == created.state
 
@@ -1383,8 +1457,11 @@ def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_value
     created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"))
     evidence = {"elapsed_milliseconds": 0, "engine": {"null": None, "empty": [], "enabled": False}}
     with sessions.begin() as session:
-        session.get(ArtifactJob, created.id).result_evidence = evidence
+        stored = session.get(ArtifactJob, created.id)
+        assert stored is not None
+        stored.result_evidence = evidence
     cancelled = service.cancel(created.id, actor="operator", request_id="cancel-evidence", reason="stop")
+    assert cancelled.result_evidence is not None
     for key, value in evidence.items():
         assert cancelled.result_evidence[key] == value
     assert service.get(created.id).result_evidence == cancelled.result_evidence

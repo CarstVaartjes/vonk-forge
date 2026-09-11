@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.bounded_json import require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from vonk_control.models import (
@@ -59,7 +60,7 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     tmp_path: Path,
 ) -> None:
     fixture, index_path, descriptor = _publisher_fixture()
-    rows = descriptor["recipes"]
+    rows = require_sequence(descriptor["recipes"], "catalog index recipes")
     expected_recipe_count = len(rows)
     calls: list[str] = []
 
@@ -89,7 +90,8 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     tmp_path: Path, tampered_field: str
 ) -> None:
     fixture, _index_path, index = _publisher_fixture()
-    row = index["recipes"][0]
+    row = require_sequence(index["recipes"], "catalog index recipes")[0]
+    assert isinstance(row, dict)
     package_name = Path(row["package"]["path"]).name
     files: dict[str, bytes] = {}
     with tarfile.open(fixture / package_name, mode="r:*") as archive:
@@ -198,10 +200,16 @@ def _active_recipe_state(session) -> dict[str, tuple[str, str, int]]:
     }
 
 
-def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(tmp_path: Path) -> None:
+def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fixture, _index_path, original_index = _publisher_fixture()
-    expected_recipe_count = len(original_index["recipes"])
-    expected_model_count = len(original_index["catalog_entities"])
+    index_recipes = require_sequence(original_index["recipes"], "catalog index recipes")
+    index_entities = require_sequence(
+        original_index["catalog_entities"], "catalog index entities"
+    )
+    expected_recipe_count = len(index_recipes)
+    expected_model_count = len(index_entities)
     index_bytes = _canonical(original_index) + b"\n"
     calls: list[str] = []
 
@@ -262,10 +270,14 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
         assert session.scalar(select(func.count()).select_from(CatalogDocumentHead)) == (
             expected_model_count + expected_recipe_count
         )
-        assert session.scalar(select(func.count()).select_from(CatalogRecipeModelReference)) > 0
+        model_reference_count = session.scalar(
+            select(func.count()).select_from(CatalogRecipeModelReference)
+        )
+        assert model_reference_count is not None and model_reference_count > 0
 
     changed_index = copy.deepcopy(original_index)
-    changed_row = changed_index["recipes"][0]
+    changed_row = require_sequence(changed_index["recipes"], "catalog index recipes")[0]
+    assert isinstance(changed_row, dict)
     original_package = (fixture / Path(changed_row["package"]["path"]).name).read_bytes()
     changed_bytes, changed_descriptor = _changed_package(original_package)
     changed_row["document"]["metadata"]["description"] += " (package sync fixture revision)"
@@ -307,8 +319,12 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
     invalid_index["source_commit"] = "e" * 40
     invalid_name = Path(changed_row["package"]["path"]).name
     invalid_bytes = b"this is not a recipe package"
-    invalid_index["recipes"][0]["package"]["sha256"] = hashlib.sha256(invalid_bytes).hexdigest()
-    invalid_index["recipes"][0]["package"]["expected_bytes"] = len(invalid_bytes)
+    invalid_row = require_sequence(invalid_index["recipes"], "catalog index recipes")[0]
+    assert isinstance(invalid_row, dict)
+    invalid_package = invalid_row["package"]
+    assert isinstance(invalid_package, dict)
+    invalid_package["sha256"] = hashlib.sha256(invalid_bytes).hexdigest()
+    invalid_package["expected_bytes"] = len(invalid_bytes)
     package_overrides[invalid_name] = invalid_bytes
     index_bytes = _canonical(invalid_index) + b"\n"
     restarted = RecipePackageClient(
@@ -325,7 +341,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
     # Force a later item failure after the package candidate has fully validated.
     failing_index = copy.deepcopy(changed_index)
     failing_index["source_commit"] = "d" * 40
-    failing_row = failing_index["recipes"][1]
+    failing_row = require_sequence(failing_index["recipes"], "catalog index recipes")[1]
+    assert isinstance(failing_row, dict)
     failing_original = (fixture / Path(failing_row["package"]["path"]).name).read_bytes()
     failing_bytes, failing_descriptor = _changed_package(failing_original)
     failing_row["document"]["metadata"]["description"] += " (package sync fixture revision)"
@@ -340,7 +357,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
             raise CatalogSyncError("fixture.apply_failed", "injected package apply failure")
         return original_import(*args, **kwargs)
 
-    catalog.import_recipe_library = fail_late  # type: ignore[method-assign]
+    monkeypatch.setattr(catalog, "import_recipe_library", fail_late)
     failing = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog,
@@ -359,7 +376,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
 
     # Loading one identical cached package offline imports one recipe without
     # treating the partial view as a complete generation.
-    current_row = changed_index["recipes"][0]
+    current_row = require_sequence(changed_index["recipes"], "catalog index recipes")[0]
+    assert isinstance(current_row, dict)
     offline = load_recipe_package(
         cache / current_row["package"]["sha256"][:2] / f"{current_row['package']['sha256']}.tar.gz",
         package_sha256=current_row["package"]["sha256"],

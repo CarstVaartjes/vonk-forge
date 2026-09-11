@@ -4,24 +4,28 @@ import copy
 import hashlib
 import io
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
 import pytest
 import vonk_control.recipe_builds as recipe_builds_module
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Table, create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
+    RecipeBuildRequest,
     canonical_payload,
 )
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -46,6 +50,7 @@ from vonk_control.recipe_operations import (
     RecipeOperationService,
     _record_build_evidence,
 )
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -53,33 +58,54 @@ from vonk_forge_contracts import RecipeDefinition, content_sha256
 class RecordingQueue:
     def enqueue_in_session(
         self,
-        session,
-        parent_job_id,
-        node_id,
-        operation,
-        authority_revision,
-        payload,
+        session: Session,
+        parent_job_id: str,
+        node_id: str,
+        operation: str,
+        authority_revision: str,
+        payload: Mapping[str, object],
         *,
-        operation_id,
-    ):
-        session.add(
-            AgentOperation(
-                id=operation_id,
-                parent_job_id=parent_job_id,
-                node_id=node_id,
-                kind=operation,
-                payload_digest="f" * 64,
-                payload=dict(payload),
-                authority_revision=authority_revision,
-                state="queued",
-                current_attempt=0,
-                created_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
-                updated_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
-            )
+        operation_id: str,
+    ) -> AgentOperation:
+        record = AgentOperation(
+            id=operation_id,
+            parent_job_id=parent_job_id,
+            node_id=node_id,
+            kind=operation,
+            payload_digest="f" * 64,
+            payload=dict(payload),
+            authority_revision=authority_revision,
+            state="queued",
+            current_attempt=0,
+            created_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
+            updated_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
         )
+        session.add(record)
+        return record
 
     def notify_available(self) -> None:
         pass
+
+
+def _json_object(value: object) -> dict[str, object]:
+    """Narrow decoded JSON to a mutable object; a wrong shape fails the test."""
+
+    assert isinstance(value, dict)
+    return value
+
+
+def _json_array(value: object) -> list[object]:
+    """Narrow decoded JSON to a mutable array; a wrong shape fails the test."""
+
+    assert isinstance(value, list)
+    return value
+
+
+def _json_text(value: object) -> str:
+    """Narrow decoded JSON to a string; a wrong shape fails the test."""
+
+    assert isinstance(value, str)
+    return value
 
 
 def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
@@ -232,9 +258,10 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert "command" not in plan.agent_payload
     assert plan.agent_payload["target"] == "runtime"
     assert plan.agent_payload["capabilities"] == ["DAC_OVERRIDE"]
-    assert plan.agent_payload["limits"]["cpu_cores"] == 6
-    assert plan.agent_payload["limits"]["gpu"] == 0
-    assert plan.agent_payload["limits"]["processes"] == 2048
+    limits = _json_object(plan.agent_payload["limits"])
+    assert limits["cpu_cores"] == 6
+    assert limits["gpu"] == 0
+    assert limits["processes"] == 2048
     assert plan.agent_payload["base_images"] == [
         {
             "manifest_digest": "sha256:" + "a" * 64,
@@ -332,7 +359,7 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        document["metadata"]["title"] = "Editorially renamed recipe"
+        _json_object(document["metadata"])["title"] = "Editorially renamed recipe"
         canonical = RecipeDefinition.model_validate(document)
         document = canonical.model_dump(mode="json")
         content_digest = content_sha256(canonical)
@@ -431,7 +458,9 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        document["execution"]["build"]["arguments"] = [{"name": "changed", "value": "yes"}]
+        _json_object(_json_object(document["execution"])["build"])["arguments"] = [
+            {"name": "changed", "value": "yes"}
+        ]
         canonical = RecipeDefinition.model_validate(document)
         document = canonical.model_dump(mode="json")
         content_digest = content_sha256(canonical)
@@ -549,7 +578,7 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
         operation=ProtocolOperation.RECIPE_BUILD,
         authority_revision="a" * 64,
         payload_digest=payload_digest,
-        payload=plan.agent_payload,
+        payload=RecipeBuildRequest.model_validate(plan.agent_payload),
         deadline=now,
     )
 
@@ -564,8 +593,8 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -590,17 +619,23 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
                 .order_by(ResourceReservation.kind)
             )
         )
+    limits = _json_object(plan.agent_payload["limits"])
     assert [(item.kind, item.amount_bytes) for item in reservations] == [
         (
             "disk",
             max(
-                plan.agent_payload["limits"]["temporary_bytes"],
-                plan.agent_payload["source_bundle_bytes"]
-                + plan.agent_payload["limits"]["output_bytes"]
-                + plan.agent_payload["base_image_storage_bytes"],
+                require_integer(limits["temporary_bytes"], "temporary bytes"),
+                require_integer(
+                    plan.agent_payload["source_bundle_bytes"], "source bundle bytes"
+                )
+                + require_integer(limits["output_bytes"], "output bytes")
+                + require_integer(
+                    plan.agent_payload["base_image_storage_bytes"],
+                    "base image storage bytes",
+                ),
             ),
         ),
-        ("host-memory", plan.agent_payload["limits"]["memory_bytes"]),
+        ("host-memory", require_integer(limits["memory_bytes"], "memory bytes")),
     ]
 
     operations.record_node_result(
@@ -638,8 +673,8 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -651,13 +686,17 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
         request_id="initial-build",
     )
     with sessions.begin() as session:
-        session.get(Job, first.id).state = operation_state  # type: ignore[union-attr]
+        job = session.get(Job, first.id)
+        assert job is not None
+        job.state = operation_state
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
         )
         assert child is not None
         child.state = operation_state
-        session.get(RecipeBuild, plan.build_id).state = build_state  # type: ignore[union-attr]
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.state = build_state
 
     retried = operations.retry(first.id, actor="admin", request_id="retry-build")
     repeated = operations.retry(first.id, actor="admin", request_id="retry-build")
@@ -667,7 +706,9 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
     assert retried.owner_id == plan.build_id
     assert retried.state == "running"
     with sessions() as session:
-        assert session.get(RecipeBuild, plan.build_id).state == "building"  # type: ignore[union-attr]
+        stored_build = session.get(RecipeBuild, plan.build_id)
+        assert stored_build is not None
+        assert stored_build.state == "building"
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(
@@ -697,8 +738,8 @@ def test_fresh_build_request_retries_matching_failed_build_idempotently(
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -710,13 +751,17 @@ def test_fresh_build_request_retries_matching_failed_build_idempotently(
         request_id="failed-acceptance-build",
     )
     with sessions.begin() as session:
-        session.get(Job, first.id).state = "failed"  # type: ignore[union-attr]
+        job = session.get(Job, first.id)
+        assert job is not None
+        job.state = "failed"
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
         )
         assert child is not None
         child.state = "failed"
-        session.get(RecipeBuild, plan.build_id).state = "failed"  # type: ignore[union-attr]
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.state = "failed"
 
     retried = operations.build(
         plan,
@@ -736,8 +781,12 @@ def test_fresh_build_request_retries_matching_failed_build_idempotently(
     assert retried.owner_id == plan.build_id
     assert retried.state == "running"
     with sessions() as session:
-        assert session.get(RecipeBuild, plan.build_id).state == "building"  # type: ignore[union-attr]
-        assert session.get(Job, retried.id).request_id == "fresh-acceptance-build"  # type: ignore[union-attr]
+        stored_build = session.get(RecipeBuild, plan.build_id)
+        assert stored_build is not None
+        assert stored_build.state == "building"
+        stored_job = session.get(Job, retried.id)
+        assert stored_job is not None
+        assert stored_job.request_id == "fresh-acceptance-build"
 
 
 def test_successful_build_retry_converges_original_and_new_request_keys(
@@ -748,8 +797,8 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -761,7 +810,9 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
         request_id="initial-build",
     )
     with sessions.begin() as session:
-        session.get(Job, first.id).state = "waiting-for-operator"  # type: ignore[union-attr]
+        job = session.get(Job, first.id)
+        assert job is not None
+        job.state = "waiting-for-operator"
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
         )
@@ -812,7 +863,9 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
     assert new_replay.state == "succeeded"
     assert new_replay.result == succeeded.result
     with sessions() as session:
-        assert session.get(Job, new_replay.id).request_id == "fresh-acceptance-build"  # type: ignore[union-attr]
+        stored_job = session.get(Job, new_replay.id)
+        assert stored_job is not None
+        assert stored_job.request_id == "fresh-acceptance-build"
         assert (
             session.scalar(
                 select(AgentOperation).where(
@@ -827,15 +880,27 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
+    projected = revision.projected
+    build_resources = _json_object(projected["build_resources"])
     source_bytes = len(
-        bundles.get(revision.projected["source_bundle_sha256"]).archive
+        bundles.get(_json_text(projected["source_bundle_sha256"])).archive
     )
-    temporary_bytes = revision.projected["build_resources"]["temporary_bytes"]
+    temporary_bytes = require_integer(
+        build_resources["temporary_bytes"], "temporary bytes"
+    )
+    roles = _json_array(_json_object(revision.document["topology"])["roles"])
     output_bytes = max(
-        role["resources"]["disk"]["image_bytes"]
-        for role in revision.document["topology"]["roles"]
+        require_integer(
+            _json_object(_json_object(_json_object(role)["resources"])["disk"])[
+                "image_bytes"
+            ],
+            "role image bytes",
+        )
+        for role in roles
     )
-    base_image_bytes = revision.projected["build_resources"]["download_bytes"]
+    base_image_bytes = require_integer(
+        build_resources["download_bytes"], "download bytes"
+    )
     peak_bytes = max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
     disk_total_bytes = 2 * 1024**4
     required_bytes = peak_bytes + recipe_builds_module._build_disk_reserve(
@@ -1043,8 +1108,8 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -1105,7 +1170,10 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         assert build is not None and build.state == "succeeded"
         job = session.get(Job, operation_view.id)
         assert job is not None and job.state == "succeeded"
-        assert job.result["node_evidence"][node_id]["policy"]["findings"] == []
+        result = job.result
+        assert result is not None
+        evidence = _json_object(result["node_evidence"])
+        assert _json_object(_json_object(evidence[node_id])["policy"])["findings"] == []
         assert (
             session.scalar(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
             is None
@@ -1258,8 +1326,8 @@ def test_image_distribution_requires_the_previewed_plan_digest(
 
     operations = RecipeOperationService(
         sessions,
-        install_admission=object(),
-        run_admission=object(),
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -1307,12 +1375,15 @@ def test_build_readers_reject_retired_or_null_persisted_settings(tmp_path, setti
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
+        assert row is not None
         document = copy.deepcopy(row.document)
         document["settings"] = settings
         # Corrupt stored JSON directly so the read boundary is exercised;
         # ordinary catalog writes independently enforce immutability.
+        table = CatalogDocumentRevision.__table__
+        assert isinstance(table, Table)
         session.execute(
-            CatalogDocumentRevision.__table__.update()
+            table.update()
             .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
@@ -1332,12 +1403,15 @@ def test_build_readers_require_persisted_settings(tmp_path) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
+        assert row is not None
         document = copy.deepcopy(row.document)
         document.pop("settings")
         # Corrupt stored JSON directly so the read boundary is exercised;
         # ordinary catalog writes independently enforce immutability.
+        table = CatalogDocumentRevision.__table__
+        assert isinstance(table, Table)
         session.execute(
-            CatalogDocumentRevision.__table__.update()
+            table.update()
             .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
@@ -1352,7 +1426,7 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     catalog = CatalogEntityService(sessions, clock=lambda: now)
     document = copy.deepcopy(revision.document)
-    document["settings"]["knobs"] = {
+    _json_object(document["settings"])["knobs"] = {
         "compiler": {"value": "clang", "change_effect": "rebuild"},
         "enabled": {"value": False, "change_effect": "rebuild"},
         "count": {"value": 0, "change_effect": "rebuild"},
@@ -1364,6 +1438,7 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
         draft = catalog.revise(revision.document_id, document, actor="admin")
         with sessions.begin() as session:
             stored = session.get(CatalogDocumentRevision, draft.id)
+            assert stored is not None
             stored.projected = copy.deepcopy(revision.projected)
         return catalog.resolve(draft.id, actor="admin")
 
@@ -1375,6 +1450,8 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
         "change_effects": {name: "rebuild" for name in ("knobs.compiler", "knobs.enabled", "knobs.count", "knobs.label")},
     }
     assert service.plan(selected.id, node_id, now=now).build_input_sha256 == first.build_input_sha256
-    document["settings"]["knobs"]["compiler"]["value"] = "gcc"
+    _json_object(
+        _json_object(_json_object(document["settings"])["knobs"])["compiler"]
+    )["value"] = "gcc"
     changed = publish(document)
     assert service.plan(changed.id, node_id, now=now).build_input_sha256 != first.build_input_sha256

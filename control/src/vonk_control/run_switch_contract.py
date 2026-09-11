@@ -528,6 +528,16 @@ class ArtifactVerificationResult(_StrictModel):
 
 class _RunSwitchPhaseBase(_StrictModel):
     phase: RunSwitchPhaseKind
+    # The default here is deliberate, and the nine `subphase overrides a field
+    # ... missing a default` errors it causes are accepted in
+    # tools/pyright-baseline.json. The nine concrete results that narrow
+    # `subphase` to their own Literal cannot all be given defaults, and removing
+    # this one is not schema-neutral either: the four results that do NOT
+    # override it -- RunSwitchCleanupResult, RunSwitchStartResult,
+    # RunSwitchStopResult and RunSwitchFinalVerifyResult -- would gain a
+    # required `subphase`, changing the committed OpenAPI. Giving the overrides
+    # a default, or dropping this field entirely, changes it too. Tried and
+    # verified; no schema-preserving formulation exists.
     subphase: RunSwitchSubphase | None = None
 
 class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):

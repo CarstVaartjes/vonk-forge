@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from vonk_control.bounded_json import require_mapping
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     PACKAGE_REPOSITORY,
@@ -38,7 +39,7 @@ def _repack(files: dict[str, bytes]) -> bytes:
     return gzip.compress(stream.getvalue(), compresslevel=9, mtime=0)
 
 
-def _canonical_package_fixture() -> tuple[bytes, dict[str, object], dict[str, object]]:
+def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
     """Create a tiny valid package without depending on another checkout."""
     model = ModelDefinition.model_validate(
         {
@@ -312,14 +313,15 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
         f"{publication}/catalog-index.json"
     )
+    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
     assert requests[2] == (
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
-        f"{publication}/{row['package']['path']}"
+        f"{publication}/{package_metadata['path']}"
     )
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == publication
-    assert item.package_handle.package_size == row["package"]["expected_bytes"]
-    assert item.package_handle.package_sha256 == row["package"]["sha256"]
+    assert item.package_handle.package_size == package_metadata["expected_bytes"]
+    assert item.package_handle.package_sha256 == package_metadata["sha256"]
     assert item.package_handle.archive_path.is_file()
     assert item.package_handle.closure_path.is_dir()
 
@@ -348,6 +350,7 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
     )
     snapshot = client.list()
     item = client.fetch(next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe"))
+    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
 
     assert requests == [
         "http://127.0.0.1:8083/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main",
@@ -357,7 +360,7 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
         ),
         (
             "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/"
-            f"{publication}/{row['package']['path']}"
+            f"{publication}/{package_metadata['path']}"
         ),
     ]
     assert item.package_handle is not None
@@ -410,7 +413,8 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
     )
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == publication
-    assert item.package_handle.package_sha256 == row["package"]["sha256"]
+    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
+    assert item.package_handle.package_sha256 == package_metadata["sha256"]
     client.close()
 
 
@@ -474,9 +478,10 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path
     index, row, package = _canonical_package_fixture()
     changed = _package_with_extra_member(package)
     changed_row = deepcopy(row)
-    changed_row["package"] = dict(changed_row["package"])
-    changed_row["package"]["sha256"] = hashlib.sha256(changed).hexdigest()
-    changed_row["package"]["expected_bytes"] = len(changed)
+    changed_package = dict(require_mapping(row["package"], "canonical fixture package metadata"))
+    changed_package["sha256"] = hashlib.sha256(changed).hexdigest()
+    changed_package["expected_bytes"] = len(changed)
+    changed_row["package"] = changed_package
     changed_index = json.loads(index)
     changed_index["recipes"] = [changed_row]
     state = {"index": index, "package": package}
@@ -505,9 +510,10 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path
 def test_failed_candidate_can_retry_against_previous_good_snapshot(tmp_path: Path) -> None:
     index, row, package = _canonical_package_fixture()
     bad_row = deepcopy(row)
-    bad_row["package"] = dict(bad_row["package"])
-    bad_row["package"]["sha256"] = "0" * 64
-    bad_row["package"]["expected_bytes"] = 1
+    bad_package = dict(require_mapping(row["package"], "canonical fixture package metadata"))
+    bad_package["sha256"] = "0" * 64
+    bad_package["expected_bytes"] = 1
+    bad_row["package"] = bad_package
     bad_index = json.loads(index)
     bad_index["recipes"] = [bad_row]
     state = {"index": index, "package": package}
