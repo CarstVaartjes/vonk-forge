@@ -131,8 +131,10 @@ def test_dual_node_claims_lock_complete_scope_before_identity(queue, postgres_en
         [lambda: _claim(services[0], 0), lambda: _claim(services[1], 1)],
     )
     assert all(claim is not None for claim in claims)
-    assert {claim.operation_id for claim in claims} == {op.id for op in operations}
-    assert len({claim.fence for claim in claims}) == 2
+    assert {claim.operation_id for claim in claims if claim is not None} == {
+        op.id for op in operations
+    }
+    assert len({claim.fence for claim in claims if claim is not None}) == 2
 
 
 @pytest.mark.parametrize("action", ("heartbeat", "succeed"))
@@ -211,7 +213,9 @@ def test_changed_candidate_does_not_claim_another_operation(queue, postgres_engi
         assert _claim(services[0], 0) is None
     finally:
         event.remove(postgres_engine, "before_cursor_execute", hook)
-    assert _claim(services[0], 0).operation_id == replacement[0].id
+    replaced = _claim(services[0], 0)
+    assert replaced is not None
+    assert replaced.operation_id == replacement[0].id
 
 
 def test_revocation_between_hint_and_lock_stays_fail_closed(queue, postgres_engine):

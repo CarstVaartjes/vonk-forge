@@ -183,6 +183,12 @@ def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, ob
     }
 
 
+def snapshot_name(publication: dict[str, object]) -> str:
+    snapshot = publication["snapshot"]
+    assert isinstance(snapshot, str)
+    return snapshot
+
+
 def test_publication_receipt_binds_the_arm64_package() -> None:
     state = load_state_module()
     version = "0.1.0~dev.1786300000+g0123456789ab"
@@ -423,7 +429,7 @@ def test_development_compaction_makes_each_new_snapshot_exact_and_bounded(
         tmp_path,
         current,
         repo=old_records,
-        snapshots={previous["snapshot"]: old_records},
+        snapshots={snapshot_name(previous): old_records},
     )
     monkeypatch.setattr(state, "_run_aptly", aptly.run)
     monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
@@ -440,7 +446,7 @@ def test_development_compaction_makes_each_new_snapshot_exact_and_bounded(
         f"Name (= vonk-forge-agent), $Version (= '{previous['version']}')",
     ) in aptly.operations
 
-    aptly.snapshots[current["snapshot"]] = set(aptly.repo)
+    aptly.snapshots[snapshot_name(current)] = set(aptly.repo)
     public = write_public_tree(tmp_path, current_records)
     state.compact_aptly_state(
         current, config, "vonk-forge-dev", package_dir, public, "finalize"
@@ -450,7 +456,7 @@ def test_development_compaction_makes_each_new_snapshot_exact_and_bounded(
     assert aptly.snapshots == {current["snapshot"]: current_records}
     assert aptly.cleanup_count == 1
     assert ("snapshot", "drop", previous["snapshot"]) in aptly.operations
-    drop = aptly.operations.index(("snapshot", "drop", previous["snapshot"]))
+    drop = aptly.operations.index(("snapshot", "drop", snapshot_name(previous)))
     cleanup = aptly.operations.index(("db", "cleanup"))
     assert drop < cleanup
 
@@ -472,7 +478,7 @@ def test_development_compaction_workflow_retry_restores_prior_committed_state(
         tmp_path,
         publication,
         repo=old_records,
-        snapshots={previous["snapshot"]: old_records},
+        snapshots={snapshot_name(previous): old_records},
     )
     monkeypatch.setattr(state, "_run_aptly", aptly.run)
     monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
@@ -495,7 +501,7 @@ def test_development_compaction_workflow_retry_restores_prior_committed_state(
             tmp_path / "public",
             "prepare",
         )
-    retry = FakeAptly(old_records, {previous["snapshot"]: old_records}, aptly.packages)
+    retry = FakeAptly(old_records, {snapshot_name(previous): old_records}, aptly.packages)
     monkeypatch.setattr(state, "_run_aptly", retry.run)
     state.compact_aptly_state(
         publication,
@@ -521,8 +527,8 @@ def test_development_compaction_fails_closed_on_cumulative_current_snapshot(
         current,
         repo=current_records,
         snapshots={
-            previous["snapshot"]: old_records,
-            current["snapshot"]: old_records | current_records,
+            snapshot_name(previous): old_records,
+            snapshot_name(current): old_records | current_records,
         },
     )
     monkeypatch.setattr(state, "_run_aptly", aptly.run)
@@ -567,7 +573,7 @@ def test_stable_compaction_retains_current_and_two_complete_predecessors(
     publication = stable_receipt("1.11.0")
     old_records = set().union(*(package_records(item) for item in historical))
     old_snapshots = {
-        item["snapshot"]: package_records(item) for item in historical
+        snapshot_name(item): package_records(item) for item in historical
     }
     config, package_dir, aptly = fake_aptly(
         tmp_path,
@@ -588,7 +594,7 @@ def test_stable_compaction_retains_current_and_two_complete_predecessors(
     )
     assert {record[1] for record in aptly.repo} == {"1.9.0", "1.10.0", "1.11.0"}
     assert {record[2] for record in aptly.repo} == {"arm64"}
-    aptly.snapshots[publication["snapshot"]] = set(aptly.repo)
+    aptly.snapshots[snapshot_name(publication)] = set(aptly.repo)
     public = write_public_tree(tmp_path, aptly.repo, "stable")
     state.compact_aptly_state(
         publication, config, "vonk-forge", package_dir, public, "finalize"
@@ -608,7 +614,7 @@ def test_stable_compaction_rejects_rollback_before_mutation(
         tmp_path,
         publication,
         repo=high_records,
-        snapshots={high["snapshot"]: high_records},
+        snapshots={snapshot_name(high): high_records},
     )
     monkeypatch.setattr(state, "_run_aptly", aptly.run)
     monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
@@ -1180,7 +1186,9 @@ def test_successor_publication_preserves_older_public_pool_objects(
 
     state.commit_candidate(private, first, first_state, first_public)
     state.publish_committed(private, public, first)
-    first_package = first["packages"]["arm64"]
+    first_packages = first["packages"]
+    assert isinstance(first_packages, dict)
+    first_package = first_packages["arm64"]
     assert isinstance(first_package, dict)
     first_key = f"pool/main/v/vonk-forge-agent/{first_package['filename']}"
     immutable_bytes = public.objects[first_key]
@@ -1206,7 +1214,9 @@ def test_stable_successor_replays_predecessor_pool_object_immutably(
     second_root.mkdir()
     first_state, first_public = bundles(first_root, first)
     second_state, _ = bundles(second_root, second)
-    first_package = first["packages"]["arm64"]
+    first_packages = first["packages"]
+    assert isinstance(first_packages, dict)
+    first_package = first_packages["arm64"]
     assert isinstance(first_package, dict)
     predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
     (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["arm64"])
@@ -1238,7 +1248,9 @@ def test_immutable_public_conflict_preserves_all_public_bytes_and_latest(
     second_root.mkdir()
     first_state, first_public = bundles(first_root, first)
     second_state, _ = bundles(second_root, second)
-    first_package = first["packages"]["arm64"]
+    first_packages = first["packages"]
+    assert isinstance(first_packages, dict)
+    first_package = first_packages["arm64"]
     assert isinstance(first_package, dict)
     predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
     (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["arm64"])

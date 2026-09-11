@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -237,8 +238,10 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         certificate_serial="certificate-1",
     )
 
-    assert grant.claims.operation.request_sha256 == "e" * 64
-    assert grant.claims.operation.action == "start"
+    operation = grant.claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.request_sha256 == "e" * 64
+    assert operation.action == "start"
 
     inspect = service.issue_grant(
         node_id="spk_" + "1" * 32,
@@ -250,7 +253,9 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         request_sha256="f" * 64,
         certificate_serial="certificate-1",
     )
-    assert inspect.claims.operation.action == "run-inspect"
+    inspect_operation = inspect.claims.operation
+    assert isinstance(inspect_operation, ExecuteContainerRuntimeRequestOperation)
+    assert inspect_operation.action == "run-inspect"
 
 
 def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
@@ -264,12 +269,11 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
         "request_sha256": "e" * 64,
         "certificate_serial": "certificate-1",
     }
-    assert (
-        service.issue_grant(
-            **common, action=ContainerRuntimeAction.RUN_INSPECT
-        ).claims.operation.action
-        == "run-inspect"
-    )
+    inspected = service.issue_grant(
+        **common, action=ContainerRuntimeAction.RUN_INSPECT
+    ).claims.operation
+    assert isinstance(inspected, ExecuteContainerRuntimeRequestOperation)
+    assert inspected.action == "run-inspect"
     for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
         with pytest.raises(HostHelperAuthorityError, match="stale"):
             service.issue_grant(**common, action=action)
@@ -294,7 +298,9 @@ def test_job_run_cancellation_keeps_exact_start_and_stop_authority_live(
         certificate_serial="certificate-1",
     )
 
-    assert grant.claims.operation.action == action.value
+    operation = grant.claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.action == action.value
 
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:
@@ -324,8 +330,10 @@ def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
     }
     service = runtime_service(operation_kind="runtime.preflight.v1")
     grant = service.issue_grant(**arguments)
-    assert grant.claims.operation.action == "runtime-preflight"
-    assert grant.claims.operation.request_sha256 == "e" * 64
+    operation = grant.claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.action == "runtime-preflight"
+    assert operation.request_sha256 == "e" * 64
     for changes in [{"fence": "50000000-0000-4000-8000-000000000005"}, {"action": ContainerRuntimeAction.START}]:
         with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(**{**arguments, **changes})
@@ -388,7 +396,19 @@ SECOND_INSTALLATION_ID = "80000000-0000-4000-8000-000000000008"
 OUTSIDE_INSTALLATION_ID = "90000000-0000-4000-8000-000000000009"
 
 
-def cleanup_grant_arguments(installation_id: str) -> dict[str, object]:
+class _CleanupGrantArguments(TypedDict):
+    node_id: str
+    job_id: str
+    operation_id: str
+    attempt: int
+    fence: str
+    action: ContainerRuntimeAction
+    request_sha256: str
+    certificate_serial: str
+    installation_id: str | None
+
+
+def cleanup_grant_arguments(installation_id: str) -> _CleanupGrantArguments:
     request = HostRuntimeRequest(
         schema_version=1,
         action="installation-cleanup",
@@ -431,9 +451,11 @@ def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload(
     for installation_id in authorized:
         arguments = cleanup_grant_arguments(installation_id)
         grant = service.issue_grant(**arguments)
-        assert grant.claims.operation.installation_id == installation_id
-        assert grant.claims.operation.action == "installation-cleanup"
-        assert grant.claims.operation.request_sha256 == arguments["request_sha256"]
+        operation = grant.claims.operation
+        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        assert operation.installation_id == installation_id
+        assert operation.action == "installation-cleanup"
+        assert operation.request_sha256 == arguments["request_sha256"]
         issuer().public_key.verify(
             bytes.fromhex(grant.signature.value),
             host_helper_grant_signing_bytes(grant.claims),
@@ -464,7 +486,8 @@ def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
 
 
 def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> None:
-    document = cleanup_grant_arguments(INSTALLATION_ID)
+    document: dict[str, object] = {}
+    document.update(cleanup_grant_arguments(INSTALLATION_ID))
     document.pop("certificate_serial")
     document["action"] = "installation-cleanup"
     document["expires_in_seconds"] = 30

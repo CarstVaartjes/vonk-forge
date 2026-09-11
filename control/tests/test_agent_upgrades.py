@@ -608,6 +608,7 @@ def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
     assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=changed) is None
     with sessions() as session:
         operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        assert operation is not None
         assert operation.current_attempt == 0
 
 
@@ -841,6 +842,7 @@ def test_resume_recovers_delayed_worker_failure_by_exact_identity_without_reinst
                 AgentOperation.node_id == NODE_A,
             )
         )
+        assert operation is not None
         attempts = list(
             session.scalars(
                 select(AgentOperationAttempt).where(
@@ -887,6 +889,7 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
         operation = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
+        assert operation is not None
         attempts = list(
             session.scalars(
                 select(AgentOperationAttempt).where(
@@ -948,6 +951,7 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
         operation = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
+        assert operation is not None
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
@@ -1081,7 +1085,8 @@ def test_resume_rejects_all_at_once_subset_topology(tmp_path) -> None:
     with pytest.raises(ValueError, match="topology"):
         upgrades.resume(job.id)
     with sessions() as session:
-        assert session.get(Job, job.id).state == "waiting-for-operator"
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "waiting-for-operator"
 
 
 def test_resume_rejects_one_at_a_time_non_prefix_topology(tmp_path) -> None:
@@ -1099,7 +1104,8 @@ def test_resume_rejects_one_at_a_time_non_prefix_topology(tmp_path) -> None:
     with pytest.raises(ValueError, match="topology"):
         upgrades.resume(job.id)
     with sessions() as session:
-        assert session.get(Job, job.id).state == "waiting-for-operator"
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "waiting-for-operator"
 
 
 def test_resume_rejects_unsucceeded_earlier_sequential_child(tmp_path) -> None:
@@ -1121,7 +1127,8 @@ def test_resume_rejects_unsucceeded_earlier_sequential_child(tmp_path) -> None:
     with pytest.raises(ValueError, match="topology"):
         upgrades.resume(job.id)
     with sessions() as session:
-        assert session.get(Job, job.id).state == "waiting-for-operator"
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "waiting-for-operator"
 
 
 def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
@@ -1352,6 +1359,7 @@ def test_queued_exact_target_contact_cannot_invent_an_install_attempt(tmp_path) 
     assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=NEW_IDENTITY) is None
     with sessions() as session:
         operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        assert operation is not None
         assert operation.current_attempt == 0
         assert operation.state == "queued"
     assert _operation_nodes(sessions, job.id) == [NODE_A]
@@ -1825,7 +1833,8 @@ def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(tmp
     assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**NEW_IDENTITY, "package_activation": receipt}) is None
     assert _operation_nodes(sessions, job.id) == [NODE_A]
     with sessions() as session:
-        assert session.get(Job, job.id).state != "succeeded"
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state != "succeeded"
 
 
 def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path):
@@ -1835,9 +1844,13 @@ def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path
     assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**OLD_IDENTITY, "package_activation": receipt}) is None
     with sessions() as session:
         parent = session.get(Job, job.id)
+        assert parent is not None
         assert parent.state == "waiting-for-operator"
+        assert parent.status_reason is not None
         assert "rolled_back" in parent.status_reason
         attempt = session.scalar(select(AgentOperationAttempt))
+        assert attempt is not None
+        assert attempt.result is not None
         assert attempt.result["package_activation"] == receipt
         assert attempt.state == "failed"
     assert _operation_nodes(sessions, job.id) == [NODE_A]
@@ -1848,12 +1861,15 @@ def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(t
     old_claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     with sessions.begin() as session:
         old = session.get(AgentOperation, old_claim.operation_id)
+        assert old is not None
         old.state = "waiting-for-operator"
         old.created_at -= timedelta(minutes=1)
         payload = json.loads(json.dumps(old.payload))
         payload["rollback"]["attempt_nonce"] = "0" * 64
         old.payload = payload
-        session.get(Job, old_job.id).state = "waiting-for-operator"
+        waiting = session.get(Job, old_job.id)
+        assert waiting is not None
+        waiting.state = "waiting-for-operator"
     plan = upgrades.preview(None, PACKAGE, strategy="one-at-a-time")
     current = upgrades.apply(
         None, PACKAGE, plan_digest=plan.plan_digest, actor="admin",
@@ -1866,8 +1882,10 @@ def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(t
         runtime_identity=NEW_IDENTITY,
     ) is None
     with sessions() as session:
-        assert session.get(AgentOperation, claim.operation_id).state == "succeeded"
-        assert session.get(AgentOperation, old_claim.operation_id).state == "waiting-for-operator"
+        claim_operation = session.get(AgentOperation, claim.operation_id)
+        old_operation = session.get(AgentOperation, old_claim.operation_id)
+        assert claim_operation is not None and claim_operation.state == "succeeded"
+        assert old_operation is not None and old_operation.state == "waiting-for-operator"
     assert set(_operation_nodes(sessions, current.id)) == {NODE_A, NODE_B}
 
 
@@ -1886,9 +1904,11 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(t
         assert contact(source) is None
         with sessions() as session:
             operation = session.get(AgentOperation, first.operation_id)
+            assert operation is not None
             assert operation.retry_disposition == "retry"
             assert operation.current_attempt == 1
-            assert session.get(Job, job.id).state == "queued"
+            queued = session.get(Job, job.id)
+            assert queued is not None and queued.state == "queued"
     clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
     monkeypatch.setattr("vonk_control.agent_upgrades.secrets.token_hex", lambda _: "8" * 64)
     # The second Spark continues reporting while the first waits out recovery.
@@ -1903,5 +1923,6 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(t
         "created_at": int(clock().timestamp()), "updated_at": int(clock().timestamp())}
     assert contact({**NEW_IDENTITY, "package_activation": acknowledged}) is None
     with sessions() as session:
-        assert session.get(AgentOperation, first.operation_id).state == "succeeded"
+        final_operation = session.get(AgentOperation, first.operation_id)
+        assert final_operation is not None and final_operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}

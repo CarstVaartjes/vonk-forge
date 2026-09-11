@@ -11,6 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypedDict
 
 import httpx
 import jwt
@@ -40,11 +41,35 @@ CA_URL = "https://step-ca:9000"
 STEP_CA_IMAGE = "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270"
 
 
+class _Material(TypedDict):
+    root: x509.Certificate
+    root_path: Path
+    intermediate: x509.Certificate
+    intermediate_key: ed25519.Ed25519PrivateKey
+    intermediate_path: Path
+    credential_path: Path
+    public_jwk_path: Path
+    public_jwk: dict[str, str]
+    kid: str
+
+
+class _SignRequestBody(TypedDict):
+    csr: str
+    ott: str
+    notBefore: str
+    notAfter: str
+
+
+class _SignExchange(TypedDict):
+    request: httpx.Request
+    body: _SignRequestBody
+
+
 def _b64(value: int) -> str:
     return base64.urlsafe_b64encode(value.to_bytes(32, "big")).rstrip(b"=").decode()
 
 
-def _write_material(tmp_path: Path) -> dict[str, object]:
+def _write_material(tmp_path: Path) -> _Material:
     tmp_path.mkdir(parents=True, exist_ok=True)
     root_key = ed25519.Ed25519PrivateKey.generate()
     root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Offline Root")])
@@ -107,7 +132,7 @@ def _csr(node_id: str = NODE_ID) -> bytes:
 
 def _leaf(
     csr_pem: bytes,
-    material: dict[str, object],
+    material: _Material,
     *,
     now: datetime = NOW,
     serial: int = 1234,
@@ -133,7 +158,7 @@ def _provider(
     *,
     certificate_lifetime_seconds: int = 86400,
     max_response_bytes: int = 64 * 1024,
-) -> tuple[StepCertificateAuthority, dict[str, object]]:
+) -> tuple[StepCertificateAuthority, _Material]:
     material = _write_material(tmp_path)
     provider = StepCertificateAuthority(
         ca_url=CA_URL,
@@ -177,7 +202,7 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
     )
 
 
-def _success_response(request: httpx.Request, material: dict[str, object], seen: list[dict[str, object]], *, serial: int = 1234) -> httpx.Response:
+def _success_response(request: httpx.Request, material: _Material, seen: list[_SignExchange], *, serial: int = 1234) -> httpx.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
     leaf = _leaf(body["csr"].encode(), material, serial=serial)
@@ -187,8 +212,8 @@ def _success_response(request: httpx.Request, material: dict[str, object], seen:
 
 
 def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signed_csr(tmp_path: Path) -> None:
-    seen: list[dict[str, object]] = []
-    holder: dict[str, object] = {}
+    seen: list[_SignExchange] = []
+    holder: dict[str, _Material] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _success_response(request, holder["material"], seen)
@@ -224,8 +249,8 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
 
 
 def test_sign_uses_and_validates_configured_certificate_lifetime(tmp_path: Path) -> None:
-    seen: list[dict[str, object]] = []
-    holder: dict[str, object] = {}
+    seen: list[_SignRequestBody] = []
+    holder: dict[str, _Material] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -275,8 +300,8 @@ def test_rejects_invalid_configured_certificate_lifetime(
 
 
 def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
-    seen: list[dict[str, object]] = []
-    holder: dict[str, object] = {}
+    seen: list[_SignExchange] = []
+    holder: dict[str, _Material] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _success_response(request, holder["material"], seen, serial=5678)
@@ -313,13 +338,15 @@ def test_revocation_is_authenticated_passive_and_idempotent_in_effect(tmp_path: 
     assert all(set(body) == {"serial", "ott", "reasonCode", "reason", "passive"} for body in seen)
     assert all(body | {"ott": "redacted"} == {"serial": "5678", "ott": "redacted", "reasonCode": 4, "reason": "superseded by Vonk Forge", "passive": True} for body in seen)
     for body in seen:
-        claims = jwt.decode(body["ott"], options={"verify_signature": False})
+        ott = body["ott"]
+        assert isinstance(ott, str)
+        claims = jwt.decode(ott, options={"verify_signature": False})
         assert claims["aud"] == f"{CA_URL}/1.0/revoke"
         assert claims["sub"] == "5678"
     assert seen[0]["ott"] != seen[1]["ott"]
 
 
-def _crl_response(material: dict[str, object], *, last_update: datetime, next_update: datetime | None) -> httpx.Response:
+def _crl_response(material: _Material, *, last_update: datetime, next_update: datetime | None) -> httpx.Response:
     builder = x509.CertificateRevocationListBuilder().issuer_name(material["intermediate"].subject).last_update(last_update)
     if next_update is not None:
         builder = builder.next_update(next_update)
@@ -328,7 +355,7 @@ def _crl_response(material: dict[str, object], *, last_update: datetime, next_up
 
 
 def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) -> None:
-    holder: dict[str, object] = {}
+    holder: dict[str, _Material] = {}
 
     def handler(_: httpx.Request) -> httpx.Response:
         return _crl_response(holder["material"], last_update=NOW - timedelta(minutes=1), next_update=NOW + timedelta(minutes=59))
@@ -352,7 +379,7 @@ def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) ->
 def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
     tmp_path: Path, last_update: datetime, next_update: datetime | None,
 ) -> None:
-    holder: dict[str, object] = {}
+    holder: dict[str, _Material] = {}
 
     def handler(_: httpx.Request) -> httpx.Response:
         return _crl_response(holder["material"], last_update=last_update, next_update=next_update)
@@ -364,14 +391,21 @@ def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
 
 
 def test_revocation_bundle_rejects_missing_next_update_window() -> None:
-    crl_without_window = SimpleNamespace(last_update_utc=NOW, next_update_utc=None)
+    issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Test CA")])
+    crl_without_window = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(issuer)
+        .last_update(NOW)
+        .sign(ed25519.Ed25519PrivateKey.generate(), algorithm=None)
+    )
+    assert crl_without_window.next_update_utc is None
     with pytest.raises(StepCAError, match="revocation bundle.*freshness"):
         _validate_crl_freshness(crl_without_window, NOW, timedelta(seconds=30))
 
 
 @pytest.mark.parametrize("mutation", ("key", "subject", "san", "eku", "usage", "issuer", "lifetime", "chain", "extra-chain"))
 def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, mutation: str) -> None:
-    holder: dict[str, object] = {}
+    holder: dict[str, _Material] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         material = holder["material"]
@@ -384,8 +418,13 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
         if mutation in {"subject", "san", "eku", "usage", "lifetime", "key", "issuer"}:
             request_obj = x509.load_pem_x509_csr(request_pem)
             node = "spk_fedcba9876543210fedcba9876543210" if mutation in {"subject", "san"} else NODE_ID
-            signer = other_intermediate["intermediate_key"] if mutation == "issuer" else material["intermediate_key"]
-            issuer = other_intermediate["intermediate"].subject if mutation == "issuer" else material["intermediate"].subject
+            if mutation == "issuer":
+                assert other_intermediate is not None
+                signer = other_intermediate["intermediate_key"]
+                issuer = other_intermediate["intermediate"].subject
+            else:
+                signer = material["intermediate_key"]
+                issuer = material["intermediate"].subject
             builder = (
                 x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node)]))
                 .issuer_name(issuer).public_key(request_obj.public_key()).serial_number(9876)
@@ -396,7 +435,11 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
                 .add_extension(x509.SubjectAlternativeName([x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node}")]), critical=False)
             )
             leaf = builder.sign(signer, algorithm=None)
-        chain_ca = other_intermediate["intermediate"] if mutation == "chain" else material["intermediate"]
+        if mutation == "chain":
+            assert other_intermediate is not None
+            chain_ca = other_intermediate["intermediate"]
+        else:
+            chain_ca = material["intermediate"]
         leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
         ca_pem = chain_ca.public_bytes(serialization.Encoding.PEM).decode()
         chain = [leaf_pem, ca_pem]
@@ -498,7 +541,7 @@ def test_health_probe_is_bounded_get_without_body(tmp_path: Path) -> None:
 def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
     tmp_path: Path, monkeypatch
 ) -> None:
-    calls: list[object] = []
+    calls: list[dict[str, object]] = []
 
     class FakeStepAuthority:
         def __init__(self, **kwargs) -> None:

@@ -88,16 +88,18 @@ def _claim(service: AgentJobService):
 
 
 def _result(claim, state: str, result: dict[str, object]) -> AgentResult:
-    return AgentResult(
-        schema_version=1,
-        job_id=claim.job_id,
-        operation_id=claim.operation_id,
-        attempt=claim.attempt,
-        fence=claim.fence,
-        node_id=claim.node_id,
-        deadline=claim.deadline,
-        state=state,
-        result=result,
+    return AgentResult.model_validate(
+        {
+            "schema_version": 1,
+            "job_id": claim.job_id,
+            "operation_id": claim.operation_id,
+            "attempt": claim.attempt,
+            "fence": claim.fence,
+            "node_id": claim.node_id,
+            "deadline": claim.deadline,
+            "state": state,
+            "result": result,
+        }
     )
 
 

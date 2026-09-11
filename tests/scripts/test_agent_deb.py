@@ -2234,9 +2234,14 @@ def test_repair_provenance_requires_exact_source_relationships() -> None:
         "binary_source_revision": REPAIR_BINARY_REVISION,
         "packaging_source_revision": REPAIR_PACKAGING_REVISION,
     }
-    dependencies = documents["provenance.json"]["predicate"]["buildDefinition"][
-        "resolvedDependencies"
-    ]
+    provenance = documents["provenance.json"]
+    assert isinstance(provenance, dict)
+    predicate = provenance["predicate"]
+    assert isinstance(predicate, dict)
+    build_definition = predicate["buildDefinition"]
+    assert isinstance(build_definition, dict)
+    dependencies = build_definition["resolvedDependencies"]
+    assert isinstance(dependencies, list)
     dependencies[0]["relationship"] = "target-binary-source"
     with pytest.raises(VERIFY_MODULE.VerificationError, match="resolved dependencies"):
         VERIFY_MODULE._verify_repair_evidence(

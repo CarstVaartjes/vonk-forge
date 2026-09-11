@@ -10,6 +10,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     RestartVonkUnitOperation,
     SignedHostHelperGrant,
@@ -116,20 +117,33 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
     class RecordingHostAuthority:
         public_key_document = issuer.public_key_document()
 
-        def issue_grant(self, **values: object) -> SignedHostHelperGrant:
+        def issue_grant(
+            self,
+            *,
+            node_id: str,
+            job_id: str,
+            operation_id: str,
+            attempt: int,
+            fence: str,
+            action: ContainerRuntimeAction,
+            request_sha256: str,
+            certificate_serial: str,
+            installation_id: str | None = None,
+            expires_in_seconds: int = 30,
+        ) -> SignedHostHelperGrant:
             return issuer.issue_grant(
-                node_id=values["node_id"],
+                node_id=node_id,
                 operation=ExecuteContainerRuntimeRequestOperation(
                     type="execute-container-runtime-request",
-                    action=values["action"].value,
-                    job_id=values["job_id"],
-                    operation_id=values["operation_id"],
-                    attempt=values["attempt"],
-                    fence=values["fence"],
-                    request_sha256=values["request_sha256"],
+                    action=action.value,
+                    job_id=job_id,
+                    operation_id=operation_id,
+                    attempt=attempt,
+                    fence=fence,
+                    request_sha256=request_sha256,
                     observation_identity_sha256="b" * 64,
                 ),
-                expires_in_seconds=values["expires_in_seconds"],
+                expires_in_seconds=expires_in_seconds,
             )
 
     object.__setattr__(services, "host_runtime_authority", RecordingHostAuthority())

@@ -24,9 +24,9 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     harness = HARNESS.read_text()
     matrix = MATRIX.read_text()
     production_phases = set(re.findall(r"write_phase ([a-z-]+)", runner))
-    accepted_phases = set(
-        re.search(r'case "\$next_phase" in\n\s*([^)]*)\)', runner).group(1).split("|")
-    )
+    accepted = re.search(r'case "\$next_phase" in\n\s*([^)]*)\)', runner)
+    assert accepted is not None
+    accepted_phases = set(accepted.group(1).split("|"))
     harness_phases = _shell_array(harness, "repair_crash_phases")
     boot_crashpoints = _shell_array(harness, "repair_boot_crashpoints")
 

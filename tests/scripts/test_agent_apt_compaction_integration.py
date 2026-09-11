@@ -138,6 +138,8 @@ def run_channel(
             ] = str(public)
             config.write_text(json.dumps(configuration))
         publication = receipt(channel, version, package_dir)
+        snapshot = publication["snapshot"]
+        assert isinstance(snapshot, str)
         state.compact_aptly_state(
             publication,
             config,
@@ -158,7 +160,7 @@ def run_channel(
             config,
             "snapshot",
             "create",
-            publication["snapshot"],
+            snapshot,
             "from",
             "repo",
             repository,
@@ -172,7 +174,7 @@ def run_channel(
                 "-architectures=arm64",
                 f"-distribution={channel}",
                 "-component=main",
-                publication["snapshot"],
+                snapshot,
                 "filesystem:integration:",
             )
         else:
@@ -183,7 +185,7 @@ def run_channel(
                 "-skip-signing",
                 channel,
                 "filesystem:integration:",
-                publication["snapshot"],
+                snapshot,
             )
         state.compact_aptly_state(
             publication,
@@ -215,7 +217,7 @@ def run_channel(
             "-skip-signing",
             channel,
             "filesystem:integration:",
-            publication["snapshot"],
+            snapshot,
         )
         state.compact_aptly_state(
             publication,
@@ -240,7 +242,9 @@ def run_channel(
                 for item in state._debian_control_paragraphs(index.read_bytes())
                 if item["Version"] == version
             )
-            first_public_path = public / fields["Filename"]
+            filename = fields["Filename"]
+            assert isinstance(filename, str)
+            first_public_path = public / filename
             first_public_package = first_public_path.read_bytes()
         else:
             assert first_public_path.read_bytes() == first_public_package
