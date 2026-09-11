@@ -630,8 +630,9 @@ def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
 
     state = _required_text(item["state"], "operation state is invalid")
     result = item.get("result")
+    operation_id = _required_text(item["id"], "operation id is invalid")
     return JobOperationResponse(
-        id=_required_text(item["id"], "operation id is invalid"),
+        id=operation_id,
         node_id=_required_text(item["node_id"], "operation node id is invalid"),
         kind=_required_text(item["kind"], "operation kind is invalid"),
         state=state,
@@ -641,8 +642,8 @@ def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
             item.get("updated_at"), "operation updated_at is invalid"
         ),
         failure=_item_failure(item),
-        provenance=_provenance_projection(result),
-        evidence_download=_evidence_download_projection(result),
+        provenance=_provenance_projection(result, operation_id),
+        evidence_download=_evidence_download_projection(result, operation_id),
         recovery=recovery_for_operation(
             state,
             supported_actions=item.get("supported_actions"),
@@ -816,12 +817,15 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
     return _failure_projection(item.get("result"))
 
 
-def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
+def _provenance_projection(
+    value: object, operation_id: str
+) -> OperationEvidenceProvenance | None:
     """Project stored evidence provenance, keeping absence distinct.
 
     A missing key or an explicit ``null`` means no provenance was attached.
     A present value that is not the canonical document is corruption and must
-    not be reported as absent.
+    not be reported as absent. The failure names the operation, because the
+    route that reports it serves a whole list.
     """
 
     if not isinstance(value, Mapping) or "provenance" not in value:
@@ -829,20 +833,23 @@ def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
     stored = value["provenance"]
     if stored is None:
         return None
+    detail = f"stored provenance for operation {operation_id} is invalid"
     if not isinstance(stored, Mapping):
-        raise BoundedJSONError("operation provenance is invalid")
+        raise BoundedJSONError(detail)
     try:
         return OperationEvidenceProvenance.model_validate(stored, strict=True)
     except ValidationError as error:
-        raise BoundedJSONError("operation provenance is invalid") from error
+        raise BoundedJSONError(detail) from error
 
 
-def _evidence_download_projection(value: object) -> OperationEvidenceDownload | None:
+def _evidence_download_projection(
+    value: object, operation_id: str
+) -> OperationEvidenceDownload | None:
     """Project the stored evidence download, keeping absence distinct.
 
     A missing key or an explicit ``null`` means no download was attached. A
     present value that is not the canonical document is corruption and must
-    not be reported as absent.
+    not be reported as absent. As above, the failure names the operation.
     """
 
     if not isinstance(value, Mapping) or "evidence_download" not in value:
@@ -850,12 +857,13 @@ def _evidence_download_projection(value: object) -> OperationEvidenceDownload | 
     stored = value["evidence_download"]
     if stored is None:
         return None
+    detail = f"stored evidence download for operation {operation_id} is invalid"
     if not isinstance(stored, Mapping):
-        raise BoundedJSONError("operation evidence download is invalid")
+        raise BoundedJSONError(detail)
     try:
         return OperationEvidenceDownload.model_validate(stored, strict=True)
     except ValidationError as error:
-        raise BoundedJSONError("operation evidence download is invalid") from error
+        raise BoundedJSONError(detail) from error
 
 
 def _operation_item(
@@ -895,8 +903,9 @@ def operation_detail_response(
     failure = _item_failure(item)
     state = _required_text(item["state"], "operation state is invalid")
     result = item.get("result")
+    operation_id = _required_text(item["id"], "operation id is invalid")
     return OperationDetailResponse(
-        id=_required_text(item["id"], "operation id is invalid"),
+        id=operation_id,
         parent_id=_optional_text(item.get("parent_id"), "operation parent id is invalid"),
         node_ids=_required_node_ids(item["node_ids"]),
         kind=_required_text(item["kind"], "operation kind is invalid"),
@@ -908,8 +917,8 @@ def operation_detail_response(
             item.get("updated_at"), "operation updated_at is invalid"
         ),
         failure=failure,
-        provenance=_provenance_projection(result),
-        evidence_download=_evidence_download_projection(result),
+        provenance=_provenance_projection(result, operation_id),
+        evidence_download=_evidence_download_projection(result, operation_id),
         recovery=recovery_for_operation(
             state,
             supported_actions=item.get("supported_actions"),

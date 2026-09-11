@@ -1172,22 +1172,40 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
     the operation detail then surfaced as an omitted field.
     """
 
-    assert operation_api._provenance_projection(None) is None
-    assert operation_api._provenance_projection({}) is None
-    assert operation_api._provenance_projection({"provenance": None}) is None
-    with pytest.raises(BoundedJSONError, match="provenance is invalid"):
-        operation_api._provenance_projection({"provenance": {"source": 7}})
-    with pytest.raises(BoundedJSONError, match="provenance is invalid"):
-        operation_api._provenance_projection({"provenance": ["not", "an", "object"]})
+    identifier = "11111111-1111-4111-8111-111111111111"
 
-    assert operation_api._evidence_download_projection(None) is None
-    assert operation_api._evidence_download_projection({}) is None
+    assert operation_api._provenance_projection(None, identifier) is None
+    assert operation_api._provenance_projection({}, identifier) is None
     assert (
-        operation_api._evidence_download_projection({"evidence_download": None}) is None
+        operation_api._provenance_projection({"provenance": None}, identifier)
+        is None
     )
-    with pytest.raises(BoundedJSONError, match="evidence download is invalid"):
+    with pytest.raises(
+        BoundedJSONError, match="provenance for operation .* is invalid"
+    ):
+        operation_api._provenance_projection(
+            {"provenance": {"source": 7}}, identifier
+        )
+    with pytest.raises(
+        BoundedJSONError, match="provenance for operation .* is invalid"
+    ):
+        operation_api._provenance_projection(
+            {"provenance": ["not", "an", "object"]}, identifier
+        )
+
+    assert operation_api._evidence_download_projection(None, identifier) is None
+    assert operation_api._evidence_download_projection({}, identifier) is None
+    assert (
         operation_api._evidence_download_projection(
-            {"evidence_download": {"media_type": "application/json"}}
+            {"evidence_download": None}, identifier
+        )
+        is None
+    )
+    with pytest.raises(
+        BoundedJSONError, match="evidence download for operation .* is invalid"
+    ):
+        operation_api._evidence_download_projection(
+            {"evidence_download": {"media_type": "application/json"}}, identifier
         )
 
 
@@ -1218,11 +1236,21 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
         agents=lambda: (),
         job_operations=unavailable,
         resume_job=lambda _job_id: None,
-        list_operations=unavailable,
+        # The list route decorates each item, so it reaches the same corrupt
+        # document through the projection rather than through a failing call.
+        list_operations=lambda *_args: OperationListPage((value,), None, 1),
         get_operation=lambda _operation_id: value,
     )
     client, operator, *_ = _client(operations=services)
 
     detail = client.get(f"/api/operations/{value['id']}", headers=operator)
     assert detail.status_code == 503
-    assert detail.json()["detail"] == "operation projection unavailable"
+    assert detail.json()["detail"] == (
+        f"stored provenance for operation {value['id']} is invalid"
+    )
+
+    listed = client.get("/api/operations", headers=operator)
+    assert listed.status_code == 503
+    assert listed.json()["detail"] == (
+        f"stored provenance for operation {value['id']} is invalid"
+    )

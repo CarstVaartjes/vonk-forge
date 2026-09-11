@@ -62,6 +62,7 @@ from .auth import (
     TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
 )
+from .bounded_json import BoundedJSONError
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogError, CatalogService
@@ -1050,10 +1051,12 @@ def create_app(
             ) from None
         try:
             items = [activity_detail(item) for item in page.items]
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except BoundedJSONError as error:
             # A stored evidence decoration that no longer validates is the
-            # Controller's fault, so it stays a declared server fault rather
-            # than escaping as an undeclared 500.
+            # Controller's fault. It stays a declared server fault, and the
+            # message names the operation so the corrupt row can be found.
+            raise HTTPException(status_code=503, detail=str(error)[:256]) from None
+        except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
@@ -1087,6 +1090,8 @@ def create_app(
             ) from None
         try:
             return activity_detail(item)
+        except BoundedJSONError as error:
+            raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
             # A stored document that no longer validates is a declared server
             # fault, not an undeclared 500 and not the caller's request fault.
