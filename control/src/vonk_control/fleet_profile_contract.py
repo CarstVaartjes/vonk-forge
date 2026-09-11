@@ -50,6 +50,60 @@ RecipeSelector = Annotated[
     ),
 ]
 
+# Each closed profile value set is named once here and used by the contract's
+# own field annotations and by the Fleet profile helpers that build those
+# fields. A shared alias is what keeps a helper signature from drifting away
+# from the set the model will accept, so the two cannot disagree without a
+# type error.
+FleetProfileInstallationPolicy = Literal["keep-cached", "exact"]
+FleetProfileOperationState = Literal[
+    "queued",
+    "running",
+    "waiting-for-operator",
+    "succeeded",
+    "failed",
+    "cancelled",
+]
+FleetProfileChildPhase = Literal[
+    "model-download",
+    "container-download",
+    "container-build",
+    "target-copy",
+    "runtime-install",
+    "start",
+    "final-verify",
+    "transfer",
+    "verify",
+    "prepare",
+    "cleanup",
+    "stop",
+    "final_verify",
+]
+FleetProfileAssignmentState = Literal[
+    "not-placed", "placed", "installing", "installed", "running", "degraded"
+]
+FleetProfileAction = Literal[
+    "stop",
+    "create-placement",
+    "build",
+    "distribute-image",
+    "install",
+    "start",
+    "switch",
+    "keep",
+]
+FleetProfilePlanStepKind = Literal[
+    "stop",
+    "uninstall",
+    "create-placement",
+    "build",
+    "distribute-image",
+    "install",
+    "start",
+    "switch",
+]
+FleetProfileOperationKind = Literal["fleet-profile.apply"]
+
 
 class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -167,7 +221,7 @@ class FleetProfileAssignmentView(_StrictModel):
 class FleetProfileInput(_StrictModel):
     name: Name = "Default"
     description: Description = ""
-    installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
+    installation_policy: FleetProfileInstallationPolicy = "keep-cached"
     labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
     favorite: bool = False
     expected_revision: int | None = Field(default=None, ge=1)
@@ -202,7 +256,7 @@ class FleetProfileView(_StrictModel):
     revision: int = Field(ge=1)
     name: Name
     description: Description
-    installation_policy: Literal["keep-cached", "exact"]
+    installation_policy: FleetProfileInstallationPolicy
     labels: dict[LabelName, LabelValue]
     favorite: bool
     assignments: list[FleetProfileAssignmentView]
@@ -235,22 +289,9 @@ class FleetProfileAssignmentPreview(_StrictModel):
     recipe_revision_id: UuidId
     recipe_title: Name
     desired_state: Literal["installed", "running"]
-    current_state: Literal[
-        "not-placed", "placed", "installing", "installed", "running", "degraded"
-    ]
+    current_state: FleetProfileAssignmentState
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    actions: list[
-        Literal[
-            "stop",
-            "create-placement",
-            "build",
-            "distribute-image",
-            "install",
-            "start",
-            "switch",
-            "keep",
-        ]
-    ] = Field(max_length=7)
+    actions: list[FleetProfileAction] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
 
     @model_validator(mode="after")
@@ -277,16 +318,7 @@ class FleetProfileScopePreview(_StrictModel):
 
 class FleetProfilePlanStep(_StrictModel):
     index: int = Field(ge=0, le=1023)
-    kind: Literal[
-        "stop",
-        "uninstall",
-        "create-placement",
-        "build",
-        "distribute-image",
-        "install",
-        "start",
-        "switch",
-    ]
+    kind: FleetProfilePlanStepKind
     assignment_id: UuidId | None = None
     owner_id: UuidId | None = None
     recipe_revision_id: UuidId | None = None
@@ -322,21 +354,7 @@ class FleetProfileChildProgress(_StrictModel):
 
     operation: OperationProgress | None = None
 
-    phase: Literal[
-        "model-download",
-        "container-download",
-        "container-build",
-        "target-copy",
-        "runtime-install",
-        "start",
-        "final-verify",
-        "transfer",
-        "verify",
-        "prepare",
-        "cleanup",
-        "stop",
-        "final_verify",
-    ]
+    phase: FleetProfileChildPhase
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
@@ -398,9 +416,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     children: list[FleetProfileSwitchChildState] = Field(default_factory=list, max_length=128)
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId
-    state: Literal[
-        "queued", "running", "waiting-for-operator", "succeeded", "failed", "cancelled"
-    ] = "queued"
+    state: FleetProfileOperationState = "queued"
     child_progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: FleetProfileSwitchAdapterResult | None = None
@@ -457,7 +473,7 @@ class FleetProfileIntendedConfiguration(_StrictModel):
     """Immutable desired configuration captured when execution is admitted."""
 
     profile_digest: Digest
-    installation_policy: Literal["keep-cached", "exact"]
+    installation_policy: FleetProfileInstallationPolicy
     scope: FleetProfileScope
     assignments: list[FleetProfileAssignment] = Field(max_length=64)
 
@@ -468,7 +484,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
-    operation_kind: Literal["fleet-profile.apply"] | None = None
+    operation_kind: FleetProfileOperationKind | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
     current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
@@ -495,14 +511,7 @@ class FleetProfileChildOperation(_StrictModel):
     """Stable child operation envelope independent of the Run service module."""
 
     id: UuidId
-    state: Literal[
-        "queued",
-        "running",
-        "waiting-for-operator",
-        "succeeded",
-        "failed",
-        "cancelled",
-    ]
+    state: FleetProfileOperationState
     progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: FleetProfileChildResult | None = None
@@ -528,8 +537,12 @@ class FleetProfileSwitchAdapter(Protocol):
         assignments while preparing or stopping other members.
         """
 
+        ...
+
     def get(self, operation_id: str) -> FleetProfileChildOperation:
         """Return the durable child state for inspection or resumption."""
+
+        ...
 
 
 class FleetProfilePreview(_StrictModel):
@@ -563,9 +576,7 @@ class FleetProfileApplicationView(_StrictModel):
     plan_digest: Digest
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
-    state: Literal[
-        "queued", "running", "waiting-for-operator", "succeeded", "failed", "cancelled"
-    ]
+    state: FleetProfileOperationState
     current_step: int = Field(ge=0, le=1024)
     total_steps: int = Field(ge=0, le=1024)
     current_operation_id: UuidId | None

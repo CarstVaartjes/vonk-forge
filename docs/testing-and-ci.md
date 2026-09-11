@@ -60,6 +60,26 @@ Linux host tool such as `dpkg`. `-m "not lane"` therefore stays honest as tests
 are added. Run `tests` and `control/tests` in separate pytest invocations: the
 two trees contain modules with the same basename.
 
+The PostgreSQL, step-ca, and security-boundary lane tests do not need a Spark or
+a release: with OrbStack running they execute locally in about a minute each and
+are worth running before claiming a Controller change works.
+
+```bash
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache uv run --project control \
+  --frozen --with-editable . pytest -q -m lane -n auto --dist loadfile \
+  control/tests/test_catalog_documents_postgres.py \
+  control/tests/test_agent_jobs_postgres.py \
+  control/tests/test_agent_job_lock_order_postgres.py \
+  control/tests/test_run_switch_postgres.py \
+  control/tests/test_telemetry_postgres.py \
+  control/tests/test_recipe_operations.py \
+  control/tests/test_step_ca.py control/tests/security
+```
+
+Only the Rust wire probes (`*_wire_bridge.py`) still require a Linux `cargo`
+build, so they stay in CI or a Linux container.
+
 Hardware-dependent lifecycle, thermal, NCCL, real model-quality, physical
 replacement, and encryption-drill evidence stays on the designated local
 hosts. It is never replaced by a green hosted smoke test.

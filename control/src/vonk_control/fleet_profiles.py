@@ -7,6 +7,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, select
@@ -14,8 +15,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
-from .bounded_json import integer, sequence
+from .bounded_json import integer, require_mapping, sequence
 from .fleet_profile_contract import (
+    FleetProfileAction,
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileApplicationView,
@@ -24,14 +26,20 @@ from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
+    FleetProfileAssignmentState,
     FleetProfileAssignmentView,
     FleetProfileChildOperation,
+    FleetProfileChildPhase,
     FleetProfileChildProgress,
     FleetProfileInput,
+    FleetProfileInstallationPolicy,
     FleetProfileIntendedConfiguration,
     FleetProfileList,
     FleetProfileNode,
+    FleetProfileOperationKind,
+    FleetProfileOperationState,
     FleetProfilePlanStep,
+    FleetProfilePlanStepKind,
     FleetProfilePlanSummary,
     FleetProfilePreview,
     FleetProfileReason,
@@ -95,6 +103,30 @@ _CHILD_PENDING_STATES = frozenset(
 _CHILD_FAILED_STATES = frozenset(
     {"failed", "expired", "cancelled", "waiting-for-operator"}
 )
+# Decoded and database-sourced closed values are read back through the
+# contract's own alias, so a malformed state fails instead of reaching a typed
+# model as an unvalidated string.
+_OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
+_PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
+_INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
+
+
+class _PlanStepDraftRequired(TypedDict):
+    """Required keys of one plan step before its index is assigned."""
+
+    kind: FleetProfilePlanStepKind
+    label: str
+
+
+class _PlanStepDraft(_PlanStepDraftRequired, total=False):
+    """Optional keys of one plan step before its index is assigned."""
+
+    assignment_id: str
+    owner_id: str
+    recipe_revision_id: str | None
+    node_ids: list[str]
+
+
 def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview:
     """Load the complete stored preview through its canonical contract."""
 
@@ -155,6 +187,31 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
 
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
+
+
+def _operation_state(
+    value: object, *, default: FleetProfileOperationState
+) -> FleetProfileOperationState:
+    """Read one child operation state, keeping the caller's deliberate default."""
+
+    try:
+        return _OPERATION_STATE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return default
+
+
+def _string_items(value: object, detail: str) -> list[str]:
+    """Read a decoded JSON string array, or raise when it is not exactly that."""
+
+    items = sequence(value)
+    if items is None:
+        raise FleetProfileConflict(detail)
+    result: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise FleetProfileConflict(detail)
+        result.append(item)
+    return result
 
 
 class RunSwitchFleetProfileAdapter:
@@ -647,22 +704,20 @@ class RunSwitchFleetProfileAdapter:
         child: RunSwitchOperation,
     ) -> FleetProfileChildOperation:
         run_phase = child.current_phase or child.progress.phase or "prepare"
-        phase = _PROFILE_PHASE_BY_RUN_PHASE.get(run_phase, run_phase)
+        phase = _PROFILE_PHASE_ADAPTER.validate_python(
+            _PROFILE_PHASE_BY_RUN_PHASE.get(run_phase, run_phase), strict=True
+        )
         progress = FleetProfileChildProgress(
             operation=child.progress.operation,
             phase=phase,
-            node_ids=list(state.get("scope_node_ids", [])),
+            node_ids=_string_items(
+                state.get("scope_node_ids", []),
+                "profile switch child scope node IDs are invalid",
+            ),
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
         )
-        child_state = child.state if child.state in {
-            "queued",
-            "running",
-            "waiting-for-operator",
-            "failed",
-            "succeeded",
-            "cancelled",
-        } else "running"
+        child_state = _operation_state(child.state, default="running")
         result = (
             FleetProfileSwitchChildResult(
                 run_switch_operation_id=child.operation_id,
@@ -684,30 +739,27 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: Mapping[str, object],
     ) -> FleetProfileChildOperation:
-        child_state = state.get("state")
-        if child_state not in {
-            "queued",
-            "running",
-            "waiting-for-operator",
-            "failed",
-            "succeeded",
-            "cancelled",
-        }:
-            child_state = "running"
+        child_state = _operation_state(state.get("state"), default="running")
         raw_progress = state.get("child_progress")
         progress = (
             FleetProfileChildProgress.model_validate(raw_progress)
             if isinstance(raw_progress, Mapping)
             else FleetProfileChildProgress(
                 phase="final-verify" if child_state == "succeeded" else "prepare",
-                node_ids=list(state.get("scope_node_ids", [])),
+                node_ids=_string_items(
+                    state.get("scope_node_ids", []),
+                    "profile switch child scope node IDs are invalid",
+                ),
             )
         )
+        raw_status_reason = state.get("status_reason")
         return FleetProfileChildOperation(
             id=application.id,
             state=child_state,
             progress=progress,
-            status_reason=state.get("status_reason") if isinstance(state.get("status_reason"), str) else None,
+            status_reason=(
+                raw_status_reason if isinstance(raw_status_reason, str) else None
+            ),
             result=(
                 FleetProfileSwitchAdapterResult.model_validate(state["result"])
                 if isinstance(state.get("result"), Mapping)
@@ -1043,7 +1095,7 @@ class FleetProfileService:
                         )
                     )
                 }
-            fleet = [
+            fleet: list[dict[str, object]] = [
                 {
                     "selector": node.node_id,
                     "display_name": display_names.get(node.node_id, node.node_id),
@@ -1195,19 +1247,26 @@ class FleetProfileService:
         now = _aware(self._clock())
         with self._sessions() as session:
             row = session.get(FleetProfile, profile_id)
-            if row is None and execution_assignments is None:
-                raise KeyError(profile_id)
-            if row is not None:
+            resolved_assignments: tuple[FleetProfileAssignment, ...]
+            if row is None:
+                if execution_assignments is None:
+                    raise KeyError(profile_id)
+                resolved_assignments = execution_assignments
+                resolved_name = profile_name or "Direct placement"
+                resolved_digest = profile_digest or _digest(
+                    {
+                        "profile_id": profile_id,
+                        "assignments": [
+                            item.model_dump(mode="json")
+                            for item in resolved_assignments
+                        ],
+                    }
+                )
+            else:
                 view = self._view(session, row)
                 resolved_assignments = self._execution_assignments(session, row)
                 resolved_name = view.name
                 resolved_digest = view.profile_digest
-            else:
-                resolved_assignments = execution_assignments
-                resolved_name = profile_name or "Direct placement"
-                resolved_digest = profile_digest or _digest(
-                    {"profile_id": profile_id, "assignments": [item.model_dump(mode="json") for item in resolved_assignments]}
-                )
             assignment_previews: list[FleetProfileAssignmentPreview] = []
             assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             reasons: list[FleetProfileReason] = []
@@ -1218,11 +1277,11 @@ class FleetProfileService:
                     .order_by(AgentNode.node_id)
                 )
             )
-            stop_steps: list[dict[str, object]] = []
-            uninstall_steps: list[dict[str, object]] = []
-            preparation_steps: list[dict[str, object]] = []
-            start_steps: list[dict[str, object]] = []
-            switch_steps: list[dict[str, object]] = []
+            stop_steps: list[_PlanStepDraft] = []
+            uninstall_steps: list[_PlanStepDraft] = []
+            preparation_steps: list[_PlanStepDraft] = []
+            start_steps: list[_PlanStepDraft] = []
+            switch_steps: list[_PlanStepDraft] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
             managed_run_ids: set[str] = set()
@@ -1369,7 +1428,7 @@ class FleetProfileService:
                     desired_run_ids.add(state.run.id)
                 if self._switch_adapter is not None and state.run is not None:
                     managed_run_ids.add(state.run.id)
-                actions: list[str] = []
+                actions: list[FleetProfileAction] = []
                 if (
                     self._switch_adapter is None
                     and assignment.desired_state == "installed"
@@ -1508,7 +1567,7 @@ class FleetProfileService:
                         adapter_switch_needed = True
                         break
             scheduled_stops = {
-                str(step["owner_id"])
+                str(step.get("owner_id"))
                 for step in stop_steps
                 if isinstance(step.get("owner_id"), str)
             }
@@ -1748,7 +1807,7 @@ class FleetProfileService:
         *,
         request_key: str,
         actor: str,
-        operation_kind: str,
+        operation_kind: FleetProfileOperationKind,
         retry_of_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
@@ -1784,7 +1843,9 @@ class FleetProfileService:
             )
             intended = FleetProfileIntendedConfiguration(
                 profile_digest=intended_view.profile_digest,
-                installation_policy=profile.installation_policy,
+                installation_policy=_INSTALLATION_POLICY_ADAPTER.validate_python(
+                    profile.installation_policy, strict=True
+                ),
                 scope=FleetProfileScope(node_ids=list(frozen_nodes)),
                 assignments=list(frozen_assignments),
             )
@@ -1932,13 +1993,13 @@ class FleetProfileService:
 
         # Keep this import local so the profile domain remains usable by the
         # profile routes when the optional Activity projection is unavailable.
-        from .operation_api import OperationListPage, OperationProvider
+        from .operation_api import OperationListPage, OperationProvider, OperationQuery
 
-        def list_operations(query: object) -> object:
-            after = getattr(query, "after", None)
-            state = getattr(query, "state", None)
-            node_id = getattr(query, "node_id", None)
-            limit = int(getattr(query, "limit", 100))
+        def list_operations(query: OperationQuery) -> OperationListPage:
+            after = query.after
+            state = query.state
+            node_id = query.node_id
+            limit = query.limit
             with self._sessions() as session:
                 base_statement = select(FleetProfileApplication).order_by(
                     FleetProfileApplication.created_at.desc(),
@@ -2421,7 +2482,9 @@ class FleetProfileService:
         choices = self._choices(row)
         assignments: list[FleetProfileAssignmentView] = []
         assigned_nodes = {node_id for choice in choices for node_id in choice.spark_ids}
-        cache_summary: dict[str, object] = {"cached": 0, "missing": 0, "unknown": 0}
+        cache_cached = 0
+        cache_missing = 0
+        cache_unknown = 0
         warnings: list[str] = []
         for choice in choices:
             recipe, revision, cache = self._resolve_choice(session, choice)
@@ -2430,17 +2493,55 @@ class FleetProfileService:
             required = required_sparks if type(required_sparks) is int else None
             if self._cache_resolver is None:
                 warnings.append("Cache resolution is unavailable until the cache service is configured")
-            recipe_state = "Cached" if cache and bool(cache.get("recipe", {}).get("cached")) else "Recipe not cached"
-            model_state = "Cached" if cache and bool(cache.get("model", {}).get("cached")) else "Model not cached"
+            recipe_part = (
+                require_mapping(
+                    cache.get("recipe", {}), "profile cache recipe is invalid"
+                )
+                if cache
+                else None
+            )
+            model_part = (
+                require_mapping(
+                    cache.get("model", {}), "profile cache model is invalid"
+                )
+                if cache
+                else None
+            )
+            recipe_state = (
+                "Cached"
+                if recipe_part and bool(recipe_part.get("cached"))
+                else "Recipe not cached"
+            )
+            model_state = (
+                "Cached"
+                if model_part and bool(model_part.get("cached"))
+                else "Model not cached"
+            )
             if cache is None:
-                cache_summary["unknown"] = integer(cache_summary["unknown"], default=0) + 1
+                cache_unknown += 1
             elif recipe_state == "Cached" and model_state == "Cached":
-                cache_summary["cached"] = integer(cache_summary["cached"], default=0) + 1
+                cache_cached += 1
             else:
-                cache_summary["missing"] = integer(cache_summary["missing"], default=0) + 1
-            resources = dict(cache.get("resources", {})) if cache else {}
-            model_document = resolve_recipe_entities(session, revision.document).get("models", ())
-            model = model_document[0] if model_document else None
+                cache_missing += 1
+            resources = (
+                dict(
+                    require_mapping(
+                        cache.get("resources", {}),
+                        "profile cache resources are invalid",
+                    )
+                )
+                if cache
+                else {}
+            )
+            model_document = sequence(
+                resolve_recipe_entities(session, revision.document).get("models", ())
+            )
+            candidate_model = next(iter(model_document or ()), None)
+            model = (
+                candidate_model
+                if isinstance(candidate_model, CatalogDocumentRevision)
+                else None
+            )
             model_selector = None
             model_name = None
             if model is not None:
@@ -2461,7 +2562,11 @@ class FleetProfileService:
                         "name": model_name,
                         "variant": choice.model_variant,
                         "state": model_state,
-                        "content_sha256": cache.get("model", {}).get("content_sha256") if cache else None,
+                        "content_sha256": (
+                            model_part.get("content_sha256")
+                            if model_part is not None
+                            else None
+                        ),
                     },
                     recipe={
                         "selector": f"{recipe.publisher}/{recipe.slug}",
@@ -2488,7 +2593,7 @@ class FleetProfileService:
                 )
             )
         }
-        fleet = [
+        fleet: list[dict[str, object]] = [
             {
                 "selector": node.node_id,
                 "display_name": display_names.get(node.node_id, node.node_id),
@@ -2503,13 +2608,19 @@ class FleetProfileService:
             revision=row.revision,
             name=row.name,
             description=row.description,
-            installation_policy=row.installation_policy,
+            installation_policy=_INSTALLATION_POLICY_ADAPTER.validate_python(
+                row.installation_policy, strict=True
+            ),
             labels=dict(row.labels),
             favorite=row.favorite,
             assignments=assignments,
             fleet=fleet,
             status="draft",
-            cache_summary=cache_summary,
+            cache_summary={
+                "cached": cache_cached,
+                "missing": cache_missing,
+                "unknown": cache_unknown,
+            },
             warnings=sorted(set(warnings)),
             next_actions=[f"vonkctl --profile {row.number} profile load"],
             profile_digest=_digest(document),
@@ -2531,10 +2642,16 @@ class FleetProfileService:
         return root.title if root is not None else f"{model.publisher}/{model.slug}"
 
     class _AssignmentState:
+        current_state: FleetProfileAssignmentState
+        mapping: ClusterMapping | None
+        installation: RecipeInstallation | None
+        run: RecipeRun | None
+        build: RecipeBuild | None
+
         def __init__(
             self,
             *,
-            current_state: str,
+            current_state: FleetProfileAssignmentState,
             mapping: ClusterMapping | None,
             installation: RecipeInstallation | None,
             run: RecipeRun | None,
@@ -2663,7 +2780,7 @@ class FleetProfileService:
             and all(node.state == "installed" for node in install_members)
         )
         if not exact_installed:
-            state = (
+            state: FleetProfileAssignmentState = (
                 "installing"
                 if installation.state in {"planned", "installing"}
                 else "degraded"
@@ -2770,7 +2887,7 @@ class FleetProfileService:
             profile_id=row.profile_id,
             profile_digest=row.profile_digest,
             plan_digest=row.plan_digest,
-            state=row.state,
+            state=_OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True),
             attempt=FleetProfileApplicationProgress.model_validate(row.progress).attempt,
             retry_of_application_id=FleetProfileApplicationProgress.model_validate(row.progress).retry_of_application_id,
             current_step=row.current_step,
