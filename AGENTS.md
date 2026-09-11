@@ -83,6 +83,12 @@ classified without further edits, so `-m "not lane"` stays honest. A fast-tier
 failure is a real defect; a lane-tier failure on macOS is usually a missing
 Linux dependency, not a regression.
 
+The fast tier is also hermetic about the developer's environment. The root and
+control `conftest.py` files configure `git` to ignore global and system
+configuration, so a test that creates a throwaway repository cannot be broken by
+a personal `commit.gpgsign`, a signing agent, a hook, or `init.defaultBranch`.
+Keep that isolation: a fixture that only passes on one machine is not evidence.
+
 Run the two trees in separate pytest invocations. Both contain modules with the
 same basename, so a single invocation over `tests control/tests` mis-collects
 them.

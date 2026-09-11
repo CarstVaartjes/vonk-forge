@@ -2433,11 +2433,11 @@ class FleetProfileService:
             recipe_state = "Cached" if cache and bool(cache.get("recipe", {}).get("cached")) else "Recipe not cached"
             model_state = "Cached" if cache and bool(cache.get("model", {}).get("cached")) else "Model not cached"
             if cache is None:
-                cache_summary["unknown"] = int(cache_summary["unknown"]) + 1
+                cache_summary["unknown"] = integer(cache_summary["unknown"], default=0) + 1
             elif recipe_state == "Cached" and model_state == "Cached":
-                cache_summary["cached"] = int(cache_summary["cached"]) + 1
+                cache_summary["cached"] = integer(cache_summary["cached"], default=0) + 1
             else:
-                cache_summary["missing"] = int(cache_summary["missing"]) + 1
+                cache_summary["missing"] = integer(cache_summary["missing"], default=0) + 1
             resources = dict(cache.get("resources", {})) if cache else {}
             model_document = resolve_recipe_entities(session, revision.document).get("models", ())
             model = model_document[0] if model_document else None

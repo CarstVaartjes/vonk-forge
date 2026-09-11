@@ -19,7 +19,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy import and_, func, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
-from .bounded_json import integer, mapping, sequence
+from .bounded_json import integer, mapping, require_integer, sequence
 from .failure_evidence_models import FailureEvidenceCursor, FailureEvidenceRecord
 from .logging import redact_text
 from .models import (
@@ -317,7 +317,7 @@ class FailureEvidenceService:
             bundle = FailureEvidenceBundle(
                 context=EvidenceContext(
                     operation_id=str(item["id"]),
-                    attempt=int(item["attempt"]),
+                    attempt=require_integer(item["attempt"], "operation attempt"),
                     kind=str(item["kind"]),
                     node_ids=list(item.get("node_ids", []))[:128],
                     omitted_node_count=max(0, len(item.get("node_ids", [])) - 128),
@@ -392,7 +392,7 @@ class FailureEvidenceService:
     def decorate(self, item: Mapping[str, object]) -> dict[str, object]:
         result = dict(item.get("result") or {})
         try:
-            content, digest, bundle = self.read(str(item["id"]), int(item["attempt"]))
+            content, digest, bundle = self.read(str(item["id"]), require_integer(item["attempt"], "operation attempt"))
         except (KeyError, ValueError, OSError):
             return dict(item)
         result["evidence_download"] = OperationEvidenceDownload(

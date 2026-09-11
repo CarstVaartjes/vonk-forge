@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
+from .bounded_json import integer, require_integer
 from .model_cache_contract import Digest
 from .operation_api import bounded_error_responses
 from .operation_contract import (
@@ -240,7 +241,7 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
         }, kind="runtime-image"))
     return RecipeImageAvailabilityResponse(
         id=str(document["id"]), request_id=str(document["request_id"]), kind=str(document["kind"]),
-        state=str(document["state"]), attempt=int(document["attempt"]),
+        state=str(document["state"]), attempt=require_integer(document["attempt"], "attempt"),
         recipe_revision_id=str(document["recipe_revision_id"]),
         recipe_content_sha256=str(document["recipe_content_sha256"]),
         progress=_progress(document.get("progress")),
@@ -291,7 +292,7 @@ def install_recipe_operator_routes(
 
     def removal_document(result: Mapping[str, object]) -> RecipeOperatorResponse:
         return RecipeOperatorResponse(
-            schema_version=int(result.get("schema_version", 2)),
+            schema_version=integer(result.get("schema_version"), default=2),
             action="remove",
             selector=str(result["selector"]),
             request_key=str(result["request_key"]),
@@ -300,13 +301,13 @@ def install_recipe_operator_routes(
             state=str(result["state"]),
             progress=OperationProgress(
                 phase="completed",
-                completed_bytes=int(result.get("reclaimed_bytes", 0)),
-                total_bytes=int(result.get("reclaimed_bytes", 0)),
+                completed_bytes=integer(result.get("reclaimed_bytes"), default=0),
+                total_bytes=integer(result.get("reclaimed_bytes"), default=0),
                 total_bytes_known=True,
                 completed_items=len(result.get("cancelled_operations", [])),
                 total_items=len(result.get("cancelled_operations", [])),
             ),
-            reclaimed_bytes=int(result.get("reclaimed_bytes", 0)),
+            reclaimed_bytes=integer(result.get("reclaimed_bytes"), default=0),
             preserved=[str(item) for item in result.get("preserved", [])],
             next_actions=[str(item) for item in result.get("next_actions", [])],
             cancelled_operations=[str(item) for item in result.get("cancelled_operations", [])],

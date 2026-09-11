@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import validate_recipe_models
 
+from .bounded_json import integer, require_integer
 from .recipe_library_types import (
     RecipeLibraryChange,
     RecipeLibraryError,
@@ -484,7 +485,7 @@ class RecipePackageClient:
         archive, archive_path = self._cached_or_download(
             package_digest,
             str(package["location"]),
-            int(package["size"]),
+            require_integer(package["size"], "package size"),
             expected_publication=str(package.get("publication_commit", "")) or None,
         )
         return self._decode_package(archive, item, package=package, archive_path=archive_path)
@@ -599,7 +600,7 @@ class RecipePackageClient:
             raise RecipePackageError("recipe_package.package_invalid", "recipe package identity or contents are invalid") from error
         metadata = recipe.metadata
         package_digest = str(package.get("package_sha256")) if package is not None else _sha256(archive)
-        package_size = int(package.get("size", len(archive))) if package is not None else len(archive)
+        package_size = integer(package.get("size"), default=len(archive)) if package is not None else len(archive)
         package_path = str(package.get("location", "")) if package is not None else ""
         publication_commit = str(package.get("publication_commit", item.library_commit)) if package is not None else item.library_commit
         if archive_path is None:
