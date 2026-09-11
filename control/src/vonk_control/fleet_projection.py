@@ -1480,6 +1480,11 @@ class FleetProjection:
             revision = group[0][3]
             recipe = group[0][4]
             if _canonical_recipe(revision) is None:
+                # An ineligible revision is simply not this projection's
+                # business. A damaged active one cannot pass unnoticed: the ORM
+                # refuses to commit a stored document that no longer hashes to
+                # its recorded digest, so the read fails instead of returning a
+                # node with nothing installed.
                 continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = _install_degraded_reason(
@@ -1548,6 +1553,8 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
+            # As above: a damaged active revision fails the read at commit, so
+            # this only ever skips a run that is genuinely ineligible.
             if _canonical_recipe(revision) is None:
                 continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]

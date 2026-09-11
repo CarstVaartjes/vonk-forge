@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -327,3 +330,27 @@ def test_cookie_sessions_reflect_revocation_disablement_and_expiry() -> None:
             clock.value += timedelta(hours=12)
 
         assert client.get("/api/audit").status_code == 401
+
+
+class _RejectedPlan(BaseModel):
+    """A stand-in for the compiled plans whose failures are reported."""
+
+    retries: int
+
+
+def test_bounded_error_detail_never_echoes_the_rejected_value() -> None:
+    """The bounded error detail is redacted as well as truncated.
+
+    Routes build this detail from a caught exception, and a pydantic
+    ``ValidationError`` stringifies the submitted input, so an unredacted
+    detail would hand the failing value straight back to the caller.
+    """
+    from vonk_control.api import _bounded_error_content
+
+    with pytest.raises(ValidationError) as rejected:
+        _RejectedPlan.model_validate({"retries": "token=super-secret-value"})
+    body = json.loads(_bounded_error_content(str(rejected.value)))
+    assert "super-secret-value" not in body["detail"]
+    assert "token=<redacted>" in body["detail"]
+
+    assert len(json.loads(_bounded_error_content("x" * 400))["detail"]) == 256

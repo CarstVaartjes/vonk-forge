@@ -36,7 +36,7 @@ from .agent_upgrade_status import (
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
 )
-from .auth import CursorCodec
+from .auth import CursorCodec, CursorError
 from .bounded_json import BoundedJSONError, require_integer, require_sequence
 from .logging import redact_text
 from .models import (
@@ -497,7 +497,7 @@ def merge_operation_providers(
                 raise ValueError
             after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
         except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-            raise ValueError("operation cursor is invalid") from None
+            raise CursorError("operation cursor is invalid") from None
     query = OperationQuery(after=after, limit=limit + 1, state=state, node_id=node_id)
     rows: list[Mapping[str, object]] = []
     total = 0
@@ -734,9 +734,9 @@ def decode_offset(
             context={"job_id": job_id},
         )
     except (UnicodeError, ValueError):
-        raise ValueError("target cursor is invalid") from None
+        raise CursorError("target cursor is invalid") from None
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
-        raise ValueError("target cursor is invalid")
+        raise CursorError("target cursor is invalid")
     return offset
 
 
@@ -1252,7 +1252,7 @@ class _DurableOperationProjection:
                     raise ValueError
                 boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
             except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-                raise ValueError("operation cursor is invalid") from None
+                raise CursorError("operation cursor is invalid") from None
         with self._sessions() as session:
             agent_upgrade_diagnostics = _agent_upgrade_diagnostics(session, job_id)
             statement = select(AgentOperation).where(
@@ -1398,7 +1398,7 @@ class _DurableOperationProjection:
                     raise ValueError
                 boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
             except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-                raise ValueError("operation cursor is invalid") from None
+                raise CursorError("operation cursor is invalid") from None
         with self._sessions() as session:
             filters = []
             if state is not None:
