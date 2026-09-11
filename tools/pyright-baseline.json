@@ -1,4 +1,3 @@
 {
-  "control/tests/security/test_agent_identity.py": 1,
-  "control/tests/test_telemetry.py": 1
+  "control/tests/security/test_agent_identity.py": 1
 }
