@@ -389,6 +389,7 @@ class FleetProfileSwitchChildState(_StrictModel):
     operation_id: UuidId
     kind: Literal["run", "stop"]
     state: Literal["succeeded", "failed", "cancelled"]
+    result: FleetProfileSwitchChildResult | None = None
 
 
 class FleetProfileSwitchAdapterResult(_StrictModel):
@@ -441,6 +442,11 @@ class FleetProfileSwitchChildResult(_StrictModel):
 
     run_switch_operation_id: UuidId
     run_switch: RunSwitchOperationResult
+
+
+# The terminal child receipt is declared above its own type so a completed
+# child can carry it; resolve that forward reference once both exist.
+FleetProfileSwitchChildState.model_rebuild()
 
 
 class FleetProfileVerificationResult(_StrictModel):
