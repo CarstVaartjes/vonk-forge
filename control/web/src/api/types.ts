@@ -158,6 +158,7 @@ export interface LibraryApi {
   removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
+  removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }
 export interface ControlApi extends LibraryApi {

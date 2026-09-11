@@ -30,6 +30,7 @@ import type {
   ModelCacheOperatorResponse,
   RecipeImageAvailabilityResponse,
   RecipeCacheOperation,
+  RecipeOperatorResponse,
   RecipeDetail,
   RecipeLibrary,
   RecipeStatus,
@@ -319,6 +320,17 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
       params: {path: {selector}},
       body: {request_key: requestKey, schema_version: 2, with_model: true},
+      signal,
+    }));
+  }
+
+  async removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
+    // The model choice is explicit, like the CLI's mandatory --keep-model or
+    // --with-model: the Controller fails closed rather than guessing whether a
+    // shared model entry should go too.
+    return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
+      params: {path: {selector}},
+      body: {request_key: requestKey, schema_version: 2, with_model: withModel},
       signal,
     }));
   }
