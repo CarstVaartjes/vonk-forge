@@ -4,7 +4,7 @@ import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey, recipeLibraryPath} from "../lib/library-route";
 import {LibraryCacheAction} from "./library-cache-action";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
-import {filterLibraryRecipeRecords} from "./library-workcell";
+import {filterLibraryRecipeRecords, LIBRARY_RECENCY_LABELS, LIBRARY_RECENCY_VALUES, libraryFiltersToSearch, libraryRecencyFromValue, LIBRARY_SORTS, LIBRARY_SORT_LABELS, librarySortFromValue} from "./library-workcell";
 
 type LibraryModelsViewProps = {
   api: ControlApi;
@@ -36,13 +36,12 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     .filter(model => !normalizedQuery || filteredRecipes.some(record => record.modelKey === modelKey(model.model)) || modelTitle(model).toLowerCase().includes(normalizedQuery));
   const refresh = () => void onRefresh(new AbortController().signal);
 
-  function updateFilter(name: keyof LibraryWorkcellFilters, value: string) {
-    onFiltersChange({...filters, [name]: value});
+  function updateFilters(patch: Partial<LibraryWorkcellFilters>) {
+    const next = {...filters, ...patch};
+    onFiltersChange(next);
     if (!onNavigatePath) return;
     const url = new URL(path, location.origin);
-    if (value) url.searchParams.set(name, value);
-    else url.searchParams.delete(name);
-    onNavigatePath(`${url.pathname}${url.search}`, true);
+    onNavigatePath(`${url.pathname}?${libraryFiltersToSearch(next, url.searchParams).toString()}`, true);
   }
 
   return <section className="library-models-view" aria-labelledby="library-models-heading">
@@ -52,13 +51,15 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     </header>
     <div className="library-model-controls">
       <label>Search models<input type="search" aria-label="Search models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability" /></label>
-      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
-      <label>Usage<select aria-label="Filter model usage" value={filters.usage} onChange={event => updateFilter("usage", event.target.value)}><option value="">All usage</option>{[...new Set(models.flatMap(model => model.usage))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Family<select aria-label="Filter model family" value={filters.family} onChange={event => updateFilter("family", event.target.value)}><option value="">All families</option>{[...new Set(models.map(model => model.family).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Version<select aria-label="Filter model version" value={filters.version} onChange={event => updateFilter("version", event.target.value)}><option value="">All versions</option>{[...new Set(models.map(model => model.version).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Quantization<select aria-label="Filter model quantization" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">All quantization</option>{[...new Set(models.map(model => model.quantization).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Creator<select aria-label="Filter model creator" value={filters.publisher} onChange={event => updateFilter("publisher", event.target.value)}><option value="">All creators</option>{[...new Set(models.map(model => model.model.publisher).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Alignment<select aria-label="Filter model alignment" value={filters.alignment} onChange={event => updateFilter("alignment", event.target.value)}><option value="">All alignments</option>{[...new Set(models.flatMap(model => model.alignment))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateFilters({model: event.target.value})}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
+      <label>Usage<select aria-label="Filter model usage" value={filters.usage} onChange={event => updateFilters({usage: event.target.value})}><option value="">All usage</option>{[...new Set(models.flatMap(model => model.usage))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Family<select aria-label="Filter model family" value={filters.family} onChange={event => updateFilters({family: event.target.value})}><option value="">All families</option>{[...new Set(models.map(model => model.family).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Version<select aria-label="Filter model version" value={filters.version} onChange={event => updateFilters({version: event.target.value})}><option value="">All versions</option>{[...new Set(models.map(model => model.version).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Quantization<select aria-label="Filter model quantization" value={filters.quantization} onChange={event => updateFilters({quantization: event.target.value})}><option value="">All quantization</option>{[...new Set(models.map(model => model.quantization).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Creator<select aria-label="Filter model creator" value={filters.publisher} onChange={event => updateFilters({publisher: event.target.value})}><option value="">All creators</option>{[...new Set(models.map(model => model.model.publisher).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Alignment<select aria-label="Filter model alignment" value={filters.alignment} onChange={event => updateFilters({alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(models.flatMap(model => model.alignment))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Sort<select aria-label="Sort models" value={filters.sort} onChange={event => updateFilters({sort: librarySortFromValue(event.target.value)})}>{LIBRARY_SORTS.map(value => <option key={value} value={value}>{LIBRARY_SORT_LABELS[value]}</option>)}</select></label>
+      <label>Updated<select aria-label="Filter model updated" value={filters.updated} onChange={event => updateFilters({updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
     </div>
     <div className="library-model-list" aria-label="Model library">
       {visible.map(model => <ModelRow key={modelKey(model.model)} api={api} model={model} onNavigate={onNavigate} onPrepared={refresh} />)}

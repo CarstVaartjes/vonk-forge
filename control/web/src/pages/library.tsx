@@ -1,9 +1,10 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, ModelLibrary, RecipeDetail, RecipeLibrary, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibrarySort, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, ModelLibrary, RecipeDetail, RecipeLibrary, VisualFleetSnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import type {LibrarySubview} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
+import {libraryFiltersFromSearch, libraryRecencySince} from "../components/library-workcell";
 import {nodeDisplayName} from "../lib/fleet";
 import {libraryRoute} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
@@ -67,10 +68,13 @@ async function loadAll<T extends {next_cursor: string | null}>(load: (cursor: st
   return pages;
 }
 
-export async function loadLibraryView(api: ControlApi, signal: AbortSignal): Promise<LibraryViewSnapshot> {
+export async function loadLibraryView(api: ControlApi, signal: AbortSignal, sort?: LibrarySort, updatedSince?: string): Promise<LibraryViewSnapshot> {
+  // Every load starts from the first page: the cursor belongs to the ordering
+  // and filters that produced it, so the caller re-derives the whole view when
+  // either changes rather than resuming a page in the previous order.
   const [modelPages, recipePages] = await Promise.all([
-    loadAll(cursor => api.modelLibrary(cursor, signal), signal),
-    loadAll(cursor => api.recipeLibrary(cursor, signal), signal),
+    loadAll(cursor => api.modelLibrary(cursor, sort, updatedSince, signal), signal),
+    loadAll(cursor => api.recipeLibrary(cursor, sort, updatedSince, signal), signal),
   ]);
   const models = modelPages.flatMap(page => page.models);
   const recipes = recipePages.flatMap(page => page.recipes).map(viewRecipe);
@@ -122,12 +126,13 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   const route = useMemo(() => libraryRoute(new URL(path, location.origin).pathname), [path]);
   const view = subview(path);
   const preferredNodeId = new URL(path, location.origin).searchParams.get("spark") ?? undefined;
+  const {sort: librarySort, updated: libraryUpdated} = useMemo(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams), [path]);
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
   useEffect(() => {
     const controller = new AbortController(); setError("");
-    void loadLibraryView(api, controller.signal).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library"); });
+    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated)).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library"); });
     return () => controller.abort();
-  }, [api, attempt]);
+  }, [api, attempt, librarySort, libraryUpdated]);
   useEffect(() => {
     if (!api.visualFleet) return;
     const controller = new AbortController(); setFleetError("");
