@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
 
+from .bounded_json import integer, sequence
 from .logging import redact_text
 
 _SENSITIVE = re.compile(
@@ -210,17 +211,17 @@ def validate_progress_update(
         )
         if key not in current or current[key] is None or omitted_total:
             normalized[key] = old[key]
-    old_bytes = int(old.get("completed_bytes", 0))
-    new_bytes = int(normalized.get("completed_bytes", 0))
+    old_bytes = integer(old.get("completed_bytes"), default=0)
+    new_bytes = integer(normalized.get("completed_bytes"), default=0)
     if new_bytes < old_bytes:
         raise ValueError("operation progress bytes cannot move backwards")
-    if int(normalized.get("completed_items") or 0) < int(old.get("completed_items") or 0):
+    if integer(normalized.get("completed_items"), default=0) < integer(old.get("completed_items"), default=0):
         raise ValueError("operation progress items cannot move backwards")
     old_checkpoint = old.get("checkpoint")
     new_checkpoint = normalized.get("checkpoint")
     if isinstance(old_checkpoint, Mapping) and isinstance(new_checkpoint, Mapping):
-        old_sequence = int(old_checkpoint.get("sequence", 0))
-        new_sequence = int(new_checkpoint.get("sequence", 0))
+        old_sequence = integer(old_checkpoint.get("sequence"), default=0)
+        new_sequence = integer(new_checkpoint.get("sequence"), default=0)
         if new_sequence < old_sequence:
             raise ValueError("operation checkpoint sequence cannot move backwards")
         if new_sequence == old_sequence and dict(new_checkpoint) != dict(
@@ -229,15 +230,15 @@ def validate_progress_update(
             raise ValueError("operation checkpoint was reused with different data")
     old_members = {
         str(item["member_id"]): item
-        for item in old.get("members", [])
+        for item in sequence(old.get("members")) or ()
         if isinstance(item, Mapping) and isinstance(item.get("member_id"), str)
     }
-    for item in normalized.get("members", []):
+    for item in sequence(normalized.get("members")) or ():
         if not isinstance(item, Mapping):
             continue
         member_id = item.get("member_id")
         prior = old_members.get(str(member_id))
-        if prior is not None and int(item.get("completed_bytes", 0)) < int(
+        if prior is not None and integer(item.get("completed_bytes"), default=0) < int(
             prior.get("completed_bytes", 0)
         ):
             raise ValueError("operation member progress bytes cannot move backwards")
