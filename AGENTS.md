@@ -97,6 +97,19 @@ configuration, so a test that creates a throwaway repository cannot be broken by
 a personal `commit.gpgsign`, a signing agent, a hook, or `init.defaultBranch`.
 Keep that isolation: a fixture that only passes on one machine is not evidence.
 
+Every test costs review time on every future change, so each one has to earn its
+place by catching a defect a reviewer would otherwise reason about by hand. Name
+the wrong implementation it fails on; if only deleting the code it calls can make
+it fail, it is ceremony. Prefer the boundary — empty, absent, malformed, first
+and last accepted value, replayed or expired grant, a permission that must be
+refused — over another walk through the happy path. Do not re-assert a constant,
+field list, literal set or schema shape that another test already pins; two
+copies drift, and the drift costs more than the copy catches. A bug fix ships
+with the test that fails without it, and you confirm that failure before fixing.
+Exercise the real seam: a stub that replaces the thing under review cannot catch
+a fault in it. See
+[docs/testing-and-ci.md](docs/testing-and-ci.md#what-earns-a-test).
+
 Run the two trees in separate pytest invocations. Both contain modules with the
 same basename, so a single invocation over `tests control/tests` mis-collects
 them.
@@ -140,6 +153,12 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache scripts/check-python-types
 # TypeScript types; the build runs tsc --noEmit before bundling.
 npm ci --prefix control/web
 npm run build --prefix control/web
+
+# Rust wire structures: fail if they no longer match the Pydantic schemas.
+# This is the typify step, and it is a text comparison, so it needs no cargo.
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+  uv run --project control --frozen --with-editable . \
+  python scripts/generate-agent-wire --check
 ```
 
 `control/.venv` cannot satisfy the ruff pin because `openapi-python-client`

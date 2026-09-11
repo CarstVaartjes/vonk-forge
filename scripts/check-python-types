@@ -3,9 +3,14 @@
 
 The repository does not yet type-check cleanly. This gate makes the check
 enforceable now: every file's error count is pinned in
-`tools/pyright-baseline.json`, a file may never exceed its pinned count, and a
-file that improves must lower its entry in the same change. Passing `--update`
-rewrites the baseline from the current run.
+`tools/pyright-baseline.json`, and a file may never exceed its pinned count.
+A file absent from the baseline counts as zero, so a new module that introduces
+errors fails immediately.
+
+Only growth blocks. A reduction is reported so the author can record it with
+`--update`, but it does not fail the check: a count can legitimately differ
+between a developer host and CI on platform-conditional code, and a gate that
+failed on improvement would punish exactly the change it wants.
 """
 
 from __future__ import annotations
