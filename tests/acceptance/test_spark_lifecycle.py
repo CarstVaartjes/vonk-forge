@@ -68,6 +68,16 @@ from tests.acceptance.test_fresh_nas_install import (
 )
 
 PLATFORMS = ("linux-arm64",)
+
+# How long a synthetic-canary operation may take before the lane calls it
+# stuck. The product bounds a single distributed step at
+# VONK_DISTRIBUTED_START_TIMEOUT_SECONDS (60s by default), and the canary moves
+# a tiny synthetic asset set, so a well-behaved operation converges in seconds
+# and a stuck one is distinguishable well inside this budget. Keep these
+# proportional to that guarantee: waiting tens of minutes only delays the
+# diagnosis and hides the cause behind a timeout.
+_CANARY_CONVERGENCE_SECONDS = 120
+_CANARY_ROUTE_SECONDS = 60
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -1057,36 +1067,51 @@ class SparkLifecycle:
         output = self._redact_diagnostics(logs.stdout or logs.stderr)
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
+    # The whole diagnostics block is appended to one LifecycleError, so it is
+    # spent from a single budget in priority order rather than letting each
+    # section grow unbounded.
+    _DIAGNOSTIC_BUDGET = 8_400
+
+    def _bounded_diagnostics(self, sections: Sequence[tuple[str, str]]) -> str:
+        """Join labelled diagnostics inside one total budget, most useful first."""
+
+        rendered: list[str] = []
+        remaining = self._DIAGNOSTIC_BUDGET
+        for title, body in sections:
+            allowance = remaining - len(title) - 2
+            if allowance <= 0:
+                break
+            entry = f"{title}:\n" + self._redact_diagnostics(body, limit=allowance)
+            rendered.append(entry)
+            remaining -= len(entry) + 1
+        return "\n".join(rendered)
+
     def _installation_failure(
         self, stage: str, error: Exception
     ) -> LifecycleError:
-        sections = ["installer error:\n" + self._redact_diagnostics(str(error), limit=2_000)]
+        sections: list[tuple[str, str]] = [("installer error", str(error))]
         if getattr(self, "bundle", None) is not None:
-            logs = self._diagnostic_command(
-                self._compose(
-                    "logs",
-                    "--no-color",
-                    "--tail",
-                    "120",
-                    "control-api",
-                    "control-worker",
-                    "step-ca",
-                    "caddy",
-                )
+            # Service states come first: a restarting or unhealthy worker is the
+            # difference between "the work is stuck" and "nothing is draining
+            # the queue", and an interleaved log tail cannot show it.
+            sections.append(
+                ("controller services", self._controller_startup_diagnostics())
             )
-            if logs is not None:
-                sections.append("controller diagnostics:\n" + self._redact_diagnostics(
-                    logs.stdout or logs.stderr, limit=2_000
-                ))
+            for service in ("control-worker", "control-api"):
+                logs = self._diagnostic_command(
+                    self._compose("logs", "--no-color", "--tail", "80", service)
+                )
+                if logs is not None:
+                    sections.append(
+                        (f"{service} diagnostics", logs.stdout or logs.stderr)
+                    )
             for unit in ("vonk-forge-agent.service", "vonk-forge-package-helper.service"):
                 journal = self._diagnostic_command(
                     ["sudo", "journalctl", "--no-pager", "--lines=40", f"--unit={unit}"]
                 )
                 if journal is not None:
-                    sections.append(f"{unit} diagnostics:\n" + self._redact_diagnostics(
-                        journal.stdout or journal.stderr, limit=1_800
-                    ))
-        diagnostics = "\n".join(sections)
+                    sections.append((f"{unit} diagnostics", journal.stdout or journal.stderr))
+        diagnostics = self._bounded_diagnostics(sections)
         return LifecycleError(
             f"{stage} failed; {diagnostics or 'installer diagnostics unavailable'}"
         )
@@ -2336,7 +2361,7 @@ class SparkLifecycle:
             raise LifecycleError("synthetic canary recipe download response is invalid") from error
         if typed.recipe_revision_id != recipe_revision_id or typed.recipe_content_sha256 != fixture.recipe_content_sha256:
             raise LifecycleError("synthetic canary recipe download identity differs")
-        deadline = time.monotonic() + 900
+        deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running", "partial"}:
             if time.monotonic() >= deadline:
                 raise LifecycleError("synthetic canary recipe download did not converge")
@@ -2370,10 +2395,33 @@ class SparkLifecycle:
             typed = FleetProfileApplicationView.model_validate_json(_canonical(operation))
         except (TypeError, ValueError) as error:
             raise LifecycleError(f"{label} response is invalid") from error
-        deadline = time.monotonic() + 1_800
+        deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
-                raise LifecycleError(f"{label} did not converge")
+                # Say where it stalled: a queued application with no step
+                # means nothing claimed it, while a running one names the step
+                # and child phase it never left.
+                progress = typed.progress
+                child = progress.child_progress
+                child_detail = "none"
+                child_bytes = "none"
+                if child is not None:
+                    inner = child.operation
+                    child_detail = (
+                        f"{child.phase}/{inner.phase}"
+                        if inner is not None
+                        else child.phase
+                    )
+                    child_bytes = f"{child.bytes}/{child.total_bytes}"
+                raise LifecycleError(
+                    f"{label} did not converge: state={typed.state} "
+                    f"step={typed.current_step}/{typed.total_steps} "
+                    f"completed={progress.completed_steps}/{progress.total_steps} "
+                    f"label={progress.current_label or 'none'} "
+                    f"operation={typed.current_operation_id or 'none'} "
+                    f"child={child_detail} child_bytes={child_bytes} "
+                    f"reason={typed.status_reason or 'none'}"
+                )
             time.sleep(1)
             _, payload = self.control.request("GET", "/api/profile/1/progress")
             try:
@@ -2485,7 +2533,7 @@ class SparkLifecycle:
         return identities.pop()
 
     def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
-        deadline = time.monotonic() + 300
+        deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
         while True:
             try:
                 fleet = self._fleet_snapshot()
