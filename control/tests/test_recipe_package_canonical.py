@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_control.auth import TokenCodec
+from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog_service import CatalogService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -52,8 +53,13 @@ def _fixture() -> tuple[dict[str, object], dict[str, object], bytes]:
 
 
 def _archive_files(package: bytes) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
     with tarfile.open(fileobj=io.BytesIO(package), mode="r:*") as archive:
-        return {member.name: archive.extractfile(member).read() for member in archive.getmembers()}
+        for member in archive.getmembers():
+            stream = archive.extractfile(member)
+            assert stream is not None
+            files[member.name] = stream.read()
+    return files
 
 
 def _repack(files: dict[str, bytes]) -> bytes:
@@ -70,7 +76,8 @@ def _repack(files: dict[str, bytes]) -> bytes:
 def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) -> None:
     index, row, package = _fixture()
     index["recipes"] = [row]
-    package_path = row["package"]["path"]
+    package_path = require_mapping(row["package"], "fixture recipe package metadata")["path"]
+    assert isinstance(package_path, str)
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -127,13 +134,21 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     assert item.package_handle is not None
     assert item.package_handle.package_sha256 == row["package"]["sha256"]
     bundles = SourceBundleStore(tmp_path / "sources")
-    bundles.put(item.source_bundle_sha256, io.BytesIO(item.source_bundle))
-    bundle = bundles.get(item.source_bundle_sha256)
+    source_bundle_sha256 = item.source_bundle_sha256
+    source_bundle = item.source_bundle
+    assert source_bundle_sha256 is not None
+    assert source_bundle is not None
+    bundles.put(source_bundle_sha256, io.BytesIO(source_bundle))
+    bundle = bundles.get(source_bundle_sha256)
     build = _canonical_build(item.document)
-    assert build["dockerfile"] == "Dockerfile"
-    assert bundle.files[build["dockerfile"]] == _archive_files(package)[
-        item.document["execution"]["build"]["dockerfile"]
-    ]
+    dockerfile = build["dockerfile"]
+    assert isinstance(dockerfile, str)
+    assert dockerfile == "Dockerfile"
+    execution = require_mapping(item.document["execution"], "recipe execution document")
+    build_document = require_mapping(execution["build"], "recipe execution build document")
+    package_dockerfile = build_document["dockerfile"]
+    assert isinstance(package_dockerfile, str)
+    assert bundle.files[dockerfile] == _archive_files(package)[package_dockerfile]
     assert inspect_build_source_policy(
         _source_policy_document(item.document, build, bundle.sha256), bundle
     ).passed
@@ -174,6 +189,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
         revision = session.scalar(select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.content_digest == view.content_sha256
         ))
+        assert revision is not None
         revision_id = revision.id
     InventoryRepository(sessions, clock=lambda: now).record(InventorySnapshotInput(
         node_id=node_id, observed_at=now,
@@ -186,10 +202,14 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     resolution = builder.resolve(revision_id)
     plan = builder.plan(revision_id, node_id, now=now, resolution=resolution)
     RecipeBuildRequest.model_validate(plan.agent_payload)
-    assert plan.agent_payload["dockerfile"] == "Dockerfile"
-    assert plan.agent_payload["limits"]["memory_bytes"] <= 4 * 1024**3
-    assert plan.agent_payload["limits"]["gpu"] == 0
-    assert all(plan.agent_payload["limits"][name] is False for name in (
+    payload = plan.agent_payload
+    limits = require_mapping(payload["limits"], "recipe build plan limits")
+    assert payload["dockerfile"] == "Dockerfile"
+    memory_bytes = limits["memory_bytes"]
+    assert isinstance(memory_bytes, int)
+    assert memory_bytes <= 4 * 1024**3
+    assert limits["gpu"] == 0
+    assert all(limits[name] is False for name in (
         "privileged", "host_mounts", "container_socket"
     ))
     client.close()
@@ -247,8 +267,10 @@ def test_candidate_package_rejects_model_snapshot_digest_mismatch(tmp_path: Path
     package = _repack({**files, "manifest.json": json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()})
     index = copy.deepcopy(index)
     index["recipes"] = [row]
-    row["package"]["sha256"] = hashlib.sha256(package).hexdigest()
-    row["package"]["expected_bytes"] = len(package)
+    row_package = row["package"]
+    assert isinstance(row_package, dict)
+    row_package["sha256"] = hashlib.sha256(package).hexdigest()
+    row_package["expected_bytes"] = len(package)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("index.json"):
@@ -311,9 +333,13 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         )
         assert receipt.projected["package_sha256"] == package_sha256
         assert receipt.projected["source_bundle_sha256"] == item.source_bundle_sha256
-        assert receipt.projected["package_handle"]["closure_path"].endswith(
-            f"{package_sha256}/closure"
+        package_handle_projection = require_mapping(
+            receipt.projected["package_handle"],
+            "recipe revision package handle projection",
         )
+        closure_path = package_handle_projection["closure_path"]
+        assert isinstance(closure_path, str)
+        assert closure_path.endswith(f"{package_sha256}/closure")
     restarted = CatalogService(
         sessions,
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),

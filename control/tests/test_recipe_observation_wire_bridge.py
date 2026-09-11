@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import uuid
+from collections.abc import Mapping, Sequence
 from datetime import UTC, timedelta
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -39,12 +41,48 @@ from vonk_control.models import (
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore
 
-from .test_agent_api import Jobs
 from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
 )
+
+
+class _UnusedJobs:
+    """Structural ``JobQueue`` for agent routes that never touch a Controller Job.
+
+    ``test_agent_api.Jobs`` predates the ``list_page`` member of the protocol,
+    so this suite supplies its own conforming stub instead of editing another
+    suite's double.
+    """
+
+    def enqueue(
+        self,
+        kind: str,
+        actor: str,
+        authority_revision: str,
+        targets: Sequence[str],
+        payload: Mapping[str, object],
+        *,
+        request_id: str,
+    ) -> object:
+        raise AssertionError("the observation wire bridge must not enqueue work")
+
+    def get(self, job_id: str) -> object:
+        raise KeyError(job_id)
+
+    def list(self, *, limit: int = 100) -> list[object]:
+        return []
+
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        status: str | None = None,
+        target: str | None = None,
+    ) -> tuple[list[object], str | None, int]:
+        return [], None, 0
 
 
 @pytest.fixture(scope="session")
@@ -126,7 +164,7 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         request_id="2" * 36,
     )
     completed: set[str] = set()
-    captured: dict[str, dict[str, object]] = {}
+    captured: dict[str, Mapping[str, object]] = {}
     while service.get(started.id).state == "running":
         with sessions() as session:
             pending = tuple(
@@ -141,7 +179,13 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         assert pending
         for child in pending:
             assert child.payload.get("run_generation") is not None
-            placement = child.payload["compiled_execution_plan"]["runtime"]["placement"]
+            plan_document = require_mapping(
+                child.payload["compiled_execution_plan"], "compiled execution plan"
+            )
+            placement = require_mapping(
+                require_mapping(plan_document["runtime"], "compiled runtime")["placement"],
+                "compiled runtime placement",
+            )
             if nodes > 1 and child.payload["local_address"] != child.payload["master_address"]:
                 assert placement["endpoint_address"] is None
                 assert child.payload["endpoint_address"] == child.payload["local_address"]
@@ -150,15 +194,25 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
                 assert run is not None
                 installation_row = session.get(RecipeInstallation, run.installation_id)
                 assert installation_row is not None
-                compiled = installation_row.plan["compiled_execution_plans"][
-                    child.node_id
-                ]
+                installation_plan = require_mapping(
+                    installation_row.plan, "installation plan"
+                )
+                compiled = require_mapping(
+                    require_mapping(
+                        installation_plan["compiled_execution_plans"],
+                        "compiled execution plans",
+                    )[child.node_id],
+                    "compiled execution plan",
+                )
+            compiled_identity = require_mapping(
+                compiled["identity"], "compiled plan identity"
+            )
             persisted = subprocess.run(
                 [str(producer), "persist-binding"],
                 input=json.dumps(
                     {
                         "request": child.payload,
-                        "artifact_set_digest": compiled["identity"][
+                        "artifact_set_digest": compiled_identity[
                             "model_artifact_set_sha256"
                         ],
                         "data_root": str(tmp_path / "runtime" / child.node_id),
@@ -171,8 +225,13 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
                 check=False,
             )
             assert persisted.returncode == 0, persisted.stderr
-            produced = json.loads(persisted.stdout)
-            evidence = produced["evidence"]["evidence"]
+            produced = require_mapping(
+                json.loads(persisted.stdout), "observation wire probe output"
+            )
+            evidence = require_mapping(
+                require_mapping(produced["evidence"], "start result")["evidence"],
+                "start evidence",
+            )
             previous = captured.get(child.node_id)
             if previous is not None:
                 assert previous["binding"] == produced["binding"]
@@ -222,7 +281,7 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         host_runtime_authority=authority,
     )
     app = create_app(
-        jobs=Jobs(),
+        jobs=_UnusedJobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
         now=lambda: 0,
@@ -233,14 +292,19 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         assert run is not None and isinstance(run.plan, dict)
+        run_plan_document = require_mapping(run.plan, "run plan")
         plan_nodes = {
             item["node_id"]: item
-            for item in run.plan["nodes"]
+            for item in require_sequence(
+                run_plan_document["nodes"], "run plan nodes"
+            )
             if isinstance(item, dict)
         }
     assert set(plan_nodes) == set(node_ids)
     if nodes == 1:
-        binding = captured[node_ids[0]]["binding"]
+        binding = require_mapping(
+            captured[node_ids[0]]["binding"], "recipe run inspection binding"
+        )
         assert plan_nodes[node_ids[0]]["endpoint_owner"] is True
         assert binding["local_address"] is None
         assert binding["master_address"] is None
@@ -249,7 +313,9 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         owner = next(item for item in plan_nodes.values() if item["endpoint_owner"])
         assert sum(item["endpoint_owner"] for item in plan_nodes.values()) == 1
         for node_id, produced in captured.items():
-            binding = produced["binding"]
+            binding = require_mapping(
+                produced["binding"], "recipe run inspection binding"
+            )
             assert binding["local_address"] == plan_nodes[node_id]["fabric_address"]
             assert binding["master_address"] == owner["fabric_address"]
             assert binding["master_port"] == owner["rendezvous_port"]
@@ -281,13 +347,16 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
             tmp_path, nodes=nodes, producer=recipe_observation_wire_probe
         )
     )
-    binding = produced["binding"]
+    binding = require_mapping(produced["binding"], "recipe run inspection binding")
     identity = {"schema_version": 1, "node_id": node_id, **binding}
     with sessions() as session:
         job = session.get(Job, start_job_id)
         assert job is not None and isinstance(job.result, dict)
-        launch = job.result["launch_evidence"][node_id]
-        assert launch == produced["evidence"]["evidence"]
+        launch = require_mapping(
+            require_mapping(job.result["launch_evidence"], "launch evidence")[node_id],
+            "node launch evidence",
+        )
+        assert launch == require_mapping(produced["evidence"], "start result")["evidence"]
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, binding["installation_id"])
         run_node = (

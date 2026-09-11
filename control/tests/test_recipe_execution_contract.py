@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.recipe_execution_contract import (
     RecipeExecutionContractError,
     StoredRunNodePlan,
+    StoredRunPlan,
     build_plan_document,
     parse_stored_build_policy,
     parse_stored_installation_plan,
@@ -14,49 +16,55 @@ from vonk_control.recipe_execution_contract import (
 
 
 def _run_plan() -> dict[str, object]:
-    node = {
-        "node_id": "spk_" + "0" * 32,
-        "rank": 0,
-        "role": "entrypoint",
-        "endpoint_owner": True,
-        "port": 8000,
-        "allowed": True,
-        "inventory_observed_at": "2026-09-08T10:11:12Z",
-        "memory_kind": "unified",
-        "required_memory_bytes": 1,
-        "available_memory_bytes": None,
-        "active_reserved_bytes": 0,
-        "free_after_bytes": None,
-        "memory_floor_bytes": 0,
-        "fabric_address": None,
-        "fabric_bandwidth_mbps": None,
-        "rendezvous_port": None,
-        "blockers": [],
-        "warnings": [],
-    }
-    return {
-        "schema_version": 1,
-        "observation_schema_version": 2,
-        "run_generation": 1,
-        "installation_id": "00000000-0000-4000-8000-000000000001",
-        "alias": "demo",
-        "mapping_id": "00000000-0000-4000-8000-000000000002",
-        "mapping_generation": 1,
-        "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
-        "plan_digest": "a" * 64,
-        "nodes": [node],
-    }
+    """Build the fixture through the persisted contract, then serialize it as JSON.
+
+    The models are the authority for the field list, so a contract change breaks
+    this fixture instead of silently leaving a hand-written copy behind.
+    """
+    node = StoredRunNodePlan(
+        node_id="spk_" + "0" * 32,
+        rank=0,
+        role="entrypoint",
+        endpoint_owner=True,
+        port=8000,
+        allowed=True,
+        inventory_observed_at="2026-09-08T10:11:12Z",
+        memory_kind="unified",
+        required_memory_bytes=1,
+        available_memory_bytes=None,
+        active_reserved_bytes=0,
+        free_after_bytes=None,
+        memory_floor_bytes=0,
+        fabric_address=None,
+        fabric_bandwidth_mbps=None,
+        rendezvous_port=None,
+        blockers=[],
+        warnings=[],
+    )
+    plan = StoredRunPlan(
+        schema_version=1,
+        observation_schema_version=2,
+        run_generation=1,
+        installation_id="00000000-0000-4000-8000-000000000001",
+        alias="demo",
+        mapping_id="00000000-0000-4000-8000-000000000002",
+        mapping_generation=1,
+        recipe_revision_id="00000000-0000-4000-8000-000000000003",
+        plan_digest="a" * 64,
+        nodes=[node],
+    )
+    return plan.model_dump(mode="json")
 
 
 def test_run_plan_json_roundtrip_retains_required_nulls_and_timestamp_spelling() -> None:
     value = _run_plan()
-    assert run_plan_document(value)["nodes"][0]["inventory_observed_at"] == (
-        "2026-09-08T10:11:12Z"
-    )
-    node = run_plan_document(value)["nodes"][0]
+    document = run_plan_document(value)
+    nodes = require_sequence(document["nodes"], "run plan nodes")
+    node = require_mapping(nodes[0], "run plan node")
+    assert node["inventory_observed_at"] == "2026-09-08T10:11:12Z"
     assert node["fabric_address"] is None
     assert node["rendezvous_port"] is None
-    assert "execution_mode" not in run_plan_document(value)
+    assert "execution_mode" not in document
 
 
 def test_persisted_contracts_fail_closed_on_malformed_db_shapes() -> None:
@@ -66,7 +74,10 @@ def test_persisted_contracts_fail_closed_on_malformed_db_shapes() -> None:
         parse_stored_run_plan(malformed_run)
 
     strict_scalar_run = _run_plan()
-    strict_scalar_run["nodes"][0]["allowed"] = 1
+    strict_nodes = require_sequence(strict_scalar_run["nodes"], "run plan nodes")
+    strict_node = strict_nodes[0]
+    assert isinstance(strict_node, dict)
+    strict_node["allowed"] = 1
     with pytest.raises(RecipeExecutionContractError):
         parse_stored_run_plan(strict_scalar_run)
 

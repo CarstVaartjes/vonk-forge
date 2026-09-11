@@ -11,10 +11,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
-from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
+from vonk_control.litellm import (
+    LiteLlmGeneration,
+    LiteLlmPolicyError,
+    LiteLlmPublisher,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -45,6 +49,30 @@ from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
+
+
+def _recipe_run(session: Session, run_id: str) -> RecipeRun:
+    """Return the run row the test itself wrote, or fail on a missing row."""
+
+    run = session.get(RecipeRun, run_id)
+    assert run is not None
+    return run
+
+
+def _publication_owner(session: Session) -> RoutePublicationOwner:
+    """Return the singleton route publication owner, which must exist here."""
+
+    owner = session.get(RoutePublicationOwner, 1)
+    assert owner is not None
+    return owner
+
+
+def _publication(session: Session, authority_id: str | None) -> RoutePublication:
+    """Return the publication for an owner's authority, which must exist here."""
+
+    publication = session.get(RoutePublication, authority_id)
+    assert publication is not None
+    return publication
 
 
 class MutableClock:
@@ -629,8 +657,9 @@ def test_nonzero_mapping_owner_routes_with_its_accepted_rank_identity(
 def test_mapping_owner_must_be_the_run_entrypoint(tmp_path: Path) -> None:
     service, _publisher, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         mapping = session.get(ClusterMapping, run.mapping_id)
+        assert mapping is not None
         worker = session.query(RunNode).filter_by(run_id=run_id, rank=1).one()
         mapping.endpoint_owner_node_id = worker.node_id
 
@@ -724,8 +753,8 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
 ) -> None:
     service, _publisher, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        run.plan = {
+        run = _recipe_run(session, run_id)
+        invalid_plan: dict[str, object] = {
             "nodes": [
                 {
                     "node_id": "spk_" + "9" * 32,
@@ -735,6 +764,7 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
                 for rank in range(2)
             ]
         }
+        run.plan = invalid_plan
 
     with pytest.raises(RecipeRouteError, match="stored recipe run plan is invalid"):
         service.publish_run(run_id)
@@ -798,16 +828,14 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
 
     with service.sessions() as session:
         assert [
-            session.get(RecipeRun, run_id).route_state
+            _recipe_run(session, run_id).route_state
             for run_id in (first_run, second_run)
         ] == ["withdrawn", "withdrawn"]
     assert overlap.aliases[-1] == ()
 
 
 def test_route_publication_owner_lock_compiles_for_postgresql() -> None:
-    statement_factory = getattr(
-        recipe_routes, "route_publication_owner_lock_statement", None
-    )
+    statement_factory = recipe_routes.route_publication_owner_lock_statement
     assert callable(statement_factory)
 
     sql = str(
@@ -851,13 +879,13 @@ def test_candidate_contains_published_runs_and_explicit_pending_run_only(
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
-        session.get(RecipeRun, run_id).route_state = "pending"
+        _recipe_run(session, run_id).route_state = "pending"
     worker = RecipeOperationWorker(service.sessions, service, clock=lambda: NOW)
 
     assert worker.tick() is True
     assert worker.tick() is False
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         assert run.route_state == "published"
         assert run.route_generation == 1
 
@@ -865,13 +893,14 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         tmp_path / "failed", validate=lambda _: False
     )
     with failed_service.sessions.begin() as session:
-        session.get(RecipeRun, failed_run).route_state = "pending"
+        _recipe_run(session, failed_run).route_state = "pending"
     RecipeOperationWorker(
         failed_service.sessions, failed_service, clock=lambda: NOW
     ).tick()
     with failed_service.sessions() as session:
-        failed = session.get(RecipeRun, failed_run)
+        failed = _recipe_run(session, failed_run)
         assert failed.route_state == "failed"
+        assert failed.route_error is not None
         assert "LiteLlmPolicyError" in failed.route_error
 
 
@@ -887,20 +916,26 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
         identity=3,
     )
     with service.sessions.begin() as session:
-        session.get(RecipeRun, first_run).route_state = "pending"
+        _recipe_run(session, first_run).route_state = "pending"
 
-    class Routes:
+    class Routes(RecipeRouteService):
         def __init__(self) -> None:
             self.ready = {second_run}
             self.published: list[str] = []
             self.maintained = 0
 
-        def publish_run(self, run_id: str) -> None:
+        def publish_run(self, run_id: str) -> LiteLlmGeneration:
             if run_id not in self.ready:
                 raise RecipeRouteNotReady("awaiting exact observation")
             self.published.append(run_id)
+            return LiteLlmGeneration(
+                generation=0,
+                route_digest="",
+                config_sha256="",
+                path="memory",
+            )
 
-        def maintain(self, *, renew_before_seconds: int) -> bool:
+        def maintain(self, *, renew_before_seconds: int = 10) -> bool:
             assert renew_before_seconds == 10
             self.maintained += 1
             return True
@@ -920,7 +955,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
 ) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = NOW + timedelta(seconds=60)
@@ -965,7 +1000,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
     assert worker.tick() is True
     assert recoveries.calls == 2
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         assert run.route_state == "withdrawn"
         assert run.route_error == "initial exact observation deadline elapsed"
@@ -978,7 +1013,7 @@ def test_initial_exact_observation_deadline_fails_late_signed_ranks(
     service, _publisher, _applied, run_id = setup(tmp_path)
     deadline = NOW + timedelta(seconds=60)
     with service.sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = deadline
@@ -995,7 +1030,7 @@ def test_initial_exact_observation_deadline_fails_late_signed_ranks(
     )
     assert worker.tick() is True
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         assert run.route_state == "withdrawn"
         assert run.route_error == "initial exact observation deadline elapsed"
@@ -1008,7 +1043,7 @@ def test_direct_publication_rejects_exact_observation_after_deadline(
     service, _publisher, _applied, run_id = setup(tmp_path)
     deadline = NOW - timedelta(seconds=1)
     with service.sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         run.plan = {**run.plan, "observation_schema_version": 2}
         run.route_state = "pending"
         run.observation_deadline_at = deadline
@@ -1106,10 +1141,13 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
     restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
     assert restarted.tick() is True
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.authority_id)
-        assert run.route_generation > first.generation
+        run = _recipe_run(session, run_id)
+        owner = _publication_owner(session)
+        publication = _publication(session, owner.authority_id)
+        assert (
+            run.route_generation is not None and run.route_generation > first.generation
+        )
+        assert publication.lease_expires_at is not None
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
             clock.now + timedelta(seconds=180)
         )
@@ -1130,7 +1168,7 @@ def test_fresh_health_timestamp_does_not_churn_route_before_renewal_window(
 
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
     with service.sessions() as session:
-        assert session.get(RecipeRun, run_id).route_generation == first.generation
+        assert _recipe_run(session, run_id).route_generation == first.generation
 
 
 def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
@@ -1146,13 +1184,13 @@ def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
     assert worker.tick() is True
 
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
         agents = tuple(session.get(AgentNode, node.node_id) for node in nodes)
         assert run.route_state == "withdrawn"
         assert all(agent is not None and agent.state == "active" for agent in agents)
-        owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.authority_id)
+        owner = _publication_owner(session)
+        publication = _publication(session, owner.authority_id)
         assert publication.state == "routes-withdrawn"
 
 
@@ -1171,7 +1209,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
     worker = RecipeOperationWorker(service.sessions, service, clock=clock)
     assert worker.tick() is True
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         assert run.route_state == "withdrawn"
         assert run.route_error == "recipe rank health requires recovery"
 
@@ -1184,10 +1222,12 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
     restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
     assert restarted.tick() is True
     with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
+        run = _recipe_run(session, run_id)
         assert run.route_state == "published"
         assert run.route_error is None
-        assert run.route_generation > first.generation
+        assert (
+            run.route_generation is not None and run.route_generation > first.generation
+        )
 
 
 def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
@@ -1212,8 +1252,8 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
     worker = RecipeOperationWorker(service.sessions, service, clock=clock)
     assert worker.tick() is True
     with service.sessions() as session:
-        assert session.get(RecipeRun, healthy_run).route_state == "published"
-        assert session.get(RecipeRun, recovered_run).route_state == "withdrawn"
+        assert _recipe_run(session, healthy_run).route_state == "published"
+        assert _recipe_run(session, recovered_run).route_state == "withdrawn"
 
     clock.now += timedelta(seconds=1)
     with service.sessions.begin() as session:
@@ -1223,8 +1263,8 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
 
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     with service.sessions() as session:
-        assert session.get(RecipeRun, healthy_run).route_state == "published"
-        assert session.get(RecipeRun, recovered_run).route_state == "published"
+        assert _recipe_run(session, healthy_run).route_state == "published"
+        assert _recipe_run(session, recovered_run).route_state == "published"
 
 
 def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
@@ -1248,10 +1288,10 @@ def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
 
     with service.sessions() as session:
         assert {
-            session.get(RecipeRun, first_run).route_state,
-            session.get(RecipeRun, second_run).route_state,
+            _recipe_run(session, first_run).route_state,
+            _recipe_run(session, second_run).route_state,
         } == {"withdrawn"}
-        publication = session.get(RoutePublication, _recipe_owner_id(session))
+        publication = _publication(session, _recipe_owner_id(session))
         assert publication.state == "routes-withdrawn"
 
 
@@ -1277,8 +1317,8 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     request = _supervisor(monkeypatch, root)._active_request(now=clock.now)
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
-        owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.authority_id)
+        owner = _publication_owner(session)
+        publication = _publication(session, owner.authority_id)
         assert publication.activation_marker == bundle.marker.model_dump()
         assert publication.activation_marker_digest == request.activation_sha256
         assert owner.owner_generation == first.generation
@@ -1293,7 +1333,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     renewed = verify_active_route_bundle(root, clock=clock)
     assert renewed.marker.generation > first.generation
     with service.sessions() as session:
-        owner = session.get(RoutePublicationOwner, 1)
+        owner = _publication_owner(session)
         assert owner.owner_generation == renewed.marker.generation
 
     service.withdraw_run(run_id)
@@ -1313,8 +1353,8 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda service: service.publish_run(run_id), services))
     with base.sessions() as session:
-        owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.authority_id)
+        owner = _publication_owner(session)
+        publication = _publication(session, owner.authority_id)
         marker = AtomicRouteBundlePublisher(root, clock=lambda: NOW).inspect()
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
