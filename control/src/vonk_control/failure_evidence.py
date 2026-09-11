@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy import and_, func, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
+from .bounded_json import integer, mapping, sequence
 from .failure_evidence_models import FailureEvidenceCursor, FailureEvidenceRecord
 from .logging import redact_text
 from .models import (
@@ -196,6 +197,15 @@ def classification(kind: str, result: Mapping[str, object]) -> str:
     return "runtime" if kind.startswith(("recipe.", "agent.upgrade")) else "unknown"
 
 
+def _required_int(value: object, detail: str) -> int:
+    """Return a persisted integer or fail loudly; the field is required."""
+
+    parsed = integer(value)
+    if parsed is None:
+        raise ValueError(f"{detail} is invalid")
+    return parsed
+
+
 def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     diagnostics = FailureDiagnostics.model_validate(value)
     document = diagnostics.model_dump(mode="json")
@@ -221,8 +231,8 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
 def collect_failure(
     item: Mapping[str, object], *, now: datetime
 ) -> FailureEvidenceBundle:
-    result = item.get("result") if isinstance(item.get("result"), Mapping) else {}
-    progress = item.get("progress") if isinstance(item.get("progress"), Mapping) else {}
+    result = mapping(item.get("result")) or {}
+    progress = mapping(item.get("progress")) or {}
     errors: list[str] = []
     raw = result.get("diagnostics")
     if raw is not None:
@@ -258,10 +268,12 @@ def collect_failure(
     return FailureEvidenceBundle(
         context=EvidenceContext(
             operation_id=str(item["id"]),
-            attempt=int(item["attempt"]),
+            attempt=_required_int(item.get("attempt"), "operation attempt"),
             kind=str(item["kind"]),
-            node_ids=list(item.get("node_ids", []))[:128],
-            omitted_node_count=max(0, len(item.get("node_ids", [])) - 128),
+            node_ids=list(sequence(item.get("node_ids")) or ())[:128],
+            omitted_node_count=max(
+                0, len(sequence(item.get("node_ids")) or ()) - 128
+            ),
             authority_revision=item.get("authority_revision"),
             plan_digest=item.get("plan_digest"),
             payload_digest=item.get("payload_digest"),

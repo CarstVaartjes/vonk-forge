@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .bounded_json import require_integer, require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
@@ -1685,7 +1686,7 @@ class RunSwitchOperationService:
             if job.state not in {"queued", "running"}:
                 raise RunSwitchOperationConflict("run-switch operation is not cancellable")
             plan = _load_plan(job.payload["plan"])
-            phase = plan.phases[min(int(progress.get("phase_index", 0)), len(plan.phases) - 1)]
+            phase = plan.phases[min(require_integer(progress.get("phase_index", 0), "phase index"), len(plan.phases) - 1)]
             if "start" in progress.get("completed_phases", []) or (job.state == "running" and phase.kind in {"start", "final_verify"}):
                 raise RunSwitchOperationConflict("run-switch runtime is starting or active; use the explicit Stop operation")
             progress["cancellation"] = cancellation.model_dump(mode="json")
@@ -4108,7 +4109,7 @@ class RunSwitchOperationService:
                     if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                         return False
                     persisted_plan = _load_plan(job.payload["plan"])
-                    persisted_phase_index = int(progress.get("phase_index", phase_index))
+                    persisted_phase_index = require_integer(progress.get("phase_index", phase_index), "phase index")
                     persisted_phase = (
                         persisted_plan.phases[persisted_phase_index]
                         if persisted_phase_index < len(persisted_plan.phases)
@@ -4156,8 +4157,8 @@ class RunSwitchOperationService:
                 progress = _read_progress(job.result)
                 if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                     return False
-                phase_index = int(progress.get("phase_index", 0))
-                item_index = int(progress.get("item_index", 0)) + 1
+                phase_index = require_integer(progress.get("phase_index", 0), "phase index")
+                item_index = require_integer(progress.get("item_index", 0), "item index") + 1
                 persisted_plan = _load_plan(job.payload["plan"])
                 phase = persisted_plan.phases[phase_index]
                 _merge_progress_evidence(
@@ -4179,7 +4180,7 @@ class RunSwitchOperationService:
                     else None
                 )
                 if isinstance(child_receipts, list):
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.extend(
                         _phase_result(receipt, phase=phase)
                         for receipt in child_receipts
@@ -4199,7 +4200,7 @@ class RunSwitchOperationService:
                         job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     if not any(
                         isinstance(item, Mapping)
                         and item.get("build_id") == receipt["build_id"]
@@ -4230,7 +4231,7 @@ class RunSwitchOperationService:
                 item_total = len(persisted_plan.stops) if phase.kind == "stop" else 1
                 progress["child_operation_id"] = None
                 if item_index >= item_total:
-                    completed = list(progress.get("completed_phases", []))
+                    completed = list(require_sequence(progress.get("completed_phases", []), "completed phases"))
                     completed.append(phase.kind)
                     progress["completed_phases"] = completed
                     _complete_phase_progress(progress, persisted_plan, phase)
@@ -4264,8 +4265,8 @@ class RunSwitchOperationService:
                 _complete_cancellation(job, progress, now)
                 return True
             job.state = "running"
-            phase_index = int(progress.get("phase_index", 0))
-            item_index = int(progress.get("item_index", 0))
+            phase_index = require_integer(progress.get("phase_index", 0), "phase index")
+            item_index = require_integer(progress.get("item_index", 0), "item index")
             if phase_index >= len(plan.phases):
                 return True
             phase = plan.phases[phase_index]
@@ -4379,7 +4380,7 @@ class RunSwitchOperationService:
                     # Repeated polling must not grow durable phase receipts.
                     progress["final_observation"] = _phase_result(execution.result or {}, phase=phase)
                 elif execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             elif execution.operation_id is not None:
@@ -4387,12 +4388,12 @@ class RunSwitchOperationService:
                 progress["phase"] = phase.kind
                 progress["subphase"] = phase.subphase
                 if execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
             else:
                 if execution.result is not None:
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
                 if phase.subphase == "container-build":
@@ -4405,7 +4406,7 @@ class RunSwitchOperationService:
                         job.result = _persisted_result(progress)
                         job.updated_at = now
                         return True
-                    results = list(progress.get("phase_results", []))
+                    results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     if not any(
                         isinstance(item, Mapping)
                         and item.get("build_id") == receipt["build_id"]
@@ -4414,11 +4415,11 @@ class RunSwitchOperationService:
                     ):
                         results.append(_phase_result(receipt, phase=phase))
                         progress["phase_results"] = results
-                completed = list(progress.get("completed_phases", []))
+                completed = list(require_sequence(progress.get("completed_phases", []), "completed phases"))
                 completed.append(phase.kind)
                 progress["completed_phases"] = completed
                 _complete_phase_progress(progress, plan, phase)
-                progress["phase_index"] = int(progress.get("phase_index", 0)) + 1
+                progress["phase_index"] = require_integer(progress.get("phase_index", 0), "phase index") + 1
                 progress["item_index"] = 0
                 next_index = int(progress["phase_index"])
                 progress["phase"] = (
@@ -4469,7 +4470,7 @@ class RunSwitchOperationService:
                 _complete_cancellation(job, progress, now)
                 return True
             attempt = (
-                int(progress["retry_attempt"])
+                require_integer(progress.get("retry_attempt"), "retry attempt")
                 if progress.get("retry_reason") == _INSTALL_PREFLIGHT_REFRESH_REASON
                 and progress.get("retry_attempt") is not None
                 else 1
@@ -5203,7 +5204,7 @@ def _merge_progress_evidence(
         # phase-local too: an ETA for future build/start work would be invented.
         current = OperationProgress.model_validate(values).model_dump(mode="json", exclude_none=True)
         if prior is not None and prior.get("phase") == phase.kind:
-            current["completed_bytes"] = max(int(prior.get("completed_bytes", 0)), reported_completed)
+            current["completed_bytes"] = max(require_integer(prior.get("completed_bytes", 0), "completed bytes"), reported_completed)
         progress["operation"] = observe_progress(prior, current, now)
         progress["operation_phase_index"] = phase.index
     reported_total = next(

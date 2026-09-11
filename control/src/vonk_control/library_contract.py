@@ -228,13 +228,36 @@ class LibraryFacetValues(_StrictModel):
     sparks: list[int] = Field(default_factory=list, max_length=64)
 
 
+class LibraryFilterValues(_StrictModel):
+    """The filters that produced a Library page, echoed to the client.
+
+    This is a typed echo rather than a free-form map so the request and the
+    response describe the same vocabulary. Every field is optional, so a page
+    that applied no filter stays valid without inventing values.
+    """
+
+    model: list[Text256] = Field(default_factory=list, max_length=64)
+    usage: list[Text64] = Field(default_factory=list, max_length=64)
+    family: list[Text128] = Field(default_factory=list, max_length=64)
+    version: list[Text128] = Field(default_factory=list, max_length=64)
+    quantization: list[Text64] = Field(default_factory=list, max_length=64)
+    publisher: list[Text128] = Field(default_factory=list, max_length=64)
+    alignment: list[Text64] = Field(default_factory=list, max_length=64)
+    sparks: list[int] = Field(default_factory=list, max_length=64)
+    search: Text256 | None = None
+    updated_since: Text64 | None = None
+    sort: Literal["updated", "name"] | None = None
+    local_only: bool | None = None
+    all_models: bool | None = None
+
+
 class ModelLibraryResponse(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
-    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
+    filters: LibraryFilterValues = Field(default_factory=LibraryFilterValues)
     freshness_policy: FreshnessPolicy
 
 
@@ -264,7 +287,7 @@ class RecipeLibraryResponse(_StrictModel):
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
-    filters: dict[str, list[str] | str | bool | None] = Field(max_length=16)
+    filters: LibraryFilterValues = Field(default_factory=LibraryFilterValues)
     freshness_policy: FreshnessPolicy
 
 
@@ -542,6 +565,8 @@ def _bounded_text(value: object, maximum_length: int) -> str:
 def _saturating_nonnegative(value: object) -> int:
     """Project a schema-valid nonnegative integer into signed-bigint DTO space."""
 
+    if not isinstance(value, (int, str, bytes, bytearray)):
+        raise TypeError("nonnegative integer evidence is not numeric")
     return min(max(int(value), 0), _MAX_SIGNED_BIGINT)
 
 
@@ -600,7 +625,9 @@ def _bounded_display_scalar(value: Scalar | None) -> DisplayScalar:
     return max(-_MAX_SIGNED_BIGINT, min(value, _MAX_SIGNED_BIGINT))
 
 
-def _reason(code: str, detail: str, severity: str = "warning") -> ProjectionReason:
+def _reason(
+    code: str, detail: str, severity: Literal["info", "warning", "error"] = "warning"
+) -> ProjectionReason:
     return ProjectionReason(
         code=code, detail=_bounded_detail(detail), severity=severity
     )

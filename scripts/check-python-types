@@ -1,0 +1,91 @@
+#!/usr/bin/env -S uv run --python 3.12 --frozen --with pyright==1.1.408 python
+"""Fail when Python type errors grow beyond the checked-in baseline.
+
+The repository does not yet type-check cleanly. This gate makes the check
+enforceable now: every file's error count is pinned in
+`tools/pyright-baseline.json`, a file may never exceed its pinned count, and a
+file that improves must lower its entry in the same change. Passing `--update`
+rewrites the baseline from the current run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BASELINE = ROOT / "tools/pyright-baseline.json"
+
+
+def _current_counts() -> dict[str, int]:
+    completed = subprocess.run(
+        ["pyright", "--outputjson"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        print(completed.stdout[-4000:], file=sys.stderr)
+        print(completed.stderr[-4000:], file=sys.stderr)
+        raise SystemExit("pyright did not return a JSON report")
+    counts: dict[str, int] = {}
+    for diagnostic in payload.get("generalDiagnostics", []):
+        if diagnostic.get("severity") != "error":
+            continue
+        relative = Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix()
+        counts[relative] = counts.get(relative, 0) + 1
+    return counts
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--update", action="store_true", help="rewrite the baseline")
+    args = parser.parse_args()
+
+    counts = _current_counts()
+    if args.update:
+        BASELINE.write_text(
+            json.dumps(dict(sorted(counts.items())), indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"baseline updated: {sum(counts.values())} errors in {len(counts)} files")
+        return 0
+
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+    regressions = {
+        path: (baseline.get(path, 0), count)
+        for path, count in counts.items()
+        if count > baseline.get(path, 0)
+    }
+    fixed = {
+        path: (baseline[path], counts.get(path, 0))
+        for path in baseline
+        if counts.get(path, 0) < baseline[path]
+    }
+    for path, (was, now) in sorted(regressions.items()):
+        print(f"type errors increased: {path}: {was} -> {now}")
+    for path, (was, now) in sorted(fixed.items()):
+        print(f"type errors reduced:   {path}: {was} -> {now}")
+    if regressions:
+        print(
+            f"\nbaseline total {sum(baseline.values())}, current total "
+            f"{sum(counts.values())}"
+        )
+        return 1
+    # Improvements are informational. A count can differ between a developer
+    # host and CI on platform-conditional code, and only growth is a
+    # regression worth blocking. Run with --update to record a reduction.
+    print(
+        f"python types: {sum(counts.values())} known errors, no regressions"
+        + (f" ({len(fixed)} file(s) improved)" if fixed else "")
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -208,7 +208,7 @@ class IdentityHistoryResponse(StrictModel):
     identities: list[IdentityHistoryItem] = Field(max_length=100)
 
 
-def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
+def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
     """Describe stable JSON errors for generated clients."""
 
     return {

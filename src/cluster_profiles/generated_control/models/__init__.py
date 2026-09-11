@@ -169,6 +169,8 @@ from .job_resume_response import JobResumeResponse
 from .job_summary import JobSummary
 from .jobs_response import JobsResponse
 from .library_facet_values import LibraryFacetValues
+from .library_filter_values import LibraryFilterValues
+from .library_filter_values_sort_type_0 import LibraryFilterValuesSortType0
 from .library_local_progress import LibraryLocalProgress
 from .library_local_progress_state import LibraryLocalProgressState
 from .library_local_state import LibraryLocalState
@@ -217,7 +219,6 @@ from .model_format import ModelFormat
 from .model_format_container import ModelFormatContainer
 from .model_identity import ModelIdentity
 from .model_library_response import ModelLibraryResponse
-from .model_library_response_filters import ModelLibraryResponseFilters
 from .model_license import ModelLicense
 from .model_limits import ModelLimits
 from .model_lineage import ModelLineage
@@ -309,7 +310,6 @@ from .recipe_job_settings import RecipeJobSettings
 from .recipe_job_settings_knobs import RecipeJobSettingsKnobs
 from .recipe_library_evidence import RecipeLibraryEvidence
 from .recipe_library_response import RecipeLibraryResponse
-from .recipe_library_response_filters import RecipeLibraryResponseFilters
 from .recipe_lifecycle import RecipeLifecycle
 from .recipe_memory_resources import RecipeMemoryResources
 from .recipe_memory_resources_kind import RecipeMemoryResourcesKind
@@ -617,6 +617,8 @@ __all__ = (
     "JobsResponse",
     "JobSummary",
     "LibraryFacetValues",
+    "LibraryFilterValues",
+    "LibraryFilterValuesSortType0",
     "LibraryLocalProgress",
     "LibraryLocalProgressState",
     "LibraryLocalState",
@@ -665,7 +667,6 @@ __all__ = (
     "ModelFormatContainer",
     "ModelIdentity",
     "ModelLibraryResponse",
-    "ModelLibraryResponseFilters",
     "ModelLicense",
     "ModelLimits",
     "ModelLineage",
@@ -757,7 +758,6 @@ __all__ = (
     "RecipeJobSettingsKnobs",
     "RecipeLibraryEvidence",
     "RecipeLibraryResponse",
-    "RecipeLibraryResponseFilters",
     "RecipeLifecycle",
     "RecipeMemoryResources",
     "RecipeMemoryResourcesKind",
