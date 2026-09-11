@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
+from ..bounded_json import sequence
 from ..runtime_writable_paths import (
     effective_environment,
     reject_recipe_environment,
@@ -595,16 +596,23 @@ def validate_topology(
     ):
         raise HarnessCompileError("harness topology is invalid")
     world_size = parallelism.get("world_size")
-    dimensions = tuple(parallelism.get(name) for name in ("tensor", "pipeline", "data"))
+    tensor = parallelism.get("tensor")
+    pipeline = parallelism.get("pipeline")
+    data = parallelism.get("data")
     if (
         type(world_size) is not int
         or world_size != node_count
-        or any(type(value) is not int or value < 1 for value in dimensions)
-        or dimensions[0] * dimensions[1] * dimensions[2] != node_count
+        or type(tensor) is not int
+        or type(pipeline) is not int
+        or type(data) is not int
+        or tensor < 1
+        or pipeline < 1
+        or data < 1
+        or tensor * pipeline * data != node_count
     ):
         raise HarnessCompileError("harness topology parallelism is inconsistent")
     backend = parallelism.get("backend")
-    tensor, pipeline, data = dimensions
+    dimensions = (tensor, pipeline, data)
     mode_is_consistent = (
         mode == "single"
         and node_count == 1
@@ -978,21 +986,19 @@ def _validate_parameter_value(
     name: str, value: object, declaration: Mapping[str, object]
 ) -> None:
     kind = declaration.get("type")
+    minimum = declaration.get("minimum")
+    maximum = declaration.get("maximum")
     valid = (
         kind == "integer"
         and type(value) is int
-        and (
-            type(declaration.get("minimum")) is not int
-            or value >= declaration["minimum"]
-        )
-        and (
-            type(declaration.get("maximum")) is not int
-            or value <= declaration["maximum"]
-        )
+        and (type(minimum) is not int or value >= minimum)
+        and (type(maximum) is not int or value <= maximum)
     ) or (kind == "boolean" and type(value) is bool)
     if kind in {"string", "enum"}:
+        allowed_values = sequence(declaration.get("allowed_values"))
         valid = type(value) is str and (
-            kind != "enum" or value in declaration.get("allowed_values", ())
+            kind != "enum"
+            or (allowed_values is not None and value in allowed_values)
         )
     if not valid:
         raise HarnessCompileError(f"harness parameter value is invalid: {name}")

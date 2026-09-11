@@ -68,18 +68,22 @@ def _identity_history_rows(sessions: sessionmaker[Session], limit: int) -> list[
         nodes = session.scalars(select(AgentNode).order_by(AgentNode.node_id).limit(limit)).all()
         certificates = {row.node_id: row for row in session.scalars(select(AgentCertificate).order_by(AgentCertificate.generation.desc())).all()}
         enrollments = {row.node_id: row for row in session.scalars(select(AgentEnrollment).order_by(AgentEnrollment.created_at)).all()}
-        return [
-            IdentityHistoryRecord(
-                node.node_id,
-                node.state,
-                certificates.get(node.node_id).serial if certificates.get(node.node_id) else None,
-                certificates.get(node.node_id).fingerprint if certificates.get(node.node_id) else None,
-                certificates.get(node.node_id).generation if certificates.get(node.node_id) else None,
-                enrollments.get(node.node_id).created_at if enrollments.get(node.node_id) else None,
-                node.revoked_at,
+        records: list[IdentityHistoryRecord] = []
+        for node in nodes:
+            certificate = certificates.get(node.node_id)
+            enrollment = enrollments.get(node.node_id)
+            records.append(
+                IdentityHistoryRecord(
+                    node.node_id,
+                    node.state,
+                    certificate.serial if certificate is not None else None,
+                    certificate.fingerprint if certificate is not None else None,
+                    certificate.generation if certificate is not None else None,
+                    enrollment.created_at if enrollment is not None else None,
+                    node.revoked_at,
+                )
             )
-            for node in nodes
-        ]
+        return records
 
 class MemoryAuditStore:
     def __init__(self, clock=lambda: datetime.now(UTC)) -> None:

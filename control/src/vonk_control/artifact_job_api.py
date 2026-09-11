@@ -77,7 +77,9 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobCapabilities",
     )
     def capabilities(_actor: Actor = actor_dependency) -> ArtifactJobCapabilitiesResponse:
-        return _service(service).capabilities()
+        return ArtifactJobCapabilitiesResponse.model_validate(
+            _service(service).capabilities()
+        )
 
     @app.get(
         "/api/recipe/runs/{run_id}/artifact-jobs",
@@ -89,9 +91,9 @@ def install_artifact_job_routes(
         run_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
     ) -> ArtifactJobListResponse:
         try:
-            return {
-                "jobs": [_view(item) for item in _service(service).list_for_run(run_id)]
-            }
+            return ArtifactJobListResponse(
+                jobs=[_view(item) for item in _service(service).list_for_run(run_id)]
+            )
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="recipe run not found"
@@ -337,7 +339,7 @@ def install_artifact_job_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def agent_input(request: Request, job_id: str, sha256: str) -> Response:
-        identity = agent_identity_from_scope(request.scope)
+        identity = agent_identity_from_scope(dict(request.scope))
         if identity is None:
             raise HTTPException(
                 status_code=401, detail="verified agent identity required"
@@ -376,7 +378,7 @@ def install_artifact_job_routes(
             int, Header(alias="Content-Length", ge=0, le=1024**3)
         ],
     ) -> Response:
-        identity = agent_identity_from_scope(request.scope)
+        identity = agent_identity_from_scope(dict(request.scope))
         if identity is None:
             raise HTTPException(
                 status_code=401, detail="verified agent identity required"

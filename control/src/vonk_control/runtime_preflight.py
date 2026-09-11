@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
@@ -32,20 +33,19 @@ def recipe_requirements(
     *,
     source_build: bool,
     minimum_free_bytes: int,
-    architecture: str = "linux-arm64",
+    architecture: Literal["linux-arm64", "linux-amd64"] = "linux-arm64",
 ) -> RuntimePreflightRequest:
     """Read the canonical topology; engine arguments are not an allowlist."""
-    from .recipe_runtime_specs import recipe_topology
+    from .recipe_runtime_specs import recipe_fabric
 
-    topology = recipe_topology(document)
-    fabric = topology["fabric"]
+    fabric = recipe_fabric(document)
     return RuntimePreflightRequest(
         schema_version=1,
         architecture=architecture,
         source_build=source_build,
         minimum_free_bytes=minimum_free_bytes,
-        fabric_connectivity=fabric["connectivity"],
-        fabric_minimum_mbps=fabric["minimum_bandwidth_mbps"],
+        fabric_connectivity=fabric.connectivity,
+        fabric_minimum_mbps=fabric.minimum_bandwidth_mbps,
         mandatory_capabilities=[],
     )
 

@@ -139,7 +139,7 @@ def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
         raise ArtifactJobError("stored artifact input manifest is invalid") from error
     if (
         manifest.total_bytes != job.input_total_bytes
-        or recipe_job_manifest_sha256(manifest.files) != job.input_manifest_sha256
+        or recipe_job_manifest_sha256(tuple(manifest.files)) != job.input_manifest_sha256
     ):
         raise ArtifactJobError("stored artifact input manifest identity is invalid")
     return manifest
@@ -938,14 +938,15 @@ class ArtifactJobService:
             if job.state != "draft":
                 raise ArtifactJobError("artifact job inputs are immutable")
             declaration = self._input_declaration(job, name)
+            size_bytes = None if declaration is None else declaration.get("size_bytes")
             if (
                 declaration is None
                 or declaration.get("media_type") != media_type
                 or declaration.get("sha256") != expected_sha256
-                or not isinstance(declaration.get("size_bytes"), int)
+                or not isinstance(size_bytes, int)
             ):
                 raise ArtifactJobError("artifact input does not match its declaration")
-            return declaration["size_bytes"]
+            return size_bytes
 
     def _attach_input(
         self,
@@ -1192,12 +1193,9 @@ class ArtifactJobService:
             if job.state not in {"succeeded", "failed", "cancelled"}:
                 job.state = "cancelling" if cancel_pending else "cancelled"
                 job.status_reason = cancellation_reason
+                existing_evidence = _result_evidence(job.result_evidence)
                 job.result_evidence = _result_evidence({
-                    **(
-                        _result_evidence(job.result_evidence)
-                        if job.result_evidence is not None
-                        else {}
-                    ),
+                    **(existing_evidence or {}),
                     "cancel_request_id": request_id,
                     "cancel_actor": actor,
                     "cancel_reason": cancellation_reason,

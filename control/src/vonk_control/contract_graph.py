@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.dependencies.utils import get_flat_dependant
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 
 
 class ContractGraphError(ValueError):
@@ -37,10 +37,13 @@ def schema_application(*, browser_auth: bool = True) -> FastAPI:
     from .audit import MemoryAuditStore
     from .auth import TokenCodec
     from .browser_auth import BrowserAuthService
+    from .jobs import JobService
 
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(
-        jobs=object(),
+        jobs=JobService(
+            sessionmaker(), clock=lambda: datetime(2026, 9, 7, tzinfo=UTC)
+        ),
         tokens=TokenCodec(key),
         audits=MemoryAuditStore(),
         browser_auth=BrowserAuthService(
@@ -89,14 +92,20 @@ def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, APIRoute, dic
                         f"Missing OpenAPI operation: {method} {path}"
                     )
             yield path, route, schema
-        elif not (
-            route.path in framework_paths
-            and getattr(route.endpoint, "__module__", None) == "fastapi.applications"
-            and getattr(route.endpoint, "__qualname__", "").startswith(
-                "FastAPI.setup.<locals>."
-            )
-        ):
-            raise ContractGraphError(f"Unregistered transport: {prefix}{route.path}")
+        elif isinstance(route, Route):
+            if not (
+                route.path in framework_paths
+                and getattr(route.endpoint, "__module__", None)
+                == "fastapi.applications"
+                and getattr(route.endpoint, "__qualname__", "").startswith(
+                    "FastAPI.setup.<locals>."
+                )
+            ):
+                raise ContractGraphError(
+                    f"Unregistered transport: {prefix}{route.path}"
+                )
+        else:
+            raise ContractGraphError(f"Unregistered transport: {prefix}{route!r}")
 
 
 def _reads_raw_body(endpoint: Any) -> bool:

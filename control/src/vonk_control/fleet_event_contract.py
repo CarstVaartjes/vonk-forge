@@ -101,16 +101,16 @@ class AgentOperationPayload(_FleetEventModel):
     attempt: int = Field(strict=True, ge=0)
 
 
-type FleetEventPayload = (
-    NodeProfilePayload
-    | NodeTelemetryPayload
-    | RecipeInstallationPayload
+type _FleetEntityPayload = (
+    RecipeInstallationPayload
     | InstallationNodePayload
     | RecipeRunPayload
     | RunNodePayload
     | JobPayload
     | AgentOperationPayload
 )
+
+type FleetEventPayload = NodeProfilePayload | NodeTelemetryPayload | _FleetEntityPayload
 
 
 def validate_fleet_event_payload(
@@ -147,7 +147,7 @@ def validate_fleet_event_payload(
         if value.node_id != entity_id or value.node_id != node_id:
             raise ValueError("node telemetry event identity is inconsistent")
         return value
-    classes: dict[str, type[_FleetEventModel]] = {
+    classes: dict[str, type[_FleetEntityPayload]] = {
         "recipe-installation": RecipeInstallationPayload,
         "installation-node": InstallationNodePayload,
         "recipe-run": RecipeRunPayload,

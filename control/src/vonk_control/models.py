@@ -16,6 +16,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Connection,
     DateTime,
     Float,
     ForeignKey,
@@ -25,6 +26,7 @@ from sqlalchemy import (
     LargeBinary,
     SmallInteger,
     String,
+    Table,
     Text,
     UniqueConstraint,
     event,
@@ -1631,7 +1633,7 @@ class ClusterMappingNode(Base):
 
 
 def _reject_ready_mapping_node_mutation(
-    _mapper: object, connection: object, target: ClusterMappingNode
+    _mapper: object, connection: Connection, target: ClusterMappingNode
 ) -> None:
     state = connection.execute(
         select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
@@ -2008,9 +2010,11 @@ class TelemetryMaintenanceState(Base):
 
 
 @event.listens_for(TelemetryMaintenanceState.__table__, "after_create")
-def _seed_telemetry_maintenance_state(_target, connection, **_kw) -> None:
+def _seed_telemetry_maintenance_state(
+    target: Table, connection: Connection, **_kw
+) -> None:
     connection.execute(
-        TelemetryMaintenanceState.__table__.insert().values(
+        target.insert().values(
             singleton_id=1,
             next_resolution_seconds=60,
         )
@@ -2028,10 +2032,8 @@ class FleetEventCursor(Base):
 
 
 @event.listens_for(FleetEventCursor.__table__, "after_create")
-def _seed_fleet_event_cursor(_target, connection, **_kw) -> None:
-    connection.execute(
-        FleetEventCursor.__table__.insert().values(singleton_id=1, last_id=0)
-    )
+def _seed_fleet_event_cursor(target: Table, connection: Connection, **_kw) -> None:
+    connection.execute(target.insert().values(singleton_id=1, last_id=0))
 
 
 class FleetStreamEvent(Base):

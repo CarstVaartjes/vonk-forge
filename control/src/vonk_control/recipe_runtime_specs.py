@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.recipe import RecipeFabric
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_package_paths,
@@ -33,6 +34,11 @@ class RecipeRuntimeSpecError(ValueError):
 def recipe_topology(value: object) -> Mapping[str, object]:
     """Return the topology projection from a validated canonical recipe."""
     return _recipe(value).topology.model_dump(mode="json")
+
+
+def recipe_fabric(value: object) -> RecipeFabric:
+    """Return the validated fabric projection from a canonical recipe."""
+    return _recipe(value).topology.fabric
 
 
 def _recipe(value: object) -> RecipeDefinition:
@@ -245,14 +251,15 @@ def compile_runtime_spec(
         "role": role,
         "backend": parsed.topology.parallelism.backend,
     }
+    identity: dict[str, object] = {
+        "recipe_revision_sha256": content_sha256(parsed),
+        "model_dependencies": dependencies,
+        "harness_sha256": binding.harness_content_sha256,
+        "execution_sha256": None,
+        "build_input_sha256": _build_input_digest(package),
+    }
     spec: dict[str, object] = {
-        "identity": {
-            "recipe_revision_sha256": content_sha256(parsed),
-            "model_dependencies": dependencies,
-            "harness_sha256": binding.harness_content_sha256,
-            "execution_sha256": None,
-            "build_input_sha256": _build_input_digest(package),
-        },
+        "identity": identity,
         "model_dependencies": dependencies,
         "runtime": runtime,
         # These are compiler output, assembled from ModelDefinition selectors;
@@ -280,7 +287,7 @@ def compile_runtime_spec(
             "output_path": interface.output.path,
             "timeout_seconds": MAX_TIMEOUT_SECONDS,
         }
-    spec["identity"]["execution_sha256"] = _execution_digest(
+    identity["execution_sha256"] = _execution_digest(
         {
             "harness_sha256": binding.harness_content_sha256,
             "model_dependencies": dependencies,

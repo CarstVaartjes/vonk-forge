@@ -394,7 +394,12 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
 
 def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
     sessions = _database(tmp_path)
-    service, _ = _service(tmp_path, sessions, maximum=1)
+    # The subject here is the member count, not transfer ordering: the assertion
+    # is that all 129 durable checkpoints survive into progress. Running the
+    # transfers one at a time made this single test take 36s, roughly a third of
+    # the whole fast tier, without changing what it can catch -- any truncation
+    # at the old 128 boundary still fails the length assertion below.
+    service, _ = _service(tmp_path, sessions, maximum=8)
     artifacts = []
     for index in range(129):
         path = tmp_path / f"source-{index}"

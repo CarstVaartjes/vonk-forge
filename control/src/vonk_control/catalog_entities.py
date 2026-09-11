@@ -46,8 +46,12 @@ class CatalogEntityService:
     """Store immutable Model/Recipe revisions and switch active heads."""
 
     def __init__(self, sessions: Session | sessionmaker[Session], *, clock: Callable[[], datetime], cursors: CursorCodec | None = None) -> None:
-        self._session = sessions if isinstance(sessions, Session) else None
-        self._sessions = None if self._session is not None else sessions
+        if isinstance(sessions, Session):
+            self._session: Session | None = sessions
+            self._sessions: sessionmaker[Session] | None = None
+        else:
+            self._session = None
+            self._sessions = sessions
         self._clock, self._cursors = clock, cursors
 
     @contextmanager
