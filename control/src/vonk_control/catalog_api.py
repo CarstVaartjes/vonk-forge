@@ -63,7 +63,7 @@ CATALOG_OPERATION_IDS = {
 
 
 class AuditSink(Protocol):
-    def append(self, record: AuditRecord) -> None: ...
+    def append(self, event: AuditRecord) -> None: ...
 
 
 class ManagedRecipeCatalogSync(Protocol):

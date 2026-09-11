@@ -25,6 +25,7 @@ from .deployment_provenance_contract import (
     EvidenceAge,
     PhysicalAcceptanceEvidence,
     PlatformBoundary,
+    PlatformBoundaryName,
     PlatformObservation,
     RankProvenance,
     RecipeLibraryEvidence,
@@ -115,12 +116,15 @@ class DeploymentProvenanceService:
                 else "current",
             )
 
-        platform = []
-        for name, observation in (
+        platform: list[PlatformBoundary] = []
+        boundary_observations: tuple[
+            tuple[PlatformBoundaryName, PlatformObservation | None], ...
+        ] = (
             ("repository", observations.repository),
             ("publication", observations.publication),
             ("controller_deployment", observations.controller),
-        ):
+        )
+        for name, observation in boundary_observations:
             platform.append(
                 PlatformBoundary(
                     boundary=name,
@@ -211,12 +215,12 @@ class DeploymentProvenanceService:
                         binary_sha256=node.binary_digest,
                         evidence=evidence,
                         package_sha256=package[0].package_sha256
-                        if package_matches
+                        if package is not None and package_matches
                         else None,
                         package_evidence=age(
                             "Authenticated package upgrade receipt", package[1]
                         )
-                        if package_matches
+                        if package is not None and package_matches
                         else age("No package receipt bound to the observed binary"),
                     )
                 )
@@ -296,6 +300,7 @@ class DeploymentProvenanceService:
                     .order_by(RecipeRun.created_at.desc(), RecipeRun.id)
                     .limit(1)
                 )
+                run_generation = run.run_generation if run is not None else None
                 installed = {
                     row.node_id: row
                     for row in session.scalars(
@@ -331,7 +336,7 @@ class DeploymentProvenanceService:
                     start_evidence = start[0].evidence if start else None
                     agreement = "unknown"
                     if run_node and run_node.observed_run_generation is not None:
-                        if run_node.observed_run_generation != run.run_generation:
+                        if run_node.observed_run_generation != run_generation:
                             agreement = "mismatch"
                         elif run_node.observation_receipt_sha256:
                             agreement = "match"
@@ -341,7 +346,7 @@ class DeploymentProvenanceService:
                             or start_evidence.recipe_content_sha256
                             != revision.content_digest
                             or start_evidence.rank != placement.rank
-                            or start_evidence.run_generation != run.run_generation
+                            or start_evidence.run_generation != run_generation
                         ):
                             agreement = "mismatch"
                         elif agreement != "mismatch":
@@ -413,7 +418,7 @@ class DeploymentProvenanceService:
                 if receipts:
                     receipt = receipts[0]
                     matches = (
-                        receipt.run_generation == run.run_generation
+                        receipt.run_generation == run_generation
                         and receipt.installation_id == installation.id
                         and receipt.recipe_sha256 == revision.content_digest
                         and receipt.image_digest == installation.image_digest
@@ -455,7 +460,7 @@ class DeploymentProvenanceService:
                         if mapping.generation == installation.mapping_generation
                         else "mismatch",
                         run_id=run.id if run else None,
-                        run_generation=run.run_generation if run else None,
+                        run_generation=run_generation,
                         run_state=run.state if run else None,
                         rank_agreement="mismatch"
                         if "mismatch" in rank_states

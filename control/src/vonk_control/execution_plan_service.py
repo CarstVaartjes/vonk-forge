@@ -10,6 +10,7 @@ path as an agent instruction.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
@@ -60,8 +61,14 @@ def compile_job_invocation(
         rank=plan.runtime.placement.rank,
     )
     runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
-    runtime_spec["job"]["timeout_seconds"] = timeout_seconds
-    runtime_spec["identity"]["execution_sha256"] = execution_identity_sha256(runtime_spec)
+    job = runtime_spec.get("job")
+    if not isinstance(job, dict):
+        raise ExecutionPlanCompilationError("compiled runtime job settings are unavailable")
+    job["timeout_seconds"] = timeout_seconds
+    identity = runtime_spec.get("identity")
+    if not isinstance(identity, dict):
+        raise ExecutionPlanCompilationError("compiled runtime identity is unavailable")
+    identity["execution_sha256"] = execution_identity_sha256(runtime_spec)
     objects = {
         (artifact.model.content_sha256, artifact.file_id): {
             "model_content_sha256": artifact.model.content_sha256,
@@ -154,20 +161,30 @@ class ControllerExecutionPlanService:
                 else resolve_recipe_entities(session, revision.document)
             )
             models = _canonical_models(resolved["models"])
-            manifest = self._model_cache.resolve_artifact_set(
-                recipe_revision_sha256=revision.content_digest,
-            )
-            artifact_set_sha256 = manifest.digest
+            resolver = getattr(self._model_cache, "resolve_artifact_set", None)
+            if not isinstance(resolver, Callable):
+                raise TypeError("NAS cache artifact-set resolver is unavailable")
+            manifest = resolver(recipe_revision_sha256=revision.content_digest)
+            declared_digest = getattr(manifest, "digest", None)
+            if not isinstance(declared_digest, str):
+                raise TypeError("NAS cache artifact-set digest is unavailable")
+            artifact_set_sha256 = declared_digest
             direct_receipts = getattr(
                 self._model_cache, "verified_model_objects_for_set", None
             )
+            model_objects: Sequence[object]
             if callable(direct_receipts):
                 # The production ModelCacheService exposes the persisted
                 # manifest through ModelCacheVerifiedObjectSource.  A bound
                 # canonical cache adapter may expose the already validated
                 # receipt sequence directly; it is still required to carry
                 # selection/file identity and exact distribution objects.
-                model_objects = direct_receipts(artifact_set_sha256)
+                direct_objects = direct_receipts(artifact_set_sha256)
+                if not isinstance(direct_objects, Sequence) or isinstance(
+                    direct_objects, (str, bytes)
+                ):
+                    raise TypeError("verified model object receipts are unavailable")
+                model_objects = direct_objects
             else:
                 model_source = ModelCacheVerifiedObjectSource.from_service(
                     self._model_cache
@@ -184,7 +201,13 @@ class ControllerExecutionPlanService:
         world_size = _world_size(recipe)
         result: dict[str, dict[str, object]] = {}
         for node in sorted(mapping_nodes, key=lambda item: (item.rank, item.node_id)):
-            package = _build_package(build) if _is_source_build(recipe) else None
+            package: dict[str, object] | None = None
+            if _is_source_build(recipe):
+                if build is None:
+                    raise ExecutionPlanCompilationError(
+                        "job build receipt is unavailable"
+                    )
+                package = _build_package(build)
             try:
                 runtime_spec = compile_runtime_spec(
                     recipe,
@@ -343,10 +366,18 @@ def _world_size(recipe: RecipeDefinition) -> int:
     return recipe.topology.parallelism.world_size
 
 
+@dataclass(frozen=True, slots=True)
+class _PlacementTarget:
+    """A mapped rank/role pair that is not a persisted mapping row."""
+
+    rank: int
+    role: str
+
+
 def _placement(
     recipe: RecipeDefinition,
     runtime_spec: Mapping[str, object],
-    node: ClusterMappingNode,
+    node: ClusterMappingNode | _PlacementTarget,
     world_size: int,
 ) -> dict[str, object]:
     endpoint = runtime_spec.get("endpoint")
@@ -406,6 +437,10 @@ def _bind_runtime_artifacts(
         model = raw.get("model")
         file_id = raw.get("file_id")
         model_digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+        if not isinstance(model_digest, str) or not isinstance(file_id, str):
+            raise ExecutionPlanCompilationError(
+                "selected model file is absent from the canonical model manifest"
+            )
         file = by_identity.get((model_digest, file_id))
         if file is None:
             raise ExecutionPlanCompilationError("selected model file is absent from the canonical model manifest")

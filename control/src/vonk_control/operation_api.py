@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import (
     ConfigDict,
@@ -395,7 +395,7 @@ class OperationApiServices:
         Callable[[str | None, int, str | None, str | None], OperationListPage] | None
     ) = None
     get_operation: Callable[[str], Mapping[str, object]] | None = None
-    operation_providers: tuple[OperationProvider, ...] = ()
+    operation_providers: tuple[OperationProviderProtocol, ...] = ()
     cursor_codec: CursorCodec | None = None
 
 
@@ -433,6 +433,25 @@ class OperationProvider:
     get_operation: Callable[[str], Mapping[str, object]]
 
 
+class OperationProviderProtocol(Protocol):
+    """Structural surface of one global activity operation family.
+
+    :class:`OperationProvider` is the canonical value and stays an instantiable
+    dataclass; implementations such as ``RunSwitchOperationProvider`` expose the
+    same surface as methods.  Annotating the merge boundary with this protocol
+    keeps both usable without a nominal base class.
+    """
+
+    @property
+    def family(self) -> str: ...
+
+    @property
+    def list_operations(self) -> Callable[[OperationQuery], OperationListPage]: ...
+
+    @property
+    def get_operation(self) -> Callable[[str], Mapping[str, object]]: ...
+
+
 def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
     created_at = item.get("created_at")
     if not isinstance(created_at, str):
@@ -448,7 +467,7 @@ def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
 
 
 def merge_operation_providers(
-    providers: Sequence[OperationProvider],
+    providers: Sequence[OperationProviderProtocol],
     *,
     cursor: str | None,
     limit: int,
@@ -523,7 +542,7 @@ def merge_operation_providers(
 
 
 def get_operation_from_providers(
-    providers: Sequence[OperationProvider], operation_id: str
+    providers: Sequence[OperationProviderProtocol], operation_id: str
 ) -> Mapping[str, object]:
     """Resolve one operation without coupling the Controller to provider modules."""
 
@@ -1575,7 +1594,7 @@ def durable_operation_services(
     cursors: CursorCodec,
     stale_after_seconds: int = 150,
     resume_agent_upgrade: Callable[[str], None] | None = None,
-    operation_providers: Sequence[OperationProvider] = (),
+    operation_providers: Sequence[OperationProviderProtocol] = (),
 ) -> OperationApiServices:
     """Build bounded projections over database state and the active route bundle."""
 

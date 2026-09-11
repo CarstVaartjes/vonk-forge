@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .cli_render import progress_line
 from .cli_select import SelectorError
@@ -21,6 +21,7 @@ from .cli_select import SelectorError
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
 MAX_PAGE_LIMIT = 512
+MAX_LOG_LINES = 1000
 
 
 class ControllerClient(Protocol):
@@ -33,6 +34,13 @@ class ControllerClient(Protocol):
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
     ) -> dict[str, object]: ...
+
+
+@runtime_checkable
+class _WatchCallback(Protocol):
+    """The progress callback the terminal renderer stores on the namespace."""
+
+    def __call__(self, observed: Mapping[str, object]) -> None: ...
 
 
 def _quoted(value: str) -> str:
@@ -61,25 +69,37 @@ def _request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
     return str(parsed)
 
 
-def _page_limit(value: str) -> int:
-    """Accept a page size between 1 and 512.
+def _bounded_int(value: str, *, label: str, minimum: int, maximum: int) -> int:
+    """Accept an integer within a closed range.
 
-    The bound belongs in the conversion rather than in ``choices``: 512
-    choices turn every ``--help`` that lists a library command into a wall of
-    numbers that hides the real options.
+    The bound belongs in the conversion rather than in ``choices``: a range of
+    choices turns every ``--help`` that lists the option into a wall of numbers
+    that hides the real options.
     """
 
     try:
         number = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"invalid page limit: {value!r} is not an integer"
+            f"invalid {label}: {value!r} is not an integer"
         ) from None
-    if not 1 <= number <= MAX_PAGE_LIMIT:
+    if not minimum <= number <= maximum:
         raise argparse.ArgumentTypeError(
-            f"page limit must be between 1 and {MAX_PAGE_LIMIT}"
+            f"{label} must be between {minimum} and {maximum}"
         )
     return number
+
+
+def _page_limit(value: str) -> int:
+    """Accept a page size between 1 and 512."""
+
+    return _bounded_int(value, label="page limit", minimum=1, maximum=MAX_PAGE_LIMIT)
+
+
+def _line_limit(value: str) -> int:
+    """Accept a log tail line count between 1 and 1000."""
+
+    return _bounded_int(value, label="line count", minimum=1, maximum=MAX_LOG_LINES)
 
 
 def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
@@ -191,7 +211,13 @@ def add_controller_commands(
     )
     _selector(loginfo, "selector", help="Exact Spark selector or friendly name")
     loginfo.add_argument("--since", default="15m")
-    loginfo.add_argument("--lines", type=int, choices=range(1, 1001), default=100)
+    loginfo.add_argument(
+        "--lines",
+        type=_line_limit,
+        default=100,
+        metavar="1-1000",
+        help=f"Tail lines, 1 to {MAX_LOG_LINES} (default: 100)",
+    )
     loginfo.add_argument("--recipe")
     loginfo.add_argument("--source", choices=("client", "monitor", "runtime"))
     loginfo.add_argument("--follow", action="store_true")
@@ -327,9 +353,9 @@ def _state(value: Mapping[str, object]) -> str:
     return ""
 
 
-def _watch_callback(args: argparse.Namespace) -> Callable[[Mapping[str, object]], None] | None:
+def _watch_callback(args: argparse.Namespace) -> _WatchCallback | None:
     callback = getattr(args, "_watch_callback", None)
-    return callback if callable(callback) else None
+    return callback if isinstance(callback, _WatchCallback) else None
 
 
 def _bounded_timeout(args: argparse.Namespace) -> float:
@@ -451,6 +477,15 @@ def _overview(
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
 
 
+def _fleet_selector(args: argparse.Namespace) -> str:
+    """Return the validated Spark selector of a fleet action that requires one."""
+
+    selector = getattr(args, "selector", None)
+    if not isinstance(selector, str):
+        raise TypeError("fleet action requires a Spark selector")
+    return selector
+
+
 def _fleet(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -459,8 +494,8 @@ def _fleet(
     action = getattr(args, "fleet_action", None)
     if action is None:
         return _watch_resource(client, "/api/fleet", _overview(client, "fleet", args), args)
-    selector = getattr(args, "selector", None)
     if action == "detail":
+        selector = _fleet_selector(args)
         result = client.request(
             "GET",
             f"/api/fleet/{_quoted(selector)}",
@@ -480,7 +515,9 @@ def _fleet(
         )
     if action == "rename":
         return client.request(
-            "POST", f"/api/fleet/{_quoted(selector)}/rename", {"display_name": args.new_name}
+            "POST",
+            f"/api/fleet/{_quoted(_fleet_selector(args))}/rename",
+            {"display_name": args.new_name},
         )
     if action == "enroll":
         return client.request(
@@ -491,13 +528,13 @@ def _fleet(
     if action == "re-enroll":
         return client.request(
             "POST",
-            f"/api/fleet/{_quoted(selector)}/re-enroll",
+            f"/api/fleet/{_quoted(_fleet_selector(args))}/re-enroll",
             None,
         )
     if action == "remove":
         return client.request(
             "POST",
-            f"/api/fleet/{_quoted(selector)}/remove",
+            f"/api/fleet/{_quoted(_fleet_selector(args))}/remove",
             None,
         )
     if action == "upgrade":
@@ -513,6 +550,7 @@ def _fleet(
             },
         )
     if action == "loginfo":
+        selector = _fleet_selector(args)
         path = f"/api/fleet/{_quoted(selector)}/loginfo"
         query = _query(
             since=args.since,
@@ -659,6 +697,19 @@ def _recipe(
         )
         return _follow_mutation(client, "recipe", result, args)
     raise ValueError(f"unsupported recipe action: {action}")
+
+
+def _spark_id_list(value: object) -> list[str]:
+    """Validate a decoded assignment ``spark_ids`` field without coercion."""
+
+    if not isinstance(value, list):
+        raise TypeError("profile assignment spark_ids must be an array of Spark IDs")
+    identifiers: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError("profile assignment spark_ids must be an array of Spark IDs")
+        identifiers.append(item)
+    return identifiers
 
 
 def _authoring_assignments(profile: Mapping[str, object]) -> list[dict[str, object]]:
@@ -862,8 +913,8 @@ def _profile(
             ]
             if matching:
                 matching[0]["spark_ids"] = sorted(
-                    set(matching[0].get("spark_ids", []))
-                    | set(new_assignment["spark_ids"])
+                    set(_spark_id_list(matching[0].get("spark_ids", [])))
+                    | set(spark_ids)
                 )
             else:
                 assignments.append(new_assignment)
@@ -892,7 +943,7 @@ def _profile(
                     continue
                 remaining = [
                     spark
-                    for spark in assignment.get("spark_ids", [])
+                    for spark in _spark_id_list(assignment.get("spark_ids", []))
                     if spark not in spark_ids
                 ]
                 if remaining:

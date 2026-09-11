@@ -1051,6 +1051,11 @@ class RecipeOperationService:
                 endpoint_owner = node.endpoint_owner
                 node_id = node.node_id
                 try:
+                    endpoint_address = (
+                        presences[node_id] if endpoint_owner else node.fabric_address
+                    )
+                    if not isinstance(endpoint_address, str):
+                        raise KeyError("recipe start endpoint address is unavailable")
                     payload = build_recipe_start_payload(
                         run_id=run_id,
                         installation_id=plan.installation_id,
@@ -1070,11 +1075,7 @@ class RecipeOperationService:
                             node.required_memory_bytes,
                             node.fabric_address,
                         ),
-                        endpoint_address=(
-                            presences[node_id]
-                            if endpoint_owner
-                            else node.fabric_address
-                        ),
+                        endpoint_address=endpoint_address,
                         compiled_endpoint_address=(
                             presences[node_id] if endpoint_owner else None
                         ),
@@ -2107,8 +2108,9 @@ class RecipeOperationService:
                     recovery_error = error
             start_failed = bool(failed) or recovery_error is not None
             job.state = "failed" if start_failed else "succeeded"
+            stored_result = job.result
             projected_result = (
-                dict(job.result) if isinstance(job.result, Mapping) else {}
+                dict(stored_result) if isinstance(stored_result, Mapping) else {}
             )
             final_result = {
                 "successful_nodes": successful,
@@ -3065,7 +3067,8 @@ def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
     publisher = model.get("publisher")
     slug = model.get("slug")
     if (
-        not _lower_hex_digest(digest)
+        not isinstance(digest, str)
+        or not _lower_hex_digest(digest)
         or not isinstance(publisher, str)
         or not publisher
         or not isinstance(slug, str)
@@ -3564,7 +3567,7 @@ def _validate_start_evidence(
         if installation is not None
         else None
     )
-    if revision is None:
+    if revision is None or installation is None:
         raise RecipeOperationConflict("start evidence authority is unavailable")
     selections = revision.document.get("models")
     selection = (
@@ -3585,6 +3588,8 @@ def _validate_start_evidence(
     except (KeyError, TypeError, ValueError) as error:
         raise RecipeOperationConflict("start evidence authority is invalid") from error
     endpoint_address = operation.payload.get("endpoint_address")
+    if not isinstance(endpoint_address, (str, bytes, int)):
+        raise RecipeOperationConflict("start evidence authority is invalid")
     port = operation.payload.get("port")
     try:
         parsed_address = ipaddress.ip_address(endpoint_address)

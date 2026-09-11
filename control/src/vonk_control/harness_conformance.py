@@ -7,7 +7,6 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.resources import files
-from types import SimpleNamespace
 
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -18,7 +17,7 @@ from .compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
 )
-from .execution_plan_service import _placement
+from .execution_plan_service import _placement, _PlacementTarget
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .recipe_runtime_specs import RecipeRuntimeSpecError, compile_runtime_spec
@@ -294,6 +293,8 @@ def _run_plan_conformance(request: LifecycleRequest, *, clock: DeterministicCloc
         raise HarnessConformanceError("bounded stop deadline elapsed")
     terminal = _observe(observations, "verify-stopped", executor.verify_stopped())
     document = terminal.get("evidence")
+    if not isinstance(document, Mapping):
+        raise HarnessConformanceError("lifecycle evidence is invalid")
     return HarnessEvidence(tuple(observations), validate_terminal_evidence(document, request))
 
 
@@ -328,7 +329,7 @@ def _compile_request(
         model_objects=_verified_model_objects(recipe, models, role=role),
         runtime_image=runtime_image or _fixture_runtime_image(recipe),
     )
-    node = SimpleNamespace(rank=rank, role=role)
+    node = _PlacementTarget(rank=rank, role=role)
     try:
         placement = dict(
             _placement(
@@ -372,8 +373,13 @@ def _bind_runtime_artifacts(runtime_spec: Mapping[str, object], models: Sequence
         if not isinstance(raw, Mapping):
             raise HarnessConformanceError("canonical runtime model artifact is invalid")
         model = raw.get("model")
-        key = (model.get("content_sha256"), raw.get("file_id")) if isinstance(model, Mapping) else (None, None)
-        source = by_identity.get(key)
+        model_digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+        file_id = raw.get("file_id")
+        if not isinstance(model_digest, str) or not isinstance(file_id, str):
+            raise HarnessConformanceError(
+                "selected model file is absent from the canonical model manifest"
+            )
+        source = by_identity.get((model_digest, file_id))
         if source is None:
             raise HarnessConformanceError("selected model file is absent from the canonical model manifest")
         if raw.get("path") != source.get("path"):
@@ -537,7 +543,7 @@ def _mount_paths_are_isolated(mounts: Sequence[object]) -> bool:
 
 def _runtime_timeout(runtime_spec: Mapping[str, object]) -> float:
     value = _mapping(runtime_spec.get("lifecycle"), "lifecycle").get("stop_timeout_seconds")
-    if type(value) not in (int, float) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise HarnessConformanceError("runtime stop timeout is invalid")
     return float(value)
 

@@ -122,7 +122,7 @@ from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
-from .source_bundles import SourceBundleError, SourceBundleStore
+from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
@@ -273,7 +273,7 @@ class AgentApiServices:
     clock: Callable[[], datetime]
     presence: AgentPresenceService
     artifact_root: Path
-    source_bundles: SourceBundleStore
+    source_bundles: SourceBundleStoreProtocol
     workload_tuf_metadata_root: Path = Path("/state/workload-tuf/metadata")
     workload_tuf_target_root: Path = Path("/state/workload-tuf/targets")
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES

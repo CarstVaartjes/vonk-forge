@@ -12,12 +12,32 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 from .presence import ManagementAddressPolicy, PresenceError
 
 _AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}")
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
+
+
+class _RouteStateDocument(TypedDict):
+    """The exact JSON document persisted for one route generation.
+
+    ``_publish_payload`` builds this document itself before it is encoded and
+    atomically applied; the typed fields keep the persisted shape and the
+    in-memory :class:`RouteState` projection from drifting apart.
+    """
+
+    state: str
+    authority_revision: str | None
+    profile: str | None
+    workload: str | None
+    node_ids: list[str]
+    aliases: dict[str, str]
+    health_timestamp: str | None
+    reason: str | None
+    generation: NotRequired[int]
 
 
 class RouteValidationError(ValueError):
@@ -187,7 +207,7 @@ class RoutePublisher:
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
             raise RouteValidationError("active route state is unreadable") from error
 
-    def _publish_payload(self, payload: dict[str, object]) -> RouteState:
+    def _publish_payload(self, payload: _RouteStateDocument) -> RouteState:
         generation = (self._state.generation if self._state else 0) + 1
         payload["generation"] = generation
         content = self._encoded(payload)
@@ -218,7 +238,7 @@ class RoutePublisher:
         finally:
             temporary.unlink(missing_ok=True)
         self._state = RouteState(
-            generation=generation, state=str(payload["state"]), authority_revision=payload.get("authority_revision"),
+            generation=generation, state=payload["state"], authority_revision=payload.get("authority_revision"),
             profile=payload.get("profile"), workload=payload.get("workload"),
             node_ids=tuple(payload["node_ids"]), aliases=dict(payload["aliases"]),
             health_timestamp=payload.get("health_timestamp"), reason=payload.get("reason"), digest=digest,

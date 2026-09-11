@@ -35,6 +35,7 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
@@ -55,6 +56,7 @@ from .audit import AuditRecord, IdentityHistoryRecord
 from .auth import (
     MUTATION_ROLES,
     Actor,
+    AgentSource,
     AuthError,
     TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
@@ -87,12 +89,14 @@ from .operation_api import (
     EndpointResponse,
     ErrorContextResponse,
     HealthzResponse,
+    IdentityHistoryItem,
     IdentityHistoryResponse,
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
     JobResumeResponse,
     JobsResponse,
+    JobSummary,
     OperationApiServices,
     OperationDetailResponse,
     OperationPage,
@@ -371,7 +375,11 @@ def build_agent_services(
         sessions,
         clock=clock,
     )
-    operations.set_contact_consumer(presence.observe_in_session)
+
+    def observe_contact(session: Session, source: AgentSource) -> None:
+        presence.observe_in_session(session, source)
+
+    operations.set_contact_consumer(observe_contact)
     helper_authority = None
     host_runtime_authority = None
     grant_key_path = getattr(settings, "package_helper_grant_private_key_path", None)
@@ -437,7 +445,11 @@ class SpaFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as error:
-            if error.status_code == 404 and "." not in path:
+            if (
+                error.status_code == 404
+                and "." not in path
+                and self.directory is not None
+            ):
                 return FileResponse(Path(self.directory) / "index.html")
             raise
 
@@ -969,16 +981,16 @@ def create_app(
             ) from None
         return JobsResponse(
             jobs=[
-                {
-                    "id": job.id,
-                    "state": job.state,
-                    "kind": job.kind,
-                    "created_at": (
+                JobSummary(
+                    id=job.id,
+                    state=job.state,
+                    kind=job.kind,
+                    created_at=(
                         job.created_at.replace(tzinfo=UTC)
                         if job.created_at.tzinfo is None
                         else job.created_at.astimezone(UTC)
                     ),
-                }
+                )
                 for job in page
             ],
             next_cursor=next_cursor,
@@ -1090,15 +1102,17 @@ def create_app(
     ) -> IdentityHistoryResponse:
         return IdentityHistoryResponse(
             identities=[
-                {
-                    "node_id": record.node_id,
-                    "agent_state": record.agent_state,
-                    "certificate_serial": record.certificate_serial,
-                    "certificate_fingerprint": record.certificate_fingerprint,
-                    "certificate_generation": record.certificate_generation,
-                    "enrolled_at": record.enrolled_at,
-                    "revoked_at": record.revoked_at,
-                }
+                IdentityHistoryItem.model_validate(
+                    {
+                        "node_id": record.node_id,
+                        "agent_state": record.agent_state,
+                        "certificate_serial": record.certificate_serial,
+                        "certificate_fingerprint": record.certificate_fingerprint,
+                        "certificate_generation": record.certificate_generation,
+                        "enrolled_at": record.enrolled_at,
+                        "revoked_at": record.revoked_at,
+                    }
+                )
                 for record in audits.identity_history()
             ]
         )
@@ -1563,13 +1577,15 @@ def production_app() -> FastAPI:
         operational_metrics.refresh()
         refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
-            metrics.replace_job_counts(
-                session.execute(
+            job_counts = [
+                (kind, state, count)
+                for kind, state, count in session.execute(
                     select(Job.kind, Job.state, func.count()).group_by(
                         Job.kind, Job.state
                     )
                 )
-            )
+            ]
+            metrics.replace_job_counts(job_counts)
         backup_marker = settings.state_path / "last-successful-backup.epoch"
         if backup_marker.is_file() and not backup_marker.is_symlink():
             try:

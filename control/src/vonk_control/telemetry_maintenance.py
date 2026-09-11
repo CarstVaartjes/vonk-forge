@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -13,6 +13,7 @@ from typing import Literal
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session, sessionmaker
 
 from .fleet_events import FleetEventDraft, FleetEventRepository
@@ -111,7 +112,7 @@ def _series_metric_name(series) -> str:
 
 
 def _rich_series_metrics(
-    rows: list[NodeTelemetrySample],
+    rows: Sequence[NodeTelemetrySample],
 ) -> list[_MetricAggregate]:
     """Aggregate only available finite numeric series for one minute bucket."""
 
@@ -271,7 +272,8 @@ def _dirty_candidate_statement(
 
 
 def _claim_dirty_identities_statement(
-    identities: list[tuple[int, str, datetime]],
+    identities: Sequence[Row[tuple[int, str, datetime]]]
+    | Sequence[tuple[int, str, datetime]],
 ):
     columns = (
         NodeTelemetryRollupDirty.resolution_seconds,
@@ -606,6 +608,7 @@ class TelemetryMaintenance:
         session: Session,
         limit: int,
     ) -> list[tuple[int, str, datetime]]:
+        quotas: tuple[tuple[RollupResolution, int], ...]
         if limit == 1:
             quotas = ((60, 1), (900, 1))
         else:
@@ -877,7 +880,7 @@ class TelemetryMaintenance:
         cutoff: datetime,
         limit: int,
         events: FleetEventRepository,
-        candidates: list,
+        candidates: Sequence[Row[tuple[str, str, datetime]]],
     ) -> None:
         sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
         _lock_nodes(
@@ -956,7 +959,7 @@ class TelemetryMaintenance:
         resolution_seconds: RollupResolution,
         cutoff: datetime,
         limit: int,
-        candidates: list,
+        candidates: Sequence[Row[tuple[int, str, datetime]]],
     ) -> None:
         identities = [
             (resolution, node_id, _database_utc(start))
