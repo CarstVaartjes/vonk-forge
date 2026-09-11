@@ -15,11 +15,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
-from .bounded_json import integer, mapping, require_integer, sequence
+from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
 from .failure_evidence_models import FailureEvidenceCursor, FailureEvidenceRecord
 from .logging import redact_text
 from .models import (
@@ -50,6 +50,40 @@ _SECRET_LINE = re.compile(
 )
 _OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9])")
 
+# The failure-evidence closed sets are named once here so the bundle fields and
+# the helpers that build them cannot disagree. ``FailureCategory`` mirrors the
+# protocol's ``FailureDiagnostics.category`` literal set, which is defined in
+# the shared ``vonk_agent_protocol`` package rather than this module.
+EvidenceSource = Literal["agent", "controller"]
+FailureCategory = Literal[
+    "platform-policy",
+    "capacity",
+    "network",
+    "digest",
+    "timeout",
+    "runtime",
+    "unknown",
+]
+_EVIDENCE_SOURCE = TypeAdapter(EvidenceSource)
+_CATEGORY_MARKERS: tuple[tuple[FailureCategory, tuple[str, ...]], ...] = (
+    (
+        "platform-policy",
+        (
+            "permission",
+            "denied",
+            "namespace",
+            "sandbox",
+            "policy",
+            "mapping",
+            "proc-mount",
+        ),
+    ),
+    ("capacity", ("space", "storage", "capacity", "memory-limit")),
+    ("digest", ("digest", "integrity", "verification", "checksum")),
+    ("timeout", ("timeout", "deadline")),
+    ("network", ("network", "connection", "download", "upstream", "rate_limit")),
+)
+
 
 class EvidenceModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -65,7 +99,7 @@ class EvidenceContext(EvidenceModel):
     plan_digest: str | None = None
     payload_digest: str | None = None
     updated_at: str
-    source: Literal["agent", "controller"]
+    source: EvidenceSource
     rank: int | None = Field(default=None, ge=0)
 
 
@@ -167,43 +201,50 @@ def failure_receipt(result: Mapping[str, object]) -> OperationFailureEvidence:
     )
 
 
-def classification(kind: str, result: Mapping[str, object]) -> str:
+def classification(kind: str, result: Mapping[str, object]) -> FailureCategory:
     # Phase/state comes from typed fields. Classification uses stable emitted
     # error/diagnostic codes, never searches logs to invent operation progress.
     code = " ".join(
         str(result.get(key, ""))
         for key in ("error_code", "code", "diagnostic", "helper_error_code")
     ).casefold()
-    for category, markers in (
-        (
-            "platform-policy",
-            (
-                "permission",
-                "denied",
-                "namespace",
-                "sandbox",
-                "policy",
-                "mapping",
-                "proc-mount",
-            ),
-        ),
-        ("capacity", ("space", "storage", "capacity", "memory-limit")),
-        ("digest", ("digest", "integrity", "verification", "checksum")),
-        ("timeout", ("timeout", "deadline")),
-        ("network", ("network", "connection", "download", "upstream", "rate_limit")),
-    ):
+    for category, markers in _CATEGORY_MARKERS:
         if any(marker in code for marker in markers):
             return category
     return "runtime" if kind.startswith(("recipe.", "agent.upgrade")) else "unknown"
 
 
-def _required_int(value: object, detail: str) -> int:
-    """Return a persisted integer or fail loudly; the field is required."""
+def _required_text(value: object, detail: str) -> str:
+    """Return a persisted string or fail loudly; the field is required."""
 
-    parsed = integer(value)
-    if parsed is None:
-        raise ValueError(f"{detail} is invalid")
-    return parsed
+    if not isinstance(value, str):
+        raise BoundedJSONError(f"{detail} is invalid")
+    return value
+
+
+def _optional_text(value: object, detail: str) -> str | None:
+    """Return a persisted optional string without coercing a wrong JSON type."""
+
+    return None if value is None else _required_text(value, detail)
+
+
+def _optional_int(value: object, detail: str) -> int | None:
+    """Return a persisted optional integer without defaulting a wrong type."""
+
+    return None if value is None else require_integer(value, detail)
+
+
+def _required_node_ids(value: object) -> list[str]:
+    """Read the persisted node list, failing on a non-string member.
+
+    A value that is not a JSON array keeps the existing omission policy: the
+    previous ``sequence(...) or ()`` read treated it as an empty fleet.
+    """
+
+    members = sequence(value)
+    if members is None:
+        return []
+    return [_required_text(member, "operation node id") for member in members]
 
 
 def sanitize_diagnostics(value: object) -> FailureDiagnostics:
@@ -265,23 +306,31 @@ def collect_failure(
         or item.get("failure")
         or "Operation failed"
     )
+    node_ids = _required_node_ids(item.get("node_ids"))
+    source: EvidenceSource
+    if "source" in item:
+        source = _EVIDENCE_SOURCE.validate_python(item["source"], strict=True)
+    else:
+        source = "agent" if item.get("node_ids") else "controller"
     return FailureEvidenceBundle(
         context=EvidenceContext(
-            operation_id=str(item["id"]),
-            attempt=_required_int(item.get("attempt"), "operation attempt"),
-            kind=str(item["kind"]),
-            node_ids=list(sequence(item.get("node_ids")) or ())[:128],
-            omitted_node_count=max(
-                0, len(sequence(item.get("node_ids")) or ()) - 128
+            operation_id=_required_text(item["id"], "operation id"),
+            attempt=require_integer(item.get("attempt"), "operation attempt"),
+            kind=_required_text(item["kind"], "operation kind"),
+            node_ids=node_ids[:128],
+            omitted_node_count=max(0, len(node_ids) - 128),
+            authority_revision=_optional_text(
+                item.get("authority_revision"), "operation authority revision"
             ),
-            authority_revision=item.get("authority_revision"),
-            plan_digest=item.get("plan_digest"),
-            payload_digest=item.get("payload_digest"),
-            updated_at=str(item["updated_at"]),
-            source=item.get(
-                "source", "agent" if item.get("node_ids") else "controller"
+            plan_digest=_optional_text(
+                item.get("plan_digest"), "operation plan digest"
             ),
-            rank=item.get("rank"),
+            payload_digest=_optional_text(
+                item.get("payload_digest"), "operation payload digest"
+            ),
+            updated_at=_required_text(item["updated_at"], "operation updated_at"),
+            source=source,
+            rank=_optional_int(item.get("rank"), "operation rank"),
         ),
         collected_at=now.isoformat(),
         summary=safe_text(str(summary))[:512],
@@ -311,16 +360,15 @@ class FailureEvidenceService:
             empty = FailureLogTail(
                 text="", truncated=False, dropped_bytes=0, dropped_lines=0
             )
-            result = (
-                item.get("result") if isinstance(item.get("result"), Mapping) else {}
-            )
+            result = mapping(item.get("result")) or {}
+            node_ids = _required_node_ids(item.get("node_ids"))
             bundle = FailureEvidenceBundle(
                 context=EvidenceContext(
                     operation_id=str(item["id"]),
                     attempt=require_integer(item["attempt"], "operation attempt"),
                     kind=str(item["kind"]),
-                    node_ids=list(item.get("node_ids", []))[:128],
-                    omitted_node_count=max(0, len(item.get("node_ids", [])) - 128),
+                    node_ids=node_ids[:128],
+                    omitted_node_count=max(0, len(node_ids) - 128),
                     updated_at=str(item["updated_at"]),
                     source="agent" if item.get("node_ids") else "controller",
                 ),
@@ -390,9 +438,12 @@ class FailureEvidenceService:
         return content, digest, bundle
 
     def decorate(self, item: Mapping[str, object]) -> dict[str, object]:
-        result = dict(item.get("result") or {})
+        result: dict[str, object] = dict(mapping(item.get("result")) or {})
         try:
-            content, digest, bundle = self.read(str(item["id"]), require_integer(item["attempt"], "operation attempt"))
+            content, digest, bundle = self.read(
+                _required_text(item["id"], "operation id"),
+                require_integer(item["attempt"], "operation attempt"),
+            )
         except (KeyError, ValueError, OSError):
             return dict(item)
         result["evidence_download"] = OperationEvidenceDownload(
@@ -461,9 +512,14 @@ class FailureEvidenceService:
                         if cursor is None:
                             cursor = FailureEvidenceCursor(family=family)
                             session.add(cursor)
-                        cursor.updated_at = datetime.fromisoformat(item["updated_at"])
-                        cursor.operation_id = item["id"]
-                        cursor.attempt = item["attempt"]
+                        updated_at = _required_text(
+                            item["updated_at"], "operation updated_at"
+                        )
+                        cursor.updated_at = datetime.fromisoformat(updated_at)
+                        cursor.operation_id = _required_text(item["id"], "operation id")
+                        cursor.attempt = require_integer(
+                            item["attempt"], "operation attempt"
+                        )
             self.last_collection_error = None
         except Exception:  # noqa: BLE001 - worker diagnostics must not interrupt execution
             self.last_collection_error = "failure-evidence-collection-unavailable"

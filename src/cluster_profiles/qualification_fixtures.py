@@ -19,8 +19,9 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 from jsonschema import Draft202012Validator
 
@@ -107,6 +108,15 @@ class Fixture:
         }
 
 
+class _OutputLimits(TypedDict):
+    """Validated artifact-job output limits for one recipe fixture case."""
+
+    max_files: int
+    max_file_bytes: int
+    max_total_bytes: int
+    allowed_media_types: list[str]
+
+
 @dataclass(frozen=True, slots=True)
 class RecipeFixture:
     key: str
@@ -114,7 +124,7 @@ class RecipeFixture:
     interface: str
     parameters: dict[str, object]
     inputs: tuple[tuple[str, Fixture], ...]
-    output_limits: dict[str, object]
+    output_limits: _OutputLimits
     timeout_seconds: int
     assertions: tuple[dict[str, object], ...]
     case_id: str = "default"
@@ -271,9 +281,67 @@ def _integer(value: object, label: str, minimum: int, maximum: int) -> int:
     return value
 
 
-def _load_content(
-    root: resources.abc.Traversable, value: Mapping[str, object]
-) -> bytes:
+def _integer_value(
+    mapping: Mapping[str, object],
+    key: str,
+    label: str,
+    *,
+    default: int | None = None,
+) -> int:
+    """Return a required (or defaulted) integer contract field or fail loudly."""
+
+    value = mapping.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise FixtureError(f"{label} {key} is invalid")
+    return value
+
+
+def _number_value(
+    mapping: Mapping[str, object],
+    key: str,
+    label: str,
+    *,
+    default: float | None = None,
+) -> float:
+    """Return a required (or defaulted) JSON number contract field as a float."""
+
+    value = mapping.get(key, default)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise FixtureError(f"{label} {key} is invalid")
+    return float(value)
+
+
+def _string_list_value(
+    mapping: Mapping[str, object],
+    key: str,
+    label: str,
+    *,
+    default: list[str] | None = None,
+) -> list[str]:
+    """Return an array-of-strings contract field or fail loudly."""
+
+    value = mapping.get(key, default)
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise FixtureError(f"{label} {key} is invalid")
+    return value
+
+
+def _numeric_token(value: object, label: str) -> float:
+    """Parse an ffprobe numeric token, which is normally a JSON string.
+
+    A JSON boolean or a structured value is a malformed measurement, so it
+    fails loudly instead of becoming ``0`` or ``1``.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise FixtureError(f"{label} is unavailable")
+    try:
+        return float(value)
+    except ValueError as error:
+        raise FixtureError(f"{label} is unavailable") from error
+
+
+def _load_content(root: Traversable, value: Mapping[str, object]) -> bytes:
     raw_path = value.get("path")
     encoding = value.get("encoding")
     if not isinstance(raw_path, str) or not raw_path:
@@ -643,7 +711,9 @@ def _validate_document_archive(content: bytes, assertion: Mapping[str, object]) 
 def _validate_realtime_transcript(
     content: bytes, assertion: Mapping[str, object]
 ) -> None:
-    expected_frame_count = int(assertion.get("frame_count", 1))
+    expected_frame_count = _integer(
+        assertion.get("frame_count", 1), "frame count", 1, 128
+    )
     lines = content.splitlines()
     if not 3 <= len(lines) <= 4_096 or any(not line for line in lines):
         raise FixtureError("realtime transcript record count is invalid")
@@ -665,7 +735,8 @@ def _validate_realtime_transcript(
     for sequence, record in enumerate(records):
         record_type = record.get("type")
         if (
-            record_type not in allowed_shapes
+            not isinstance(record_type, str)
+            or record_type not in allowed_shapes
             or set(record) != allowed_shapes[record_type]
         ):
             raise FixtureError("realtime transcript record shape is invalid")
@@ -699,6 +770,7 @@ def _validate_realtime_transcript(
         for index, record in enumerate(frame_records)
     ):
         raise FixtureError("realtime transcript frame acknowledgement is invalid")
+    first_frame_sequence = frame_records[0].get("sequence")
     stop_indexes = [
         index
         for index, record in enumerate(records)
@@ -706,7 +778,8 @@ def _validate_realtime_transcript(
     ]
     if (
         len(stop_indexes) != 1
-        or stop_indexes[0] <= int(frame_records[0]["sequence"])
+        or not isinstance(first_frame_sequence, int)
+        or stop_indexes[0] <= first_frame_sequence
         or any(
             record.get("type") != "output" for record in records[stop_indexes[0] + 1 :]
         )
@@ -743,7 +816,10 @@ def _validate_synchronized_media_receipt(
     prompt_digest = document.get("prompt_sha256")
     if not isinstance(prompt_digest, str) or not _DIGEST.fullmatch(prompt_digest):
         raise FixtureError("synchronized media receipt prompt digest is invalid")
-    if document.get("profile") not in assertion["allowed_profiles"]:
+    allowed_profiles = _string_list_value(
+        assertion, "allowed_profiles", "synchronized media receipt"
+    )
+    if document.get("profile") not in allowed_profiles:
         raise FixtureError("synchronized media receipt profile is invalid")
     if document.get("profile") != expected_profile:
         raise FixtureError(
@@ -758,7 +834,9 @@ def _validate_synchronized_media_receipt(
         raise FixtureError("synchronized media receipt seed is invalid")
     media = _object(document.get("media"), "synchronized media receipt media")
     expected_media = _object(assertion["media_equals"], "media_equals")
-    positive_media_fields = assertion["media_positive_integers"]
+    positive_media_fields = _string_list_value(
+        assertion, "media_positive_integers", "synchronized media receipt"
+    )
     if set(media) != {*expected_media, *positive_media_fields} or any(
         media.get(key) != value for key, value in expected_media.items()
     ):
@@ -771,9 +849,15 @@ def _validate_synchronized_media_receipt(
             )
     runtime = _object(document.get("runtime"), "synchronized media receipt runtime")
     runtime_equals = _object(assertion["runtime_equals"], "runtime_equals")
-    nullable_strings = assertion["runtime_nullable_strings"]
-    nullable_integers = assertion["runtime_nullable_integers"]
-    nonempty_strings = assertion["runtime_nonempty_strings"]
+    nullable_strings = _string_list_value(
+        assertion, "runtime_nullable_strings", "synchronized media receipt"
+    )
+    nullable_integers = _string_list_value(
+        assertion, "runtime_nullable_integers", "synchronized media receipt"
+    )
+    nonempty_strings = _string_list_value(
+        assertion, "runtime_nonempty_strings", "synchronized media receipt"
+    )
     if set(runtime) != {
         *runtime_equals,
         *nullable_strings,
@@ -1184,27 +1268,32 @@ def _parse_recipe_case(
             raise FixtureError(f"recipe fixture {key} input names are not unique")
         names.add(fixture.name)
         parsed_inputs.append((slot, fixture))
-    output_limits = {
-        "max_files": _integer(limits.get("max_files"), "max_files", 1, 32),
-        "max_file_bytes": _integer(
-            limits.get("max_file_bytes"), "max_file_bytes", 1, 1024**3
-        ),
-        "max_total_bytes": _integer(
-            limits.get("max_total_bytes"), "max_total_bytes", 1, 2 * 1024**3
-        ),
-        "allowed_media_types": limits.get("allowed_media_types"),
-    }
-    allowed = output_limits["allowed_media_types"]
+    max_files = _integer(limits.get("max_files"), "max_files", 1, 32)
+    max_file_bytes = _integer(
+        limits.get("max_file_bytes"), "max_file_bytes", 1, 1024**3
+    )
+    max_total_bytes = _integer(
+        limits.get("max_total_bytes"), "max_total_bytes", 1, 2 * 1024**3
+    )
+    raw_allowed = limits.get("allowed_media_types")
     if (
-        not isinstance(allowed, list)
-        or not 1 <= len(allowed) <= 16
-        or len(set(allowed)) != len(allowed)
+        not isinstance(raw_allowed, list)
+        or not 1 <= len(raw_allowed) <= 16
+        or len(set(raw_allowed)) != len(raw_allowed)
         or any(
             not isinstance(value, str) or not _MEDIA_TYPE.fullmatch(value)
-            for value in allowed
+            for value in raw_allowed
         )
-        or output_limits["max_file_bytes"] > output_limits["max_total_bytes"]
     ):
+        raise FixtureError(f"recipe fixture {key} output media types are invalid")
+    allowed = raw_allowed
+    output_limits: _OutputLimits = {
+        "max_files": max_files,
+        "max_file_bytes": max_file_bytes,
+        "max_total_bytes": max_total_bytes,
+        "allowed_media_types": allowed,
+    }
+    if max_file_bytes > max_total_bytes:
         raise FixtureError(f"recipe fixture {key} output media types are invalid")
     timeout_seconds = _integer(timeout, "timeout_seconds", 1, 3_600)
     if not isinstance(assertions, list) or not assertions:
@@ -1368,7 +1457,11 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             "tensor_shapes",
         },
     }
-    if kind not in allowed_fields or set(assertion) - allowed_fields[kind]:
+    if (
+        not isinstance(kind, str)
+        or kind not in allowed_fields
+        or set(assertion) - allowed_fields[kind]
+    ):
         raise FixtureError(f"recipe fixture {key} assertion fields are invalid")
     media_type = assertion.get("media_type")
     if media_type is not None and (
@@ -1568,7 +1661,17 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             "runtime_nullable_integers",
             "runtime_nonempty_strings",
         )
-        parsed_lists = [assertion.get(name) for name in list_fields]
+        parsed_lists: list[list[str]] = []
+        for name in list_fields:
+            raw_values = assertion.get(name)
+            if not isinstance(raw_values, list) or any(
+                not isinstance(value, str) or not value for value in raw_values
+            ):
+                raise FixtureError(f"recipe fixture {key} receipt contract is invalid")
+            values = [value for value in raw_values if isinstance(value, str)]
+            if len(values) != len(set(values)):
+                raise FixtureError(f"recipe fixture {key} receipt contract is invalid")
+            parsed_lists.append(values)
         tensor_shapes = assertion.get("tensor_shapes")
         runtime_equals = assertion.get("runtime_equals")
         media_equals = assertion.get("media_equals")
@@ -1584,12 +1687,6 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             or not isinstance(assertion.get("output_name"), str)
             or not isinstance(media_equals, Mapping)
             or not isinstance(runtime_equals, Mapping)
-            or any(
-                not isinstance(values, list)
-                or any(not isinstance(value, str) or not value for value in values)
-                or len(values) != len(set(values))
-                for values in parsed_lists
-            )
             or len({value for values in parsed_lists for value in values})
             != sum(len(values) for values in parsed_lists)
             or any(
@@ -1785,6 +1882,7 @@ def validate_outputs(
     if not isinstance(raw_outputs, list) or not raw_outputs:
         raise FixtureError("artifact job produced no output files")
     outputs: list[dict[str, object]] = []
+    output_metadata: list[tuple[str, str, int, str]] = []
     for raw in raw_outputs:
         item = _object(raw, "artifact output")
         name = item.get("name")
@@ -1804,35 +1902,36 @@ def validate_outputs(
         ):
             raise FixtureError("artifact output metadata is invalid")
         outputs.append(dict(item))
-    if len(outputs) > int(recipe.output_limits["max_files"]) or len(
-        {str(item["name"]) for item in outputs}
+        output_metadata.append((name, media_type, size, digest))
+    if len(outputs) > recipe.output_limits["max_files"] or len(
+        {name for name, _, _, _ in output_metadata}
     ) != len(outputs):
         raise FixtureError("artifact output file identity exceeds its contract")
-    if any(
-        int(item["size_bytes"]) > int(recipe.output_limits["max_file_bytes"])
-        or item["media_type"] not in recipe.output_limits["allowed_media_types"]
-        for item in outputs
-    ) or sum(int(item["size_bytes"]) for item in outputs) > int(
-        recipe.output_limits["max_total_bytes"]
+    if (
+        any(
+            size > recipe.output_limits["max_file_bytes"]
+            or media_type not in recipe.output_limits["allowed_media_types"]
+            for _, media_type, size, _ in output_metadata
+        )
+        or sum(size for _, _, size, _ in output_metadata)
+        > recipe.output_limits["max_total_bytes"]
     ):
         raise FixtureError("artifact output media-type or size exceeds its limits")
     with tempfile.TemporaryDirectory(prefix="vonk-qualification-results-") as root:
         contents: list[tuple[dict[str, object], bytes, Path]] = []
-        for index, item in enumerate(outputs):
-            destination = Path(root) / f"{index:02d}-{item['name']}"
+        for index, (item, metadata) in enumerate(zip(outputs, output_metadata)):
+            name, media_type, size, digest = metadata
+            destination = Path(root) / f"{index:02d}-{name}"
             client.download_file(
-                f"/api/artifact-jobs/{result['id']}/results/{item['sha256']}",
+                f"/api/artifact-jobs/{result['id']}/results/{digest}",
                 destination,
-                media_type=str(item["media_type"]),
-                expected_sha256=str(item["sha256"]),
-                expected_size=int(item["size_bytes"]),
+                media_type=media_type,
+                expected_sha256=digest,
+                expected_size=size,
                 overwrite=False,
             )
             content = destination.read_bytes()
-            if (
-                len(content) != item["size_bytes"]
-                or hashlib.sha256(content).hexdigest() != item["sha256"]
-            ):
+            if len(content) != size or hashlib.sha256(content).hexdigest() != digest:
                 raise FixtureError("downloaded artifact output digest changed")
             contents.append((item, content, destination))
         for assertion in recipe.assertions:
@@ -1844,15 +1943,21 @@ def validate_outputs(
                 and [item["name"] for item, _, _ in contents] != assertion["exact"]
             ):
                 raise FixtureError("artifact output file-name assertion failed")
-            if kind == "media-type" and any(
-                item["media_type"] not in assertion["allowed"]
-                for item, _, _ in contents
-            ):
-                raise FixtureError("artifact output media-type assertion failed")
-            if kind == "minimum-bytes" and any(
-                len(content) < assertion["value"] for _, content, _ in contents
-            ):
-                raise FixtureError("artifact output minimum-bytes assertion failed")
+            if kind == "media-type":
+                allowed_assertion_media_types = _string_list_value(
+                    assertion, "allowed", "media type assertion"
+                )
+                if any(
+                    item["media_type"] not in allowed_assertion_media_types
+                    for item, _, _ in contents
+                ):
+                    raise FixtureError("artifact output media-type assertion failed")
+            if kind == "minimum-bytes":
+                minimum_bytes = _integer_value(
+                    assertion, "value", "minimum bytes assertion"
+                )
+                if any(len(content) < minimum_bytes for _, content, _ in contents):
+                    raise FixtureError("artifact output minimum-bytes assertion failed")
             if kind == "format":
                 for _, content, _ in contents:
                     _validate_magic(content, str(assertion["format"]))
@@ -1880,11 +1985,12 @@ def validate_outputs(
             ):
                 raise FixtureError("artifact semantic assertion selected no output")
             if kind == "media-type-counts":
+                declared_counts = _object(assertion.get("counts"), "media type counts")
                 actual = {
                     media_type: sum(
                         item["media_type"] == media_type for item, _, _ in contents
                     )
-                    for media_type in assertion["counts"]
+                    for media_type in declared_counts
                 }
                 if actual != assertion["counts"]:
                     raise FixtureError("artifact output media counts assertion failed")
@@ -1920,9 +2026,16 @@ def validate_outputs(
                     ):
                         raise FixtureError("artifact MP4 pixel-format assertion failed")
                     fps = _parse_fraction(video.get("avg_frame_rate"), "MP4 frame rate")
-                    if abs(fps - float(assertion["fps"])) > float(
-                        assertion.get("fps_tolerance", 0.01)
-                    ):
+                    declared_fps = _number_value(
+                        assertion, "fps", "video metadata assertion"
+                    )
+                    fps_tolerance = _number_value(
+                        assertion,
+                        "fps_tolerance",
+                        "video metadata assertion",
+                        default=0.01,
+                    )
+                    if abs(fps - declared_fps) > fps_tolerance:
                         raise FixtureError("artifact MP4 frame-rate assertion failed")
                     if "frame_count" in assertion:
                         try:
@@ -1956,12 +2069,9 @@ def validate_outputs(
                         (video.get("start_time"), "video"),
                         (format_metadata.get("start_time"), "container"),
                     ):
-                        try:
-                            start_time = float(timing)
-                        except (TypeError, ValueError) as error:
-                            raise FixtureError(
-                                f"artifact MP4 {label} start time is unavailable"
-                            ) from error
+                        start_time = _numeric_token(
+                            timing, f"artifact MP4 {label} start time"
+                        )
                         if abs(start_time) > 0.05:
                             raise FixtureError(
                                 f"artifact MP4 {label} start-time assertion failed"
@@ -2022,15 +2132,24 @@ def validate_outputs(
                         )
                         if "maximum_av_sync_delta_seconds" in assertion:
                             try:
-                                video_duration = float(video["duration"])
-                                audio_duration = float(audio_stream["duration"])
-                            except (KeyError, TypeError, ValueError) as error:
+                                video_duration_token = video["duration"]
+                                audio_duration_token = audio_stream["duration"]
+                            except KeyError as error:
                                 raise FixtureError(
                                     "artifact MP4 AV duration is unavailable"
                                 ) from error
-                            if abs(video_duration - audio_duration) > float(
-                                assertion["maximum_av_sync_delta_seconds"]
-                            ):
+                            video_duration = _numeric_token(
+                                video_duration_token, "artifact MP4 AV duration"
+                            )
+                            audio_duration = _numeric_token(
+                                audio_duration_token, "artifact MP4 AV duration"
+                            )
+                            maximum_delta = _number_value(
+                                assertion,
+                                "maximum_av_sync_delta_seconds",
+                                "video metadata assertion",
+                            )
+                            if abs(video_duration - audio_duration) > maximum_delta:
                                 raise FixtureError(
                                     "artifact MP4 AV sync assertion failed"
                                 )
@@ -2047,11 +2166,15 @@ def validate_outputs(
                     metadata = _glb_metadata(
                         content, str(assertion.get("profile", "triangle-mesh"))
                     )
-                    if metadata["mesh_count"] < assertion.get("minimum_meshes", 1):
+                    minimum_meshes = _integer_value(
+                        assertion, "minimum_meshes", "GLB assertion", default=1
+                    )
+                    if metadata["mesh_count"] < minimum_meshes:
                         raise FixtureError("artifact GLB mesh assertion failed")
-                    if metadata["primitive_count"] < assertion.get(
-                        "minimum_primitives", 1
-                    ):
+                    minimum_primitives = _integer_value(
+                        assertion, "minimum_primitives", "GLB assertion", default=1
+                    )
+                    if metadata["primitive_count"] < minimum_primitives:
                         raise FixtureError("artifact GLB primitive assertion failed")
             if kind == "zip-entries":
                 for _, content, _ in selected:
@@ -2059,7 +2182,9 @@ def validate_outputs(
                     names = [name for name, _ in entries]
                     if "exact_names" in assertion and names != assertion["exact_names"]:
                         raise FixtureError("artifact ZIP file-name assertion failed")
-                    if len(entries) < assertion.get("minimum_entries", 1):
+                    if len(entries) < _integer_value(
+                        assertion, "minimum_entries", "ZIP assertion", default=1
+                    ):
                         raise FixtureError("artifact ZIP entry-count assertion failed")
                     suffixes = assertion.get("allowed_suffixes")
                     if isinstance(suffixes, list) and any(
@@ -2088,7 +2213,9 @@ def validate_outputs(
                         if not line.strip():
                             continue
                         records.append(_parse_json_object(line, "artifact JSONL"))
-                    if len(records) < assertion.get("minimum_records", 1):
+                    if len(records) < _integer_value(
+                        assertion, "minimum_records", "JSONL assertion", default=1
+                    ):
                         raise FixtureError(
                             "artifact JSONL record-count assertion failed"
                         )
@@ -2159,14 +2286,13 @@ def _assert_number_range(
     if f"minimum_{field}" not in assertion:
         return
     try:
-        value = float(metadata[metadata_field or field])
-    except (KeyError, TypeError, ValueError) as error:
+        raw_value = metadata[metadata_field or field]
+    except KeyError as error:
         raise FixtureError(f"artifact {label} {field} is unavailable") from error
-    if (
-        not float(assertion[f"minimum_{field}"])
-        <= value
-        <= float(assertion[f"maximum_{field}"])
-    ):
+    value = _numeric_token(raw_value, f"artifact {label} {field}")
+    minimum = _number_value(assertion, f"minimum_{field}", "assertion")
+    maximum = _number_value(assertion, f"maximum_{field}", "assertion")
+    if not minimum <= value <= maximum:
         raise FixtureError(f"artifact {label} {field} assertion failed")
 
 
@@ -2181,7 +2307,9 @@ def _parse_json_object(content: bytes, label: str) -> Mapping[str, object]:
 def _assert_required_keys(
     document: Mapping[str, object], assertion: Mapping[str, object]
 ) -> None:
-    required = assertion.get("required_keys", [])
+    required = _string_list_value(
+        assertion, "required_keys", "JSON assertion", default=[]
+    )
     if any(key not in document for key in required):
         raise FixtureError("artifact JSON required-key assertion failed")
     equals = assertion.get("equals")

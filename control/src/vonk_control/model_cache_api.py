@@ -10,7 +10,7 @@ from vonk_agent_protocol import OperationProgress
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
-from .bounded_json import require_integer
+from .bounded_json import require_integer, require_sequence
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -18,7 +18,12 @@ from .model_cache import (
     ModelCacheResolutionError,
     ModelCacheService,
 )
-from .model_cache_contract import ModelCacheOperatorRequest, ModelCacheOperatorResponse
+from .model_cache_contract import (
+    ModelCacheOperatorAction,
+    ModelCacheOperatorRequest,
+    ModelCacheOperatorResponse,
+    ModelCacheRemovalResult,
+)
 from .model_cache_progress import project_cache_progress
 from .operation_api import (
     OperationApiServices,
@@ -35,17 +40,15 @@ MODEL_CACHE_OPERATION_IDS = {
     ("post", "/api/model/{selector}/remove"): "removeModel",
 }
 
-def _model_operator_response(operation: Any, *, action: str, selector: str) -> ModelCacheOperatorResponse:
+def _model_operator_response(
+    operation: Any, *, action: ModelCacheOperatorAction, selector: str
+) -> ModelCacheOperatorResponse:
     raw = project_cache_progress(operation.progress)
     progress = OperationProgress.model_validate(raw)
-    result = (
-        None
-        if operation.result is None
-        else operation.result.model_dump(mode="json")
-    )
+    result = operation.result
     cancelled = (
-        result.get("cancelled_operations", [])
-        if isinstance(result, Mapping)
+        result.cancelled_operations
+        if isinstance(result, ModelCacheRemovalResult)
         else []
     )
     return ModelCacheOperatorResponse(
@@ -223,7 +226,10 @@ class ModelCacheOperationProvider:
             state=state,
             node_id=node_id,
         )
-        items = [self._summary(item) for item in page["operations"]]
+        items = [
+            self._summary(item)
+            for item in require_sequence(page["operations"], "page operations")
+        ]
         next_cursor = self._next_cursor(
             page.get("_next_boundary"), state=state, node_id=node_id
         )

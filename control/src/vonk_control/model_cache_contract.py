@@ -27,6 +27,25 @@ UUID_PATTERN = (
 
 Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
+# One named type per closed set. The contract field and every helper that
+# produces or consumes the value share the alias, so the vocabulary cannot
+# drift apart.
+ModelCacheOperationKind = Literal["download", "repair", "remove"]
+ModelCacheOperationState = Literal[
+    "queued", "running", "partial", "succeeded", "failed", "cancelled"
+]
+ModelCacheOperatorState = Literal[
+    "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
+]
+ModelCacheOperatorAction = Literal["download", "remove"]
+ModelCacheOperationPhase = Literal[
+    "queued", "downloading", "verifying", "reclaiming", "completed", "failed"
+]
+ModelCacheEntryState = Literal[
+    "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
+]
+ModelCacheCoverage = Literal["complete", "incomplete"]
+
 
 class StrictModel(StrictJSONModel):
     model_config = ConfigDict(
@@ -241,13 +260,11 @@ class ModelCacheOperatorResponse(StrictModel):
     """CLI-shaped result without exposing an internal plan/digest workflow."""
 
     schema_version: Literal[2] = 2
-    action: Literal["download", "remove"]
+    action: ModelCacheOperatorAction
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(pattern=UUID_PATTERN)
     operation_id: str | None = Field(default=None, pattern=UUID_PATTERN)
-    state: Literal[
-        "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
-    ]
+    state: ModelCacheOperatorState
     phase: str = Field(min_length=1, max_length=64)
     progress: OperationProgress
     transferred_bytes: int = Field(ge=0)
@@ -302,10 +319,8 @@ class CacheEntryResponse(StrictModel):
     artifact_set_sha256: Digest
     model_content_sha256: Digest | None
     recipe_revision_sha256: Digest | None
-    state: Literal[
-        "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
-    ]
-    coverage: Literal["complete", "incomplete"]
+    state: ModelCacheEntryState
+    coverage: ModelCacheCoverage
     expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
@@ -331,7 +346,7 @@ class ModelCacheInventoryResponse(StrictModel):
 
 class ModelCacheOperationProgress(StrictModel):
     schema_version: Literal[2] = 2
-    phase: Literal["queued", "downloading", "verifying", "reclaiming", "completed", "failed"]
+    phase: ModelCacheOperationPhase
     completed_artifacts: int = Field(ge=0)
     total_artifacts: int = Field(ge=0)
     downloaded_bytes: int = Field(ge=0)
@@ -370,8 +385,8 @@ class ModelCacheOperationResponse(StrictModel):
     schema_version: Literal[2] = 2
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
-    kind: Literal["download", "repair", "remove"]
-    state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
+    kind: ModelCacheOperationKind
+    state: ModelCacheOperationState
     attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
@@ -411,9 +426,7 @@ class ModelCacheRepairPreviewResponse(StrictModel):
     plan_digest: Digest
     source_policy: Literal["nas-first"] = "nas-first"
     artifact_count: int = Field(ge=0)
-    current_state: Literal[
-        "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
-    ]
+    current_state: ModelCacheEntryState
     expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
 
@@ -474,18 +487,25 @@ __all__ = [
     "ModelCacheAccessRecheck",
     "ModelCacheAccessResumeRequest",
     "ModelCacheClaim",
+    "ModelCacheCoverage",
     "ModelCacheDownloadPayload",
     "ModelCacheDownloadPreviewRequest",
     "ModelCacheDownloadPreviewResponse",
     "ModelCacheDownloadRequest",
     "ModelCacheDownloadResult",
+    "ModelCacheEntryState",
     "ModelCacheInventoryResponse",
+    "ModelCacheOperationKind",
     "ModelCacheOperationPayload",
+    "ModelCacheOperationPhase",
     "ModelCacheOperationProgress",
     "ModelCacheOperationResponse",
+    "ModelCacheOperationState",
     "ModelCacheOperationsResponse",
+    "ModelCacheOperatorAction",
     "ModelCacheOperatorRequest",
     "ModelCacheOperatorResponse",
+    "ModelCacheOperatorState",
     "ModelCacheRemovalPayload",
     "ModelCacheRemovalResult",
     "ModelCacheRepairPayload",

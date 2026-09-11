@@ -19,11 +19,12 @@ import shutil
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from io import BufferedReader
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
@@ -35,7 +36,7 @@ from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
-from .bounded_json import require_integer, require_sequence
+from .bounded_json import mapping, require_integer, require_mapping, require_sequence
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
@@ -44,10 +45,14 @@ from .model_cache_contract import (
     UUID_PATTERN,
     CacheManifest,
     CacheManifestArtifact,
+    ModelCacheDownloadPayload,
+    ModelCacheOperationPhase,
     ModelCacheOperationProgress,
     ModelCacheOperationResponse,
     ModelCacheOperationResult,
+    ModelCacheOperatorAction,
     ModelCacheRepairCheckpoint,
+    ModelCacheRepairPayload,
     ModelCacheTransfer,
     parse_model_cache_payload,
     parse_model_cache_result,
@@ -365,10 +370,11 @@ class ArtifactSetManifest:
         )
 
     @classmethod
-    def from_document(cls, value: Mapping[str, object]) -> ArtifactSetManifest:
+    def from_document(cls, value: object) -> ArtifactSetManifest:
         try:
-            _reject_non_json_containers(value)
-            wire = CacheManifest.model_validate_json(canonical_message(value))
+            document = require_mapping(value, "cache manifest must be a JSON object")
+            _reject_non_json_containers(document)
+            wire = CacheManifest.model_validate_json(canonical_message(document))
         except (TypeError, ValueError, ValidationError) as error:
             code = (
                 "model_cache.schema_unsupported"
@@ -421,9 +427,9 @@ def _validated_operation_payload(
 
     try:
         parsed = parse_model_cache_payload(operation.kind, operation.payload)
-        if hasattr(parsed, "manifest"):
+        if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
-        return serialize_json_value(parsed)  # type: ignore[return-value]
+        return dict(require_mapping(serialize_json_value(parsed), "cache operation payload"))
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
@@ -450,9 +456,9 @@ def _write_operation_payload(kind: str, value: Mapping[str, object]) -> dict[str
 
     try:
         parsed = parse_model_cache_payload(kind, value)
-        if hasattr(parsed, "manifest"):
+        if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
-        return serialize_json_value(parsed)  # type: ignore[return-value]
+        return dict(require_mapping(serialize_json_value(parsed), "cache operation payload"))
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
@@ -944,7 +950,7 @@ class ModelCacheService:
         *,
         reserve_bytes: int = 10 * 1024**3,
         max_parallel_downloads: int = _DEFAULT_MAX_PARALLEL_DOWNLOADS,
-        clock: callable | None = None,
+        clock: Callable[[], datetime] | None = None,
         http_client: httpx.Client | None = None,
         fixture_sources: bool = False,
         trusted_source_hosts: Sequence[str] = ("huggingface.co",),
@@ -1064,7 +1070,7 @@ class ModelCacheService:
                     "model_cache.fixture_sources_forbidden",
                     "caller-supplied artifact sources are only available to fixture services",
                 )
-            specs = tuple(
+            provided_specs = tuple(
                 self._artifact_from_input(value, model_content_sha256=model_digest)
                 for value in artifacts
             )
@@ -1072,7 +1078,7 @@ class ModelCacheService:
                 model_content_sha256=model_digest,
                 recipe_revision_sha256=recipe_digest,
                 model_content_digests=(() if model_digest is None else (model_digest,)),
-                artifacts=tuple(sorted(specs, key=lambda item: item.key)),
+                artifacts=tuple(sorted(provided_specs, key=lambda item: item.key)),
             )
             _validate_manifest(manifest)
             return manifest
@@ -1083,7 +1089,7 @@ class ModelCacheService:
                 "an exact model definition or recipe revision is required",
             )
         with self._session() as session:
-            recipe_document: Mapping[str, object] | None = None
+            recipe_document: RecipeDefinition | None = None
             recipe_model_digests: list[str] = []
             if recipe_digest is not None or recipe_revision_id is not None:
                 recipe_document, _resolved_recipe_id, resolved_recipe_digest = self._recipe_document(
@@ -1174,13 +1180,15 @@ class ModelCacheService:
                     )
                 )
                 if not rows:
-                    rows = list(
+                    cached_digests = list(
                         session.scalars(
                             select(ModelCacheSet.model_content_sha256).where(
                                 ModelCacheSet.model_content_sha256 == selector
                             )
                         )
                     )
+                    if cached_digests:
+                        return selector
                 if rows:
                     return selector
             elif re.fullmatch(UUID_PATTERN, selector):
@@ -1198,18 +1206,18 @@ class ModelCacheService:
                 publisher = slug = None
                 if "/" in selector:
                     publisher, slug = selector.split("/", 1)
+                conditions = [
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.state == "active",
+                ]
+                if publisher is not None:
+                    conditions.append(CatalogDocumentRevision.publisher == publisher)
+                    conditions.append(CatalogDocumentRevision.slug == slug)
+                else:
+                    conditions.append(CatalogDocumentRevision.slug == selector)
                 rows = list(
                     session.scalars(
-                        select(CatalogDocumentRevision).where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.state == "active",
-                            CatalogDocumentRevision.publisher == publisher
-                            if publisher is not None
-                            else CatalogDocumentRevision.slug == selector,
-                            CatalogDocumentRevision.slug == slug
-                            if slug is not None
-                            else True,
-                        )
+                        select(CatalogDocumentRevision).where(*conditions)
                     )
                 )
             if len(rows) != 1:
@@ -2022,7 +2030,7 @@ class ModelCacheService:
         force: bool,
     ) -> dict[str, object]:
         """Create the immutable planned transfer and per-object baselines."""
-        artifacts: dict[str, dict[str, int]] = {}
+        artifacts: dict[str, dict[str, int | str | None]] = {}
         total_bytes = 0
         for digest, spec in _unique_artifacts(manifest.artifacts).items():
             baseline = (
@@ -2069,8 +2077,7 @@ class ModelCacheService:
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             payload = _validated_operation_payload(operation)
-            transfer = payload["transfer"]
-            return dict(transfer) if isinstance(transfer, Mapping) else transfer
+            return dict(require_mapping(payload["transfer"], "cache transfer ledger"))
 
     def _operation_transfer_snapshot(
         self, operation_id: str
@@ -2168,7 +2175,7 @@ class ModelCacheService:
         self,
         manifest: ArtifactSetManifest,
         *,
-        phase: str,
+        phase: ModelCacheOperationPhase,
         completed_artifacts: int = 0,
         downloaded_bytes: int = 0,
         expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
@@ -2314,7 +2321,7 @@ class ModelCacheService:
             with self._lock:
                 event = self._digest_events.get(spec.sha256)
                 owner = event is None
-                if owner:
+                if event is None:
                     event = threading.Event()
                     self._digest_events[spec.sha256] = event
             if owner:
@@ -2514,7 +2521,7 @@ class ModelCacheService:
                 try:
                     while True:
                         observe(received)
-                        if hasattr(stream, "read"):
+                        if isinstance(stream, BufferedReader):
                             chunk = stream.read(_CHUNK_BYTES)
                         else:
                             chunk = next(stream, b"")
@@ -2704,7 +2711,7 @@ class ModelCacheService:
 
     def _open_source(
         self, spec: ArtifactSpec, offset: int
-    ) -> tuple[object, int, callable]:
+    ) -> tuple[Iterator[bytes] | BufferedReader, int, Callable[[], object]]:
         try:
             parsed = urlsplit(spec.source)
         except (TypeError, ValueError) as error:
@@ -3133,11 +3140,7 @@ class ModelCacheService:
                     downloaded_bytes=received,
                     expected_bytes=_total,
                     current_artifact_key=operation.current_artifact_key,
-                    transfer=(
-                        payload.get("transfer")
-                        if isinstance(payload.get("transfer"), Mapping)
-                        else None
-                    ),
+                    transfer=mapping(payload.get("transfer")),
                 )
                 operation.progress = cache_phase(operation.progress, "downloading", now, waiting=True)
                 operation.updated_at = now
@@ -3179,9 +3182,14 @@ class ModelCacheService:
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
                 row.verified_bytes = self._verified_bytes(session, set_digest)
+                manifest_document = manifest.document()
                 all_valid = all(
-                    self._object_is_verified(ArtifactSpec.from_manifest(item))
-                    for item in require_sequence(manifest.document()["artifacts"], "artifact manifest")
+                    self._object_is_verified(
+                        ArtifactSpec.from_manifest(require_mapping(item, "artifact manifest entry"))
+                    )
+                    for item in require_sequence(
+                        manifest_document["artifacts"], "artifact manifest"
+                    )
                 )
                 row.state = "cached" if all_valid else "needs-repair"
                 row.updated_at = now
@@ -3416,9 +3424,10 @@ class ModelCacheService:
             ):
                 return self._operation_view(previous)
             manifest = ArtifactSetManifest.from_document(previous_payload["manifest"])
+            failure_artifact_key = failure.get("artifact_key")
             failed_artifact_key = (
-                failure.get("artifact_key")
-                if isinstance(failure.get("artifact_key"), str)
+                failure_artifact_key
+                if isinstance(failure_artifact_key, str)
                 else previous.current_artifact_key
             )
 
@@ -3510,11 +3519,7 @@ class ModelCacheService:
                     if isinstance(previous.current_artifact_key, str)
                     else None
                 ),
-                transfer=(
-                    payload.get("transfer")
-                    if isinstance(payload.get("transfer"), Mapping)
-                    else None
-                ),
+                transfer=mapping(payload.get("transfer")),
             )
             operation = ModelCacheOperation(
                 request_key=request_key,
@@ -3629,7 +3634,7 @@ class ModelCacheService:
         operation_id: str,
         manifest: ArtifactSetManifest,
         *,
-        phase: str,
+        phase: ModelCacheOperationPhase,
         completed_artifacts: int,
         downloaded_bytes: int,
         current_artifact_key: str | None,
@@ -3657,7 +3662,7 @@ class ModelCacheService:
                 transfer=(
                     transfer
                     if transfer is not None
-                    else _validated_operation_payload(operation).get("transfer")
+                    else mapping(_validated_operation_payload(operation).get("transfer"))
                 ),
             )
             operation.current_artifact_key = current_artifact_key
@@ -3701,7 +3706,7 @@ class ModelCacheService:
 
     def get_operator_operation(
         self, operation_id: str
-    ) -> tuple[CacheOperationView, str, str]:
+    ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
         """Return one operator mutation with its stable action and selector."""
 
         with self._session() as session:
@@ -3720,7 +3725,9 @@ class ModelCacheService:
                     "model_cache.operation_not_observable",
                     "operator operation has no stable model selector",
                 )
-            action = "remove" if operation.kind == "remove" else "download"
+            action: ModelCacheOperatorAction = (
+                "remove" if operation.kind == "remove" else "download"
+            )
             return self._operation_view(operation), action, selector
 
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
@@ -3828,7 +3835,7 @@ class ModelCacheService:
         if not 1 <= limit <= 100:
             raise ValueError("cache operation limit is invalid")
         with self._session() as session:
-            count = int(
+            count = require_integer(
                 session.scalar(
                     select(func.count())
                     .select_from(ModelCacheOperation)
@@ -3840,7 +3847,8 @@ class ModelCacheService:
                             ["queued", "running", "partial"]
                         )
                     )
-                )
+                ),
+                "cache operation count",
             )
         return min(count, limit)
 
@@ -4055,7 +4063,7 @@ class ModelCacheService:
                     for other in futures:
                         if isinstance(other, Future):
                             other.cancel()
-            if first_error is not None:
+            if isinstance(first_error, BaseException):
                 # A cancelled Future may still be running. Keep the durable
                 # claim and record until every sibling has settled, so a
                 # late checkpoint cannot resurrect a failed operation or
@@ -4072,21 +4080,22 @@ class ModelCacheService:
                             str(first_error) or "download interrupted",
                         )
                     else:
+                        recorded_failure_key = record.get("failure_artifact_key")
                         self._finish_failed(
                             operation_id,
                             str(record["set_digest"]),
                             manifest,
                             first_error,
                             failed_artifact_key=(
-                                record.get("failure_artifact_key")
-                                if isinstance(record.get("failure_artifact_key"), str)
+                                recorded_failure_key
+                                if isinstance(recorded_failure_key, str)
                                 else None
                             ),
                         )
                 self._background_operations.pop(operation_id, None)
                 finished += 1
                 continue
-            specs = record.get("specs", [])
+            specs = require_sequence(record.get("specs", []), "background specs")
             if require_integer(record.get("next_index", 0), "next index") >= len(specs) and not futures:
                 manifest = record["manifest"]
                 if isinstance(manifest, ArtifactSetManifest):
@@ -4106,7 +4115,9 @@ class ModelCacheService:
                         len(
                             [
                                 current
-                                for current in item.get("futures", [])
+                                for current in require_sequence(
+                                    item.get("futures", []), "background futures"
+                                )
                                 if isinstance(current, Future) and not current.done()
                             ]
                         )
@@ -4317,7 +4328,7 @@ class ModelCacheService:
             if failure is None or failure["code"] != "rate_limited":
                 continue
             retry_at = failure["retry_time"]
-            if retry_at is None:
+            if not isinstance(retry_at, str):
                 continue
             candidate = _datetime(datetime.fromisoformat(retry_at))
             if candidate > now and (latest is None or candidate > latest):
@@ -4328,11 +4339,16 @@ class ModelCacheService:
         digest = _optional_digest(artifact_set_sha256)
         assert digest is not None
         entry = self.get_entry(digest)
+        artifact_rows = require_sequence(entry["artifacts"], "artifacts")
+        artifact_digests = [
+            require_mapping(item, "cache artifact entry")["sha256"]
+            for item in artifact_rows
+        ]
         plan = {
             "schema_version": SCHEMA_VERSION,
             "kind": "repair",
             "artifact_set_sha256": digest,
-            "artifacts": [item["sha256"] for item in require_sequence(entry["artifacts"], "artifacts")],
+            "artifacts": artifact_digests,
             "source_policy": SOURCE_POLICY,
         }
         plan_digest = _sha256_json(plan)
@@ -4341,7 +4357,7 @@ class ModelCacheService:
             "artifact_set_sha256": digest,
             "plan_digest": plan_digest,
             "source_policy": SOURCE_POLICY,
-            "artifact_count": len(entry["artifacts"]),
+            "artifact_count": len(artifact_rows),
             "current_state": entry["state"],
             "expected_bytes": entry["expected_bytes"],
             "verified_bytes": entry["verified_bytes"],

@@ -23,6 +23,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     OperationMemberProgress,
     OperationProgress,
+    RecipeJobRunResult,
     canonical_message,
     validate_result_for_operation,
 )
@@ -36,6 +37,7 @@ from .agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from .auth import CursorCodec
+from .bounded_json import BoundedJSONError, require_integer, require_sequence
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -573,6 +575,66 @@ def _global_get_operation(
     return services.get_operation(operation_id)
 
 
+def _required_text(value: object, detail: str) -> str:
+    """Read a required persisted string, failing closed on a wrong JSON type."""
+
+    if not isinstance(value, str):
+        raise BoundedJSONError(detail)
+    return value
+
+
+def _optional_text(value: object, detail: str) -> str | None:
+    """Read an optional persisted string without coercing a wrong JSON type."""
+
+    return None if value is None else _required_text(value, detail)
+
+
+def _required_bool(value: object, detail: str) -> bool:
+    """Read a required persisted boolean, rejecting Python truthiness."""
+
+    if not isinstance(value, bool):
+        raise BoundedJSONError(detail)
+    return value
+
+
+def _required_node_ids(value: object) -> list[NodeIdentifier]:
+    """Read a persisted node-id array, failing closed on a wrong shape."""
+
+    return [
+        _required_text(member, "operation node id is invalid")
+        for member in require_sequence(value, "operation node ids are invalid")
+    ]
+
+
+def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
+    """Project one durable job operation member from its decoded JSON row."""
+
+    state = _required_text(item["state"], "operation state is invalid")
+    result = item.get("result")
+    return JobOperationResponse(
+        id=_required_text(item["id"], "operation id is invalid"),
+        node_id=_required_text(item["node_id"], "operation node id is invalid"),
+        kind=_required_text(item["kind"], "operation kind is invalid"),
+        state=state,
+        attempt=require_integer(item["attempt"], "operation attempt is invalid"),
+        progress=_progress_projection(item.get("progress"), state),
+        updated_at=_optional_text(
+            item.get("updated_at"), "operation updated_at is invalid"
+        ),
+        failure=_item_failure(item),
+        provenance=_provenance_projection(result),
+        evidence_download=_evidence_download_projection(result),
+        recovery=recovery_for_operation(
+            state,
+            supported_actions=item.get("supported_actions"),
+            available_actions=(OperationRecoveryAction.RESUME,),
+            uncertain=bool(
+                isinstance(result, Mapping) and result.get("uncertain") is True
+            ),
+        ),
+    )
+
+
 def job_response(
     job: Any,
     operation_page: OperationPage,
@@ -588,32 +650,7 @@ def job_response(
         if evidence_decorator is not None
         else operation_page.items
     )
-    projected = [
-        JobOperationResponse(
-            id=item["id"],
-            node_id=item["node_id"],
-            kind=item["kind"],
-            state=item["state"],
-            attempt=item["attempt"],
-            progress=_progress_projection(item.get("progress"), item.get("state")),
-            updated_at=(
-                None if item.get("updated_at") is None else str(item["updated_at"])
-            ),
-            failure=_item_failure(item),
-            provenance=_provenance_projection(item.get("result")),
-            evidence_download=_evidence_download_projection(item.get("result")),
-            recovery=recovery_for_operation(
-                item["state"],
-                supported_actions=item.get("supported_actions"),
-                available_actions=(OperationRecoveryAction.RESUME,),
-                uncertain=bool(
-                    isinstance(item.get("result"), Mapping)
-                    and item["result"].get("uncertain") is True
-                ),
-            ),
-        )
-        for item in items
-    ]
+    projected = [_job_operation_response(item) for item in items]
     targets = list(job.targets)
     visible_targets = targets[target_cursor : target_cursor + limit]
     target_next_cursor = (
@@ -625,6 +662,10 @@ def job_response(
         if target_cursor + limit < len(targets)
         else None
     )
+    diagnostics = operation_page.agent_upgrade_diagnostics
+    operator_summary = (
+        None if diagnostics is None else diagnostics.get("operator_summary")
+    )
     return JobDetailResponse(
         id=job.id,
         state=job.state,
@@ -635,21 +676,17 @@ def job_response(
         target_total=len(targets),
         current_attempt=job.current_attempt,
         status_reason=(
-            operation_page.agent_upgrade_diagnostics.get("operator_summary")
-            if (
-                operation_page.agent_upgrade_diagnostics is not None
-                and isinstance(
-                    operation_page.agent_upgrade_diagnostics.get("operator_summary"),
-                    str,
-                )
-            )
-            else job.status_reason
+            operator_summary if isinstance(operator_summary, str) else job.status_reason
         ),
         operations=projected,
         operation_next_cursor=operation_page.next_cursor,
         operation_total=operation_page.progress.total,
         progress=operation_page.progress,
-        agent_upgrade_diagnostics=operation_page.agent_upgrade_diagnostics,
+        agent_upgrade_diagnostics=(
+            None
+            if diagnostics is None
+            else AgentUpgradeDiagnosticsResponse.model_validate(diagnostics)
+        ),
     )
 
 
@@ -714,11 +751,15 @@ def _failure_projection(value: object) -> OperationFailureEvidence | None:
     safe = sanitize_failure_evidence(raw)
     summary = safe.get("summary") or safe.get("reason") or safe["error_code"]
     return OperationFailureEvidence(
-        error_code=safe["error_code"],
-        summary=summary[:256] if isinstance(summary, str) else summary,
-        detail=safe.get("detail"),
-        retryable=safe.get("retryable", False),
-        uncertain=safe.get("uncertain", False),
+        error_code=_required_text(safe["error_code"], "failure error code is invalid"),
+        summary=_required_text(summary, "failure summary is invalid")[:256],
+        detail=_optional_text(safe.get("detail"), "failure detail is invalid"),
+        retryable=_required_bool(
+            safe.get("retryable", False), "failure retryable is invalid"
+        ),
+        uncertain=_required_bool(
+            safe.get("uncertain", False), "failure uncertain is invalid"
+        ),
     )
 
 
@@ -728,11 +769,14 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         value = item["failure"]
         if value is None:
             return None
-        if str(item["kind"]).startswith("model-cache."):
+        kind = _required_text(item["kind"], "operation kind is invalid")
+        if kind.startswith("model-cache."):
             return AvailabilityOperationFailure.model_validate(value)
         return OperationFailureEvidence.model_validate(value, strict=True)
-    if item["kind"] in {operation.value for operation in ProtocolAgentOperation}:
-        if item["state"] not in {"failed", "waiting-for-operator"} or item.get("result") is None:
+    kind = _required_text(item["kind"], "operation kind is invalid")
+    state = _required_text(item["state"], "operation state is invalid")
+    if kind in {operation.value for operation in ProtocolAgentOperation}:
+        if state not in {"failed", "waiting-for-operator"} or item.get("result") is None:
             return None
         value = item["result"]
         if not isinstance(value, Mapping):
@@ -740,11 +784,13 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         # The evidence collector adds these separate, typed read decorations.
         result = {key: child for key, child in value.items()
                   if key not in {"provenance", "evidence_download"}}
-        parsed = validate_result_for_operation(item["kind"], result, state=item["state"])
+        parsed = validate_result_for_operation(kind, result, state=state)
         if isinstance(parsed, AgentFailureResult):
             return parsed
         # A job process receipt has its own canonical result contract. Its
         # complete manifest remains on the artifact-job result endpoint.
+        if not isinstance(parsed, RecipeJobRunResult):
+            raise ValueError("agent result is not a failure receipt")
         reason = parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
         return OperationFailureEvidence(error_code="artifact_process_failed",
                                        summary=reason[:256], detail=reason)
@@ -812,26 +858,30 @@ def operation_detail_response(
     """Build the bounded generic read representation from a durable projection."""
 
     failure = _item_failure(item)
+    state = _required_text(item["state"], "operation state is invalid")
+    result = item.get("result")
     return OperationDetailResponse(
-        id=item["id"],
-        parent_id=item.get("parent_id"),
-        node_ids=item["node_ids"],
-        kind=item["kind"],
-        state=item["state"],
-        attempt=item["attempt"],
-        progress=_progress_projection(item.get("progress"), item.get("state")),
-        created_at=str(item["created_at"]),
-        updated_at=(None if item.get("updated_at") is None else item["updated_at"]),
+        id=_required_text(item["id"], "operation id is invalid"),
+        parent_id=_optional_text(item.get("parent_id"), "operation parent id is invalid"),
+        node_ids=_required_node_ids(item["node_ids"]),
+        kind=_required_text(item["kind"], "operation kind is invalid"),
+        state=state,
+        attempt=require_integer(item["attempt"], "operation attempt is invalid"),
+        progress=_progress_projection(item.get("progress"), state),
+        created_at=_required_text(item["created_at"], "operation created_at is invalid"),
+        updated_at=_optional_text(
+            item.get("updated_at"), "operation updated_at is invalid"
+        ),
         failure=failure,
-        provenance=_provenance_projection(item.get("result")),
-        evidence_download=_evidence_download_projection(item.get("result")),
+        provenance=_provenance_projection(result),
+        evidence_download=_evidence_download_projection(result),
         recovery=recovery_for_operation(
-            item["state"],
+            state,
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
             uncertain=bool(failure is not None and getattr(failure, "uncertain", False)) or bool(
-                isinstance(item.get("result"), Mapping)
-                and item["result"].get("uncertain") is True
+                isinstance(result, Mapping)
+                and result.get("uncertain") is True
             ),
         ),
     )
@@ -1059,13 +1109,14 @@ class _DurableOperationProjection:
         ):
             raise RuntimeError("activation marker does not match durable state")
         routes = bundle.routes
+        route_document = routes.get("routes")
         if (
             routes.get("generation") != publication_generation
             or routes.get("state") != "published"
-            or not isinstance(routes.get("routes"), Mapping)
+            or not isinstance(route_document, Mapping)
         ):
             raise RuntimeError("active route state does not match publication")
-        raw = routes["routes"].get(alias)
+        raw = route_document.get(alias)
         if raw is None:
             raise KeyError(alias)
         if not isinstance(raw, Mapping):

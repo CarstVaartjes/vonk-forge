@@ -12,6 +12,7 @@ from urllib.parse import unquote
 import pytest
 from library_route_fixtures import _library_detail, _recipe
 
+from cluster_profiles import fleet_qualification
 from cluster_profiles import fleet_qualification_campaign_cli as campaign_cli
 from cluster_profiles.fleet_qualification import EvidenceLedger, QualificationError
 from cluster_profiles.qualification_locking import node_locks
@@ -429,3 +430,37 @@ def test_apply_passes_each_exact_plan_digest_and_runs_lanes_concurrently(
         lane["plan_digest"]
         for lane in preview["lanes"]  # type: ignore[index]
     }
+
+
+def test_apply_rejects_options_that_do_not_match_the_campaign_intent() -> None:
+    """The runner must compare itself against the plan's campaign intent.
+
+    The comparison used to read a retired ``profile_number`` field that
+    ``RunnerOptions`` never had, so the real runner raised ``AttributeError``
+    before it could reject anything. The apply tests above stub
+    ``QualificationRunner``, which is how that stayed invisible.
+    """
+
+    options = fleet_qualification.RunnerOptions(
+        cleanup="stop",
+        selected_recipes=frozenset({"vonk/a"}),
+        allowed_node_ids=frozenset({NODE_A}),
+    )
+    runner = fleet_qualification.QualificationRunner.__new__(
+        fleet_qualification.QualificationRunner
+    )
+    runner.options = options
+    matching: dict[str, object] = {
+        "cleanup": "stop",
+        "selected_recipes": ["vonk/a"],
+        "allowed_node_ids": [NODE_A],
+    }
+    runner._require_matching_intent_options(matching)
+
+    for field, value in (
+        ("cleanup", "uninstall"),
+        ("selected_recipes", ["vonk/b"]),
+        ("allowed_node_ids", [NODE_B]),
+    ):
+        with pytest.raises(QualificationError, match="do not match campaign intent"):
+            runner._require_matching_intent_options({**matching, field: value})

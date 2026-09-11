@@ -14,10 +14,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
+from email.message import Message
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, Self, TypedDict
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker, validators
@@ -73,6 +74,48 @@ _CONTROL_TYPE_CHECKER = Draft202012Validator.TYPE_CHECKER.redefine(
 _ControlValidator = validators.extend(
     Draft202012Validator, type_checker=_CONTROL_TYPE_CHECKER
 )
+
+
+class _OpenedResponse(Protocol):
+    """The bounded surface this client uses from a urllib response object."""
+
+    @property
+    def status(self) -> int: ...
+
+    @property
+    def headers(self) -> Message: ...
+
+    def read(self, amount: int, /) -> bytes: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(self, *args: object) -> None: ...
+
+
+class _HTTPErrorFields(TypedDict, total=False):
+    """Optional availability metadata accepted by ``ControlHTTPError``."""
+
+    code: str | None
+    recovery: tuple[str, ...]
+    retryable: bool
+    retry_time: str | None
+    preserved: str | None
+    required_bytes: int | None
+    free_bytes: int | None
+    shortfall_bytes: int | None
+    log_excerpt: str | None
+
+
+def _nonnegative_integer(value: object) -> int | None:
+    """Return *value* as a non-negative JSON integer, or ``None``.
+
+    ``bool`` is rejected so a JSON ``true`` never becomes a byte count, and
+    strings or floats are not coerced into one.
+    """
+
+    if type(value) is not int or value < 0:
+        return None
+    return value
 
 
 class ControlClientError(RuntimeError):
@@ -472,41 +515,40 @@ def _validate_generated_response(
         _response_definition(route_path, request.method, response.status_code)
 
 
-def _structured_http_error_fields(problem: object) -> dict[str, object]:
+def _structured_http_error_fields(
+    problem: object,
+) -> tuple[_HTTPErrorFields, int | None]:
     """Extract optional shared availability error metadata without exposing secrets."""
     if not isinstance(problem, Mapping):
-        return {}
+        return {}, None
     code = problem.get("code", problem.get("error_code"))
     context = problem.get("context")
     if (not isinstance(code, str) or not code) and isinstance(context, Mapping):
         code = context.get("code")
-    recovery = problem.get("recovery_actions", problem.get("recovery", ()))
-    if isinstance(recovery, str):
-        recovery = (recovery,)
-    elif isinstance(recovery, list):
-        recovery = tuple(item for item in recovery if isinstance(item, str))[:8]
+    raw_recovery = problem.get("recovery_actions", problem.get("recovery", ()))
+    if isinstance(raw_recovery, str):
+        recovery: tuple[str, ...] = (raw_recovery,)
+    elif isinstance(raw_recovery, list):
+        recovery = tuple(item for item in raw_recovery if isinstance(item, str))[:8]
     else:
         recovery = ()
     retry_time = problem.get("retry_time", problem.get("retry_at"))
-    retry_after_seconds = problem.get("retry_after_seconds")
-    retry_after_seconds = retry_after_seconds if type(retry_after_seconds) is int and retry_after_seconds >= 0 else None
+    retry_after_seconds = _nonnegative_integer(problem.get("retry_after_seconds"))
     retryable = problem.get("retryable") is True
     preserved = problem.get("preserved")
-    numeric_fields = {
-        key: problem.get(key) if type(problem.get(key)) is int and problem.get(key) >= 0 else None
-        for key in ("required_bytes", "free_bytes", "shortfall_bytes")
-    }
     log_excerpt = problem.get("log_excerpt")
-    return {
+    fields: _HTTPErrorFields = {
         "code": code if isinstance(code, str) and code else None,
         "recovery": recovery,
         "retry_time": retry_time if isinstance(retry_time, str) else None,
-        "retry_after_seconds": retry_after_seconds,
         "retryable": retryable,
         "preserved": preserved if isinstance(preserved, str) else None,
-        **numeric_fields,
+        "required_bytes": _nonnegative_integer(problem.get("required_bytes")),
+        "free_bytes": _nonnegative_integer(problem.get("free_bytes")),
+        "shortfall_bytes": _nonnegative_integer(problem.get("shortfall_bytes")),
         "log_excerpt": log_excerpt if isinstance(log_excerpt, str) else None,
     }
+    return fields, retry_after_seconds
 
 
 def _safe_job_observation(
@@ -583,7 +625,7 @@ def _read_token_file(token_file: Path) -> str:
 
 
 class _OpenerTransport(httpx.BaseTransport):
-    def __init__(self, opener: Callable[..., object], timeout: float) -> None:
+    def __init__(self, opener: Callable[..., _OpenedResponse], timeout: float) -> None:
         self._opener = opener
         self._timeout = timeout
 
@@ -607,15 +649,18 @@ class _OpenerTransport(httpx.BaseTransport):
             raise ControlTransportError(
                 context.render("control API request failed"), context=context
             ) from None
-        with response_context as response:  # type: ignore[attr-defined]
-            content = response.read(_MAX_RESPONSE + 1)  # type: ignore[attr-defined]
+        with response_context as response:
+            content = response.read(_MAX_RESPONSE + 1)
             if len(content) > _MAX_RESPONSE:
                 raise ControlResponseTooLarge(
                     "control API response exceeds safety limit"
                 )
-            response_headers = httpx.Headers(response.headers.items())  # type: ignore[attr-defined]
+            response_headers = httpx.Headers(response.headers.items())
+            status = response.status
+            if status is None:
+                raise ControlTransportError("control API response has no HTTP status")
             return httpx.Response(
-                response.status,  # type: ignore[attr-defined]
+                status,
                 content=content,
                 headers=response_headers,
                 request=request,
@@ -644,7 +689,7 @@ class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _redirect_denied_opener() -> Callable[..., object]:
+def _redirect_denied_opener() -> Callable[..., _OpenedResponse]:
     return urllib.request.build_opener(_RejectRedirectHandler()).open
 
 
@@ -654,7 +699,7 @@ class ControlClient:
         base_url: str,
         token_file: Path,
         *,
-        opener: Callable[..., object] | None = None,
+        opener: Callable[..., _OpenedResponse] | None = None,
         timeout_seconds: float = 15,
         artifact_transfer_timeout_seconds: float = 3_600,
     ) -> None:
@@ -931,11 +976,10 @@ class ControlClient:
             detail = problem.get("detail") if isinstance(problem, dict) else None
             problem_context = problem.get("context") if isinstance(problem, Mapping) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
-            fields = _structured_http_error_fields(problem)
+            fields, body_retry_after = _structured_http_error_fields(problem)
             if fields.get("code") is None:
                 fields["code"] = response_headers.get("x-vonk-error-code")
             retry_after = _bounded_retry_after(response_headers.get("retry-after"))
-            body_retry_after = fields.pop("retry_after_seconds", None)
             if retry_after is None and type(body_retry_after) is int:
                 retry_after = body_retry_after
             raise error_type(
@@ -1086,10 +1130,9 @@ class ControlClient:
                 _response_contract(path, "PUT", status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
-            fields = _structured_http_error_fields(problem)
+            fields, body_retry_after = _structured_http_error_fields(problem)
             if fields.get("code") is None:
                 fields["code"] = response_headers.get("x-vonk-error-code")
-            body_retry_after = fields.pop("retry_after_seconds", None)
             retry_after = _bounded_retry_after(response_headers.get("retry-after"))
             if retry_after is None and type(body_retry_after) is int:
                 retry_after = body_retry_after
@@ -1187,11 +1230,10 @@ class ControlClient:
                     _response_contract(path, "GET", error.code, problem)
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
-                fields = _structured_http_error_fields(problem)
+                fields, body_retry_after = _structured_http_error_fields(problem)
                 if fields.get("code") is None:
                     fields["code"] = error.headers.get("x-vonk-error-code")
                 retry_after = _bounded_retry_after(error.headers.get("retry-after"))
-                body_retry_after = fields.pop("retry_after_seconds", None)
                 if retry_after is None and type(body_retry_after) is int:
                     retry_after = body_retry_after
                 raise error_type(

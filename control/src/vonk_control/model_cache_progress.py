@@ -5,12 +5,14 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from vonk_agent_protocol import (
+    OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
     canonical_message,
 )
 
-from .model_cache_contract import ModelCacheOperationProgress
+from .bounded_json import integer, require_integer, require_mapping, text
+from .model_cache_contract import ModelCacheOperationPhase, ModelCacheOperationProgress
 from .operation_progress import STALE_AFTER_SECONDS, observe_progress, project_progress
 
 PHASES = {
@@ -26,11 +28,12 @@ PHASES = {
 def _sample(
     previous: Mapping[str, object] | None, current: dict[str, object], now: datetime
 ) -> dict[str, object]:
-    if previous and previous.get("observed_at"):
-        interval = (
-            now - datetime.fromisoformat(previous["observed_at"])
-        ).total_seconds()
-        if interval >= STALE_AFTER_SECONDS or interval < 0:
+    observed_at = previous.get("observed_at") if previous else None
+    if isinstance(observed_at, str) and observed_at:
+        interval = (now - datetime.fromisoformat(observed_at)).total_seconds()
+        if (
+            interval >= STALE_AFTER_SECONDS or interval < 0
+        ) and previous is not None:
             # A disconnected worker is not a throughput sample. Preserve elapsed
             # work already measured, but begin a fresh adjacent receipt window.
             previous = dict(previous, observed_at=now.isoformat())
@@ -68,21 +71,23 @@ def cache_progress(
         else None
     )
     value = dict(document)
-    total = value.get("expected_bytes")
+    total = integer(value.get("expected_bytes"))
     value["total_bytes_known"] = total is not None
-    phase = PHASES[value["phase"]]
+    phase_key = value["phase"]
+    if not isinstance(phase_key, str) or phase_key not in PHASES:
+        raise ValueError("cache progress phase is invalid")
     measurement = OperationProgress(
-        phase=phase,
-        completed_bytes=value["downloaded_bytes"],
+        phase=PHASES[phase_key],
+        completed_bytes=require_integer(value["downloaded_bytes"], "downloaded bytes"),
         total_bytes=total,
         total_bytes_known=total is not None,
-        completed_items=value["completed_artifacts"],
-        total_items=value["total_artifacts"],
-        checkpoint={
-            "key": "artifact-set",
-            "sequence": value["completed_artifacts"],
-            "cursor": value.get("current_artifact_key"),
-        },
+        completed_items=require_integer(value["completed_artifacts"], "completed artifacts"),
+        total_items=require_integer(value["total_artifacts"], "total artifacts"),
+        checkpoint=OperationCheckpoint(
+            key="artifact-set",
+            sequence=require_integer(value["completed_artifacts"], "completed artifacts"),
+            cursor=text(value.get("current_artifact_key")),
+        ),
     )
     sampled = _sample(
         old.measurement.model_dump(mode="json") if old else None,
@@ -118,7 +123,11 @@ def cache_progress(
 
 
 def cache_phase(
-    value: Mapping[str, object], phase: str, now: datetime, *, waiting: bool = False
+    value: Mapping[str, object],
+    phase: ModelCacheOperationPhase,
+    now: datetime,
+    *,
+    waiting: bool = False,
 ) -> dict[str, object]:
     current = ModelCacheOperationProgress.model_validate(value)
     document = current.model_dump(mode="json", exclude={"measurement"})
@@ -129,8 +138,13 @@ def cache_phase(
     ]
     result = cache_progress(document, previous=value, now=now, members=members)
     if waiting:
+        measurement_document = require_mapping(
+            result["measurement"], "cache measurement"
+        )
         result["measurement"] = observe_progress(
-            result["measurement"], dict(result["measurement"], phase="waiting"), now
+            measurement_document,
+            dict(measurement_document, phase="waiting"),
+            now,
         )
     return json.loads(
         canonical_message(ModelCacheOperationProgress.model_validate(result))

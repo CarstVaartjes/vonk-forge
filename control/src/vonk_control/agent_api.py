@@ -485,8 +485,14 @@ def _require_services(services: AgentApiServices | None) -> AgentApiServices:
     return services
 
 
+def _require_enrollment(services: AgentApiServices) -> EnrollmentService:
+    if services.enrollment is None:
+        raise HTTPException(status_code=503, detail="agent enrollment is unavailable")
+    return services.enrollment
+
+
 def _scope_identity(request: Request) -> AgentIdentity:
-    identity = agent_identity_from_scope(request.scope)
+    identity = agent_identity_from_scope(dict(request.scope))
     if identity is None:
         raise HTTPException(status_code=401, detail="verified agent identity required")
     return identity
@@ -558,7 +564,7 @@ def _validated_authenticated_source(
     services: AgentApiServices,
     identity: AgentIdentity,
 ) -> AgentSource:
-    source = agent_source_from_scope(request.scope)
+    source = agent_source_from_scope(dict(request.scope))
     if source is None or source.identity != identity:
         raise HTTPException(status_code=401, detail="verified agent source required")
     try:
@@ -671,9 +677,12 @@ def _scan_enrollment_grants(value: bytes | bytearray) -> _EnrollmentGrantScan:
 def _consume_enrollment_denial(
     services: AgentApiServices, tokens: tuple[str, ...]
 ) -> None:
+    if not tokens:
+        return
+    enrollment = _require_enrollment(services)
     for token in tokens:
         try:
-            services.enrollment.submit(token, b"", {})
+            enrollment.submit(token, b"", {})
         except EnrollmentDenied:
             pass
 
@@ -1048,9 +1057,23 @@ def _sealed_snapshot(descriptor: int, size: int, maximum: int, digest: str):
 
 
 class _SnapshotResponse(StreamingResponse):
-    def __init__(self, snapshot, start: int, length: int, **kwargs: object) -> None:
+    def __init__(
+        self,
+        snapshot,
+        start: int,
+        length: int,
+        *,
+        status_code: int = 200,
+        headers: Mapping[str, str] | None = None,
+        media_type: str | None = None,
+    ) -> None:
         self._snapshot = snapshot
-        super().__init__(self._chunks(start, length), **kwargs)
+        super().__init__(
+            self._chunks(start, length),
+            status_code=status_code,
+            headers=headers,
+            media_type=media_type,
+        )
 
     def _chunks(self, start: int, length: int):
         self._snapshot.seek(start)
@@ -1181,7 +1204,7 @@ def install_agent_routes(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
         try:
-            outcome = required.enrollment.submit(
+            outcome = _require_enrollment(required).submit(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except EnrollmentIssuanceUncertain as error:
@@ -1484,7 +1507,7 @@ def install_agent_routes(
                 status_code=409,
                 detail="recipe run observation authority rejected request",
             )
-        with services.sessions() as session:
+        with _require_services(services).sessions() as session:
             run = session.get(RecipeRun, body.run_id)
             run_node = session.scalar(
                 select(RunNode).where(
@@ -1998,7 +2021,7 @@ def install_agent_routes(
         identity = _authenticated_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
-            issued = required.enrollment.renew(
+            issued = _require_enrollment(required).renew(
                 identity.node_id, identity.certificate_serial, body.csr.encode("ascii")
             )
         except UnicodeEncodeError:
@@ -2024,7 +2047,7 @@ def install_agent_routes(
         identity = _authenticated_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
-            issued = required.enrollment.recover_rotation(
+            issued = _require_enrollment(required).recover_rotation(
                 identity.node_id, identity.certificate_serial, body.csr.encode("ascii")
             )
         except UnicodeEncodeError:
@@ -2044,7 +2067,7 @@ def install_agent_routes(
         identity = _authenticated_activation_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
-            required.enrollment.activate(
+            _require_enrollment(required).activate(
                 identity.node_id,
                 identity.certificate_serial,
                 body.generation,
@@ -2135,6 +2158,10 @@ def install_agent_routes(
         required, _, headers, key = image_upload_context(build_id, request)
         with required.sessions() as session:
             build = session.get(RecipeBuild, build_id)
+            if build is None:
+                raise HTTPException(
+                    status_code=404, detail="recipe build does not exist"
+                )
             complete = (
                 build.image_digest == headers.image_digest
                 and build.oci_layout_sha256 == headers.layout_sha256

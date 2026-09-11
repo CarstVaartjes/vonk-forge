@@ -131,6 +131,7 @@ class _CurrentRecipe:
     @property
     def artifact_identities(self) -> list[dict[str, object]]:
         rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
+        roles_by_physical_file: dict[tuple[str, str, str], set[str]] = {}
         for model_key, file, selected_roles in self._selected_model_files():
             physical_key = (model_key, file.path, file.sha256)
             row = rows_by_physical_file.get(physical_key)
@@ -148,7 +149,8 @@ class _CurrentRecipe:
                     "roles": [],
                 }
                 rows_by_physical_file[physical_key] = row
-            row["roles"] = sorted(set(row["roles"]) | set(selected_roles))
+            roles_by_physical_file.setdefault(physical_key, set()).update(selected_roles)
+            row["roles"] = sorted(roles_by_physical_file[physical_key])
         return sorted(
             rows_by_physical_file.values(),
             key=lambda item: str(item["identity_sha256"]),
@@ -244,6 +246,45 @@ def _list(value: object, label: str) -> list[object]:
     if not isinstance(value, list):
         raise QualificationError(f"{label} must be an array")
     return value
+
+
+def _string_list(value: object, label: str) -> list[str]:
+    """Return *value* as a decoded JSON array of strings or fail loudly."""
+
+    items = _list(value, label)
+    result: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise QualificationError(f"{label} must be an array of strings")
+        result.append(item)
+    return result
+
+
+def _object_list(value: object, label: str) -> list[Mapping[str, object]]:
+    """Return *value* as a decoded JSON array of objects or fail loudly."""
+
+    return [_object(item, label) for item in _list(value, label)]
+
+
+def _string_field(value: Mapping[str, object], key: str, label: str) -> str:
+    """Return a required string field of decoded JSON or fail loudly."""
+
+    item = value.get(key)
+    if not isinstance(item, str):
+        raise QualificationError(f"{label} must have a string {key}")
+    return item
+
+
+def _integer_field(value: Mapping[str, object], key: str, label: str) -> int:
+    """Return a required integer field of decoded JSON or fail loudly.
+
+    ``bool`` is rejected so a JSON ``true`` never becomes a byte count.
+    """
+
+    item = value.get(key)
+    if not isinstance(item, int) or isinstance(item, bool):
+        raise QualificationError(f"{label} must have an integer {key}")
+    return item
 
 
 @dataclass(frozen=True, slots=True)
@@ -1021,14 +1062,14 @@ def build_plan(
             raise QualificationError(
                 f"selected recipe is absent from the current Library catalog: {missing[0]}; publish it to global vonk-forge-recipes and refresh the current catalog"
             )
-    items.sort(
-        key=lambda item: (
-            -int(item["maximum_installed_bytes_per_node"])
-            if isinstance(item.get("maximum_installed_bytes_per_node"), int)
-            else 0,
+    def _installed_bytes_order(item: Mapping[str, object]) -> tuple[int, str]:
+        installed = item.get("maximum_installed_bytes_per_node")
+        return (
+            -installed if isinstance(installed, int) else 0,
             str(item["key"]),
         )
-    )
+
+    items.sort(key=_installed_bytes_order)
     intent = {
         "schema_version": 1,
         "catalog": {
@@ -1059,7 +1100,7 @@ def build_plan(
                 "artifact_identities": item["artifact_identities"],
                 "immutable_blockers": [
                     blocker
-                    for blocker in item["blockers"]
+                    for blocker in _object_list(item.get("blockers"), "plan blockers")
                     if blocker.get("code")
                     not in {
                         "topology.insufficient_online_nodes",
@@ -1125,11 +1166,14 @@ def _request_key(plan_digest: str, recipe: str, step: str) -> str:
 def _payloads(
     records: Iterable[Mapping[str, object]], event: str
 ) -> list[Mapping[str, object]]:
-    return [
-        item["payload"]
-        for item in records
-        if item.get("event") == event and isinstance(item.get("payload"), Mapping)
-    ]
+    payloads: list[Mapping[str, object]] = []
+    for item in records:
+        if item.get("event") != event:
+            continue
+        payload = item.get("payload")
+        if isinstance(payload, Mapping):
+            payloads.append(payload)
+    return payloads
 
 
 def _latest_step(
@@ -1359,7 +1403,9 @@ class ArtifactJobSmokeAdapter:
                         source,
                         media_type=str(declaration["media_type"]),
                         expected_sha256=str(declaration["sha256"]),
-                        expected_size=int(declaration["size_bytes"]),
+                        expected_size=_integer_field(
+                            declaration, "size_bytes", "artifact input declaration"
+                        ),
                     )
                     ledger.append(
                         f"{event_prefix}.input-uploaded",
@@ -1481,6 +1527,7 @@ def _assert_service_response(
             failed = (
                 not isinstance(value, (int, float))
                 or isinstance(value, bool)
+                or not isinstance(expected, (int, float))
                 or value > expected
             )
         elif kind == "path.json-equals":
@@ -1676,6 +1723,25 @@ class QualificationRunner:
         self._preflight_failed: set[str] = set()
         self._profile_application: Mapping[str, object] | None = None
 
+    def _require_matching_intent_options(
+        self, intent_options: Mapping[str, object]
+    ) -> None:
+        """Refuse a plan whose campaign intent was built from other options.
+
+        The intent is the reviewed record of what the campaign will do, so a
+        runner configured differently must stop rather than execute a plan it
+        does not match.
+        """
+
+        if (
+            intent_options.get("cleanup") != self.options.cleanup
+            or intent_options.get("selected_recipes")
+            != sorted(self.options.selected_recipes)
+            or intent_options.get("allowed_node_ids", [])
+            != sorted(self.options.allowed_node_ids)
+        ):
+            raise QualificationError("runner options do not match campaign intent")
+
     def _node_allowed(self, node_id: object) -> bool:
         return isinstance(node_id, str) and (
             not self.options.allowed_node_ids
@@ -1803,7 +1869,11 @@ class QualificationRunner:
         for node in _fleet_nodes(fleet):
             node_id = node.get("id")
             free = _node_allocatable_disk(node)
-            if self._node_allowed(node_id) and isinstance(free, int):
+            if (
+                isinstance(node_id, str)
+                and self._node_allowed(node_id)
+                and isinstance(free, int)
+            ):
                 self._capacity_remaining[node_id] = free
                 self._capacity_artifacts[node_id] = set()
         for record in self.ledger.records:
@@ -1817,12 +1887,17 @@ class QualificationRunner:
             if not isinstance(recipe, str) or not isinstance(payload, Mapping):
                 continue
             recipe_records = self.ledger.recipe_records(digest, recipe)
-            retained = payload.get("preexisting_installation") is True or any(
-                row.get("event") == "operation.completed"
-                and isinstance(row.get("payload"), Mapping)
-                and row["payload"].get("step") == "install"
-                for row in recipe_records
-            )
+            retained = payload.get("preexisting_installation") is True
+            if not retained:
+                for row in recipe_records:
+                    row_payload = row.get("payload")
+                    if (
+                        row.get("event") == "operation.completed"
+                        and isinstance(row_payload, Mapping)
+                        and row_payload.get("step") == "install"
+                    ):
+                        retained = True
+                        break
             if not retained:
                 continue
             artifact_values = payload.get("artifact_identities_by_node")
@@ -2006,7 +2081,7 @@ class QualificationRunner:
                 active_candidates = {
                     str(job["key"]): {
                         _digest(_capacity_candidate_signature(candidate))
-                        for candidate in _list(
+                        for candidate in _object_list(
                             job.get("candidates"), "capacity candidates"
                         )
                     }
@@ -2085,7 +2160,11 @@ class QualificationRunner:
         for node in _fleet_nodes(fleet):
             node_id = node.get("id")
             free = _node_allocatable_disk(node)
-            if self._node_allowed(node_id) and isinstance(free, int):
+            if (
+                isinstance(node_id, str)
+                and self._node_allowed(node_id)
+                and isinstance(free, int)
+            ):
                 remaining[node_id] = free
                 artifact_providers[node_id] = {}
         if not remaining and jobs:
@@ -2115,18 +2194,18 @@ class QualificationRunner:
             for raw_artifact in rows:
                 artifact = _object(raw_artifact, "artifact identity")
                 identity = artifact.get("identity_sha256")
-                sizes = (
-                    artifact.get("download_bytes"),
-                    artifact.get("installed_bytes"),
-                )
-                if not isinstance(identity, str) or not all(
-                    isinstance(value, int) for value in sizes
+                download_bytes = artifact.get("download_bytes")
+                installed_bytes = artifact.get("installed_bytes")
+                if (
+                    not isinstance(identity, str)
+                    or not isinstance(download_bytes, int)
+                    or not isinstance(installed_bytes, int)
                 ):
                     raise QualificationError(
                         f"{job['key']} artifact identity is invalid"
                     )
                 previous = definitions.get(identity)
-                normalized = (int(sizes[0]), int(sizes[1]))
+                normalized = (download_bytes, installed_bytes)
                 if previous is not None and previous != normalized:
                     raise QualificationError(
                         f"{job['key']} artifact identity has conflicting byte bounds"
@@ -2214,42 +2293,41 @@ class QualificationRunner:
                             f"{job['key']} role {role} has invalid {field}"
                         )
                     disk_values[field] = amount
-                role_artifacts = [
-                    value
-                    for value in artifacts
-                    if not _object(value, "artifact").get("roles")
-                    or role in _object(value, "artifact").get("roles", [])
-                ]
-                missing = [
-                    _object(value, "artifact")
-                    for value in role_artifacts
-                    if _object(value, "artifact").get("identity_sha256")
-                    not in resident[node_id]
-                ]
-                declared_artifact_bytes = sum(
-                    int(_object(value, "artifact")["installed_bytes"])
-                    for value in role_artifacts
-                )
+                role_artifacts: list[Mapping[str, object]] = []
+                for value in artifacts:
+                    artifact = _object(value, "artifact")
+                    artifact_roles = _string_list(
+                        artifact.get("roles", []), "artifact roles"
+                    )
+                    if not artifact_roles or role in artifact_roles:
+                        role_artifacts.append(artifact)
+                declared_artifact_bytes = 0
+                missing: list[tuple[str, int]] = []
+                dependencies_for_node: dict[str, str] = {}
+                for artifact in role_artifacts:
+                    identity = _string_field(
+                        artifact, "identity_sha256", "artifact identity"
+                    )
+                    installed_bytes = _integer_field(
+                        artifact, "installed_bytes", "artifact identity"
+                    )
+                    declared_artifact_bytes += installed_bytes
+                    provider = resident[node_id].get(identity)
+                    if provider is not None:
+                        dependencies_for_node[identity] = provider
+                    if identity not in resident[node_id]:
+                        missing.append((identity, installed_bytes))
                 artifact_overhead = max(
                     0, disk_values["artifact_bytes"] - declared_artifact_bytes
                 )
-                added[node_id] = [str(value["identity_sha256"]) for value in missing]
-                dependencies[node_id] = {
-                    str(_object(value, "artifact")["identity_sha256"]): provider
-                    for value in role_artifacts
-                    if (
-                        provider := resident[node_id].get(
-                            str(_object(value, "artifact")["identity_sha256"])
-                        )
-                    )
-                    is not None
-                }
+                added[node_id] = [identity for identity, _ in missing]
+                dependencies[node_id] = dependencies_for_node
                 persistent[node_id] = (
                     disk_values["image_bytes"]
                     + disk_values["cache_bytes"]
                     + disk_values["rollback_bytes"]
                     + artifact_overhead
-                    + sum(int(value["installed_bytes"]) for value in missing)
+                    + sum(installed for _, installed in missing)
                 )
                 staging[node_id] = disk_values["staging_bytes"]
                 safety_floor[node_id] = max(
@@ -2277,10 +2355,16 @@ class QualificationRunner:
                 selected = min(
                     preexisting,
                     key=lambda value: tuple(
-                        sorted(str(node) for node in value["node_ids"])
+                        sorted(
+                            _string_list(
+                                value.get("node_ids"), "candidate node ids"
+                            )
+                        )
                     ),
                 )
-                node_ids = tuple(sorted(str(node) for node in selected["node_ids"]))
+                node_ids = tuple(
+                    sorted(_string_list(selected.get("node_ids"), "candidate node ids"))
+                )
                 candidate_signature = _capacity_candidate_signature(selected)
                 builder_node_id = str(candidate_signature["builder_node_id"])
                 item = _object(job["item"], "qualification recipe")
@@ -2298,16 +2382,22 @@ class QualificationRunner:
                     if isinstance(candidate_nodes, list)
                     else {}
                 )
-                added = {
-                    node_id: [
-                        str(_object(value, "artifact")["identity_sha256"])
-                        for value in artifacts
-                        if not _object(value, "artifact").get("roles")
-                        or role_by_node.get(node_id)
-                        in _object(value, "artifact").get("roles", [])
-                    ]
-                    for node_id in node_ids
-                }
+                added: dict[str, list[str]] = {}
+                for node_id in node_ids:
+                    node_role = role_by_node.get(node_id)
+                    node_identities: list[str] = []
+                    for value in artifacts:
+                        artifact = _object(value, "artifact")
+                        artifact_roles = _string_list(
+                            artifact.get("roles", []), "artifact roles"
+                        )
+                        if not artifact_roles or node_role in artifact_roles:
+                            node_identities.append(
+                                _string_field(
+                                    artifact, "identity_sha256", "artifact identity"
+                                )
+                            )
+                    added[node_id] = node_identities
                 for node_id, values in added.items():
                     artifact_providers[node_id].update(
                         {identity: None for identity in values}
@@ -2484,7 +2574,12 @@ class QualificationRunner:
                                 else provider_key
                             )
                             artifact_providers[str(node_id)].update(
-                                {str(value): provider for value in values}
+                                {
+                                    identity: provider
+                                    for identity in _string_list(
+                                        values, "artifact identities"
+                                    )
+                                }
                             )
                     if expansions >= 250_000:
                         return False
@@ -2712,7 +2807,11 @@ class QualificationRunner:
                     "planned_builder_node_id": planned_builder,
                     "planned_installation_ids": planned_installation_ids,
                     "eligible_node_groups": [
-                        sorted(str(node) for node in candidate.get("node_ids", []))
+                        sorted(
+                            _string_list(
+                                candidate.get("node_ids"), "candidate node ids"
+                            )
+                        )
                         for candidate in eligible
                     ],
                     "automatic_eviction": False,
@@ -2732,7 +2831,7 @@ class QualificationRunner:
                 for node in _fleet_nodes(fleet)
                 if isinstance(node.get("id"), str)
             }
-            peak = _object(
+            planned_peak = _object(
                 planned_assignment.get("peak_bytes_by_node"),
                 "planned peak bytes",
             )
@@ -2741,26 +2840,33 @@ class QualificationRunner:
                 "planned available bytes",
             )
             currently_installed = bool(selected.get("installation_ids"))
-            checks = {
-                node_id: {
-                    "available_bytes": available.get(node_id),
-                    "planned_available_before_bytes": planned_available.get(node_id),
-                    "baseline_preserved": isinstance(available.get(node_id), int)
-                    and isinstance(planned_available.get(node_id), int)
-                    and int(available[node_id]) >= int(planned_available[node_id]),
-                    "peak_required_bytes": 0 if currently_installed else value,
-                    "planned_peak_bytes": value,
-                    "fits": isinstance(available.get(node_id), int)
-                    and isinstance(planned_available.get(node_id), int)
+            checks: dict[str, dict[str, object]] = {}
+            for node_id, peak_value in planned_peak.items():
+                available_bytes = available.get(node_id)
+                planned_bytes = planned_available.get(node_id)
+                baseline_preserved = (
+                    isinstance(available_bytes, int)
+                    and isinstance(planned_bytes, int)
+                    and available_bytes >= planned_bytes
+                )
+                fits = (
+                    isinstance(available_bytes, int)
+                    and isinstance(planned_bytes, int)
                     and (
                         currently_installed
-                        or int(available[node_id]) >= int(planned_available[node_id])
-                        and isinstance(value, int)
-                        and int(planned_available[node_id]) >= value
-                    ),
+                        or available_bytes >= planned_bytes
+                        and isinstance(peak_value, int)
+                        and planned_bytes >= peak_value
+                    )
+                )
+                checks[node_id] = {
+                    "available_bytes": available_bytes,
+                    "planned_available_before_bytes": planned_bytes,
+                    "baseline_preserved": baseline_preserved,
+                    "peak_required_bytes": 0 if currently_installed else peak_value,
+                    "planned_peak_bytes": peak_value,
+                    "fits": fits,
                 }
-                for node_id, value in peak.items()
-            }
             self.ledger.append(
                 "capacity.checked",
                 plan_digest=digest,
@@ -2805,7 +2911,7 @@ class QualificationRunner:
                     else planned_assignment.get("persistent_bytes_by_node"),
                     "peak_bytes_by_node": {node_id: 0 for node_id in planned_nodes}
                     if currently_installed
-                    else dict(peak),
+                    else dict(planned_peak),
                     "artifact_identities_by_node": planned_assignment.get(
                         "artifact_identities_by_node"
                     ),
@@ -2952,15 +3058,7 @@ class QualificationRunner:
         if _digest(intent) != actual:
             raise QualificationError("campaign plan content does not match its digest")
         intent_options = _object(intent.get("options"), "campaign intent options")
-        if (
-            intent_options.get("cleanup") != self.options.cleanup
-            or intent_options.get("selected_recipes")
-            != sorted(self.options.selected_recipes)
-            or intent_options.get("profile_number") != self.options.profile_number
-            or intent_options.get("allowed_node_ids", [])
-            != sorted(self.options.allowed_node_ids)
-        ):
-            raise QualificationError("runner options do not match campaign intent")
+        self._require_matching_intent_options(intent_options)
         manifest_digest = intent_options.get("fixture_manifest_sha256")
         if (
             manifest_digest != self.artifact_smoke.fixtures.manifest_sha256
@@ -3351,9 +3449,12 @@ class QualificationRunner:
                 }
             )
         global_inventory = self._global_installation_inventory(rows)
+        global_installations = _list(
+            global_inventory.get("installations"), "global installations"
+        )
         retained_installations = [
             installation
-            for installation in global_inventory["installations"]
+            for installation in global_installations
             if isinstance(installation, Mapping)
             and installation.get("retained") is True
         ]
@@ -3419,7 +3520,7 @@ class QualificationRunner:
         return {
             "recipes": rows,
             "installation_inventory_complete": global_inventory["complete"],
-            "installations": global_inventory["installations"],
+            "installations": global_installations,
             "installation_inventory_errors": global_inventory["errors"],
             "retained_installation_count": len(retained_installations),
             "fleet_snapshot_sha256": _digest(_fleet_fingerprint(fleet)),
