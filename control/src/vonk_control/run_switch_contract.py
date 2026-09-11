@@ -39,6 +39,60 @@ Alias = Annotated[
     ),
 ]
 
+# Each closed value set is named once here and used by the contract's own field
+# annotations and by the Run/Switch operation helpers that build those fields.
+# A shared alias is what keeps a helper signature from drifting away from the
+# set the model will accept, so the two cannot disagree without a type error.
+RunSwitchAction = Literal["run", "switch", "stop"]
+RunSwitchRetention = Literal["retain-cached", "reclaim-unreferenced"]
+RunSwitchReasonSeverity = Literal["blocker", "warning", "info"]
+RunSwitchReasonScope = Literal[
+    "model",
+    "recipe",
+    "mapping",
+    "group",
+    "node",
+    "artifact",
+    "freshness",
+    "conflict",
+    "operation",
+]
+RunSwitchCapabilityEvidenceState = Literal["tested", "observed", "not-tested", "unknown"]
+RunSwitchChangeEffect = Literal["none", "restart", "reprepare", "rebuild", "reinstall"]
+RunSwitchCoverage = Literal["complete", "partial", "unknown"]
+RunSwitchBuildEvidenceState = Literal[
+    "available",
+    "planned",
+    "building",
+    "failed",
+    "missing",
+    "incompatible",
+    "unknown",
+]
+RunSwitchContainerBuildState = Literal["planned", "building", "succeeded", "failed"]
+RunSwitchPhaseKind = Literal[
+    "transfer",
+    "verify",
+    "prepare",
+    "cleanup",
+    "stop",
+    "start",
+    "final_verify",
+]
+RunSwitchSubphase = Literal[
+    "container-build",
+    "model-download",
+    "runtime-image",
+    "runtime-plan",
+    "target-copy",
+    "runtime-install",
+]
+RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unknown"]
+RunSwitchProgressState = Literal[
+    "queued", "running", "succeeded", "failed", "cancelled", "unknown"
+]
+RunSwitchOperationKind = Literal["recipe.run-switch.v2", "recipe.stop.v2"]
+
 
 class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -95,7 +149,7 @@ class RunSwitchPreviewRequest(_StrictModel):
     spark_group: SparkGroup
     alias: Alias
     action: Literal["run", "switch"] = "run"
-    retention: Literal["retain-cached", "reclaim-unreferenced"] = "retain-cached"
+    retention: RunSwitchRetention = "retain-cached"
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
 
@@ -121,18 +175,8 @@ class RunSwitchStopApplyRequest(RunSwitchStopPreviewRequest):
 class RunSwitchReason(_StrictModel):
     code: Annotated[str, StringConstraints(min_length=1, max_length=96)]
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
-    severity: Literal["blocker", "warning", "info"]
-    scope: Literal[
-        "model",
-        "recipe",
-        "mapping",
-        "group",
-        "node",
-        "artifact",
-        "freshness",
-        "conflict",
-        "operation",
-    ]
+    severity: RunSwitchReasonSeverity
+    scope: RunSwitchReasonScope
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     stale: bool = False
 
@@ -151,7 +195,7 @@ class CapabilityEvidence(_StrictModel):
 
     name: Annotated[str, StringConstraints(min_length=1, max_length=96)]
     declared: bool | None
-    evidence: Literal["tested", "observed", "not-tested", "unknown"]
+    evidence: RunSwitchCapabilityEvidenceState
     support: Literal["supported", "unsupported", "unknown"]
     evidence_digest: Digest | None = None
     detail: Annotated[str, StringConstraints(max_length=256)] | None = None
@@ -195,7 +239,7 @@ class EffectiveSettingsSelection(_StrictModel):
     max_batch_tokens: int | None = Field(default=None, ge=1)
     parallelism: EffectiveParallelism
     knobs: dict[str, object] = Field(default_factory=dict, max_length=64)
-    change_effects: dict[str, Literal["none", "restart", "reprepare", "rebuild", "reinstall"]] = Field(max_length=64)
+    change_effects: dict[str, RunSwitchChangeEffect] = Field(max_length=64)
     identity_sha256: Digest
 
 
@@ -236,10 +280,10 @@ class ArtifactStorageImpact(_StrictModel):
     missing_spark_bytes: int | None = Field(default=None, ge=0)
     reclaimable_bytes: int = Field(default=0, ge=0)
     reclaimed_bytes: int = Field(default=0, ge=0)
-    nas_coverage: Literal["complete", "partial", "unknown"]
-    spark_coverage: Literal["complete", "partial", "unknown"]
-    retention: Literal["retain-cached", "reclaim-unreferenced"]
-    running_coverage: Literal["complete", "partial", "unknown"] = "unknown"
+    nas_coverage: RunSwitchCoverage
+    spark_coverage: RunSwitchCoverage
+    retention: RunSwitchRetention
+    running_coverage: RunSwitchCoverage = "unknown"
     artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
@@ -271,15 +315,15 @@ class RuntimeImageStorageImpact(_StrictModel):
     missing_nas_bytes: int | None = Field(default=None, ge=0)
     missing_spark_bytes: int | None = Field(default=None, ge=0)
     missing_image_distribution_bytes: int | None = Field(default=None, ge=0)
-    nas_coverage: Literal["complete", "partial", "unknown"]
-    spark_coverage: Literal["complete", "partial", "unknown"]
-    running_coverage: Literal["complete", "partial", "unknown"] = "unknown"
+    nas_coverage: RunSwitchCoverage
+    spark_coverage: RunSwitchCoverage
+    running_coverage: RunSwitchCoverage = "unknown"
     reclaimable_bytes: int = Field(default=0, ge=0)
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
 class RunSwitchBuildEvidence(_StrictModel):
-    state: Literal["available", "planned", "building", "failed", "missing", "incompatible", "unknown"]
+    state: RunSwitchBuildEvidenceState
     build_id: UuidId | None
     # A pending build is still bound to an immutable source/build input and a
     # deterministically selected Controller builder.  The OCI output digest
@@ -314,31 +358,13 @@ class StopImpact(_StrictModel):
     plan_digest: Digest
 
 
-RunSwitchPhaseKind = Literal[
-    "transfer",
-    "verify",
-    "prepare",
-    "cleanup",
-    "stop",
-    "start",
-    "final_verify",
-]
-
-
 class RunSwitchPhase(_StrictModel):
     index: int = Field(ge=0, le=31)
     kind: RunSwitchPhaseKind
     # ``kind`` stays in the shared lifecycle vocabulary.  This typed purpose
     # distinguishes Controller-side OCI preparation from target installation
     # while keeping Activity's generic phase enum stable.
-    subphase: Literal[
-        "container-build",
-        "model-download",
-        "runtime-image",
-        "runtime-plan",
-        "target-copy",
-        "runtime-install",
-    ] | None = None
+    subphase: RunSwitchSubphase | None = None
     state: Literal["planned", "retained", "skipped", "blocked"]
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     operation_digest: Digest | None = None
@@ -348,7 +374,7 @@ class RunSwitchPhase(_StrictModel):
 class RunSwitchPlan(_StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
-    action: Literal["run", "switch", "stop"]
+    action: RunSwitchAction
     model_content_sha256: Digest | None
     recipe_revision_id: UuidId | None
     recipe_content_sha256: Digest | None
@@ -391,7 +417,7 @@ class RunSwitchPlan(_StrictModel):
 class RunSwitchMemberProgress(_StrictModel):
     node_id: NodeId
     phase: RunSwitchPhaseKind | None = None
-    state: Literal["pending", "running", "succeeded", "failed", "unknown"]
+    state: RunSwitchMemberState
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     error: Annotated[str, StringConstraints(max_length=256)] | None = None
@@ -402,18 +428,11 @@ class RunSwitchProgress(_StrictModel):
     phase_index: int = Field(ge=0, le=31)
     phase_count: int = Field(ge=1, le=32)
     phase: RunSwitchPhaseKind | None
-    state: Literal["queued", "running", "succeeded", "failed", "cancelled", "unknown"]
+    state: RunSwitchProgressState
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     total_bytes_known: bool
-    subphase: Literal[
-        "container-build",
-        "model-download",
-        "runtime-image",
-        "runtime-plan",
-        "target-copy",
-        "runtime-install",
-    ] | None = None
+    subphase: RunSwitchSubphase | None = None
     members: list[RunSwitchMemberProgress] = Field(min_length=1, max_length=32)
 
     @model_validator(mode="after")
@@ -450,7 +469,7 @@ class RunSwitchMemberReceipt(_StrictModel):
 
     node_id: NodeId
     phase: RunSwitchPhaseKind | None = None
-    state: Literal["pending", "running", "succeeded", "failed", "unknown"]
+    state: RunSwitchMemberState
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     error: Annotated[str, StringConstraints(max_length=512)] | None = None
@@ -509,17 +528,14 @@ class ArtifactVerificationResult(_StrictModel):
 
 class _RunSwitchPhaseBase(_StrictModel):
     phase: RunSwitchPhaseKind
-    subphase: Literal[
-        "container-build", "model-download", "runtime-image", "runtime-plan",
-        "target-copy", "runtime-install",
-    ] | None = None
+    subphase: RunSwitchSubphase | None = None
 
 class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
     phase: Literal["prepare"]
     subphase: Literal["container-build"]
     build_id: UuidId
     build_input_sha256: Digest
-    state: Literal["planned", "building", "succeeded", "failed"]
+    state: RunSwitchContainerBuildState
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
     oci_layout_sha256: Digest | None = None
     image_bytes: int | None = Field(default=None, ge=1)
@@ -726,10 +742,7 @@ class RunSwitchOperationResult(_StrictModel):
     phase_index: int = Field(default=0, ge=0, le=31)
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
-    subphase: Literal[
-        "container-build", "model-download", "runtime-image", "runtime-plan",
-        "target-copy", "runtime-install",
-    ] | None = None
+    subphase: RunSwitchSubphase | None = None
     completed_phases: list[RunSwitchPhaseKind] = Field(default_factory=list, max_length=16)
     child_operation_id: UuidId | None = None
     phase_results: list[RunSwitchPhaseResult] = Field(default_factory=list)
@@ -759,8 +772,8 @@ class RunSwitchOperationResult(_StrictModel):
 class RunSwitchOperation(_StrictModel):
     schema_version: Literal[2] = 2
     operation_id: UuidId
-    kind: Literal["recipe.run-switch.v2", "recipe.stop.v2"]
-    action: Literal["run", "switch", "stop"]
+    kind: RunSwitchOperationKind
+    action: RunSwitchAction
     state: Annotated[str, StringConstraints(min_length=1, max_length=32)]
     plan_digest: Digest
     request_key: UuidId
@@ -807,17 +820,25 @@ __all__ = [
     "FreshnessEvidence",
     "InvocationMetadata",
     "MappingSelection",
+    "RunSwitchAction",
     "RunSwitchApplyRequest",
     "RunSwitchBuildEvidence",
+    "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
+    "RunSwitchCapabilityEvidenceState",
+    "RunSwitchChangeEffect",
     "RunSwitchCleanupResult",
     "RunSwitchContainerBuildResult",
+    "RunSwitchContainerBuildState",
+    "RunSwitchCoverage",
     "RunSwitchDistributionChildResult",
     "RunSwitchFinalVerifyResult",
     "RunSwitchMemberProgress",
+    "RunSwitchMemberState",
     "RunSwitchModelDownloadPendingResult",
     "RunSwitchModelDownloadResult",
     "RunSwitchOperation",
+    "RunSwitchOperationKind",
     "RunSwitchOperationResult",
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
@@ -826,7 +847,11 @@ __all__ = [
     "RunSwitchPreparedResult",
     "RunSwitchPreviewRequest",
     "RunSwitchProgress",
+    "RunSwitchProgressState",
     "RunSwitchReason",
+    "RunSwitchReasonScope",
+    "RunSwitchReasonSeverity",
+    "RunSwitchRetention",
     "RunSwitchRetryRequest",
     "RunSwitchRuntimeImageResult",
     "RunSwitchRuntimeInstallResult",
@@ -835,6 +860,7 @@ __all__ = [
     "RunSwitchStopApplyRequest",
     "RunSwitchStopPreviewRequest",
     "RunSwitchStopResult",
+    "RunSwitchSubphase",
     "RunSwitchTargetTransferEvidenceResult",
     "RunSwitchTargetTransferResult",
     "RunSwitchVerifyResult",
