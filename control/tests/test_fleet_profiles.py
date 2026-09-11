@@ -47,6 +47,7 @@ from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
     InstallationNode,
+    Job,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -1662,6 +1663,119 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert resumed.current_operation_id == application.id
     assert resumed.progress.switch_adapter is not None
     assert resumed.progress.switch_adapter.active_operation_id == child_id
+
+
+def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> None:
+    """A finished profile step must persist the child's public result tree.
+
+    The acceptance canary reads the Run/Switch receipt back out of the profile
+    application's step results.  The adapter used to answer a completed child
+    from its mirrored state, whose result is the adapter's own summary, so the
+    step recorded no receipt and the run could not be qualified.  The receipt
+    now travels with the completed child, so it survives the tick that finished
+    it and any later restart.
+    """
+
+    from vonk_control.run_switch_operations import (
+        RunSwitchOperationService,
+        _persisted_result,
+    )
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Completed switch child",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "completed-switch-child",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(647),
+        actor="admin",
+    )
+    assert service.tick() is True
+    started = service.application(application.id)
+    assert started.progress.switch_adapter is not None
+    child_id = started.progress.switch_adapter.active_operation_id
+    assert isinstance(child_id, str)
+
+    # The child finishes with its public Run/Switch result tree, exactly as the
+    # real service persists one.
+    with sessions.begin() as session:
+        job = session.get(Job, child_id)
+        assert job is not None
+        job.state = "succeeded"
+        job.status_reason = None
+        job.result = _persisted_result(
+            {"phase_index": 1, "completed_phases": ["prepare", "final_verify"]}
+        )
+        job.updated_at = lifecycle._clock()
+
+    assert service.tick() is True
+    completed = service.application(application.id)
+    assert completed.state == "succeeded", completed.status_reason
+    step_results = completed.progress.step_results
+    receipts = [
+        value.result
+        for value in step_results.values()
+        if isinstance(value.result, FleetProfileSwitchChildResult)
+    ]
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.run_switch_operation_id == child_id
+    assert receipt.run_switch.phase_index == 1
+
+    # A restart reads the same receipt out of the persisted application.
+    restarted = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    persisted = restarted.application(application.id)
+    assert persisted.progress.step_results == completed.progress.step_results
+    assert any(
+        isinstance(value.result, FleetProfileSwitchChildResult)
+        for value in persisted.progress.step_results.values()
+    )
 
 
 def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ from .fleet_profile_contract import (
     FleetProfileChildOperation,
     FleetProfileChildPhase,
     FleetProfileChildProgress,
+    FleetProfileChildResult,
     FleetProfileInput,
     FleetProfileInstallationPolicy,
     FleetProfileIntendedConfiguration,
@@ -485,11 +486,21 @@ class RunSwitchFleetProfileAdapter:
                     f"Run/Switch child returned {child.state}",
                 )
             children = list(sequence(state.get("children")) or ())
+            # Record the child's public result tree with the child.  A profile
+            # step receipt is read back from this mirror, so a completion that
+            # only updated progress would lose the Run/Switch receipt on the
+            # very tick the child finishes, and again after any restart.
+            receipt = self._child_receipt(child)
             children.append(
                 {
                     "operation_id": child.operation_id,
                     "kind": state.get("active_kind"),
                     "state": child.state,
+                    "result": (
+                        receipt.model_dump(mode="json")
+                        if receipt is not None
+                        else None
+                    ),
                 }
             )
             state["children"] = children
@@ -746,6 +757,24 @@ class RunSwitchFleetProfileAdapter:
             ) from error
         return tuple(sorted(values, key=lambda item: item.id))
 
+    @staticmethod
+    def _child_receipt(
+        child: RunSwitchOperation,
+    ) -> FleetProfileSwitchChildResult | None:
+        """Return the child's public result tree as a profile step receipt."""
+
+        if child.result is None:
+            return None
+        try:
+            return FleetProfileSwitchChildResult(
+                run_switch_operation_id=child.operation_id,
+                run_switch=RunSwitchOperationResult.model_validate(child.result),
+            )
+        except (TypeError, ValueError) as error:
+            raise FleetProfileConflict(
+                "Run/Switch child result receipt is invalid"
+            ) from error
+
     def _view_from_child(
         self,
         application_id: str,
@@ -767,14 +796,7 @@ class RunSwitchFleetProfileAdapter:
             total_bytes=child.progress.total_bytes,
         )
         child_state = _operation_state(child.state, default="running")
-        result = (
-            FleetProfileSwitchChildResult(
-                run_switch_operation_id=child.operation_id,
-                run_switch=RunSwitchOperationResult.model_validate(child.result),
-            )
-            if child.result is not None
-            else None
-        )
+        result = self._child_receipt(child)
         return FleetProfileChildOperation(
             id=application_id,
             state=child_state,
@@ -809,12 +831,31 @@ class RunSwitchFleetProfileAdapter:
             status_reason=(
                 raw_status_reason if isinstance(raw_status_reason, str) else None
             ),
-            result=(
-                FleetProfileSwitchAdapterResult.model_validate(state["result"])
-                if isinstance(state.get("result"), Mapping)
-                else None
-            ),
+            result=_state_receipt(state),
         )
+
+
+def _state_receipt(state: Mapping[str, object]) -> FleetProfileChildResult | None:
+    """Return the newest completed child receipt held by a mirrored state.
+
+    A profile step's recorded result is read from the mirror, so the receipt of
+    the child that finished last is the step's evidence.  States written before
+    receipts were mirrored fall back to the adapter's own summary.
+    """
+
+    children = sequence(state.get("children")) or ()
+    for raw in reversed(list(children)):
+        if not isinstance(raw, Mapping):
+            continue
+        receipt = raw.get("result")
+        if isinstance(receipt, Mapping):
+            return FleetProfileSwitchChildResult.model_validate(receipt)
+    summary = state.get("result")
+    return (
+        FleetProfileSwitchAdapterResult.model_validate(summary)
+        if isinstance(summary, Mapping)
+        else None
+    )
 
 
 def _aware(value: datetime) -> datetime:

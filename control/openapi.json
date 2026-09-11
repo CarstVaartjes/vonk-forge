@@ -5166,6 +5166,16 @@
             "title": "Operation Id",
             "type": "string"
           },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileSwitchChildResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "state": {
             "enum": [
               "succeeded",

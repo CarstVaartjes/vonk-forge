@@ -2556,6 +2556,7 @@ export interface components {
             kind: "run" | "stop";
             /** Operation Id */
             operation_id: string;
+            result?: components["schemas"]["FleetProfileSwitchChildResult"] | null;
             /**
              * State
              * @enum {string}
