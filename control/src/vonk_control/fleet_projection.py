@@ -12,7 +12,7 @@ from pydantic import (
     Field,
     StringConstraints,
 )
-from sqlalchemy import case, func, select
+from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -607,6 +607,28 @@ def _filter_metrics(
         ],
         provenance=value.provenance,
     )
+
+
+type RunPresenceRow = Row[
+    tuple[
+        RunNode,
+        RecipeRun,
+        ClusterMapping,
+        RecipeInstallation,
+        CatalogDocumentRevision,
+        CatalogDocument,
+    ]
+]
+
+type InstallationPresenceRow = Row[
+    tuple[
+        InstallationNode,
+        RecipeInstallation,
+        ClusterMapping,
+        CatalogDocumentRevision,
+        CatalogDocument,
+    ]
+]
 
 
 class FleetProjection:
@@ -1293,7 +1315,9 @@ class FleetProjection:
         return {row.node_id: row for row in rows}
 
     @staticmethod
-    def _installation_rows(session: Session, node_ids: Sequence[str]):
+    def _installation_rows(
+        session: Session, node_ids: Sequence[str]
+    ) -> tuple[InstallationPresenceRow, ...]:
         selected = (
             select(RecipeInstallation.id)
             .join(
@@ -1389,7 +1413,7 @@ class FleetProjection:
 
     def _installed_presence(
         self,
-        rows: Sequence[object],
+        rows: Sequence[InstallationPresenceRow],
         mapping_rows: Sequence[ClusterMappingNode],
         fleet_node_ids: frozenset[str],
     ) -> dict[str, tuple[RecipePresence, ...]]:
@@ -1453,7 +1477,7 @@ class FleetProjection:
 
     def _loaded_presence(
         self,
-        rows: Sequence[object],
+        rows: Sequence[RunPresenceRow],
         mapping_rows: Sequence[ClusterMappingNode],
         fleet_node_ids: frozenset[str],
         current: datetime,
@@ -1533,7 +1557,9 @@ class FleetProjection:
         }
 
     @staticmethod
-    def _run_rows(session: Session, node_ids: Sequence[str]):
+    def _run_rows(
+        session: Session, node_ids: Sequence[str]
+    ) -> tuple[RunPresenceRow, ...]:
         selected = (
             select(RecipeRun.id)
             .join(RunNode, RunNode.run_id == RecipeRun.id)
