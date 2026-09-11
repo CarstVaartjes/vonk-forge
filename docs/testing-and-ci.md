@@ -97,6 +97,37 @@ Hardware-dependent lifecycle, thermal, NCCL, real model-quality, physical
 replacement, and encryption-drill evidence stays on the designated local
 hosts. It is never replaced by a green hosted smoke test.
 
+## What earns a test
+
+The suites are a merge gate, so every test costs review time on every future
+change. A test earns its place by catching a defect that a reviewer would
+otherwise have to reason about by hand:
+
+- **Name the defect.** Before keeping a test, say which wrong implementation it
+  fails on. If nothing can make it fail except deleting the code it calls, it is
+  ceremony, not coverage.
+- **Prefer the boundary to the middle.** The valuable cases are the ones where
+  behaviour changes: an empty or absent value, a malformed or hostile one, the
+  first and last accepted element of a range, a replayed or expired grant, a
+  permission that must be refused. A test that only walks the happy path already
+  covered elsewhere is duplication.
+- **One authority per fact.** Do not re-assert a constant, a field list, a
+  literal set, or a schema shape that another test already pins; two copies
+  drift, and the drift costs more than the second copy ever catches. This is why
+  the contract tests consume the canonical Pydantic model instead of duplicated
+  key lists.
+- **A bug fix ships with the test that fails without it.** Write the test,
+  confirm it fails against the old behaviour, then fix. A regression test that
+  was never seen failing is an assumption.
+- **Test the real seam.** Exercise the actual serialize/store/load path, the
+  real marker set, the real CLI parser, the real runner. A stub that replaces
+  the very thing under review cannot catch a fault in it — a stubbed
+  `QualificationRunner` hid a dead `apply()` path for exactly that reason.
+- **Keep the fast tier fast and hermetic.** A host-dependent test belongs in the
+  lane tier, which the collection-time marker applies automatically, rather than
+  being skipped or made conditional. The fast tier should stay under a couple of
+  minutes so it is genuinely the thing you run while iterating.
+
 ## When the longer jobs run
 
 Container publication and release metadata are protected by the release
