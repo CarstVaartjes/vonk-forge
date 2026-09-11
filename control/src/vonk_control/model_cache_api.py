@@ -10,6 +10,7 @@ from vonk_agent_protocol import OperationProgress
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
+from .bounded_json import require_integer
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -229,7 +230,7 @@ class ModelCacheOperationProvider:
         return OperationListPage(
             items=items,
             next_cursor=next_cursor,
-            total=int(page["total"]),
+            total=require_integer(page["total"], "page total"),
         )
 
     def _next_cursor(

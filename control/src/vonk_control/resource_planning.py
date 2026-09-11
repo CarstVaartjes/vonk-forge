@@ -14,6 +14,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .bounded_json import require_integer
+
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
 
@@ -320,7 +322,7 @@ def resource_demand(settings: EffectiveResourceSettings | object, evidence: Reso
         if base is None and type(evidence.weights_bytes) is int and type(evidence.runtime_overhead_bytes) is int:
             base = evidence.weights_bytes + evidence.runtime_overhead_bytes
         if base is not None:
-            total = base + int(context[0]) + int(concurrency[0]) + int(batch[0])
+            total = base + require_integer(context[0], "context") + require_integer(concurrency[0], "concurrency") + require_integer(batch[0], "batch")
     return ResourceDemand(
         evidence.weights_bytes if type(evidence.weights_bytes) is int else None,
         evidence.runtime_overhead_bytes if type(evidence.runtime_overhead_bytes) is int else None,

@@ -19,6 +19,7 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 from .agent_jobs import AgentJobService
 from .agent_package_source import load_package_source
 from .agent_upgrade_status import RECOVERABLE_AGENT_UPGRADE_REASONS
+from .bounded_json import require_integer
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
 _PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
@@ -786,7 +787,7 @@ class AgentUpgradeService:
             or document.get("architecture") != "linux-arm64"
             or not isinstance(document.get("package_bytes"), int)
             or isinstance(document.get("package_bytes"), bool)
-            or not 1 <= int(document["package_bytes"]) <= 1024**3
+            or not 1 <= require_integer(document["package_bytes"], "package bytes") <= 1024**3
             or not isinstance(document.get("package_sha256"), str)
             or _SHA256.fullmatch(str(document["package_sha256"])) is None
             or not isinstance(document.get("package_signature"), str)
