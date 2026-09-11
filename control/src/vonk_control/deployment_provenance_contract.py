@@ -12,6 +12,7 @@ from .strict_json import StrictJSONModel
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 Commit = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{40}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
+PlatformBoundaryName = Literal["repository", "publication", "controller_deployment"]
 
 
 class ProvenanceModel(StrictJSONModel):
@@ -64,7 +65,7 @@ class DeploymentObservations(ProvenanceModel):
 
 
 class PlatformBoundary(ProvenanceModel):
-    boundary: Literal["repository", "publication", "controller_deployment"]
+    boundary: PlatformBoundaryName
     state: Literal[
         "observed", "unknown", "repository_not_published", "publication_not_deployed"
     ]
