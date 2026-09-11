@@ -2398,15 +2398,28 @@ class SparkLifecycle:
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
-                # Say where it stalled: a queued application means nothing
-                # claimed it, while a running one names the step it never left.
-                child = typed.progress.child_progress
+                # Say where it stalled: a queued application with no step
+                # means nothing claimed it, while a running one names the step
+                # and child phase it never left.
+                progress = typed.progress
+                child = progress.child_progress
+                child_detail = "none"
+                child_bytes = "none"
+                if child is not None:
+                    inner = child.operation
+                    child_detail = (
+                        f"{child.phase}/{inner.phase}"
+                        if inner is not None
+                        else child.phase
+                    )
+                    child_bytes = f"{child.bytes}/{child.total_bytes}"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "
+                    f"completed={progress.completed_steps}/{progress.total_steps} "
+                    f"label={progress.current_label or 'none'} "
                     f"operation={typed.current_operation_id or 'none'} "
-                    f"child={child.state if child is not None else 'none'}"
-                    f"/{child.progress.phase if child is not None else 'none'} "
+                    f"child={child_detail} child_bytes={child_bytes} "
                     f"reason={typed.status_reason or 'none'}"
                 )
             time.sleep(1)
