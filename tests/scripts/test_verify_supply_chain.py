@@ -549,7 +549,7 @@ def test_verifier_rejects_floating_image(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     compose = repository / "deploy/compose/compose.yaml"
     text = compose.read_text()
-    locked = "caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+    locked = "caddy:2.11.4@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017"
     compose.write_text(text.replace(locked, "caddy:latest"))
     result = subprocess.run(
         [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
