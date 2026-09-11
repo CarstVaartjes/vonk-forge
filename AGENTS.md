@@ -343,3 +343,12 @@ Use an isolated branch/worktree for each independent agent, based on the latest
 uncommitted files. Before committing, inspect `git status`, run relevant tests,
 and run `git diff --check`. Keep commits scoped and coordinate overlapping
 files before merging.
+
+The shared checkout carries stashes left by earlier work on other branches, so
+never run a bare `git stash` or `git stash pop` there: on a clean tree the
+former saves nothing and the latter then pops somebody else's work into your
+tree, which is how an unrelated conflicted file appears in `git status`. To
+compare "before" and "after", extract a detached worktree at the commit you
+want (`git worktree add --detach /private/tmp/before origin/main`) or stash
+explicit paths (`git stash push -- <paths>`), and delete the worktree when you
+are done.
