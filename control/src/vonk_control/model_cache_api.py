@@ -246,11 +246,21 @@ class ModelCacheOperationProvider:
         state: object,
         node_id: object,
     ) -> str | None:
-        if not isinstance(boundary, tuple) or len(boundary) != 2:
+        """Encode the page boundary, keeping absence distinct from corruption.
+
+        ``None`` means the service found no further page, so no cursor is
+        correct. A present boundary that is not the exact ``(created_at,
+        operation_id)`` pair is an internal contract violation and must fail
+        loudly instead of silently truncating pagination.
+        """
+
+        if boundary is None:
             return None
+        if not isinstance(boundary, tuple) or len(boundary) != 2:
+            raise OperationProjectionError("operation cursor boundary is invalid")
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
-            return None
+            raise OperationProjectionError("operation cursor boundary is invalid")
         context = {"state": state, "node_id": node_id}
         if self._cursors is not None:
             return self._cursors.encode(
