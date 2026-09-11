@@ -96,6 +96,15 @@ def _job_id(job_id: str) -> str:
     return job_id
 
 
+class JobLogCorruptError(RuntimeError):
+    """A retained job log no longer matches the digest that names it.
+
+    Deliberately not a ``ValueError``: the routes that read logs treat a
+    ``ValueError`` as a bad request (an unknown or malformed digest) and answer
+    404, which would report corrupted stored evidence as "not found".
+    """
+
+
 class DatabaseJobLogStore:
     """Redacted content-addressed job logs stored in PostgreSQL."""
 
@@ -155,5 +164,7 @@ class DatabaseJobLogStore:
                 raise KeyError(digest)
             content = row.content
         if hashlib.sha256(content).hexdigest() != digest:
-            raise ValueError("job log checksum mismatch")
+            raise JobLogCorruptError(
+                f"retained job log {digest} does not match its recorded digest"
+            )
         return content

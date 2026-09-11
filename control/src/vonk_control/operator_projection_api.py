@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
 from .agent_upgrades import AgentUpgradeService
 from .audit import AuditRecord
-from .auth import MUTATION_ROLES, Actor
+from .auth import MUTATION_ROLES, Actor, CursorError
+from .bounded_json import BoundedJSONError
 from .deployment_provenance_contract import DeploymentProvenance
 from .enrollment_bootstrap import accepted_installer_url
 from .fleet_projection import (
@@ -35,7 +36,8 @@ from .fleet_projection import (
 from .library_projection import LibrarySelectorAmbiguous
 from .models import Job, JobLogEntry
 from .operation_api import bounded_error_responses
-from .strict_json import StrictJSONModel
+from .request_fault import RequestFault
+from .strict_json import StrictJSONModel, stored_document_detail
 from .telemetry import TelemetryResolution
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
@@ -358,8 +360,18 @@ def _operator_error(error: Exception) -> HTTPException:
         return HTTPException(status_code=422, detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}")
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
-    if isinstance(error, ValueError):
+    if isinstance(error, (CursorError, RequestFault)):
+        # An explicit request fault keeps 422. Everything else, including a
+        # stored document that no longer validates, is the Controller's state
+        # and answers the declared 503 rather than blaming the request.
         return HTTPException(status_code=422, detail=str(error)[:256])
+    detail = stored_document_detail(error)
+    if detail is not None:
+        # Name the failing field path so the corrupt row can be found, without
+        # echoing the stored value.
+        return HTTPException(status_code=503, detail=detail[:256])
+    if isinstance(error, BoundedJSONError):
+        return HTTPException(status_code=503, detail=str(error)[:256])
     return HTTPException(status_code=503, detail="operator projection unavailable")
 
 

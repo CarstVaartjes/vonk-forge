@@ -7,6 +7,8 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
+from .auth import CursorError
+from .bounded_json import BoundedJSONError
 from .library_contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
@@ -15,6 +17,8 @@ from .library_contract import (
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .operation_api import bounded_error_responses
+from .request_fault import RequestFault
+from .strict_json import stored_document_detail
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control
 # characters; path routing remains safe because the projection resolves only an
@@ -40,8 +44,15 @@ def _error(error: Exception) -> HTTPException:
         )
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
-    if isinstance(error, ValueError):
+    if isinstance(error, (CursorError, RequestFault)):
+        # As in the operator surface: only an explicit request fault is 422,
+        # so unreadable stored state cannot be reported as a bad request.
         return HTTPException(status_code=422, detail=str(error)[:256])
+    detail = stored_document_detail(error)
+    if detail is not None:
+        return HTTPException(status_code=503, detail=detail[:256])
+    if isinstance(error, BoundedJSONError):
+        return HTTPException(status_code=503, detail=str(error)[:256])
     return HTTPException(status_code=503, detail="library projection unavailable")
 
 

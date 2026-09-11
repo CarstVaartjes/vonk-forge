@@ -11,7 +11,7 @@ from fastapi import Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, RootModel, ValidationError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 
@@ -161,3 +161,18 @@ __all__ = [
     "apply_optional_none_policy",
     "serialize_json_value",
 ]
+
+def stored_document_detail(error: Exception) -> str | None:
+    """Describe a stored document that will not validate, without its input.
+
+    A pydantic ``ValidationError`` stringifies the offending value, so it cannot
+    be handed to a client as-is. The failing field path and error type are
+    enough to find the row and say nothing about its contents.
+    """
+
+    if not isinstance(error, ValidationError):
+        return None
+    issues = error.errors()
+    issue = issues[0] if issues else {}
+    location = ".".join(str(part) for part in issue.get("loc", ()))[:140] or "<root>"
+    return f"stored document is invalid at {location} ({issue.get('type', 'invalid')})"
