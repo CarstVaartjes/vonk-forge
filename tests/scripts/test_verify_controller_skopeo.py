@@ -8,11 +8,11 @@ SCRIPT = ROOT / "scripts/verify-controller-skopeo"
 
 def test_controller_skopeo_verification_is_digest_bound_and_rootless() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
-    assert "6c243579ceea16adaf6033c5626bce55a0bb1cfec50e973652306ee89aa8a753" in source
-    assert "8fec5af224ef8590e9b20863d403c8e199efe7a577ae000e3ea1310dfed1d62e" in source
+    assert "ab6d8bc7b5985581d69d143e7e57606bcee6796757b9147bcc37f1df6b73d820" in source
+    assert "2dada7d8c2bf3cb87677da0ca57eba620394eaa4a0827f6b21cffeedbf3a68ea" in source
     assert "source_reference" in source
     assert "@sha256:" in source
-    assert "quay.io/skopeo/stable@sha256:3af38d0df9fca73ae063a4f56eb58d548991655c506ffc3514e828a35cdb65ad" in source
+    assert "quay.io/skopeo/stable@sha256:545723edab7793112a5c8fc36963f5cad43c6f27c0bda63c5fbc8b5d4d336036" in source
     assert "--read-only" in source
     assert "--tmpfs /var/tmp:rw,nosuid,nodev,noexec,size=256m" in source
     assert "--user 10001:10001" in source
