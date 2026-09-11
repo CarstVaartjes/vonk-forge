@@ -49,6 +49,9 @@ pythonVersion = "3.12"
 venvPath = "control"
 venv = ".venv"
 typeCheckingMode = "basic"
+# Mirror the import roots the test suites add to sys.path, so static analysis
+# resolves the same modules the runtime does.
+extraPaths = ["src", "scripts", "agent_protocol/src", "control/src", "tests/scripts"]
 include = ["control/src", "src", "tests", "control/tests"]
 exclude = [
     "**/generated_control/**",

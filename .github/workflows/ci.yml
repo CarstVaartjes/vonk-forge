@@ -118,6 +118,14 @@ jobs:
           else
             uvx --from ruff==0.16.1 ruff check .
           fi
+      # Pyright resolves imports from the control virtualenv, so that project
+      # must be synced before the type ratchet runs.
+      - name: Install control dependencies for type resolution
+        shell: bash
+        run: uv sync --project control --frozen
+      - name: Check Python types
+        shell: bash
+        run: scripts/check-python-types
 
   rust-quality:
     name: Rust workspace lint
