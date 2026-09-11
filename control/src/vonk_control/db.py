@@ -18,8 +18,21 @@ _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 
 
+# A writer that waits forever on a row lock stops the worker's coordinator loop
+# silently: no error, no progress, and nothing to trip. Bound the wait so
+# contention surfaces as an error the caller can log and retry.
+_ROW_LOCK_TIMEOUT_MILLISECONDS = 30_000
+
+
 def build_engine(database_url: str) -> Engine:
-    return create_engine(database_url, pool_pre_ping=True)
+    connect_args = (
+        {"options": f"-c lock_timeout={_ROW_LOCK_TIMEOUT_MILLISECONDS}"}
+        if "postgres" in database_url
+        else {}
+    )
+    return create_engine(
+        database_url, pool_pre_ping=True, connect_args=connect_args
+    )
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
