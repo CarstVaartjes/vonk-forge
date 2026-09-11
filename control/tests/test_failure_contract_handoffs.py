@@ -108,9 +108,7 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
             )
         },
         state="failed",
-        result=AgentFailureResult.model_validate(failure).model_dump(
-            mode="json", exclude_none=True
-        ),
+        result=AgentFailureResult.model_validate(failure),
     )
     jobs.record_result(message)
     with sessions() as session:

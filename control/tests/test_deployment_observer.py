@@ -46,7 +46,9 @@ def test_background_observation_reaches_api_projection_and_retains_age_on_outage
         assert entered.wait(5)
         assert observer.tick() is False
         proceed.set()
-        observer.pending.result(timeout=5)
+        pending = observer.pending
+        assert pending is not None
+        pending.result(timeout=5)
         assert observer.tick() is True
         projected = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()
         assert projected.platform[0].state == "repository_not_published"

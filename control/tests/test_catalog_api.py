@@ -13,7 +13,7 @@ from vonk_control.catalog_api import (
     ManagedCatalogSyncResponse,
     install_catalog_routes,
 )
-from vonk_control.catalog_service import CatalogConflict, CatalogError
+from vonk_control.catalog_service import CatalogConflict, CatalogError, CatalogService
 from vonk_control.catalog_sync import CatalogSyncError
 from vonk_control.recipe_library_types import RecipeLibraryError
 
@@ -33,8 +33,14 @@ class _FailingSync:
         return None
 
 
-class _BundleService:
-    def read_source_bundle(self, _sha256: str) -> bytes:
+class _BundleService(CatalogService):
+    """Exercise only the source-bundle read path of the catalog service."""
+
+    def __init__(self) -> None:
+        pass
+
+    def read_source_bundle(self, sha256: str) -> bytes:
+        del sha256
         return b"raw source bundle bytes"
 
 

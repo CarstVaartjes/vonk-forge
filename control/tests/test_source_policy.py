@@ -16,8 +16,12 @@ def recipe() -> dict[str, object]:
 
 def bundle_for(recipe: dict[str, object], dockerfile: str, **files: bytes):
     bundle = generate_source_bundle({"Dockerfile": dockerfile.encode(), **files})
-    recipe["build"]["context"]["sha256"] = bundle.sha256
-    recipe["build"]["context"]["expected_bytes"] = len(bundle.archive)
+    build = recipe["build"]
+    assert isinstance(build, dict)
+    context = build["context"]
+    assert isinstance(context, dict)
+    context["sha256"] = bundle.sha256
+    context["expected_bytes"] = len(bundle.archive)
     return bundle
 
 
@@ -120,7 +124,11 @@ def test_bundle_identity_must_match_recipe(recipe: dict[str, object]) -> None:
         "FROM ghcr.io/example/x@sha256:" + "a" * 64 + "\nUSER 10001\n",
     )
     changed = copy.deepcopy(recipe)
-    changed["build"]["context"]["sha256"] = "b" * 64
+    changed_build = changed["build"]
+    assert isinstance(changed_build, dict)
+    changed_context = changed_build["context"]
+    assert isinstance(changed_context, dict)
+    changed_context["sha256"] = "b" * 64
 
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(changed, bundle)
@@ -131,7 +139,9 @@ def test_bundle_identity_must_match_recipe(recipe: dict[str, object]) -> None:
 def test_public_build_refuses_a_url_outside_the_declared_host_allowlist(
     recipe: dict[str, object],
 ) -> None:
-    recipe["build"]["network"] = {
+    recipe_build = recipe["build"]
+    assert isinstance(recipe_build, dict)
+    recipe_build["network"] = {
         "mode": "public",
         "hosts": ["archives.example"],
     }
@@ -152,7 +162,9 @@ def test_public_build_refuses_a_url_outside_the_declared_host_allowlist(
 def test_public_build_accepts_only_urls_on_the_declared_host_allowlist(
     recipe: dict[str, object],
 ) -> None:
-    recipe["build"]["network"] = {
+    recipe_build = recipe["build"]
+    assert isinstance(recipe_build, dict)
+    recipe_build["network"] = {
         "mode": "public",
         "hosts": ["archives.example"],
     }

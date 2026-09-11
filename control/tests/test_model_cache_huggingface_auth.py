@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import (
     ArtifactSpec,
     ModelCacheService,
@@ -29,7 +30,7 @@ def _service(
     )
     return (
         ModelCacheService(
-            object(),
+            sessionmaker(),
             tmp_path / "cache",
             reserve_bytes=0,
             http_client=client,

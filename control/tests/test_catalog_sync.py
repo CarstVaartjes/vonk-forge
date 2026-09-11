@@ -38,6 +38,26 @@ from tests.recipe_library_source import recipe_library_root
 ROOT = recipe_library_root()
 
 
+def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
+    """Narrow one decoded JSON object member so a deliberate edit stays typed."""
+
+    section = document[key]
+    assert isinstance(section, dict)
+    return section
+
+
+def _selected_model_reference(recipe: dict[str, object]) -> dict[str, object]:
+    """Narrow ``models[0].model`` in a decoded recipe document."""
+
+    models = recipe["models"]
+    assert isinstance(models, list)
+    selection = models[0]
+    assert isinstance(selection, dict)
+    reference = selection["model"]
+    assert isinstance(reference, dict)
+    return reference
+
+
 class Reader:
     def __init__(self, snapshot: RecipeLibrarySnapshot) -> None:
         self.snapshot = snapshot
@@ -163,7 +183,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     first = library.recipe_library(all_models=True).recipes[0]
 
     changed = deepcopy(original.document)
-    changed["metadata"]["title"] = "Accepted recipe successor"
+    _document_section(changed, "metadata")["title"] = "Accepted recipe successor"
     replacement = _item_with_document(original, changed)
     second_result = apply(replacement, "2" * 40)
     assert second_result.state == "current"
@@ -173,7 +193,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     assert second.recipe_revision_id != first.identity.recipe_revision_id
 
     invalid = deepcopy(changed)
-    invalid["models"][0]["model"]["content_sha256"] = "f" * 64
+    _selected_model_reference(invalid)["content_sha256"] = "f" * 64
     failed_result = apply(_item_with_document(original, invalid), "3" * 40)
     assert failed_result.state == "partial"
     assert failed_result.problems
@@ -183,12 +203,12 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     reference = RecipeDefinition.model_validate(original.document).models[0].model
     old_model = catalog.entities.resolve_reference(reference)
     newer_model = deepcopy(old_model.document)
-    newer_model["metadata"]["description"] = "New Model metadata"
+    _document_section(newer_model, "metadata")["description"] = "New Model metadata"
     draft = catalog.entities.revise(old_model.document_id, newer_model, actor="test")
     model_head = catalog.entities.resolve(draft.id, actor="test")
 
     pending_document = deepcopy(changed)
-    pending_document["metadata"]["title"] = "Pending local candidate"
+    _document_section(pending_document, "metadata")["title"] = "Pending local candidate"
     pending = catalog.entities.revise(first.identity.recipe_id, pending_document, actor="test")
 
     rollback_result = apply(original, "4" * 40)
@@ -211,7 +231,9 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
         assert head.active_revision_id == first.identity.recipe_revision_id
         assert head.candidate_revision_id is None
         assert head.generation == 3
-        assert CatalogRepository().active_revision(session, first.identity.recipe_id).id == first.identity.recipe_revision_id
+        recipe_active = CatalogRepository().active_revision(session, first.identity.recipe_id)
+        assert recipe_active is not None
+        assert recipe_active.id == first.identity.recipe_revision_id
         assert ModelCacheService._latest_recipe_digest(session, second.content_sha256) == first.identity.content_sha256
         revisions = list(session.scalars(select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.document_id == first.identity.recipe_id

@@ -41,6 +41,7 @@ from vonk_control.library_contract import (
 )
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentRevision
+from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
@@ -242,8 +243,18 @@ def _app(
     return client
 
 
+def _package_handle(item: RecipeLibraryItem):
+    """Narrow a fetched library item to its published package handle."""
+
+    handle = item.package_handle
+    assert handle is not None
+    return handle
+
+
 def _api_page_limit(api: TestClient, path: str) -> int:
-    parameters = api.app.openapi()["paths"][path]["get"]["parameters"]
+    app = api.app
+    assert isinstance(app, FastAPI)
+    parameters = app.openapi()["paths"][path]["get"]["parameters"]
     for parameter in parameters:
         if parameter.get("name") != "limit":
             continue
@@ -341,7 +352,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     package_model_keys = {
         identity
         for item in fetched_items
-        for identity in item.package_handle.model_identities
+        for identity in _package_handle(item).model_identities
     }
     assert package_model_keys <= model_keys
     assert _selected_model_keys(corpus.index) <= package_model_keys
@@ -403,6 +414,8 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         sync=sync,
         sessions=sessions,
     )
+    app = api.app
+    assert isinstance(app, FastAPI)
     library_models = _library_models(api)
     library_model_keys = {
         (item.identity.publisher, item.identity.slug, item.identity.content_sha256)
@@ -492,10 +505,10 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         "/api/recipe/library",
         "/api/recipe/{selector}",
     }
-    assert canonical_library_paths <= set(api.app.openapi()["paths"])
+    assert canonical_library_paths <= set(app.openapi()["paths"])
     operation_ids = {
         operation.get("operationId")
-        for methods in api.app.openapi()["paths"].values()
+        for methods in app.openapi()["paths"].values()
         if isinstance(methods, dict)
         for operation in methods.values()
         if isinstance(operation, dict)

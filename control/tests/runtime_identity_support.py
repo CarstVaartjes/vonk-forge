@@ -25,6 +25,7 @@ def claim_agent(
     """Claim through the exact packaged Rust runtime contract."""
     if runtime_identity is _DEFAULT_IDENTITY:
         runtime_identity = PACKAGED_RUNTIME_IDENTITY
+    assert runtime_identity is None or isinstance(runtime_identity, Mapping)
     return service.claim(
         *args,
         runtime_identity=runtime_identity,

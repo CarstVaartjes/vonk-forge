@@ -14,6 +14,7 @@ from vonk_control.agent_api import HostHelperGrantResponse
 from vonk_control.library_contract import (
     FreshnessPolicy,
     LibraryFacetValues,
+    LibraryFilterValues,
     LibraryRecipeIdentity,
     ModelLibraryResponse,
 )
@@ -78,19 +79,23 @@ def test_numeric_literal_check_preserves_union_semantics() -> None:
     assert accepted.mixed_float == 2.5
 
     with pytest.raises(ValidationError):
-        _LiteralSemanticsProbe(
-            mixed_string="future",
-            mixed_integer=2,
-            mixed_float=2.5,
-            bool_tag=1,
+        _LiteralSemanticsProbe.model_validate(
+            {
+                "mixed_string": "future",
+                "mixed_integer": 2,
+                "mixed_float": 2.5,
+                "bool_tag": 1,
+            }
         )
     with pytest.raises(ValidationError):
-        _LiteralSemanticsProbe(
-            optional_tag=1.0,
-            mixed_string="future",
-            mixed_integer=2,
-            mixed_float=2.5,
-            bool_tag=True,
+        _LiteralSemanticsProbe.model_validate(
+            {
+                "optional_tag": 1.0,
+                "mixed_string": "future",
+                "mixed_integer": 2,
+                "mixed_float": 2.5,
+                "bool_tag": True,
+            }
         )
 
 
@@ -235,7 +240,7 @@ def test_model_library_json_roundtrip_preserves_datetime_and_strict_tags() -> No
         models=[],
         facets=LibraryFacetValues(usage=[], family=[], version=[], quantization=[]),
         next_cursor=None,
-        filters={},
+        filters=LibraryFilterValues(),
         freshness_policy=FreshnessPolicy(),
     )
     wire = snapshot.model_dump_json()

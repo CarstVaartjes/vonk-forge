@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from tests.conftest import (
+from .conftest import (
     POSTGRES_IMAGE,
     _docker_unavailable,
     postgres_database_name,

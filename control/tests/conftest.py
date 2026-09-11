@@ -201,6 +201,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if (
             relative in _DOCKER_MODULES
             or path.name.endswith("_wire_bridge.py")
-            or _POSTGRES_FIXTURES.intersection(item.fixturenames)
+            or (
+                isinstance(item, pytest.Function)
+                and _POSTGRES_FIXTURES.intersection(item.fixturenames)
+            )
         ):
             item.add_marker(pytest.mark.lane)

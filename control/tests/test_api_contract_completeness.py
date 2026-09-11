@@ -43,10 +43,10 @@ def test_all_mounted_routes_and_typed_agent_roots_are_registered(browser_auth):
     )
     agent = [op for op in operations if "/recipe-jobs/" in op["path"]]
     assert {op["method"] for op in agent} == {"GET", "PUT"}
-    assert all(
-        not path.startswith("/agent/") for path in admin_openapi_schema(app)["paths"]
-    )
-    assert "/metrics" not in admin_openapi_schema(app)["paths"]
+    admin_paths = admin_openapi_schema(app)["paths"]
+    assert isinstance(admin_paths, dict)
+    assert all(not path.startswith("/agent/") for path in admin_paths)
+    assert "/metrics" not in admin_paths
 
 
 def test_hidden_new_route_fails_even_when_absent_from_openapi():
@@ -222,7 +222,11 @@ def test_stream_flag_cannot_hide_an_untyped_json_response():
 
 def test_custom_transport_cannot_hide_behind_a_framework_documentation_path():
     app = FastAPI()
-    app.add_route("/docs", raw_reader)
+
+    async def custom_transport(request: Request) -> Response:
+        return Response()
+
+    app.add_route("/docs", custom_transport)
     with pytest.raises(ContractGraphError, match="Unregistered transport: /docs"):
         discover_contracts(app)
 

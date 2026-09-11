@@ -355,7 +355,9 @@ def test_controller_tensor_parallel_result_uses_shared_rust_evidence_contract(
     while rows := _queued_children(sessions, start_operation.id):
         assert len(rows) == 1
         row = rows[0]
-        seen_roles.append(row.payload["role"])
+        role = row.payload["role"]
+        assert isinstance(role, str)
+        seen_roles.append(role)
         assert row.payload.get("phase") is None
         results = _bridge(install_start_wire_probe, rows)
         for result in results:
@@ -381,8 +383,14 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     )
     # The same descriptor must survive both the API model and Rust parser.
     document = assignment.to_mapping()
-    document["objects"][0]["name"] = "weights/模型 weights.bin"
-    document["objects"][1]["name"] = "__init__.py"
+    objects = document["objects"]
+    assert isinstance(objects, list)
+    weights = objects[0]
+    assert isinstance(weights, dict)
+    weights["name"] = "weights/模型 weights.bin"
+    initializer = objects[1]
+    assert isinstance(initializer, dict)
+    initializer["name"] = "__init__.py"
     assignment = DistributionAssignment.parse(document)
     source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
     source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)

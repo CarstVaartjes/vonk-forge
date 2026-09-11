@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
@@ -32,6 +32,14 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 from tests.recipe_library_source import recipe_library_root
 
 ROOT = recipe_library_root()
+
+
+def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
+    """Narrow one decoded JSON object member so a deliberate edit stays typed."""
+
+    section = document[key]
+    assert isinstance(section, dict)
+    return section
 
 
 def _insert_canonical_rows(
@@ -345,7 +353,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     entities.resolve(recipe_revision.id, actor="test")
 
     old_document = copy.deepcopy(model_revision.document)
-    old_document["identity"]["version"] = "0.0.1"
+    _document_section(old_document, "identity")["version"] = "0.0.1"
     old_digest = content_sha256(ModelDefinition.model_validate(old_document))
     old_revision = CatalogDocumentRevision(
         id=str(uuid.uuid4()),
@@ -540,8 +548,10 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(tmp_path: Pat
         assert revision is not None
         revision_id = revision.id
     with engine.begin() as connection:
+        head_table = CatalogDocumentRevision.__table__
+        assert isinstance(head_table, Table)
         connection.execute(
-            CatalogDocumentRevision.__table__.update()
+            head_table.update()
             .where(CatalogDocumentRevision.id == revision_id)
             .values(document={"kind": "model"})
         )

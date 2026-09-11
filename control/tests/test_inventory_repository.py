@@ -52,7 +52,11 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         )
     )
     with repo._sessions.begin() as session:
-        session.get(NodeInventorySnapshot, stored.id).capabilities = {"bad": "value"}
+        snapshot = session.get(NodeInventorySnapshot, stored.id)
+        assert snapshot is not None
+        # Persist a JSON object where the array contract requires a list, so
+        # the read path has to reject malformed stored state.
+        object.__setattr__(snapshot, "capabilities", {"bad": "value"})
 
     with pytest.raises(ValueError, match="inventory capabilities are invalid"):
         repo.latest(node, now=now, maximum_age=60)

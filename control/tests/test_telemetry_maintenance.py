@@ -4,13 +4,18 @@ import asyncio
 import json
 import threading
 import uuid
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Self
 
 import pytest
 from sqlalchemy import create_engine, event, func, select, update
 from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.engine import Result as SQLResult
+from sqlalchemy.orm import Session as SQLASession
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
@@ -160,29 +165,44 @@ def test_claimed_dirty_rows_are_recomputed_in_deterministic_key_order(
     quarter_start = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
     recomputed: list[tuple[int, str, datetime]] = []
 
-    class Result:
+    class Result(SQLResult):
+        def __init__(self) -> None:
+            pass
+
         def all(self):
             return [
                 (900, NODE_A, quarter_start),
                 (60, NODE_A, minute_start),
             ]
 
-    class Session:
-        def execute(self, _statement):
+    class Session(SQLASession):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def execute(self, *args: object, **kwargs: object) -> Result:
             return Result()
 
-    class Transaction:
-        def __enter__(self):
-            return Session()
+        def __enter__(self) -> Self:
+            return self
 
-        def __exit__(self, *_error) -> None:
+        def __exit__(self, *_error: object) -> None:
             return None
 
-    class Sessions:
-        def __call__(self):
-            return Transaction()
+    class Transaction(AbstractContextManager[SQLASession]):
+        def __enter__(self) -> Session:
+            return Session()
 
-        def begin(self):
+        def __exit__(self, *_error: object) -> None:
+            return None
+
+    class Sessions(sessionmaker[SQLASession]):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __call__(self, **local_kw: object) -> Session:
+            return Session()
+
+        def begin(self) -> Transaction:
             return Transaction()
 
     monkeypatch.setattr(
@@ -1535,6 +1555,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
         try:
             return await anext(generator)
         finally:
+            assert isinstance(generator, AsyncGenerator)
             await generator.aclose()
 
     frame = asyncio.run(read_reset())
@@ -1648,4 +1669,5 @@ def test_sqlite_late_sample_dirty_marker_survives_claim_transaction(
             NodeTelemetryRollupMetric,
             (60, NODE_A, start, "cpu_utilization_percent"),
         )
+        assert metric is not None
         assert (metric.sample_count, metric.mean) == (2, 20)

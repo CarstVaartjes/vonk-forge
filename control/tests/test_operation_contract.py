@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import canonical_message
+from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.operation_contract import (
     OperationMemberProgress,
     OperationPhase,
@@ -157,7 +158,9 @@ def test_failure_evidence_is_bounded_and_secret_free() -> None:
     )
     assert "token" not in safe
     assert "authorization" not in str(safe)
-    assert len(safe["detail"]) == 1024
+    detail = text(safe["detail"])
+    assert detail is not None
+    assert len(detail) == 1024
     assert len(canonical_message(safe)) <= 8192
 
 
@@ -186,7 +189,9 @@ def test_partial_progress_preserves_omitted_members_but_clears_explicit_empty() 
     retained = validate_progress_update(previous, {"phase": "verify"})
     assert retained["completed_bytes"] == 10
     assert retained["total_bytes"] == 100
-    assert retained["members"][0]["member_id"] == "node"
+    members = require_sequence(retained["members"], "retained members must be a sequence")
+    member = require_mapping(members[0], "retained member must be an object")
+    assert member["member_id"] == "node"
     cleared = validate_progress_update(previous, {"phase": "verify", "members": []})
     assert cleared["members"] == []
     assert cleared["completed_bytes"] == 10

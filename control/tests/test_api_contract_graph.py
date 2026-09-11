@@ -10,6 +10,7 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.jobs import JobService
 
 # These values are intentionally defined by the selected engine or authority
 # document. Their surrounding request, response, and receipt remain typed.
@@ -41,7 +42,7 @@ def _application():
     # Validation-mode Pydantic schemas alone miss custom serializer regressions.
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(
-        jobs=object(),
+        jobs=JobService(sessionmaker(), clock=lambda: datetime(2026, 9, 7, tzinfo=UTC)),
         tokens=TokenCodec(key),
         audits=MemoryAuditStore(),
         browser_auth=BrowserAuthService(

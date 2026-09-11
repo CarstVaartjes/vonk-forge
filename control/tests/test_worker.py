@@ -18,7 +18,13 @@ def _service(tmp_path):
 def test_worker_dispatches_registered_handler_and_persists_result(tmp_path) -> None:
     jobs = _service(tmp_path)
     job = jobs.enqueue("probe", "admin", "abc", ["node"], {"value": 4})
-    worker = Worker(jobs, "worker-1", {"probe": lambda payload: {"result": payload["value"] + 1}})
+
+    def probe(payload: HandlerRequest) -> dict[str, object]:
+        value = payload["value"]
+        assert isinstance(value, int)
+        return {"result": value + 1}
+
+    worker = Worker(jobs, "worker-1", {"probe": probe})
     assert worker.run_once()
     assert jobs.get(job.id).state == "succeeded"
     assert jobs.get(job.id).result == {"result": 5}
@@ -203,8 +209,11 @@ def test_telemetry_maintenance_cadence_is_fixed_aware_and_does_not_burst() -> No
     current = datetime(2026, 8, 15, 12, tzinfo=UTC)
     calls: list[datetime] = []
 
-    class Maintenance:
-        def run_once(self) -> None:
+    class Maintenance(telemetry_maintenance.TelemetryMaintenance):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def run_once(self, *args: object, **kwargs: object) -> None:
             calls.append(current)
 
     cadence = telemetry_maintenance.TelemetryMaintenanceCadence(
@@ -244,8 +253,11 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
     current = datetime(2026, 8, 15, 12, tzinfo=UTC)
     events: list[str] = []
 
-    class Maintenance:
-        def run_once(self) -> None:
+    class Maintenance(telemetry_maintenance.TelemetryMaintenance):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def run_once(self, *args: object, **kwargs: object) -> None:
             events.append("maintenance")
 
     class Source:

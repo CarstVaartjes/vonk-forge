@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -26,8 +28,33 @@ ADMIN_VERIFIER = hash_password(ADMIN_PASSWORD)
 
 
 class Jobs:
+    def enqueue(
+        self,
+        kind: str,
+        actor: str,
+        authority_revision: str,
+        targets: Sequence[str],
+        payload: Mapping[str, object],
+        *,
+        request_id: str,
+    ) -> object:
+        raise AssertionError
+
     def get(self, job_id: str) -> object:
         raise KeyError(job_id)
+
+    def list(self, *, limit: int = 100) -> list[object]:
+        return []
+
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        status: str | None = None,
+        target: str | None = None,
+    ) -> tuple[list[object], str | None, int]:
+        raise AssertionError
 
 
 def _client(
@@ -83,7 +110,9 @@ def _login(client: TestClient, password: str = ADMIN_PASSWORD):
 def test_auth_openapi_documents_every_runtime_error_status() -> None:
     client, _audits, _verifier = _client()
 
-    schema = client.app.openapi()
+    app = client.app
+    assert isinstance(app, FastAPI)
+    schema = app.openapi()
     paths = schema["paths"]
     expected = {
         "/api/auth/login": {"401", "403", "422", "429"},
@@ -155,7 +184,9 @@ def _chunked_asgi_login(
         start = next(
             message for message in sent if message["type"] == "http.response.start"
         )
-        return int(start["status"]), reads
+        status = start["status"]
+        assert isinstance(status, int)
+        return status, reads
 
     return asyncio.run(request())
 
