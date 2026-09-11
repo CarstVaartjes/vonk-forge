@@ -431,7 +431,7 @@ class _SwitchAdapter:
         ]
         return self._operations[operation_id][0]
 
-    def get(self, operation_id: str) -> FleetProfileChildOperation:
+    def get(self, operation_id: str, *, session: object = None) -> FleetProfileChildOperation:
         states = self._operations[operation_id]
         index = min(self._states[operation_id] + 1, len(states) - 1)
         self._states[operation_id] = index
@@ -599,7 +599,7 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
         self.events.append(kind)
         return operation
 
-    def get(self, operation_id: str) -> SimpleNamespace:
+    def get(self, operation_id: str, *, session: object = None) -> SimpleNamespace:
         return self.operations[operation_id]
 
     def preview_mapping(self, revision_id, node_ids, *, parameters, actor):
@@ -1662,6 +1662,113 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert resumed.current_operation_id == application.id
     assert resumed.progress.switch_adapter is not None
     assert resumed.progress.switch_adapter.active_operation_id == child_id
+
+
+def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> None:
+    """Advancing a child must reuse the tick's transaction, not race its row lock.
+
+    The worker's tick holds the application row and then reads the switch child.
+    An adapter that opens its own transaction waits on that same row in
+    PostgreSQL: the worker deadlocks against itself, the child never advances
+    and the run stays parked. SQLite has no ``SELECT ... FOR UPDATE``, so the
+    caller writes the row instead to hold the same writer lock; an adapter that
+    opens its own writer then fails here with "database is locked".
+    """
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'operations.sqlite'}",
+        connect_args={"check_same_thread": False, "timeout": 0.25},
+    )
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, engine=engine
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Joined transaction",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "joined-transaction",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(645),
+        actor="admin",
+    )
+    assert service.tick() is True
+    started = service.application(application.id)
+    assert started.progress.switch_adapter is not None
+    child_id = started.progress.switch_adapter.active_operation_id
+    assert isinstance(child_id, str)
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id, with_for_update=True)
+        assert row is not None
+        session.execute(
+            update(FleetProfileApplication)
+            .where(FleetProfileApplication.id == application.id)
+            .values(status_reason="held by the profile tick")
+        )
+
+        child = adapter.get(application.id, session=session)
+
+        assert child.state in {"queued", "running"}
+        assert (
+            session.scalar(
+                select(FleetProfileApplication.status_reason).where(
+                    FleetProfileApplication.id == application.id
+                )
+            )
+            == "held by the profile tick"
+        )
+        stored = session.get(FleetProfileApplication, application.id)
+        assert stored is not None
+        progress = FleetProfileApplicationProgress.model_validate(stored.progress)
+        assert isinstance(progress.switch_adapter, FleetProfileSwitchAdapterState)
+        assert progress.switch_adapter.active_operation_id == child_id
+
+    committed = service.application(application.id).progress.switch_adapter
+    assert committed is not None
+    assert committed.active_operation_id == child_id
 
 
 def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(

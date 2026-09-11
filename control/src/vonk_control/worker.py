@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -11,8 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .jobs import JobService
+from .logging import log_event
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
+
+_LOGGER = logging.getLogger("vonk-control-worker")
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -634,7 +638,19 @@ if __name__ == "__main__":
     )
     try:
         while True:
-            if not worker.run_once():
+            try:
+                if not worker.run_once():
+                    time.sleep(1)
+            except Exception as error:  # noqa: BLE001 - a tick must not kill the worker
+                # Retried on the next pass. A worker that exits here stops
+                # draining every coordinator, so the failure is reported and the
+                # loop continues rather than taking the whole scheduler down.
+                log_event(
+                    _LOGGER,
+                    "worker.tick_failed",
+                    service="control-worker",
+                    error=type(error).__name__,
+                )
                 time.sleep(1)
     finally:
         worker.close()

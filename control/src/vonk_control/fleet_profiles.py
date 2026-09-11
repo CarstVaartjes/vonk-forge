@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
@@ -304,9 +305,26 @@ class RunSwitchFleetProfileAdapter:
         self._save_state(application_id, state)
         return self._advance(application_id, ordered_assignments)
 
-    def get(self, operation_id: str) -> FleetProfileChildOperation:
-        with self._sessions() as session:
+    def get(
+        self, operation_id: str, *, session: Session | None = None
+    ) -> FleetProfileChildOperation:
+        if session is not None:
+            # The caller already holds this application's row. Joining its
+            # transaction keeps the mirror write atomic with it, and the caller's
+            # own loop ticks the run-switch coordinator, so no tick is run here.
             application = session.get(FleetProfileApplication, operation_id)
+            if application is None:
+                raise KeyError(operation_id)
+            state = self._state(application)
+            if state is None:
+                raise KeyError(operation_id)
+            return self._advance(
+                operation_id,
+                self._assignments_from_state(state),
+                session=session,
+            )
+        with self._sessions() as own:
+            application = own.get(FleetProfileApplication, operation_id)
             if application is None:
                 raise KeyError(operation_id)
             state = self._state(application)
@@ -410,95 +428,115 @@ class RunSwitchFleetProfileAdapter:
         self,
         application_id: str,
         assignments: tuple[FleetProfileAssignment, ...],
+        *,
+        session: Session | None = None,
     ) -> FleetProfileChildOperation:
-        with self._sessions.begin() as session:
-            application = session.get(FleetProfileApplication, application_id)
-            if application is None:
-                raise KeyError(application_id)
-            state = self._state(application)
-            if state is None:
-                raise KeyError(application_id)
-            active = state.get("active_operation_id")
-            position = state.get("position")
-            if isinstance(active, str):
-                try:
-                    child = self._run_switch.get(active)
-                except KeyError:
-                    return self._failed_in_session(
-                        session, application, state, "Run/Switch child is unavailable"
-                    )
-                if child.state in {"queued", "running"}:
-                    view = self._view_from_child(application_id, state, child)
-                    state["state"] = view.state
-                    if view.progress is not None:
-                        state["child_progress"] = view.progress.model_dump(mode="json")
-                    self._write_state(session, application, state)
-                    session.flush()
-                    return view
-                if child.state in {"failed", "cancelled"}:
-                    reason = child.status_reason or (
-                        f"Run/Switch child ended in {child.state}"
-                    )
-                    return self._failed_in_session(session, application, state, reason)
-                if child.state != "succeeded":
-                    return self._failed_in_session(
-                        session,
-                        application,
-                        state,
-                        f"Run/Switch child returned {child.state}",
-                    )
-                children = list(sequence(state.get("children")) or ())
-                children.append(
-                    {
-                        "operation_id": child.operation_id,
-                        "kind": state.get("active_kind"),
-                        "state": child.state,
-                    }
+        """Advance the switch child, joining a caller's transaction when given one.
+
+        A caller that already holds the application row passes its session: a
+        second transaction writing that row waits for the caller's own lock and
+        deadlocks the worker.
+        """
+
+        if session is not None:
+            return self._advance_in_session(session, application_id, assignments)
+        with self._sessions.begin() as own:
+            return self._advance_in_session(own, application_id, assignments)
+
+    def _advance_in_session(
+        self,
+        session: Session,
+        application_id: str,
+        assignments: tuple[FleetProfileAssignment, ...],
+    ) -> FleetProfileChildOperation:
+
+        application = session.get(FleetProfileApplication, application_id)
+        if application is None:
+            raise KeyError(application_id)
+        state = self._state(application)
+        if state is None:
+            raise KeyError(application_id)
+        active = state.get("active_operation_id")
+        position = state.get("position")
+        if isinstance(active, str):
+            try:
+                child = self._run_switch.get(active)
+            except KeyError:
+                return self._failed_in_session(
+                    session, application, state, "Run/Switch child is unavailable"
                 )
-                state["children"] = children
-                state["active_operation_id"] = None
-                state["active_kind"] = None
-                state["position"] = (integer(position) or 0) + 1
+            if child.state in {"queued", "running"}:
+                view = self._view_from_child(application_id, state, child)
+                state["state"] = view.state
+                if view.progress is not None:
+                    state["child_progress"] = view.progress.model_dump(mode="json")
                 self._write_state(session, application, state)
                 session.flush()
-                position = state["position"]
-            queue = sequence(state.get("queue"))
-            if queue is None or (integer(position) or 0) >= len(queue):
-                state["state"] = "succeeded"
-                state["result"] = {
-                    "children": list(sequence(state.get("children")) or ()),
-                    "assignment_ids": list(
-                        sequence(state.get("assignment_ids")) or ()
-                    ),
-                }
-                self._write_state(session, application, state)
-                session.flush()
-                return self._view_from_state(application, state)
-            item = queue[integer(position) or 0]
-            if not isinstance(item, Mapping):
+                return view
+            if child.state in {"failed", "cancelled"}:
+                reason = child.status_reason or (
+                    f"Run/Switch child ended in {child.state}"
+                )
+                return self._failed_in_session(session, application, state, reason)
+            if child.state != "succeeded":
                 return self._failed_in_session(
                     session,
                     application,
                     state,
-                    "Persisted profile switch queue is invalid",
+                    f"Run/Switch child returned {child.state}",
                 )
-            operation = self._start_child(
-                application_id,
-                item,
-                assignments,
-                tuple(
-                    str(node_id)
-                    for node_id in (sequence(state.get("scope_node_ids")) or ())
-                ),
-                str(state["actor"]),
-                str(state["request_id"]),
-                integer(position) or 0,
+            children = list(sequence(state.get("children")) or ())
+            children.append(
+                {
+                    "operation_id": child.operation_id,
+                    "kind": state.get("active_kind"),
+                    "state": child.state,
+                }
             )
-            state["active_operation_id"] = operation.operation_id
-            state["active_kind"] = item.get("kind")
+            state["children"] = children
+            state["active_operation_id"] = None
+            state["active_kind"] = None
+            state["position"] = (integer(position) or 0) + 1
             self._write_state(session, application, state)
             session.flush()
-            return self._view_from_child(application_id, state, operation)
+            position = state["position"]
+        queue = sequence(state.get("queue"))
+        if queue is None or (integer(position) or 0) >= len(queue):
+            state["state"] = "succeeded"
+            state["result"] = {
+                "children": list(sequence(state.get("children")) or ()),
+                "assignment_ids": list(
+                    sequence(state.get("assignment_ids")) or ()
+                ),
+            }
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_state(application, state)
+        item = queue[integer(position) or 0]
+        if not isinstance(item, Mapping):
+            return self._failed_in_session(
+                session,
+                application,
+                state,
+                "Persisted profile switch queue is invalid",
+            )
+        operation = self._start_child(
+            application_id,
+            item,
+            assignments,
+            tuple(
+                str(node_id)
+                for node_id in (sequence(state.get("scope_node_ids")) or ())
+            ),
+            str(state["actor"]),
+            str(state["request_id"]),
+            integer(position) or 0,
+        )
+        state["active_operation_id"] = operation.operation_id
+        state["active_kind"] = item.get("kind")
+        self._write_state(session, application, state)
+        session.flush()
+        return self._view_from_child(application_id, state, operation)
 
     def _start_child(
         self,
@@ -778,6 +816,18 @@ class RunSwitchFleetProfileAdapter:
                 else None
             ),
         )
+
+
+@contextmanager
+def _borrowed(session: Session) -> Iterator[Session]:
+    """Yield a caller's session without owning its transaction.
+
+    A caller that already holds the application row passes its session down so
+    the adapter cannot open a second transaction on the same row: that nested
+    write waits for the lock its own caller holds and deadlocks the worker.
+    """
+
+    yield session
 
 
 def _aware(value: datetime) -> datetime:
@@ -2178,7 +2228,9 @@ class FleetProfileService:
                     if child_source == "switch-adapter":
                         if self._switch_adapter is None:
                             raise KeyError(row.current_operation_id)
-                        child = self._switch_adapter.get(row.current_operation_id)
+                        child = self._switch_adapter.get(
+                            row.current_operation_id, session=session
+                        )
                     else:
                         if self._recipe_operations is None:
                             raise KeyError(row.current_operation_id)

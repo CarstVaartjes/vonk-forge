@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import OperationProgress
@@ -11,6 +11,9 @@ from vonk_agent_protocol import OperationProgress
 from .preparation_contract import RolloutPreparation
 from .run_switch_contract import RunSwitchOperationResult
 from .strict_json import StrictJSONModel
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -539,8 +542,15 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
-    def get(self, operation_id: str) -> FleetProfileChildOperation:
-        """Return the durable child state for inspection or resumption."""
+    def get(
+        self, operation_id: str, *, session: Session | None = None
+    ) -> FleetProfileChildOperation:
+        """Return the durable child state for inspection or resumption.
+
+        A caller that already holds this application's row passes its session so
+        the adapter joins that transaction instead of opening a second one on a
+        row the caller has locked.
+        """
 
         ...
 
