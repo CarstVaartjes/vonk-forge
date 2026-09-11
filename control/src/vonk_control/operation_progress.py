@@ -12,6 +12,8 @@ from math import exp
 
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 
+from .bounded_json import integer
+
 TRANSFER_PHASES = frozenset(
     {
         "download",
@@ -65,7 +67,7 @@ def observe_progress(
     delta_time = max(0.0, (now - prior_time).total_seconds()) if prior_time else 0.0
     elapsed = float(old.get("elapsed_seconds") or 0.0) + delta_time
     advanced = any(
-        int(result.get(key) or 0) > int(old.get(key) or 0)
+        integer(result.get(key), default=0) > integer(old.get(key), default=0)
         for key in ("completed_bytes", "completed_items")
     ) or result["phase"] != old.get("phase")
     result.update(
@@ -85,8 +87,8 @@ def observe_progress(
     ):
         delta = max(
             0,
-            int(result.get("completed_bytes") or 0)
-            - int(old.get("completed_bytes") or 0),
+            integer(result.get("completed_bytes"), default=0)
+            - integer(old.get("completed_bytes"), default=0),
         )
         rate = min(10**15, delta / delta_time)
         prior_rate = old.get("smoothed_bytes_per_second")
@@ -104,7 +106,7 @@ def observe_progress(
                 10**9,
                 max(
                     0.0,
-                    (int(total) - int(result.get("completed_bytes") or 0)) / smoothed,
+                    (integer(total, default=0) - integer(result.get("completed_bytes"), default=0)) / smoothed,
                 ),
             )
     return project_progress(OperationProgress.model_validate(result), now).model_dump(
