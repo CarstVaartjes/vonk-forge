@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Audit the digest-pinned container images recorded in the image lock.
+
+This is a manual, read-only checker. It resolves every pin in
+``deploy/compose/images.lock.json`` against its registry and reports:
+
+* pins that no longer resolve at all;
+* version tags that now point at a digest other than the recorded one;
+* digest-pinned references used by the build and Compose inputs that are
+  missing from the inventory.
+
+It performs registry reads only: it never writes a file, pulls layers, or
+mutates local image state. It is deliberately not wired into CI; run it by hand
+when reviewing or refreshing the pins. See ``docs/image-pin-refresh.md``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+INVENTORY = "deploy/compose/images.lock.json"
+SECTIONS = ("images", "build_bases")
+
+# Build and Compose inputs that declare upstream images. Keep this list in sync
+# with the files named in docs/image-pin-refresh.md: a new digest-pinned
+# reference anywhere in here that is absent from the inventory is a finding.
+SCAN_PATHS = (
+    "control/Dockerfile",
+    "deploy/compose/.env.example",
+    "deploy/compose/compose.yaml",
+    "deploy/compose/tailscale/compose.yaml",
+    "deploy/compose/hermes-agent/compose.yaml",
+    "deploy/compose/hermes-agent/Dockerfile",
+    "deploy/compose/litellm/Dockerfile",
+    "scripts/verify-controller-skopeo",
+)
+
+PIN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._/-]*"
+    r"(?::[A-Za-z0-9][A-Za-z0-9._-]*)?"
+    r"@sha256:[0-9a-f]{64}"
+)
+DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def tag_reference(reference: str) -> str | None:
+    """Return ``NAME:TAG`` for a pin, or ``None`` for a digest-only reference."""
+    name = reference.split("@", 1)[0]
+    return name if ":" in name.rsplit("/", 1)[-1] else None
+
+
+def resolve(reference: str, timeout: float) -> tuple[str | None, str | None]:
+    """Resolve a reference to its manifest digest through the registry."""
+    if shutil.which("docker") is None:
+        return None, "docker is not available on PATH"
+    try:
+        result = subprocess.run(
+            ["docker", "buildx", "imagetools", "inspect", "--raw", reference],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"registry read timed out after {timeout:g}s"
+    if result.returncode != 0:
+        lines = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        return None, lines[-1] if lines else f"exit status {result.returncode}"
+    if not result.stdout:
+        return None, "registry returned an empty manifest"
+    return "sha256:" + hashlib.sha256(result.stdout).hexdigest(), None
+
+
+def load_inventory(root: Path) -> dict[str, list[str]]:
+    """Map each recorded reference to the inventory keys that hold it."""
+    document = json.loads((root / INVENTORY).read_text(encoding="utf-8"))
+    references: dict[str, list[str]] = {}
+    for section in SECTIONS:
+        entries = document.get(section)
+        if not isinstance(entries, dict):
+            raise TypeError(f"{INVENTORY} {section} mapping is missing or invalid")
+        for name, reference in entries.items():
+            digest = reference.rsplit("@", 1)[-1] if isinstance(reference, str) else ""
+            if DIGEST.fullmatch(digest) is None:
+                raise ValueError(f"{INVENTORY} {section}.{name} is not digest pinned")
+            references.setdefault(reference, []).append(f"{section}.{name}")
+    return references
+
+
+def used_references(root: Path) -> dict[str, str]:
+    """Map every digest-pinned reference in the scanned inputs to file:line."""
+    used: dict[str, str] = {}
+    for relative in SCAN_PATHS:
+        path = root / relative
+        if not path.is_file():
+            raise ValueError(f"scan input is missing: {relative}")
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for reference in PIN.findall(line):
+                used.setdefault(reference, f"{relative}:{number}")
+    return used
+
+
+def audit(root: Path, timeout: float) -> dict[str, object]:
+    inventory = load_inventory(root)
+    used = used_references(root)
+    findings: list[dict[str, str]] = []
+    checked: list[dict[str, str]] = []
+
+    for reference, keys in sorted(inventory.items()):
+        recorded = reference.rsplit("@", 1)[1]
+        entry = {"reference": reference, "inventory": ", ".join(sorted(keys))}
+        checked.append(entry)
+        tag = tag_reference(reference)
+        if tag is not None:
+            entry["tag"] = tag
+            tag_digest, tag_error = resolve(tag, timeout)
+            if tag_error is None and tag_digest == recorded:
+                entry["tag_digest"] = tag_digest
+                continue
+            pinned_digest, pinned_error = resolve(reference, timeout)
+            if pinned_error is not None:
+                findings.append(
+                    {
+                        "kind": "unresolved",
+                        "reference": reference,
+                        "inventory": entry["inventory"],
+                        "detail": pinned_error,
+                    }
+                )
+                continue
+            entry["tag_digest"] = tag_digest or ""
+            entry["pinned_digest"] = pinned_digest or ""
+            if tag_error is not None:
+                detail = f"tag {tag} no longer resolves: {tag_error}"
+            else:
+                detail = f"tag {tag} now resolves to {tag_digest}"
+            findings.append(
+                {
+                    "kind": "moved",
+                    "reference": reference,
+                    "inventory": entry["inventory"],
+                    "detail": detail,
+                }
+            )
+        else:
+            pinned_digest, pinned_error = resolve(reference, timeout)
+            if pinned_error is not None:
+                findings.append(
+                    {
+                        "kind": "unresolved",
+                        "reference": reference,
+                        "inventory": entry["inventory"],
+                        "detail": pinned_error,
+                    }
+                )
+                continue
+            entry["pinned_digest"] = pinned_digest or ""
+
+    for reference, location in sorted(used.items()):
+        if reference not in inventory:
+            findings.append(
+                {
+                    "kind": "unlisted",
+                    "reference": reference,
+                    "inventory": "",
+                    "detail": f"pinned at {location} but absent from {INVENTORY}",
+                }
+            )
+
+    return {
+        "inventory": INVENTORY,
+        "inventoried": len(inventory),
+        "checked": checked,
+        "findings": findings,
+        "ok": not findings,
+    }
+
+
+def report(payload: dict[str, object]) -> None:
+    findings = payload["findings"]
+    assert isinstance(findings, list)
+    print(f"check-image-pins: {payload['inventoried']} pins in {payload['inventory']}")
+    if not findings:
+        print("check-image-pins: every pin resolves and every tag matches")
+        return
+    for finding in findings:
+        location = finding["inventory"] or "-"
+        print(
+            f"{finding['kind']}: {finding['reference']} [{location}] "
+            f"- {finding['detail']}",
+            file=sys.stderr,
+        )
+    print(f"check-image-pins: {len(findings)} finding(s)", file=sys.stderr)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="seconds to wait for each registry read (default: 120)",
+    )
+    parser.add_argument("--json", action="store_true")
+    arguments = parser.parse_args()
+    try:
+        payload = audit(arguments.root.resolve(), arguments.timeout)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        print(f"check-image-pins: {error}", file=sys.stderr)
+        return 2
+    if arguments.json:
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        report(payload)
+    return 0 if payload["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

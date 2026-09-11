@@ -10,7 +10,8 @@ with one complete set of registry digests. The three `vonk-forge` packages are
 `ghcr.io/carstvaartjes/vonk-forge-hermes`. Build the `api` and `worker`
 Dockerfile targets from the same release commit; the worker target deliberately
 contains neither Git nor OpenSSH. The Node and Python build bases are separately
-digest-pinned in the lock.
+digest-pinned in the lock. Refreshing a pin is a manual, reviewed edit; follow
+[Refresh the pinned container images](../image-pin-refresh.md).
 
 ## Future image releases
 
