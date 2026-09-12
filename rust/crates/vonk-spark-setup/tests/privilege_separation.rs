@@ -1051,103 +1051,105 @@ fn start_converges_when_reset_failed_reports_unit_not_loaded() {
 }
 
 #[test]
-fn reenrollment_replaces_a_paired_identity_without_manual_state_edits() {
-    let temporary = tempdir().unwrap();
-    let install_paths = paths(temporary.path());
-    let ca = controller_ca();
-    configured_install(&install_paths, &ca, "paired-v1\n");
-    let mut prompt = TokenOnlyPrompt { secrets: 0 };
-    let mut prepare_runner = RecordingRunner::default();
-    let prepared = prepare_setup(
-        &request(temporary.path()).with_enroll(true),
-        &install_paths,
-        &mut prompt,
-        &mut prepare_runner,
-        CallerIdentity::unprivileged(1000),
-    )
-    .unwrap();
+fn explicit_reenrollment_replaces_paired_and_recovering_identities() {
+    for state in ["paired-v1\n", "recovering-v1\n"] {
+        let temporary = tempdir().unwrap();
+        let install_paths = paths(temporary.path());
+        let ca = controller_ca();
+        configured_install(&install_paths, &ca, state);
+        let mut prompt = TokenOnlyPrompt { secrets: 0 };
+        let mut prepare_runner = RecordingRunner::default();
+        let prepared = prepare_setup(
+            &request(temporary.path()).with_enroll(true),
+            &install_paths,
+            &mut prompt,
+            &mut prepare_runner,
+            CallerIdentity::unprivileged(1000),
+        )
+        .unwrap();
 
-    assert_eq!(prompt.secrets, 1);
-    assert!(prepare_runner.commands.is_empty());
-    let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
-    let mut apply_runner = RecordingRunner::default();
-    apply_setup_from(
-        handoff_runner.commands[0].stdin.as_slice(),
-        prepared.package_path(),
-        prepared.executable_path(),
-        &install_paths,
-        &mut apply_runner,
-        CallerIdentity::sudo_root(1000),
-    )
-    .unwrap();
+        assert_eq!(prompt.secrets, 1);
+        assert!(prepare_runner.commands.is_empty());
+        let mut handoff_runner = RecordingRunner::default();
+        handoff_to_root_with_authority(
+            &prepared,
+            &mut handoff_runner,
+            &ReleaseAuthority::canonical(),
+        )
+        .unwrap();
+        let mut apply_runner = RecordingRunner::default();
+        apply_setup_from(
+            handoff_runner.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut apply_runner,
+            CallerIdentity::sudo_root(1000),
+        )
+        .unwrap();
 
-    let pair = apply_runner
-        .commands
-        .iter()
-        .find(|command| command.args.iter().any(|argument| argument == "pair"))
-        .unwrap();
-    assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
-    let pair_position = apply_runner
-        .commands
-        .iter()
-        .position(|command| command.args.iter().any(|argument| argument == "pair"))
-        .unwrap();
-    let stop_position = apply_runner
-        .commands
-        .iter()
-        .position(|command| command.args == ["stop", "vonk-forge-agent.service"])
-        .unwrap();
-    assert!(
-        pair_position < stop_position,
-        "a rejected grant must not stop a healthy agent"
-    );
-    assert!(apply_runner.commands.iter().any(|command| {
-        command.program == std::path::Path::new("/usr/bin/systemctl")
-            && command.args == ["stop", "vonk-forge-agent.service"]
-    }));
-    assert!(apply_runner.commands.iter().any(|command| {
-        command.program == std::path::Path::new("/usr/bin/systemctl")
-            && command.args == ["reset-failed", "vonk-forge-agent.service"]
-    }));
-    let reload_position = apply_runner
-        .commands
-        .iter()
-        .position(|command| {
+        let pair = apply_runner
+            .commands
+            .iter()
+            .find(|command| command.args.iter().any(|argument| argument == "pair"))
+            .unwrap();
+        assert_eq!(pair.stdin, format!("{TOKEN}\n").into_bytes());
+        let pair_position = apply_runner
+            .commands
+            .iter()
+            .position(|command| command.args.iter().any(|argument| argument == "pair"))
+            .unwrap();
+        let stop_position = apply_runner
+            .commands
+            .iter()
+            .position(|command| command.args == ["stop", "vonk-forge-agent.service"])
+            .unwrap();
+        assert!(
+            pair_position < stop_position,
+            "a rejected grant must not stop a healthy agent"
+        );
+        assert!(apply_runner.commands.iter().any(|command| {
             command.program == std::path::Path::new("/usr/bin/systemctl")
-                && command.args == ["daemon-reload"]
-        })
-        .unwrap();
-    let reset_position = apply_runner
-        .commands
-        .iter()
-        .position(|command| {
+                && command.args == ["stop", "vonk-forge-agent.service"]
+        }));
+        assert!(apply_runner.commands.iter().any(|command| {
             command.program == std::path::Path::new("/usr/bin/systemctl")
                 && command.args == ["reset-failed", "vonk-forge-agent.service"]
-        })
-        .unwrap();
-    assert!(reload_position < reset_position);
-    assert!(apply_runner.commands.iter().any(|command| {
-        command.program == std::path::Path::new("/usr/bin/systemctl")
-            && command.args
-                == [
-                    "enable",
-                    "--now",
-                    "vonk-forge-docker-firewall.service",
-                    "vonk-forge-package-helper.socket",
-                    "vonk-forge-agent.service",
-                    "vonk-forge-monitor.service",
-                ]
-    }));
-    assert_eq!(
-        fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
-        "paired-v1\n"
-    );
+        }));
+        let reload_position = apply_runner
+            .commands
+            .iter()
+            .position(|command| {
+                command.program == std::path::Path::new("/usr/bin/systemctl")
+                    && command.args == ["daemon-reload"]
+            })
+            .unwrap();
+        let reset_position = apply_runner
+            .commands
+            .iter()
+            .position(|command| {
+                command.program == std::path::Path::new("/usr/bin/systemctl")
+                    && command.args == ["reset-failed", "vonk-forge-agent.service"]
+            })
+            .unwrap();
+        assert!(reload_position < reset_position);
+        assert!(apply_runner.commands.iter().any(|command| {
+            command.program == std::path::Path::new("/usr/bin/systemctl")
+                && command.args
+                    == [
+                        "enable",
+                        "--now",
+                        "vonk-forge-docker-firewall.service",
+                        "vonk-forge-package-helper.socket",
+                        "vonk-forge-agent.service",
+                        "vonk-forge-monitor.service",
+                    ]
+        }));
+        assert_eq!(
+            fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
+            "paired-v1\n"
+        );
+    }
 }
 
 #[test]

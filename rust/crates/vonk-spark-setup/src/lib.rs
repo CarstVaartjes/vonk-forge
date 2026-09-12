@@ -988,7 +988,10 @@ pub fn prepare_setup_with_authority(
             }
         }
         (InstallState::Existing, false) => ApplyOperation::Upgrade,
-        (InstallState::Existing, true) => {
+        // An explicit grant replaces the identity even when an earlier setup
+        // stopped during readiness. That identity may no longer exist after
+        // Controller recovery; retrying it cannot satisfy the new enrollment.
+        (InstallState::Existing | InstallState::Recovering, true) => {
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
@@ -1004,7 +1007,7 @@ pub fn prepare_setup_with_authority(
                 pairing_token,
             }
         }
-        (InstallState::Recovering, _) => ApplyOperation::Recover,
+        (InstallState::Recovering, false) => ApplyOperation::Recover,
     };
     let envelope = ApplyEnvelope {
         schema_version: 1,
@@ -1264,7 +1267,10 @@ pub fn apply_setup_from_with_authority(
                 ApplyOperation::Pair { .. },
                 InstallState::ConfiguredUnpaired
             )
-            | (ApplyOperation::Reenroll { .. }, InstallState::Existing)
+            | (
+                ApplyOperation::Reenroll { .. },
+                InstallState::Existing | InstallState::Recovering
+            )
             | (ApplyOperation::Recover, InstallState::Recovering)
             | (ApplyOperation::Upgrade, InstallState::Existing)
     ) {
