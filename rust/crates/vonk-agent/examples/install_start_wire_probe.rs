@@ -131,13 +131,28 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let distribution_mode = std::env::args().nth(1).as_deref() == Some("--distribution");
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    let distribution_mode = arguments.iter().any(|value| value == "--distribution");
+    // Constructing the typed claim validators dominates one probe run (~100ms,
+    // against ~4ms for each further claim in the same process), so the wire
+    // tests ask many independent questions per process and read one verdict per
+    // line.  Every claim still crosses the production parser.
+    let verdicts_mode = arguments.iter().any(|value| value == "--verdicts");
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = io::BufWriter::new(stdout.lock());
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
+            continue;
+        }
+        if verdicts_mode {
+            let verdict = match serde_json::from_str::<AgentClaim>(&line) {
+                Ok(claim) => result_for(&claim).is_ok(),
+                Err(_) => false,
+            };
+            writeln!(output, "{}", u8::from(verdict))?;
+            output.flush()?;
             continue;
         }
         if distribution_mode {

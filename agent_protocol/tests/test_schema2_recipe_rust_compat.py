@@ -244,6 +244,38 @@ def _rust_accepts(
     return completed.returncode == 0
 
 
+def _rust_accepts_many(
+    probe: Path, cases: list[tuple[AgentOperation, dict[str, Any]]]
+) -> list[bool]:
+    """Ask one probe process about many claims and read one verdict per line.
+
+    Each claim is still an independent trip through the production Rust parser;
+    only the process boundary is shared.  Building the typed validators costs
+    about 100ms once per process against about 4ms for every further claim, so
+    the per-claim spawn in ``_rust_accepts`` dominates the whole wire tier.
+    """
+
+    if not cases:
+        return []
+    completed = subprocess.run(
+        [str(probe), "--verdicts"],
+        input="".join(
+            json.dumps(_claim(operation, payload), separators=(",", ":")) + "\n"
+            for operation, payload in cases
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    verdicts = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if completed.returncode != 0 or len(verdicts) != len(cases):
+        raise AssertionError(
+            f"wire probe answered {len(verdicts)} of {len(cases)} claims "
+            f"(exit {completed.returncode}): {completed.stderr[-400:]}"
+        )
+    return [verdict == "1" for verdict in verdicts]
+
+
 def _schema_for_value(
     root: dict[str, Any], schema: dict[str, Any], value: Any
 ) -> dict[str, Any]:
@@ -467,15 +499,25 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
     wire_probe: Path,
 ) -> None:
     checked_array_items: set[tuple[str | int, ...]] = set()
+    # Every question this test asks the real Rust parser is collected first and
+    # answered by one probe process: the process boundary, not the claim, is
+    # what costs about 100ms per call.
+    cases: list[tuple[AgentOperation, dict[str, Any]]] = []
+    expectations: list[bool] = []
+    labels: list[tuple[object, ...]] = []
     for operation, model, payload in _plans_and_models():
         schema = model.model_json_schema()
         model.model_validate(payload)
-        assert _rust_accepts(wire_probe, operation, payload)
+        cases.append((operation, payload))
+        expectations.append(True)
+        labels.append((operation.value,))
         for path in _required_paths(schema, schema, payload):
             missing = _without(payload, path)
             with pytest.raises(ValueError):
                 model.model_validate(missing)
-            assert not _rust_accepts(wire_probe, operation, missing), path
+            cases.append((operation, missing))
+            expectations.append(False)
+            labels.append((operation.value, *path))
 
         for path, object_schema in _object_paths(schema, schema, payload):
             for name, field_schema in object_schema.get("properties", {}).items():
@@ -509,7 +551,9 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
                 _at(changed, path)[name] = invalid
                 with pytest.raises(ValueError):
                     model.model_validate(changed)
-                assert not _rust_accepts(wire_probe, operation, changed), (*path, name)
+                cases.append((operation, changed))
+                expectations.append(False)
+                labels.append((operation.value, *path, name))
 
         for path, item_schema in _scalar_array_item_paths(schema, schema, payload):
             if item_schema.get("type") == "string":
@@ -524,8 +568,14 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
             _at(changed, path[:-1])[path[-1]] = invalid
             with pytest.raises(ValueError):
                 model.model_validate(changed)
-            assert not _rust_accepts(wire_probe, operation, changed), path
+            cases.append((operation, changed))
+            expectations.append(False)
+            labels.append((operation.value, *path))
             checked_array_items.add(path)
+    for (label, expected), accepted in zip(
+        zip(labels, expectations), _rust_accepts_many(wire_probe, cases)
+    ):
+        assert accepted == expected, (label, expected)
     assert ("compiled_execution_plan", "runtime", "argv", 0) in checked_array_items
     assert ("compiled_execution_plan", "security", "devices", 0) in checked_array_items
     assert (
@@ -567,6 +617,8 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
     checked: set[tuple[str, tuple[str | int, ...], str]] = set()
     topology_modes: set[str] = set()
     topology_backends: set[str] = set()
+    cases: list[tuple[AgentOperation, dict[str, Any]]] = []
+    labels: list[tuple[str, tuple[str | int, ...], str, bool]] = []
     for operation, model, payload in _positive_enum_cases():
         schema = model.model_json_schema()
         for path, object_schema in _object_paths(schema, schema, payload):
@@ -589,14 +641,17 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                         model.model_validate(changed)
                     except ValueError:
                         continue
-                    assert _rust_accepts(wire_probe, operation, changed), (
-                        *path,
-                        name,
-                        candidate,
+                    cases.append((operation, changed))
+                    labels.append(
+                        (operation.value, (*path, name), str(candidate), name == "mode")
                     )
-                    checked.add((operation.value, (*path, name), str(candidate)))
-                    if name == "mode":
-                        topology_modes.add(str(candidate))
+    for (operation_name, path, candidate, is_mode), accepted in zip(
+        labels, _rust_accepts_many(wire_probe, cases)
+    ):
+        assert accepted, (path, candidate)
+        checked.add((operation_name, path, candidate))
+        if is_mode:
+            topology_modes.add(candidate)
     assert topology_modes == set(
         CompiledTopology.model_json_schema()["properties"]["mode"]["enum"]
     )
