@@ -405,7 +405,9 @@ class JobService:
             and existing.payload_digest == requested.payload_digest
         )
 
-    def claim(self, worker_id: str, lease_seconds: int) -> AttemptFence | None:
+    def claim(
+        self, worker_id: str, lease_seconds: int, *, kinds: Sequence[str]
+    ) -> AttemptFence | None:
         if not worker_id.strip() or lease_seconds <= 0:
             raise ValueError("worker and positive lease are required")
         now = self._clock()
@@ -413,17 +415,9 @@ class JobService:
             statement = (
                 select(Job)
                 .where(
-                    # Agent work and durable coordinators own these jobs.
-                    # A generic lease must never turn their queued state into
-                    # an "unsupported job kind" failure between worker turns.
-                    Job.kind.not_in(
-                        (
-                            "agent-upgrade",
-                            "artifact-distribution",
-                            "recipe.run-switch.v2",
-                            "recipe.stop.v2",
-                        )
-                    ),
+                    # Claim only work this executor handles. Coordinators may
+                    # be queued between turns without an AgentOperation yet.
+                    Job.kind.in_(kinds),
                     ~select(AgentOperation.id)
                     .where(AgentOperation.parent_job_id == Job.id)
                     .exists(),

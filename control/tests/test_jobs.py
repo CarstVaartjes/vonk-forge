@@ -41,7 +41,7 @@ def test_workers_cannot_claim_same_job(service) -> None:
     jobs, _ = service
     job = jobs.enqueue("probe", "admin", "abc123", ["spk_1"], {"safe": True})
     with ThreadPoolExecutor(max_workers=4) as pool:
-        claims = list(pool.map(lambda index: jobs.claim(f"worker-{index}", 30), range(4)))
+        claims = list(pool.map(lambda index: jobs.claim(f"worker-{index}", 30, kinds=("probe",)), range(4)))
     claimed = [claim for claim in claims if claim is not None]
     assert len(claimed) == 1
     assert claimed[0].job_id == job.id
@@ -172,7 +172,7 @@ def test_claim_carries_commit_and_targets_to_the_worker(service) -> None:
     jobs, _ = service
     jobs.enqueue("probe", "admin", "a" * 64, ["spk_a", "spk_b"], {})
 
-    attempt = jobs.claim("worker", 30)
+    attempt = jobs.claim("worker", 30, kinds=("probe",))
 
     assert attempt is not None
     assert attempt.authority_revision == "a" * 64
@@ -182,10 +182,10 @@ def test_claim_carries_commit_and_targets_to_the_worker(service) -> None:
 def test_stale_attempt_cannot_publish_success_after_lease_reclaim(service) -> None:
     jobs, clock = service
     jobs.enqueue("probe", "admin", "abc123", ["spk_1"], {})
-    first = jobs.claim("worker-1", 10)
+    first = jobs.claim("worker-1", 10, kinds=("probe",))
     assert first is not None
     clock.now += timedelta(seconds=11)
-    second = jobs.claim("worker-2", 30)
+    second = jobs.claim("worker-2", 30, kinds=("probe",))
     assert second is not None and second.fence != first.fence
     with pytest.raises(StaleAttempt):
         jobs.succeed(first, {"wrong": True})
@@ -210,7 +210,7 @@ def test_job_payload_and_result_reject_nonfinite_json_numbers(service, value) ->
         jobs.enqueue("probe", "admin", "abc", [], {"nested": [value]})
 
     job = jobs.enqueue("probe", "admin", "abc", [], {})
-    attempt = jobs.claim("worker", 30)
+    attempt = jobs.claim("worker", 30, kinds=("probe",))
     assert attempt is not None and attempt.job_id == job.id
     with pytest.raises(ValueError):
         jobs.succeed(attempt, {"nested": [value]})
@@ -239,7 +239,7 @@ def test_job_json_values_targets_and_projection_survive_store_load(service) -> N
     loaded = jobs.get(job.id)
     assert loaded.payload == payload
     assert loaded.targets == ["target-a", "target-b"]
-    attempt = jobs.claim("worker", 30)
+    attempt = jobs.claim("worker", 30, kinds=("probe",))
     assert attempt is not None
     assert attempt.payload == payload
     assert attempt.targets == ("target-a", "target-b")
@@ -337,7 +337,7 @@ def test_exact_bounded_reconciliation_route_quota_is_accepted(service) -> None:
 def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
     jobs, _ = service
     jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
-    attempt = jobs.claim("worker", 10)
+    attempt = jobs.claim("worker", 10, kinds=("install",))
     assert attempt is not None
     renewed = jobs.heartbeat(attempt, 20)
     assert renewed.lease_deadline > attempt.lease_deadline
@@ -345,7 +345,7 @@ def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
     assert jobs.get(renewed.job_id).state == "waiting-for-operator"
 
     jobs.resume(renewed.job_id)
-    retry = jobs.claim("worker", 10)
+    retry = jobs.claim("worker", 10, kinds=("install",))
     assert retry is not None
     jobs.fail(retry, "bounded failure")
     assert jobs.get(retry.job_id).state == "failed"
@@ -365,7 +365,7 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
     )
     install = jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
 
-    attempt = jobs.claim("worker", 10)
+    attempt = jobs.claim("worker", 10, kinds=("install",))
 
     assert attempt is not None and attempt.job_id == install.id
     stored = jobs.get(upgrade.id)
@@ -377,7 +377,7 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
 def test_concurrent_operator_resume_has_one_winner(service) -> None:
     jobs, _ = service
     jobs.enqueue("install", "operator", "abc", ["spk_1"], {})
-    attempt = jobs.claim("worker", 10)
+    attempt = jobs.claim("worker", 10, kinds=("install",))
     assert attempt is not None
     jobs.wait_for_operator(attempt, "confirm console fingerprint")
 

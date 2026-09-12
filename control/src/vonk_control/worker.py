@@ -207,7 +207,7 @@ class Worker:
         raise RuntimeError("model cache service exposes no tick or run_pending")
 
     def _run_generic(self) -> bool:
-        attempt = self._jobs.claim(self._worker_id, 30)
+        attempt = self._jobs.claim(self._worker_id, 30, kinds=tuple(self._handlers))
         if attempt is None:
             return False
         if self._logs is not None:
@@ -215,12 +215,7 @@ class Worker:
                 attempt.job_id,
                 f"job {attempt.kind} attempt {attempt.attempt} started".encode(),
             )
-        handler = self._handlers.get(attempt.kind)
-        if handler is None:
-            self._jobs.fail(attempt, f"unsupported job kind: {attempt.kind}")
-            if self._logs is not None:
-                self._logs.save(attempt.job_id, b"job failed: unsupported job kind")
-            return True
+        handler = self._handlers[attempt.kind]
         try:
             result = handler(
                 HandlerRequest(
