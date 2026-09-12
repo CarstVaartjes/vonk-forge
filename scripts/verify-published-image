@@ -64,14 +64,23 @@ jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
 jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
   "$sbom_file" >/dev/null
 
+build_revision=""
 while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   [[ "$attestation_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-  scripts/retry-dependency-fetch skopeo inspect --config "docker://$image@$runnable_digest" \
-    | jq -e --arg revision "$revision" \
-      '.config.Labels["org.opencontainers.image.revision"] == $revision' \
-      >/dev/null
+  observed_revision=$(scripts/retry-dependency-fetch skopeo inspect --config "docker://$image@$runnable_digest" \
+    | jq -er '.config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")
+      | ."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))')
+  if [[ -z "$build_revision" ]]; then
+    build_revision=$observed_revision
+    if [[ "$build_revision" != "$revision" ]]; then
+      # Only isolated Hermes/LiteLLM inputs can prove equivalence to an older
+      # build. API/worker embed their source commit and remain exact-source.
+      scripts/dev-image-inputs matches "$identity" "$build_revision" "$revision"
+    fi
+  fi
+  [[ "$observed_revision" == "$build_revision" ]]
   jq -e --arg platform "linux/$architecture" \
-    --arg revision "$revision" \
+    --arg revision "$build_revision" \
     '(.[$platform] | ([.. | objects | select(
         ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
         or (((.SLSA?.buildType? // "") | length) > 0)

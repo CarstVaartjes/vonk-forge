@@ -15,6 +15,9 @@ on:
       - scripts/accept-development-image-archive
       - scripts/dev-image-acceptance-receipt
       - scripts/dev-image-metadata
+      - scripts/dev-image-inputs
+      - scripts/reuse-development-image
+      - agent_protocol/src/vonk_agent_protocol/route_activation.py
       - scripts/promote-image-aliases
       - scripts/publish-immutable-image
       - scripts/render-dev-compose
@@ -98,6 +101,52 @@ jobs:
               echo "unable to install skopeo after bounded retries" >&2
               exit 1
 
+      - name: Prepare isolated image inputs
+        id: image_inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for role in hermes litellm; do
+            scripts/dev-image-inputs prepare "$role" "$GITHUB_SHA" \
+              "$RUNNER_TEMP/image-contexts/$role" >> "$GITHUB_OUTPUT"
+          done
+
+      - parallel:
+          - name: Restore accepted hermes digest and signed evidence
+            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            with:
+              path: ${{ runner.temp }}/accepted-image-cache/hermes
+              key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}
+
+          - name: Restore accepted litellm digest and signed evidence
+            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            with:
+              path: ${{ runner.temp }}/accepted-image-cache/litellm
+              key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}
+
+      - parallel:
+          - name: Revalidate accepted hermes image for reuse
+            id: reuse_hermes
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+            run: |
+              scripts/reuse-development-image hermes "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/hermes" \
+                "$RUNNER_TEMP/hermes.role-receipt.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+          - name: Revalidate accepted litellm image for reuse
+            id: reuse_litellm
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+            run: |
+              scripts/reuse-development-image litellm "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/litellm" \
+                "$RUNNER_TEMP/litellm.role-receipt.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
       - name: Log in for digest-only image staging
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -148,10 +197,11 @@ jobs:
 
           - name: Build Hermes once to local OCI and exact registry digest
             id: build_hermes
+            if: steps.reuse_hermes.outputs.digest == ''
             uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
             with:
-              context: deploy/compose/hermes-agent
-              file: deploy/compose/hermes-agent/Dockerfile
+              context: ${{ runner.temp }}/image-contexts/hermes
+              file: ${{ runner.temp }}/image-contexts/hermes/Dockerfile
               target: managed
               platforms: linux/amd64,linux/arm64
               outputs: |
@@ -167,10 +217,11 @@ jobs:
 
           - name: Build LiteLLM once to local OCI and exact registry digest
             id: build_litellm
+            if: steps.reuse_litellm.outputs.digest == ''
             uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
             with:
-              context: .
-              file: deploy/compose/litellm/Dockerfile
+              context: ${{ runner.temp }}/image-contexts/litellm
+              file: ${{ runner.temp }}/image-contexts/litellm/deploy/compose/litellm/Dockerfile
               platforms: linux/amd64,linux/arm64
               outputs: |
                 type=oci,dest=${{ runner.temp }}/vonk-forge-litellm.oci.tar
@@ -198,6 +249,7 @@ jobs:
           fi
 
       - name: Smoke the exact rootless LiteLLM runtime on both architectures
+        if: steps.reuse_litellm.outputs.digest == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -246,6 +298,7 @@ jobs:
                 "$RUNNER_TEMP/worker.role-receipt.json"
 
           - name: Deep-scan exact Hermes build and bind its remote digest
+            if: steps.reuse_hermes.outputs.digest == ''
             shell: bash
             run: |
               scripts/accept-development-image-archive \
@@ -256,6 +309,7 @@ jobs:
                 "$RUNNER_TEMP/hermes.role-receipt.json"
 
           - name: Deep-scan exact LiteLLM build and bind its remote digest
+            if: steps.reuse_litellm.outputs.digest == ''
             shell: bash
             run: |
               scripts/accept-development-image-archive \
@@ -365,14 +419,14 @@ jobs:
             run: >-
               scripts/verify-published-image hermes
               ghcr.io/carstvaartjes/vonk-forge-hermes
-              "${{ steps.build_hermes.outputs.digest }}" - "$GITHUB_SHA"
+              "${{ steps.images.outputs.hermes_digest }}" - "$GITHUB_SHA"
 
           - name: Verify exact digest-only LiteLLM manifest and attestations
             shell: bash
             run: >-
               scripts/verify-published-image litellm
               ghcr.io/carstvaartjes/vonk-forge-litellm
-              "${{ steps.build_litellm.outputs.digest }}" - "$GITHUB_SHA"
+              "${{ steps.images.outputs.litellm_digest }}" - "$GITHUB_SHA"
 
       - name: Confirm accepted inputs
         shell: bash
@@ -533,6 +587,7 @@ jobs:
               push-to-registry: true
 
           - name: Sign accepted Hermes image provenance
+            id: sign_hermes
             uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
             with:
               subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
@@ -540,11 +595,53 @@ jobs:
               push-to-registry: true
 
           - name: Sign accepted LiteLLM image provenance
+            id: sign_litellm
             uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
             with:
               subject-name: ghcr.io/carstvaartjes/vonk-forge-litellm
               subject-digest: ${{ steps.publish.outputs.litellm_digest }}
               push-to-registry: true
+
+      - parallel:
+          - name: Retain signed hermes acceptance for identical future inputs
+            if: steps.reuse_hermes.outputs.digest == ''
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+              BUNDLE: ${{ steps.sign_hermes.outputs.bundle-path }}
+              DIGEST: ${{ steps.publish.outputs.hermes_digest }}
+            run: |
+              set -euo pipefail
+              install -d -m 0700 "$RUNNER_TEMP/accepted-image-cache/hermes"
+              jq -n --arg digest "$DIGEST" --arg build_commit "$GITHUB_SHA" \
+                '{digest: $digest, build_commit: $build_commit}' \
+                > "$RUNNER_TEMP/accepted-image-cache/hermes/image.json"
+              cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/hermes/provenance.json"
+              # Exercise the real signed-cache consumer before saving a new entry.
+              scripts/reuse-development-image hermes "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/hermes" \
+                "$RUNNER_TEMP/hermes.cache-check.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+
+          - name: Retain signed litellm acceptance for identical future inputs
+            if: steps.reuse_litellm.outputs.digest == ''
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+              BUNDLE: ${{ steps.sign_litellm.outputs.bundle-path }}
+              DIGEST: ${{ steps.publish.outputs.litellm_digest }}
+            run: |
+              set -euo pipefail
+              install -d -m 0700 "$RUNNER_TEMP/accepted-image-cache/litellm"
+              jq -n --arg digest "$DIGEST" --arg build_commit "$GITHUB_SHA" \
+                '{digest: $digest, build_commit: $build_commit}' \
+                > "$RUNNER_TEMP/accepted-image-cache/litellm/image.json"
+              cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/litellm/provenance.json"
+              # Exercise the real signed-cache consumer before saving a new entry.
+              scripts/reuse-development-image litellm "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/litellm" \
+                "$RUNNER_TEMP/litellm.cache-check.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
 
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
