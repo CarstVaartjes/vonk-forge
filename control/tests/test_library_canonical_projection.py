@@ -19,6 +19,7 @@ from vonk_control.models import (
     AgentNode,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ClusterMapping,
     ModelCacheSet,
@@ -51,6 +52,7 @@ def _insert_canonical_rows(
 ) -> None:
     rows: list[CatalogDocument | CatalogDocumentRevision] = []
     revisions: list[CatalogDocumentRevision] = []
+    heads: list[CatalogDocumentHead] = []
     for index in range(count):
         document = copy.deepcopy(template)
         identity = document["identity"]
@@ -104,9 +106,17 @@ def _insert_canonical_rows(
                 created_at=now,
             )
         )
+        heads.append(CatalogDocumentHead(
+            kind=kind,
+            publisher=canonical.identity.publisher,
+            slug=canonical.identity.slug,
+            active_revision_id=revision_id,
+        ))
     with sessions.begin() as session:
         session.add_all(rows)
         session.add_all(revisions)
+        session.flush()
+        session.add_all(heads)
 
 
 def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path: Path) -> None:

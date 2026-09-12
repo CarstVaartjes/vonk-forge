@@ -24,7 +24,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
+from vonk_control.models import (
+    Base,
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
@@ -62,6 +67,7 @@ def _insert_synthetic_corpus(
 
     times = _revision_times()
     rows: list[CatalogDocument | CatalogDocumentRevision] = []
+    heads: list[CatalogDocumentHead] = []
     for slug in _SLUGS_OLDEST_FIRST:
         document = copy.deepcopy(template)
         identity = document["identity"]
@@ -89,6 +95,7 @@ def _insert_synthetic_corpus(
         )
         clean = canonical.model_dump(mode="json")
         document_id = str(uuid.uuid4())
+        revision_id = str(uuid.uuid4())
         stamp = times[slug]
         rows.append(
             CatalogDocument(
@@ -104,7 +111,7 @@ def _insert_synthetic_corpus(
         )
         rows.append(
             CatalogDocumentRevision(
-                id=str(uuid.uuid4()),
+                id=revision_id,
                 document_id=document_id,
                 kind=kind,
                 publisher=canonical.identity.publisher,
@@ -119,8 +126,16 @@ def _insert_synthetic_corpus(
                 created_at=stamp,
             )
         )
+        heads.append(CatalogDocumentHead(
+            kind=kind,
+            publisher=canonical.identity.publisher,
+            slug=canonical.identity.slug,
+            active_revision_id=revision_id,
+        ))
     with sessions.begin() as session:
         session.add_all(rows)
+        session.flush()
+        session.add_all(heads)
 
 
 @pytest.fixture(scope="module")
