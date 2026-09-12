@@ -54,7 +54,10 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.host_helper_authority import HostHelperGrantIssuer
+from vonk_control.host_helper_authority import (
+    HostHelperGrantIssuer,
+    RecipeRunObservationPendingError,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -2416,9 +2419,14 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     class ExactObservationAuthority:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
+            self.pending = False
 
         def issue_recipe_run_observation_grant(self, **values):
             self.calls.append(values)
+            if self.pending:
+                raise RecipeRunObservationPendingError(
+                    "recipe run observation grant is already pending"
+                )
             assert values["certificate_serial"] == "serial-a"
             assert values["expires_in_seconds"] == 10
             return "f" * 64, SignedHostHelperGrant(
@@ -2623,6 +2631,27 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert too_early.status_code == 425
     assert too_early.json() == {"detail": "recipe run observation is not ready"}
     assert len(authority.calls) == 2
+
+    # An unconsumed grant for the same run is the authority's bounded "not
+    # yet".  It must stay distinguishable from a rejected request, or the
+    # agent reads a live run as unauthorized and abandons the whole sweep.
+    authority.pending = True
+    already_pending = client.post(
+        "/agent/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=request,
+    )
+    authority.pending = False
+    assert already_pending.status_code == 409
+    assert (
+        already_pending.headers["x-vonk-error-code"]
+        == "controller.recipe_run.observation_pending"
+    )
+    assert already_pending.json() == {
+        "detail": "recipe run observation grant is already pending"
+    }
+
+
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:

@@ -591,6 +591,19 @@ impl AgentHttpClient {
         if response.status() == StatusCode::TOO_EARLY {
             return Err(ClientError::ObservationNotReady);
         }
+        // An unconsumed grant from the previous sweep is the controller's
+        // bounded "not yet", not a lost authorization.  Reading it as a hard
+        // failure abandoned every other run's observation for that tick and
+        // slowed the claim cadence to the idle one.
+        if response.status() == StatusCode::CONFLICT
+            && response
+                .headers()
+                .get("x-vonk-error-code")
+                .and_then(|value| value.to_str().ok())
+                == Some("controller.recipe_run.observation_pending")
+        {
+            return Err(ClientError::ObservationNotReady);
+        }
         classify_response(&response)?;
         let body = bounded_body(response).await?;
         let response: RecipeRunObservationGrantWire =
@@ -3539,6 +3552,38 @@ mod tests {
                 .recipe_run_inspection_grant(&binding, &request, &digest)
                 .await,
             Err(ClientError::ObservationNotReady)
+        ));
+        server.join().unwrap();
+
+        // An outstanding unconsumed grant is the same bounded "not yet" as the
+        // 425 above: the run is authorized, its inspection is just in flight.
+        let (client, server) = request_capture_client(
+            409,
+            vec!["x-vonk-error-code: controller.recipe_run.observation_pending".to_owned()],
+            vec![],
+            None,
+        );
+        assert!(matches!(
+            client
+                .recipe_run_inspection_grant(&binding, &request, &digest)
+                .await,
+            Err(ClientError::ObservationNotReady)
+        ));
+        server.join().unwrap();
+
+        // A conflict the controller did not classify as pending stays a hard
+        // failure: an authority rejection must never read as a retry.
+        let (client, server) = request_capture_client(
+            409,
+            vec!["x-vonk-error-code: controller.conflict".to_owned()],
+            vec![],
+            None,
+        );
+        assert!(matches!(
+            client
+                .recipe_run_inspection_grant(&binding, &request, &digest)
+                .await,
+            Err(ClientError::Controller(_))
         ));
         server.join().unwrap();
     }

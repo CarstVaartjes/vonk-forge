@@ -235,8 +235,9 @@ async fn run_control_lane(
             .recipes
             .report_exact_recipe_run_observations()
             .await;
+        let local_managed_runs = executor.recipes.managed_recipe_run_count().unwrap_or(0);
         let exact_observation_disposition =
-            exact_observation_disposition(&exact_observation_result);
+            exact_observation_disposition(&exact_observation_result, local_managed_runs);
         let exact_observation_count = exact_observation_disposition.managed_run_count;
         match exact_observation_result {
             Ok(_) => {
@@ -376,9 +377,14 @@ struct ExactObservationDisposition {
 
 fn exact_observation_disposition(
     result: &Result<usize, RecipeObservationError>,
+    local_managed_runs: usize,
 ) -> ExactObservationDisposition {
     ExactObservationDisposition {
-        managed_run_count: result.as_ref().copied().unwrap_or(0),
+        // A refused sweep reports no count, but the runs it could not report
+        // are still retained locally.  Counting them as absent made the agent
+        // fall back to the idle claim cadence exactly when it had work to
+        // observe, which delayed every later receipt.
+        managed_run_count: result.as_ref().copied().unwrap_or(local_managed_runs),
         transition_not_ready: result.as_ref().is_err_and(|error| error.not_ready()),
     }
 }
@@ -421,22 +427,36 @@ mod tests {
         let transition = Err(RecipeObservationError::Inspection(
             HostRuntimeError::Controller(ClientError::ObservationNotReady),
         ));
-        let transition = exact_observation_disposition(&transition);
+        let transition = exact_observation_disposition(&transition, 0);
         assert_eq!(transition.managed_run_count, 0);
         assert!(transition.transition_not_ready);
 
         let denied = Err(RecipeObservationError::Inspection(
             HostRuntimeError::Controller(ClientError::Protocol),
         ));
-        let denied = exact_observation_disposition(&denied);
+        let denied = exact_observation_disposition(&denied, 0);
         assert_eq!(denied.managed_run_count, 0);
         assert!(!denied.transition_not_ready);
 
         for cycle in [Ok(2), Ok(2)] {
-            let complete = exact_observation_disposition(&cycle);
+            let complete = exact_observation_disposition(&cycle, 0);
             assert_eq!(complete.managed_run_count, 2);
             assert!(!complete.transition_not_ready);
         }
+    }
+
+    #[test]
+    fn refused_observation_sweep_keeps_the_managed_run_cadence() {
+        // The wrong implementation counted a refused sweep as zero managed
+        // runs, so exactly when a run needed observing the agent fell back to
+        // the idle long poll and the next receipt arrived a minute later.
+        let refused = Err(RecipeObservationError::Inspection(
+            HostRuntimeError::Controller(ClientError::Protocol),
+        ));
+        let refused = exact_observation_disposition(&refused, 1);
+        assert_eq!(refused.managed_run_count, 1);
+        assert_eq!(claim_wait_seconds(60, refused.managed_run_count, true), 10);
+        assert_eq!(claim_wait_seconds(300, refused.managed_run_count, true), 10);
     }
 
     #[test]
