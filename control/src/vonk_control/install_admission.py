@@ -781,12 +781,32 @@ def _refreshable_preflight_is_the_only_blocker(
 
     if not plan.allowed:
         return False
-    codes = {reason.code for node in fresh.nodes for reason in node.blockers}
-    return bool(codes) and codes <= {
+    return refreshable_preflight_is_the_only_blocker(fresh)
+
+
+REFRESHABLE_PREFLIGHT_CODES = frozenset(
+    {
         "runtime_preflight.stale",
         "runtime_preflight.host_changed",
         "runtime_preflight.requirements_changed",
     }
+)
+
+
+def refreshable_preflight_is_the_only_blocker(plan: InstallPlan) -> bool:
+    """True when preflight *evidence* validity is the plan's only objection.
+
+    These are exactly the codes ``LifecyclePreflight.ensure`` re-probes on its
+    own: evidence aged out, the host fingerprint moved, or the receipt does not
+    cover this recipe's requirements.  All three describe the evidence, not the
+    plan, so a caller holding the plan may rerun the ordinary probe and
+    re-present it.  Every other blocker — a failed native probe finding, missing
+    or stale inventory, a read-only artifact store, capacity, topology, licence
+    or compiled-plan evidence — is a real objection to the plan itself.
+    """
+
+    codes = {reason.code for node in plan.nodes for reason in node.blockers}
+    return bool(codes) and codes <= REFRESHABLE_PREFLIGHT_CODES
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:

@@ -45,7 +45,12 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission import (
+    AdmissionReason,
+    InstallAdmissionService,
+    InstallNodePlan,
+    InstallPlan,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -73,6 +78,7 @@ from vonk_control.models import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
+    RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
     _recipe_model_identities,
@@ -4889,3 +4895,59 @@ def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:
             actor="admin",
             request_id="a" * 36,
         )
+
+
+def _blocked_install_plan(codes: tuple[str, ...]) -> InstallPlan:
+    return InstallPlan(
+        mapping_id="10000000-0000-4000-8000-000000000001",
+        mapping_generation=1,
+        recipe_build_id=None,
+        image_digest="a" * 64,
+        recipe_revision_id="20000000-0000-4000-8000-000000000002",
+        recipe_content_sha256="b" * 64,
+        allowed=False,
+        nodes=(
+            InstallNodePlan(
+                node_id="spk_00000000000000000000000000000001",
+                rank=0,
+                role="entrypoint",
+                allowed=False,
+                inventory_observed_at=None,
+                free_bytes=None,
+                active_reserved_bytes=0,
+                reused_bytes=0,
+                required_download_bytes=0,
+                required_bytes=0,
+                disk_floor_bytes=0,
+                free_after_bytes=None,
+                blockers=tuple(AdmissionReason(code=code, detail=code) for code in codes),
+                warnings=(),
+            ),
+        ),
+        plan_digest="c" * 64,
+    )
+
+
+def test_prepare_installation_hands_a_refreshable_preflight_refusal_to_the_probe() -> None:
+    # The run-switch compile phase re-plans and then prepares the plan it just
+    # received.  A plan whose only objection is preflight evidence must reach
+    # the caller's bounded re-probe; rejecting it here dead-ended the whole
+    # application on an observation the controller can simply refresh.
+    service = object.__new__(RecipeOperationService)
+    with pytest.raises(RecipeInstallPreflightExpired):
+        service.prepare_installation(
+            _blocked_install_plan(("runtime_preflight.host_changed",)), actor="admin"
+        )
+
+
+def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
+    # A co-blocker is an objection to the plan itself, so the identical plan
+    # must keep the opaque refusal instead of looping through the probe bound.
+    service = object.__new__(RecipeOperationService)
+    with pytest.raises(RecipeOperationConflict) as error:
+        service.prepare_installation(
+            _blocked_install_plan(("runtime_preflight.host_changed", "node.disk_below_floor")),
+            actor="admin",
+        )
+    assert not isinstance(error.value, RecipeInstallPreflightExpired)
+    assert "install plan is blocked" in str(error.value)

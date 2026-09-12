@@ -43,6 +43,7 @@ from .install_admission import (
     InstallAdmissionService,
     InstallPlan,
     InstallPreflightExpired,
+    refreshable_preflight_is_the_only_blocker,
 )
 from .models import (
     AgentNode,
@@ -504,6 +505,17 @@ class RecipeOperationService:
         """
 
         if not plan.allowed:
+            if refreshable_preflight_is_the_only_blocker(plan):
+                # The plan is unchanged and every objection is preflight
+                # *evidence*: the receipt aged out, the host fingerprint
+                # moved, or it does not cover this recipe's requirements.
+                # Rejecting the plan here dead-ended Run/Switch on its own
+                # re-probeable observation, so hand the caller the narrower
+                # outcome that reruns the ordinary probe and re-presents the
+                # identical plan.
+                raise RecipeInstallPreflightExpired(
+                    "install.plan_preflight_refresh_required"
+                )
             reasons = list(
                 dict.fromkeys(
                     f"{reason.code}: {reason.detail}"[:200]
