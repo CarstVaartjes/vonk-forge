@@ -521,6 +521,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/verify-multiarch-image-manifest",
         "scripts/verify-public-image-inputs",
         "scripts/verify-published-image",
+        "scripts/retry-dependency-fetch",
+        "scripts/retry_dependency_fetch.py",
         "scripts/verify-supply-chain",
         "scripts/select-workload-runtime-manifest",
         "scripts/validate-workload-dockerfile",

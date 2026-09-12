@@ -366,17 +366,70 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert "docker-daemon:" not in scan
 
 
-def test_development_image_publication_requires_both_platforms() -> None:
-    verification = (ROOT / "scripts/verify-published-image").read_text()
-
-    assert "--format '{{ json .Manifest }}'" in verification
-    assert "scripts/verify-multiarch-image-manifest" in verification
-    assert '"docker://$image@$runnable_digest"' in verification
-    assert verification.count('"$image@$digest"') == 4
-    assert 'done < "$platform_records"' in verification
-    assert '--arg platform "linux/$architecture"' in verification
-    assert verification.count(".[$platform]") == 2
-    assert verification.count('keys | sort == ["linux/amd64", "linux/arm64"]') == 2
+@pytest.mark.parametrize("fault", ["transient", "digest", "revision", "sbom"])
+def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(tmp_path, fault):
+    revision = "a" * 40
+    digest = "sha256:" + "b" * 64
+    manifest = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            image_descriptor("amd64", "c"), image_descriptor("arm64", "d"),
+            attestation_descriptor("c", "e"), attestation_descriptor("d", "f"),
+        ],
+    }
+    documents = {
+        "Manifest": manifest,
+        "Provenance": {f"linux/{arch}": {
+            "predicateType": "https://slsa.dev/provenance/v1", "revision": revision,
+        } for arch in ("amd64", "arm64")},
+        "SBOM": {f"linux/{arch}": {
+            "SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3",
+        } for arch in ("amd64", "arm64")},
+    }
+    if fault == "sbom":
+        documents["SBOM"].pop("linux/arm64")
+    tool_bin = tmp_path / "bin"
+    tool_bin.mkdir()
+    requests = tmp_path / "requests"
+    # Stub only the remote reads. Execute the real shell, retry helper, jq
+    # validation and multiarch verifier against their documented CLI responses.
+    fake = f'''#!/usr/bin/env python3
+import json, pathlib, sys
+log = pathlib.Path({str(requests)!r})
+args = sys.argv[1:]
+key = " ".join(args)
+previous = log.read_text().splitlines() if log.exists() else []
+with log.open("a") as output: output.write(key + "\\n")
+if {fault!r} == "transient" and ".Provenance" in key and key not in previous:
+    print("partial response")
+    print("connection reset by peer", file=sys.stderr)
+    sys.exit(1)
+if "--config" in args:
+    print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.revision": {('0' * 40 if fault == 'revision' else revision)!r}}}}}}}))
+elif args[0] == "inspect":
+    print({('sha256:' + '0' * 64 if fault == 'digest' else digest)!r})
+else:
+    documents = {documents!r}
+    field = next(field for field in documents if "." + field in key)
+    print(json.dumps(documents[field]))
+'''
+    for name in ("docker", "skopeo"):
+        tool = tool_bin / name
+        tool.write_text(fake)
+        tool.chmod(0o755)
+    result = subprocess.run(
+        [ROOT / "scripts/verify-published-image", "api",
+         "ghcr.io/carstvaartjes/vonk-forge-api", digest, "dev-sha-" + revision],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+        env={**os.environ, "PATH": f"{tool_bin}:{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path)},
+    )
+    assert (result.returncode == 0) == (fault == "transient"), result.stderr
+    calls = requests.read_text().splitlines()
+    if fault == "transient":
+        assert sum(".Provenance" in call for call in calls) == 2
+        assert sum("--config" in call for call in calls) == 2
+    else:
+        assert len(calls) == len(set(calls))  # validation failures never retry
 
 
 def _write_receipt_fixture(root: Path) -> None:

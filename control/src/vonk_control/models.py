@@ -1432,7 +1432,7 @@ class RuntimeImageReceipt(Base):
             name="ck_runtime_image_receipts_runtime_identity",
         ),
         CheckConstraint(
-            "state IN ('verified','revoked')",
+            "state IN ('verified','evicted','revoked')",
             name="ck_runtime_image_receipts_state",
         ),
         ForeignKeyConstraint(

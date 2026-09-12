@@ -48,7 +48,7 @@ Useful flags:
 
 - **The CI command, not a paraphrase.** It runs
   `uv run --project control --frozen --with-editable . python
-  scripts/tests/run_agent_wire_contracts.py -- -q`, the exact
+  scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile`, the exact
   `controller-spark-wire` step. Before starting Docker it extracts that step,
   the Rust/uv/Python pins and the recipe-revision file from
   `.github/workflows/ci.yml` and refuses to run when they disagree with the
@@ -71,6 +71,12 @@ Useful flags:
   evidence: the lane propagates the pytest exit code and also refuses to report
   success when the output has no passing-test summary or says `no tests ran`.
   The runner itself already refuses to proceed when a probe is missing.
+- **Acquisition retries before execution.** The lane prepares the locked
+  Controller environment through `scripts/retry-dependency-fetch` before its
+  wire command, matching CI's dependency preflight. The runner builds every
+  selected Rust probe in one Cargo invocation so shared dependencies use one
+  feature graph. Four pytest workers distribute whole files. The selected
+  probes and pytest assertions are unchanged.
 - **A real error when the container cannot run.** With no reachable Docker
   engine (for example `docker context use missing`) it exits non-zero and
   explains that OrbStack must be started, rather than falling back to a macOS
@@ -87,13 +93,18 @@ virtualenv. Every run appends its full container output to
 | Run | Wall clock on this host | Dominated by |
 | --- | --- | --- |
 | Cold — no image, empty caches | 8m25s and 12m19s on two runs | the one-time image build (~1.5 min with no BuildKit layers), uv resolution, the first `cargo build --locked`, then the suite |
-| Warm — image and caches present | 6m40s–7m10s | the pytest suite itself; cargo is incremental and the image build is skipped |
+| Historical warm runs before probe batching | 6m40s–7m10s | the sequential pytest suite; cargo is incremental and the image build is skipped |
 
-Timings move with host load and this machine's sleep behaviour, so treat the
-suite time below as the floor. The first selection (`agent_protocol/tests` plus
-the eleven bridge suites) reported **674 passed, 17 skipped** in 3m44s–7m03s
-across runs, and the second selection (release-publication manifest)
-`1 passed`. The bridge suites alone, given the probe environment
+On 2026-09-12, after probe batching, the same first selection took 64.47s
+sequentially and 31.74s with four workers: **674 passed / 17 skipped** in both
+runs. The publisher selection also passed (1 test). These are local Linux
+measurements, not a promise of hosted CI wall time. The combined Cargo build
+also replaces four feature-resolution invocations with one; on the same warm
+cache that reduced build overhead from 0.42s to 0.13s.
+
+Timings move with host load and this machine's sleep behaviour. Earlier runs
+before probe batching reported 3m44s–7m03s for the first selection and one
+passing release-publication test. The bridge suites alone, given the probe environment
 `run_agent_wire_contracts.py` builds, are **55 passed, 1 skipped**; the skip is
 `test_operation_progress_wire_bridge.py`, which skips unless
 `VONK_PROGRESS_WIRE_PROBE` is set and for which the runner builds no probe — CI

@@ -23,6 +23,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from vonk_control.recipe_image_availability import (
@@ -35,6 +36,7 @@ from vonk_control.runtime_image_preparation import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
     prepare_runtime_image,
+    resolve_persisted_runtime_image_receipt,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -131,6 +133,73 @@ def test_force_download_skips_verified_cache_but_preserves_archive(tmp_path: Pat
     assert first == second == forced
     assert transport.calls == 2
     assert Path(first.archive_path).read_bytes() == ARCHIVE
+
+
+@pytest.mark.parametrize("revoked", [None, "receipt", "authorization"])
+def test_download_after_cache_removal_restores_only_unrevoked_authority(tmp_path, revoked):
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-restore", recipe)
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions, storage=storage, transport=transport,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC), automatic_attempt_limit=1,
+    )
+    first = service.start_selector(recipe.identity.slug, actor="operator", request_id="1" * 36)
+    service.run_pending()
+    assert service.get(first.id).state == "succeeded"
+    cached = storage.read_receipt(ARCHIVE_SHA)
+    with sessions.begin() as session:
+        receipt = session.scalar(select(RuntimeImageReceipt))
+        authorization = session.scalar(select(RuntimeImageAuthorization))
+        assert receipt is not None and authorization is not None
+        receipt_id, authorization_id = receipt.id, authorization.id
+        execution_key = receipt.effective_execution_key
+        if revoked == "receipt":
+            receipt.state = "revoked"
+        elif revoked == "authorization":
+            authorization.state = "revoked"
+    service.remove_selector(recipe.identity.slug, actor="operator", request_id="2" * 36)
+    assert not (storage.root / ARCHIVE_SHA).exists()
+    with sessions() as session, pytest.raises(ValueError):
+        resolve_persisted_runtime_image_receipt(
+            session, recipe_revision_id="revision-restore",
+            current_content_digest=content_sha256(recipe),
+            effective_execution_key=execution_key, receipt=cached,
+        )
+    # Restart and use the real download path, including SQL receipt persistence.
+    restarted = RecipeImageAvailabilityService(
+        sessions, storage=storage, transport=transport,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC), automatic_attempt_limit=1,
+    )
+    download = restarted.start_selector(recipe.identity.slug, actor="operator", request_id="3" * 36)
+    restarted.run_pending()
+    result = restarted.get(download.id)
+    if revoked is None:
+        assert result.state == "succeeded", result.failure
+        assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+        with sessions() as session:
+            restored = resolve_persisted_runtime_image_receipt(
+                session, recipe_revision_id="revision-restore",
+                current_content_digest=content_sha256(recipe),
+                effective_execution_key=execution_key, receipt=cached,
+            )
+            assert restored.id == receipt_id
+            authorization = session.get(RuntimeImageAuthorization, authorization_id)
+            assert authorization is not None and authorization.state == "authorized"
+    else:
+        assert result.state == "failed"
+        assert result.failure is not None
+        assert result.failure["code"] == (
+            "runtime_image.receipt_authority_revoked" if revoked == "receipt"
+            else "runtime_image.authorization_revoked"
+        )
 
 
 def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) -> None:

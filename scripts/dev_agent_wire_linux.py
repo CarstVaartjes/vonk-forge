@@ -54,7 +54,7 @@ RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
 # Spark results together". This exact string is executed by the lane.
 TIER_COMMAND = (
     "uv run --project control --frozen --with-editable . "
-    "python scripts/tests/run_agent_wire_contracts.py -- -q"
+    "python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile"
 )
 
 DOCKERFILE = Path("scripts/dev-agent-wire-linux.Dockerfile")
@@ -394,7 +394,14 @@ def container_command(
     for host, target in mounts.items():
         suffix = ":ro" if target == CONTAINER_RECIPE_LIBRARY else ""
         command += ["--volume", f"{host}:{target}{suffix}"]
-    command += [image_tag(), "bash", "-c", f"set -euo pipefail; {TIER_COMMAND}"]
+    command += [
+        image_tag(), "bash", "-c",
+        (
+            "set -euo pipefail; "
+            "scripts/retry-dependency-fetch uv sync --project control --frozen; "
+            f"{TIER_COMMAND}"
+        ),
+    ]
     return command
 
 

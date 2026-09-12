@@ -32,7 +32,6 @@ from .bounded_json import mapping, require_mapping, require_sequence
 from .model_cache import ModelCacheNotFound
 from .model_cache_progress import project_cache_progress
 from .models import CatalogDocumentRevision, Job, RecipeBuild
-from .models import RuntimeImageAuthorization as RuntimeImageAuthorizationRow
 from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
 from .operation_progress import aggregate_progress
@@ -568,19 +567,16 @@ class RecipeImageAvailabilityService:
                 )
                 archive = self._storage.root / archive_sha256
                 receipt_file = self._storage.root / f"{archive_sha256}.receipt.json"
-                receipt.state = "revoked"
+                # Cache removal invalidates availability, not recipe authority.
+                # Exact re-preparation may restore evicted bytes; an explicit
+                # security revocation must survive removal and re-download.
+                if receipt.state == "verified":
+                    receipt.state = "evicted"
                 if archive_sha256 not in other_archives and archive.is_file():
                     reclaimed += archive.stat().st_size
                     archive.unlink(missing_ok=True)
                 if archive_sha256 not in other_archives:
                     receipt_file.unlink(missing_ok=True)
-            receipt_ids = [receipt.id for receipt in receipts]
-            if receipt_ids:
-                authorizations = list(session.scalars(select(RuntimeImageAuthorizationRow).where(
-                    RuntimeImageAuthorizationRow.receipt_id.in_(receipt_ids),
-                )))
-                for authorization in authorizations:
-                    authorization.state = "revoked"
             model_children = [
                 child.get("model_content_digests", [])
                 for job in jobs

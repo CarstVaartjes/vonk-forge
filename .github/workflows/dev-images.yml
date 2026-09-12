@@ -21,6 +21,8 @@ on:
       - scripts/render-production-compose
       - scripts/verify-public-image-inputs
       - scripts/verify-published-image
+      - scripts/retry-dependency-fetch
+      - scripts/retry_dependency_fetch.py
       - src/cluster_profiles/**
   workflow_dispatch:
 

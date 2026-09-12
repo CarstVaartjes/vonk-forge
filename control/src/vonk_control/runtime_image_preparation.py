@@ -474,7 +474,7 @@ def persist_runtime_image_receipt(
         )
         session.add(row)
     else:
-        if row.state != "verified":
+        if row.state not in {"verified", "evicted"}:
             raise RuntimeImagePreparationError(
                 "runtime_image.receipt_authority_revoked",
                 "immutable runtime image receipt is not verified",
@@ -488,8 +488,9 @@ def persist_runtime_image_receipt(
                 "runtime_image.receipt_identity_conflict",
                 "durable runtime image receipt identity changed for the same execution",
             )
-        # The bytes and original provenance are immutable.  Refreshing the
-        # observation timestamp is safe and preserves idempotent preparation.
+        # Re-preparation restores an evicted cache entry only after verifying
+        # the identical bytes and original provenance. Security revocation of
+        # either the receipt or its authorization remains terminal.
         row.verified_at = verified_at
         row.state = "verified"
     session.flush()

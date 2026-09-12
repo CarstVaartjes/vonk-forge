@@ -139,3 +139,18 @@ complete check cycle.
 If a change needs a longer check, run it locally and attach its bounded report
 to the pull request. Use `workflow_dispatch` only when hosted evidence itself
 is required.
+
+## Dependency acquisition failures
+
+`scripts/retry-dependency-fetch` permits only `uv sync`, `skopeo inspect`, and
+`docker buildx imagetools inspect`. The Controller and wire jobs resolve locked
+dependencies before running checks. Published-image verification uses the same
+helper around remote reads, leaving digest, revision, platform, provenance and
+SBOM validation outside the retry boundary.
+
+A recognized transient network or Git-fetch failure gets at most three
+attempts, with two- and four-second delays. Authentication, certificate, missing
+ref, missing manifest, dependency-solver and build failures fail immediately;
+unknown failures also fail immediately. Failed reads never contribute partial
+stdout to the successful metadata response. Tests and other commands cannot be
+wrapped, so a retry cannot turn a failing test into a passing job.
