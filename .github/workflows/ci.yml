@@ -953,6 +953,7 @@ jobs:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify public image inputs
         run: scripts/verify-public-image-inputs
@@ -1097,28 +1098,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/litellm-attestation.json"
-          skopeo inspect --config "docker://$LITELLM_IMAGE@$digest" \
-            | jq -e --arg revision "$GITHUB_SHA" \
-              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
-               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
-              >/dev/null
-          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
-            --format '{{ json .Provenance }}' \
-            | jq -e --arg revision "$GITHUB_SHA" \
-              '([.. | objects | select(
-                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
-                  or (((.SLSA?.buildType? // "") | length) > 0)
-                  or (((.buildDefinition?.buildType? // "") | length) > 0)
-                )] | length > 0)
-               and ([.. | strings | select(. == $revision)] | length > 0)' \
-              >/dev/null
-          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
-            --format '{{ json .SBOM }}' \
-            | jq -e '[.. | objects | select(
-                .SPDXID? == "SPDXRef-DOCUMENT"
-                and ((.spdxVersion? // "") | startswith("SPDX-"))
-              )] | length > 0' >/dev/null
+          scripts/verify-published-image litellm "$LITELLM_IMAGE" "$digest" - "$GITHUB_SHA"
           inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then

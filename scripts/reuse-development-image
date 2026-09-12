@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Revalidate a cached accepted digest and bind it to this acceptance run."""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    try:
+        role, commit, cache_root, receipt, run_id, attempt = sys.argv[1:]
+        if role not in {"hermes", "litellm"}:
+            raise ValueError("only isolated component images can be reused")
+        root = Path(cache_root)
+        if not root.exists():
+            return 0  # Exact-key cache miss: the normal build/scan path runs.
+        metadata = root / "image.json"
+        bundle = root / "provenance.json"
+        if root.is_symlink() or any(p.is_symlink() or not p.is_file() for p in (metadata, bundle)):
+            raise ValueError("cached image evidence is incomplete")
+        document = json.loads(metadata.read_text())
+        if not isinstance(document, dict) or set(document) != {"digest", "build_commit"}:
+            raise ValueError("invalid cached image evidence")
+        digest, built = document["digest"], document["build_commit"]
+        if not isinstance(digest, str) or re.fullmatch(r"sha256:[a-f0-9]{64}", digest) is None:
+            raise ValueError("invalid cached image digest")
+        if not isinstance(built, str) or re.fullmatch(r"[a-f0-9]{40}", built) is None:
+            raise ValueError("invalid cached image source")
+        image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
+        commands = [
+            ["scripts/dev-image-inputs", "matches", role, built, commit],
+            ["gh", "attestation", "verify", f"oci://{image}@{digest}",
+             "--bundle", str(bundle), "--repo", "CarstVaartjes/vonk-forge",
+             "--signer-workflow", "CarstVaartjes/vonk-forge/.github/workflows/dev-images.yml",
+             "--signer-digest", built, "--source-digest", built,
+             "--source-ref", "refs/heads/main", "--deny-self-hosted-runners"],
+            ["scripts/verify-published-image", role, image, digest, "-", built],
+            ["scripts/dev-image-acceptance-receipt", "create-role", receipt,
+             commit, run_id, attempt, role, image, digest],
+        ]
+        for command in commands:
+            subprocess.run(command, check=True, stdout=sys.stderr, timeout=180)
+        print(f"digest={digest}")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"reuse-development-image: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -154,3 +154,31 @@ ref, missing manifest, dependency-solver and build failures fail immediately;
 unknown failures also fail immediately. Failed reads never contribute partial
 stdout to the successful metadata response. Tests and other commands cannot be
 wrapped, so a retry cannot turn a failing test into a passing job.
+
+## Reusing accepted component images
+
+Development publication reuses Hermes and LiteLLM by their exact build inputs.
+`scripts/dev-image-inputs` hashes Git paths, file modes and blob identities for
+an isolated build context plus the complete build/acceptance policy. BuildKit
+receives only that context: a new `COPY` cannot silently depend on an unhashed
+Controller file. Dockerfile/base-image pins, copied protocol code, mounted
+LiteLLM smoke inputs and acceptance-tool changes invalidate the relevant key.
+Controller-only changes keep both keys stable.
+
+The Actions cache contains only the accepted registry digest, original build
+commit and original signed provenance bundle. It has no prefix restore keys.
+A hit must pass ancestry/input equality, GitHub signature/source/workflow
+verification, and exact remote digest, both architectures, original revision,
+BuildKit provenance and SBOM checks. Invalid evidence fails closed. A missing
+or evicted entry takes the normal build, smoke and deep-scan path; an entry is
+saved only after the complete publication succeeds. Cold builds also exercise
+the signed-cache consumer before saving the entry.
+
+A reused image keeps its original digest and build revision. The current
+`dev-sha-` tag and acceptance receipt bind that image to the current assembled
+release; they do not rewrite its original build provenance. Stable promotion
+checks the current acceptance signature and the same source-equivalence gate.
+Compose validation and fresh NAS/Spark installer acceptance still run for the
+assembled release. API and worker continue using BuildKit layer caches and
+embed their current Controller source identity, so they are rebuilt on each
+qualifying generation.
