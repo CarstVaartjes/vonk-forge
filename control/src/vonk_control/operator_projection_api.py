@@ -595,7 +595,7 @@ def install_operator_projection_routes(
     ) -> FleetNodeDetailResponse:
         node = _node(snapshot(), selector)
         return FleetNodeDetailResponse.model_validate(
-            node.model_dump(mode="json") | {"provenance": provenance()}
+            node.model_dump() | {"provenance": provenance()}
         )
 
     @app.post(

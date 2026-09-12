@@ -12,6 +12,7 @@ from vonk_control.deployment_provenance_contract import (
 )
 from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
+    FleetNodeDetailResponse,
     FleetOperatorServices,
     _deployment_provenance,
     _operator_error,
@@ -177,6 +178,30 @@ def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
     response = TestClient(app).get(f"/api/fleet/{NODE}")
     assert response.status_code == 503
     assert response.json()["detail"].startswith("stored document is invalid at ")
+
+
+def test_fleet_node_detail_preserves_typed_live_observations() -> None:
+    from vonk_control.fleet_projection import FleetSnapshot
+
+    from .test_metrics import NODE, _fleet_snapshot
+
+    snapshot = _fleet_snapshot()
+
+    class _Projection:
+        def read(self) -> FleetSnapshot:
+            return snapshot
+
+    app = FastAPI()
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        fleet_projection=_Projection(),
+        library_projection=None,
+    )
+    response = TestClient(app).get(f"/api/fleet/{NODE}")
+    assert response.status_code == 200, response.text
+    detail = FleetNodeDetailResponse.model_validate_json(response.content)
+    assert detail.model_dump(exclude={"provenance"}) == snapshot.nodes[0].model_dump()
 
 
 def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> None:
