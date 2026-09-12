@@ -172,7 +172,7 @@ pub struct RecipeExecutor<'a, R> {
 pub enum RecipeObservationError {
     #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
-    #[error("exact recipe run inspection was not authorized")]
+    #[error("exact recipe run inspection failed ({})", .0.preflight_code())]
     Inspection(#[from] crate::host_runtime::HostRuntimeError),
     #[error("exact recipe run observation could not be reported: {0}")]
     Report(#[from] ClientError),
@@ -284,6 +284,18 @@ async fn report_complete_recipe_run_observations(
 impl<R> RecipeExecutor<'_, R> {
     async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
         self.client.set_progress_phase(claim.operation_id, phase);
+    }
+
+    /// Locally retained managed runs, counted without asking the Controller.
+    ///
+    /// A refused sweep must not be mistaken for a node with nothing left to
+    /// observe: the claim cadence follows this count, so reporting zero after
+    /// a transient refusal slowed exact observation six-fold.
+    pub fn managed_recipe_run_count(&self) -> Result<usize, RecipeObservationError>
+    where
+        R: ProcessRunner,
+    {
+        Ok(self.runtime.recipe_run_inspection_plans()?.len())
     }
 
     pub async fn report_exact_recipe_run_observations(
