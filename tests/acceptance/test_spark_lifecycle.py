@@ -2261,7 +2261,14 @@ class SparkLifecycle:
                 node_id=node_id,
             )
             cleanup_steps = require_object(cleanup_application.get("progress"), "cleanup progress").get("step_results")
-            if not isinstance(cleanup_steps, dict) or not {step.get("kind") for step in cleanup_steps.values() if isinstance(step, dict)} >= {"stop", "uninstall"}:
+            # Cleanup stops the live run through one scope-wide Run/Switch step
+            # and then uninstalls it.  An empty desired set never plans a
+            # "stop" step, so the switch receipt is the stop evidence.
+            if not isinstance(cleanup_steps, dict) or not {
+                step.get("kind")
+                for step in cleanup_steps.values()
+                if isinstance(step, dict)
+            } >= {"switch", "uninstall"}:
                 raise LifecycleError("synthetic canary cleanup receipts are incomplete")
             completed.append("stopped")
             self._await_canary_endpoint(fixture.slug, published=False)
