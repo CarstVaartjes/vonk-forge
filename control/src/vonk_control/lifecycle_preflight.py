@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
@@ -22,6 +22,9 @@ from .runtime_preflight import (
 from .strict_json import StrictJSONModel
 
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
+# The agent probe is bounded to 40 seconds. Allow claim delivery and reporting,
+# but never let a disconnected node hold a lifecycle checkpoint indefinitely.
+PENDING_PROBE_TIMEOUT = timedelta(seconds=180)
 UuidId = Annotated[
     str,
     StringConstraints(
@@ -125,6 +128,12 @@ class LifecyclePreflight:
                     if child is None:
                         return checkpoint, "runtime_preflight.child_missing"
                     if child.state in {"queued", "running"}:
+                        created_at = child.created_at
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=UTC)
+                        observed_now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+                        if observed_now >= created_at + PENDING_PROBE_TIMEOUT:
+                            return checkpoint, "runtime_preflight.deadline_exceeded"
                         return checkpoint, None
                     if child.state != "succeeded":
                         return (

@@ -122,7 +122,7 @@ jobs:
       # must be synced before the type ratchet runs.
       - name: Install control dependencies for type resolution
         shell: bash
-        run: uv sync --project control --frozen
+        run: scripts/retry-dependency-fetch uv sync --project control --frozen
       - name: Check Python types
         shell: bash
         run: scripts/check-python-types
@@ -260,6 +260,8 @@ jobs:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: "false"
+      - name: Prepare locked Controller dependencies
+        run: scripts/retry-dependency-fetch uv sync --project control --frozen
       - name: Validate every canonical recipe launch projection
         run: >-
           uv run --project control --frozen --with-editable .
@@ -285,7 +287,7 @@ jobs:
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen --with-editable .
-          python scripts/tests/run_agent_wire_contracts.py -- -q
+          python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
 
   rust-platform:
     name: Rust platform integration
@@ -640,6 +642,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+      - name: Prepare locked Controller dependencies
+        run: scripts/retry-dependency-fetch uv sync --project control --frozen --python 3.12
       - name: Run complete control suite
         shell: bash
         env:

@@ -54,15 +54,17 @@ def main() -> int:
         for key, (package, name) in PROBES.items():
             if key not in environment:
                 packages.setdefault(package, []).append(name)
-        for package, names in packages.items():
+        if packages:
+            # Resolve one Cargo feature graph for every probe. Separate builds
+            # compiled the shared protocol/jsonschema dependencies repeatedly
+            # with different feature sets, even after restoring the CI cache.
             subprocess.run(
                 [
                     "cargo",
                     "build",
                     "--locked",
-                    "--package",
-                    package,
-                    *[argument for name in names for argument in ("--example", name)],
+                    *[argument for package in packages for argument in ("--package", package)],
+                    *[argument for names in packages.values() for name in names for argument in ("--example", name)],
                 ],
                 cwd=repository,
                 check=True,

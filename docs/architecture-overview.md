@@ -211,9 +211,20 @@ ownership, and mode remain unchanged. Changes trigger a new byte scan. The
 verification cache is bounded and process-local; authorization is still checked
 on every operation. Storage reconciliation reuses unchanged verified files;
 changed filesystem identities trigger a new byte scan.
+Removing an image from the Controller cache marks its SQL receipt `evicted`.
+Admission rejects that receipt until preparation verifies the same immutable
+image and restores it to `verified`. Cache removal preserves recipe
+authorizations and any explicit `revoked` state; re-downloading bytes cannot
+restore revoked authority. This state belongs to the current fresh database
+schema, not an automatic migration of an existing Controller database.
 Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
-start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
+start. Run/Switch waits at most 180 seconds for each pending runtime-preflight
+child, measured from its persisted creation time. Progress updates and worker
+restarts do not reset that deadline. A completed probe still undergoes the
+normal freshness, fingerprint and requirements checks; a pending probe that
+times out fails the parent before any expensive phase is dispatched.
+Multi-node v1 uses ordinary TCP over the declared direct-fabric
 addresses; it does not claim GPUDirect RDMA support. The resulting workload
 route is published to LiteLLM only after every
 mapped node has acknowledged the same build and run evidence. The global

@@ -257,7 +257,39 @@ def test_repeated_host_changes_exhaust_bounded_probe_attempts(tmp_path):
     assert len(checkpoint.receipts) == 1
 
 
-def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tmp_path):
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_pending_probe_deadline_survives_restart_and_progress_updates(tmp_path, state):
+    sessions, queue, clock, _, service, arguments = _setup(tmp_path)
+    checkpoint, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    clock.now += timedelta(seconds=179)
+    with sessions.begin() as session:
+        child = session.get(Job, checkpoint.pending_job_id)
+        assert child is not None
+        child.state = state
+        child.updated_at = clock.now
+    restarted = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
+    pending, error = restarted.ensure(**arguments, previous=checkpoint)
+    assert error is None and pending.pending_job_id == checkpoint.pending_job_id
+    clock.now += timedelta(seconds=1)
+    timed_out, error = restarted.ensure(**arguments, previous=pending)
+    assert error == "runtime_preflight.deadline_exceeded"
+    assert timed_out.attempts == checkpoint.attempts
+    assert timed_out.receipts == {}
+
+
+def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline(tmp_path):
+    sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
+    checkpoint, _ = service.ensure(**arguments, previous=None)
+    _finish(sessions, checkpoint, clock.now)
+    clock.now += timedelta(seconds=180)
+    completed, error = service.ensure(**arguments, previous=checkpoint)
+    assert error is None and completed.pending_job_id is None
+    assert node_id in completed.receipts
+
+
+@pytest.mark.parametrize("probe_completed", [True, False])
+def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tmp_path, probe_completed):
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
     from .test_recipe_operations import installed_recipe
@@ -288,10 +320,15 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tm
     pending_progress = pending.progress.operation
     assert pending_progress is not None
     assert pending_progress.phase == "runtime-preflight"
-    _finish(sessions, pending_preflight, NOW)
-    restarted = _service(sessions, NOW, lifecycle, artifacts, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    if probe_completed:
+        _finish(sessions, pending_preflight, NOW)
+    restarted = _service(sessions, NOW + timedelta(seconds=180), lifecycle, artifacts, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
     restarted.tick()
     active = restarted.get(operation.operation_id)
+    if not probe_completed:
+        assert active.state == "failed"
+        assert not artifacts.children
+        return
     active_result = active.result
     assert active_result is not None
     assert active.progress.phase_index == 0

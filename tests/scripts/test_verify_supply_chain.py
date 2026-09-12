@@ -162,6 +162,8 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-multiarch-image-manifest",
         "scripts/verify-public-image-inputs",
         "scripts/verify-published-image",
+        "scripts/retry-dependency-fetch",
+        "scripts/retry_dependency_fetch.py",
         "scripts/verify-agent-deb",
         "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
