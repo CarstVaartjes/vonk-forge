@@ -23,7 +23,12 @@ export function FleetPage({api}: {api: ControlApi; onBusyChange?(busy: boolean):
 
   return <div className="fleet-page">
     <header className="fleet-command-header"><div className="fleet-command-title"><h1>Fleet</h1><p>Every enrolled Spark, its health, and what is running there.</p></div><div className="fleet-command-actions"><a className="button" href="/library">Open Library</a><button type="button" className="button secondary" onClick={fleet.retry}>Refresh</button></div></header>
-    {fleet.snapshot && <section className="fleet-command-summary" aria-label="Fleet summary"><div><strong>{fleet.snapshot.nodes.length}</strong><span>Sparks</span></div><div><strong>{fleet.snapshot.nodes.filter(node => nodeOperationalState(node, fleet.now) === "live").length}</strong><span>Live</span></div><div><strong>{fleet.snapshot.nodes.reduce((count, node) => count + node.loaded.filter(item => item.healthy).length, 0)}</strong><span>Running recipes</span></div><div><strong>{fleet.snapshot.nodes.reduce((count, node) => count + node.installed.filter(item => item.complete).length, 0)}</strong><span>Installed recipes</span></div></section>}
+    {fleet.snapshot && <section className="fleet-command-summary" aria-label="Fleet summary">
+      <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.length}</strong><span>Sparks</span></div>
+      <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.filter(node => nodeOperationalState(node, fleet.now) === "live").length}</strong><span>Live</span></div>
+      <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.reduce((count, node) => count + node.loaded.filter(item => item.healthy).length, 0)}</strong><span>Running recipes</span></div>
+      <div className="fleet-command-fact"><strong>{fleet.snapshot.nodes.reduce((count, node) => count + node.installed.filter(item => item.complete).length, 0)}</strong><span>Installed recipes</span></div>
+    </section>}
     {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <section className="fleet-discovery" aria-label="Find a Spark"><label className="fleet-search"><span>Find a Spark</span><input type="search" value={query} placeholder="Friendly name or technical name" onChange={event => setQuery(event.currentTarget.value)}/></label><span role="status">Showing {visibleNodes.length} of {fleet.snapshot.nodes.length}</span></section>}
     {fleet.loading && !fleet.snapshot && <section className="fleet-loading" role="status"><h2>Loading Fleet</h2><p>Reading the current Spark state…</p></section>}
     {fleet.error && !fleet.snapshot && <section className="fleet-error" role="alert"><h2>Fleet unavailable</h2><p>{fleet.error}</p><button type="button" className="button" onClick={fleet.retry}>Retry</button></section>}

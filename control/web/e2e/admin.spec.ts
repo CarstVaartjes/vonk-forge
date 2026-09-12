@@ -67,6 +67,25 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
   }
 });
 
+test("Fleet summary keeps each count above its label at narrow and wide widths", async ({page}) => {
+  await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
+  await page.goto("/fleet");
+  const summary = page.getByRole("region", {name: "Fleet summary"});
+  await expect(summary.locator("strong")).toHaveCount(4);
+
+  for (const width of [360, 768, 1280]) {
+    await page.setViewportSize({width, height: 900});
+    for (const metric of await summary.locator(":scope > div").all()) {
+      const value = await metric.locator("strong").boundingBox();
+      const label = await metric.locator("span").boundingBox();
+      expect(value).not.toBeNull();
+      expect(label).not.toBeNull();
+      expect(label!.y).toBeGreaterThanOrEqual(value!.y + value!.height);
+    }
+    await expectNoDocumentOverflow(page);
+  }
+});
+
 test("Activity combines friendly audit history and current operations", async ({page}) => {
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
   const targetId = `spk_${"1".repeat(32)}`;
