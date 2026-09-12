@@ -92,6 +92,7 @@ from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
+    RecipeRunObservationPendingError,
     RecipeRunObservationReplayError,
 )
 from .inventory_repository import InventoryRepository, InventorySnapshotInput
@@ -1533,6 +1534,16 @@ def install_agent_routes(
                 request_sha256=body.request_sha256,
                 expires_in_seconds=body.expires_in_seconds,
             )
+        except RecipeRunObservationPendingError:
+            # An outstanding, unconsumed grant is the authoritative "not yet",
+            # exactly like the "starting" 425 above.  Name it with a stable
+            # code so the agent can retry the run instead of reading a lost
+            # authorization and abandoning its whole observation sweep.
+            raise HTTPException(
+                status_code=409,
+                detail="recipe run observation grant is already pending",
+                headers={"x-vonk-error-code": "controller.recipe_run.observation_pending"},
+            ) from None
         except (TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409,

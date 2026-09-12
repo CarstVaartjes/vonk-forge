@@ -73,6 +73,16 @@ class RecipeRunObservationReplayError(HostHelperAuthorityError):
     """A valid observation repeats an already consumed current grant."""
 
 
+class RecipeRunObservationPendingError(HostHelperAuthorityError):
+    """An unconsumed observation grant for this run is still outstanding.
+
+    This is the bounded, *expected* refusal: the Controller already authorized
+    this exact run and the agent's previous grant has not been consumed yet.
+    It must stay distinguishable from an authority rejection, because the agent
+    retries a pending grant and must never read it as a lost authorization.
+    """
+
+
 class HostHelperGrantIssuer:
     """Sign one short-lived, exact host operation for one GPU node."""
 
@@ -334,7 +344,7 @@ class HostRuntimeAuthorityService:
                 and pending.consumed is not True
                 and pending.expires_at + 5 >= int(now.timestamp())
             ):
-                raise HostHelperAuthorityError(
+                raise RecipeRunObservationPendingError(
                     "recipe run observation grant is already pending"
                 )
             grant = self._issuer.issue_grant(
