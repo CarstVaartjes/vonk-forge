@@ -708,7 +708,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         )
 
     # The generic worker queue must never consume an agent-owned rollout.
-    assert JobService(sessions, clock=clock).claim("worker", 30) is None
+    assert JobService(sessions, clock=clock).claim("worker", 30, kinds=("reconcile",)) is None
     assert (
         operations.claim(
             NODE_A,

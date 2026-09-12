@@ -47,11 +47,20 @@ def test_worker_handler_receives_pinned_job_metadata(tmp_path) -> None:
     assert jobs.get(job.id).state == "succeeded"
 
 
-def test_unknown_job_kind_fails_without_execution(tmp_path) -> None:
+@pytest.mark.parametrize("kind", ["recipe.image.availability.v2", "future-coordinator"])
+def test_generic_worker_leaves_unregistered_jobs_for_their_owner(tmp_path, kind) -> None:
     jobs = _service(tmp_path)
-    job = jobs.enqueue("unknown", "admin", "abc", [], {})
-    assert Worker(jobs, "worker-1", {}).run_once()
-    assert jobs.get(job.id).state == "failed"
+    pending = jobs.enqueue(kind, "admin", "abc", [], {"retry_after_at": "later"})
+    assert Worker(jobs, "worker-1", {}).run_once() is False
+    generic = jobs.enqueue("probe", "admin", "abc", [], {})
+    worker = Worker(jobs, "worker-1", {"probe": lambda _: {"done": True}})
+    assert worker.run_once()
+    assert jobs.get(generic.id).state == "succeeded"
+    assert worker.run_once() is False
+    stored = jobs.get(pending.id)
+    assert stored.state == "queued"
+    assert stored.current_attempt == 0
+    assert stored.payload == {"retry_after_at": "later"}
 
 
 def test_worker_does_not_mask_unexpected_programming_error(tmp_path) -> None:

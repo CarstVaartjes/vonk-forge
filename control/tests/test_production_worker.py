@@ -30,7 +30,7 @@ def _jobs(tmp_path) -> JobService:
     )
 
 
-def test_production_worker_fails_unknown_generic_work(
+def test_production_worker_leaves_unregistered_work_queued(
     tmp_path,
 ) -> None:
     jobs = _jobs(tmp_path)
@@ -42,12 +42,12 @@ def test_production_worker_fails_unknown_generic_work(
             "worker",
             {},
         ).run_once()
-        is True
+        is False
     )
     persisted = jobs.get(job.id)
-    assert persisted.state == "failed"
-    assert persisted.status_reason == "unsupported job kind: probe"
-    assert persisted.current_attempt == 1
+    assert persisted.state == "queued"
+    assert persisted.status_reason is None
+    assert persisted.current_attempt == 0
 
 
 def test_production_worker_does_not_claim_agent_owned_upgrade_parent(

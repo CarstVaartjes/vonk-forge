@@ -337,11 +337,12 @@ def test_generic_worker_claim_skips_current_agent_operation_parent(queue) -> Non
     with sessions.begin() as session:
         linked = session.get(Job, linked_id)
         assert linked is not None
+        linked_kind = linked.kind
         linked.created_at = clock.now - timedelta(seconds=1)
     jobs = JobService(sessions, clock=clock)
     ordinary = jobs.enqueue("probe", "operator", COMMIT, [NODE_ID], {})
 
-    claim = jobs.claim("generic-worker", 30)
+    claim = jobs.claim("generic-worker", 30, kinds=("probe", linked_kind))
 
     assert claim is not None and claim.job_id == ordinary.id
     with sessions() as session:
