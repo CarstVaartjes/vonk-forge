@@ -2335,8 +2335,14 @@ class FleetProfileService:
                     return True
                 progress_data = progress.model_dump(mode="json")
                 results = dict(progress_data.get("step_results", {}))
+                # The receipt names the *plan* step it completed.  Copying the
+                # child's own kind recorded "recipe.uninstall" for an
+                # "uninstall" step and nothing at all for a switch-adapter
+                # child, so no reader could match a receipt to its plan step.
+                completed_step = steps[row.current_step]
                 child_result = FleetProfileStepResult(
                     operation_id=child.id,
+                    kind=completed_step["kind"],
                     result=(
                         child.result
                         if isinstance(child, FleetProfileChildOperation)
@@ -2345,7 +2351,7 @@ class FleetProfileService:
                 )
                 if not isinstance(child, FleetProfileChildOperation):
                     child_result = child_result.model_copy(
-                        update={"owner_id": child.owner_id, "kind": child.kind}
+                        update={"owner_id": child.owner_id}
                     )
                 results[str(row.current_step)] = child_result.model_dump(mode="json")
                 progress_data["step_results"] = results

@@ -1807,6 +1807,9 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
         if isinstance(value.result, FleetProfileSwitchChildResult)
     ]
     assert len(receipts) == 1
+    # The receipt names the plan step it completed, not the child's own
+    # operation kind: a switch-adapter child used to record no kind at all.
+    assert {value.kind for value in step_results.values()} == {"switch"}
     receipt = receipts[0]
     assert receipt.run_switch_operation_id == child_id
     assert receipt.run_switch.phase_index == 3
