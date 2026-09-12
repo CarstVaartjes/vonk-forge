@@ -166,6 +166,21 @@ def _persisted_profile_result(
         raise FleetProfileConflict("Persisted Fleet profile result is invalid") from error
 
 
+def _canonical_progress(value: object) -> FleetProfileApplicationProgress:
+    """Validate a persisted progress document with canonical JSON semantics.
+
+    The document was written as JSON: nested contract tuples arrive as arrays
+    and unions must resolve the way they did on the producer side.  Validating
+    an already-decoded mapping as strict Python data instead lets Pydantic's
+    smart union pick a different variant, which silently replaces a child
+    receipt with a same-shaped neighbour.
+    """
+
+    return FleetProfileApplicationProgress.model_validate_json(
+        canonical_message(value), strict=True
+    )
+
+
 def _persisted_profile_progress(
     row: FleetProfileApplication,
 ) -> FleetProfileApplicationProgress:
@@ -692,9 +707,14 @@ class RunSwitchFleetProfileAdapter:
 
     @staticmethod
     def _state(application: FleetProfileApplication) -> dict[str, object] | None:
+        # Persisted JSON is consumed with the canonical JSON validation
+        # semantics, exactly as it was written.  Validating an already-decoded
+        # document as strict Python data rejects JSON arrays where the contract
+        # declares tuples, which makes Pydantic's smart union pick a different
+        # phase-result variant and loses the receipt entirely.
         try:
-            progress = FleetProfileApplicationProgress.model_validate(
-                application.progress
+            progress = FleetProfileApplicationProgress.model_validate_json(
+                canonical_message(application.progress), strict=True
             )
         except ValidationError as error:
             raise FleetProfileConflict(
@@ -703,7 +723,7 @@ class RunSwitchFleetProfileAdapter:
         raw = progress.switch_adapter
         if raw is None:
             return None
-        return raw.model_dump(mode="python")
+        return raw.model_dump(mode="json")
 
     def _save_state(self, application_id: str, state: Mapping[str, object]) -> None:
         with self._sessions.begin() as session:
@@ -720,8 +740,12 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: Mapping[str, object],
     ) -> None:
-        typed = FleetProfileSwitchAdapterState.model_validate(state)
-        progress = FleetProfileApplicationProgress.model_validate(application.progress)
+        typed = FleetProfileSwitchAdapterState.model_validate_json(
+            canonical_message(state), strict=True
+        )
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(application.progress), strict=True
+        )
         application.progress = {
             **progress.model_dump(mode="json"),
             "switch_adapter": typed.model_dump(mode="json"),
@@ -768,7 +792,9 @@ class RunSwitchFleetProfileAdapter:
         try:
             return FleetProfileSwitchChildResult(
                 run_switch_operation_id=child.operation_id,
-                run_switch=RunSwitchOperationResult.model_validate(child.result),
+                run_switch=RunSwitchOperationResult.model_validate_json(
+                    canonical_message(child.result), strict=True
+                ),
             )
         except (TypeError, ValueError) as error:
             raise FleetProfileConflict(
@@ -849,10 +875,14 @@ def _state_receipt(state: Mapping[str, object]) -> FleetProfileChildResult | Non
             continue
         receipt = raw.get("result")
         if isinstance(receipt, Mapping):
-            return FleetProfileSwitchChildResult.model_validate(receipt)
+            return FleetProfileSwitchChildResult.model_validate_json(
+                canonical_message(receipt), strict=True
+            )
     summary = state.get("result")
     return (
-        FleetProfileSwitchAdapterResult.model_validate(summary)
+        FleetProfileSwitchAdapterResult.model_validate_json(
+            canonical_message(summary), strict=True
+        )
         if isinstance(summary, Mapping)
         else None
     )
@@ -1911,7 +1941,7 @@ class FleetProfileService:
                 )
             )
             if existing is not None:
-                existing_progress = FleetProfileApplicationProgress.model_validate(existing.progress)
+                existing_progress = _canonical_progress(existing.progress)
                 if (
                     existing.profile_id != preview.profile_id
                     or existing_progress.retry_of_application_id != retry_of_application_id
@@ -1946,7 +1976,7 @@ class FleetProfileService:
                 parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
                 if parent is None:
                     raise KeyError(retry_of_application_id)
-                prior = FleetProfileApplicationProgress.model_validate(parent.progress)
+                prior = _canonical_progress(parent.progress)
                 if parent.state not in {"failed", "waiting-for-operator"}:
                     raise FleetProfileConflict("Only failed or waiting applications can be retried")
                 if parent.profile_digest != intended.profile_digest:
@@ -1961,7 +1991,7 @@ class FleetProfileService:
                     FleetProfileApplication.id != parent.id,
                 ))
                 for other in applications:
-                    other_progress = FleetProfileApplicationProgress.model_validate(other.progress)
+                    other_progress = _canonical_progress(other.progress)
                     if (other_progress.retry_of_application_id == parent.id
                             or other.state in {"queued", "running"}
                             or _aware(other.created_at) > _aware(parent.created_at)):
@@ -2009,7 +2039,7 @@ class FleetProfileService:
     def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
         if row.state not in {"failed", "waiting-for-operator"}:
             return False
-        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        progress = _canonical_progress(row.progress)
         profile = session.get(FleetProfile, row.profile_id)
         if (
             progress.intended_profile is None
@@ -2022,7 +2052,7 @@ class FleetProfileService:
             FleetProfileApplication.id != row.id,
         ))
         return not any(
-            FleetProfileApplicationProgress.model_validate(other.progress).retry_of_application_id == row.id
+            _canonical_progress(other.progress).retry_of_application_id == row.id
             or other.state in {"queued", "running"}
             or _aware(other.created_at) > _aware(row.created_at)
             for other in others
@@ -2037,14 +2067,14 @@ class FleetProfileService:
                 FleetProfileApplication.request_key == request_key
             ))
             if replay is not None:
-                progress = FleetProfileApplicationProgress.model_validate(replay.progress)
+                progress = _canonical_progress(replay.progress)
                 if progress.retry_of_application_id != application_id:
                     raise FleetProfileConflict("Retry request key was reused for another application")
                 return self._application_view(replay)
             parent = session.get(FleetProfileApplication, application_id)
             if parent is None:
                 raise KeyError(application_id)
-            progress = FleetProfileApplicationProgress.model_validate(parent.progress)
+            progress = _canonical_progress(parent.progress)
             if parent.state not in {"failed", "waiting-for-operator"}:
                 raise FleetProfileConflict("Only failed or waiting applications can be retried")
             if progress.intended_profile is None:
@@ -2167,7 +2197,7 @@ class FleetProfileService:
             if kind == "start":
                 return "start"
             if kind == "switch":
-                progress = FleetProfileApplicationProgress.model_validate(row.progress)
+                progress = _canonical_progress(row.progress)
                 if progress.child_progress is not None:
                     return progress.child_progress.phase
                 return "prepare"
@@ -2179,7 +2209,7 @@ class FleetProfileService:
     ) -> dict[str, object]:
         """Project profile progress and its operator-visible failure into Activity."""
 
-        typed_progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        typed_progress = _canonical_progress(row.progress)
         progress = {"phase": cls._operation_phase(row)}
         operation_kind = typed_progress.operation_kind
         failure = None
@@ -2976,7 +3006,7 @@ class FleetProfileService:
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
         plan = _persisted_profile_plan(row)
-        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        progress = _canonical_progress(row.progress)
         if row.state in {"queued", "running"} and progress.child_progress and progress.child_progress.operation:
             progress.child_progress.operation = project_progress(progress.child_progress.operation, _aware(self._clock()))
         return FleetProfileApplicationView(
@@ -2985,8 +3015,8 @@ class FleetProfileService:
             profile_digest=row.profile_digest,
             plan_digest=row.plan_digest,
             state=_OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True),
-            attempt=FleetProfileApplicationProgress.model_validate(row.progress).attempt,
-            retry_of_application_id=FleetProfileApplicationProgress.model_validate(row.progress).retry_of_application_id,
+            attempt=_canonical_progress(row.progress).attempt,
+            retry_of_application_id=_canonical_progress(row.progress).retry_of_application_id,
             current_step=row.current_step,
             total_steps=len(plan.steps),
             current_operation_id=row.current_operation_id,
@@ -2999,7 +3029,7 @@ class FleetProfileService:
 
     @staticmethod
     def _intended_profile(application: FleetProfileApplication) -> FleetProfileIntendedConfiguration:
-        progress = FleetProfileApplicationProgress.model_validate(application.progress)
+        progress = _canonical_progress(application.progress)
         if progress.intended_profile is None:
             raise FleetProfileConflict("Persisted application intent is unavailable")
         if progress.intended_profile.profile_digest != application.profile_digest:
@@ -3046,7 +3076,7 @@ class FleetProfileService:
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
                 raise KeyError(application_id)
-            progress = FleetProfileApplicationProgress.model_validate(
+            progress = _canonical_progress(
                 application.progress
             )
             value = progress.assignments.get(assignment_id)
@@ -3061,7 +3091,7 @@ class FleetProfileService:
             )
             if application is None:
                 raise KeyError(application_id)
-            progress = FleetProfileApplicationProgress.model_validate(
+            progress = _canonical_progress(
                 application.progress
             ).model_dump(mode="python")
             assignments = (
@@ -3073,7 +3103,7 @@ class FleetProfileService:
                 value
             ).model_dump(mode="json")
             progress["assignments"] = assignments
-            application.progress = FleetProfileApplicationProgress.model_validate(
+            application.progress = _canonical_progress(
                 progress
             ).model_dump(mode="json")
             application.updated_at = _aware(self._clock())
