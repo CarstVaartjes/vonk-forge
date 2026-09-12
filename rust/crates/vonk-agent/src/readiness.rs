@@ -39,12 +39,16 @@ pub struct ReadinessReceipt {
 
 impl ReadinessReceipt {
     pub fn new(
-        runtime_identity: AgentRuntimeIdentity,
+        mut runtime_identity: AgentRuntimeIdentity,
         pid: u32,
         process_start_ticks: u64,
         boot_id: String,
         accepted_at: DateTime<Utc>,
     ) -> Self {
+        // Readiness binds the direct self-test of the running executable.
+        // Activation history belongs to Controller reports and may describe
+        // an earlier package; it is not part of that local self-test.
+        runtime_identity.package_activation = None;
         Self {
             schema_version: 1,
             pid,
