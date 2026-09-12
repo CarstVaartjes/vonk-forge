@@ -46,6 +46,12 @@ When a newer revision is imported, existing installations and runs remain bound
 to their old immutable revision and are reported as stale until the operator
 reviews an update.
 
+Library lists only the current accepted revision of each recipe, selected by
+the Controller's catalog head. Recipe links and counts on Models use that same
+current set. Cached older revisions do not become extra Library choices;
+their exact records remain available to the installations and runs that use
+them. A pending or failed update never replaces the accepted recipe.
+
 The latest durable result is available from
 `GET /api/catalog/managed-recipes/sync-status`. An explicit refresh uses
 `POST /api/catalog/managed-recipes/sync` with a fresh UUID `request_key` and,

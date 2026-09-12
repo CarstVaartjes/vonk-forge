@@ -6,7 +6,7 @@ import type {LibrarySubview} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
 import {libraryFiltersFromSearch, libraryRecencySince} from "../components/library-workcell";
 import {nodeDisplayName} from "../lib/fleet";
-import {libraryRoute} from "../lib/library-route";
+import {libraryRoute, modelKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
 
@@ -80,15 +80,18 @@ export async function loadLibraryView(api: ControlApi, signal: AbortSignal, sort
   const recipes = recipePages.flatMap(page => page.recipes).map(viewRecipe);
   const modelRecipes = new Map<string, LibraryViewRecipe[]>();
   for (const recipe of recipes) {
-    const source = recipePages.flatMap(page => page.recipes).find(item => item.identity.recipe_id === recipe.recipe_id && item.identity.recipe_revision_id === recipe.recipe_revision_id);
-    for (const selector of source?.model_selectors ?? []) modelRecipes.set(selector, [...(modelRecipes.get(selector) ?? []), recipe]);
+    for (const selection of recipe.recipe_document.models) {
+      const key = modelKey(selection.model);
+      modelRecipes.set(key, [...(modelRecipes.get(key) ?? []), recipe]);
+    }
   }
-  const matched = new Set([...modelRecipes.values()].flat().map(recipe => recipe.recipe_revision_id));
+  const viewModels = models.map(model => viewModel(model, modelRecipes.get(modelKey(model.identity)) ?? []));
+  const matched = new Set(viewModels.flatMap(model => model.recipes.map(recipe => recipe.recipe_revision_id)));
   return {
     schema_version: 2,
     generated_at: modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
     freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
-    models: models.map(model => viewModel(model, modelRecipes.get(model.selector) ?? [])),
+    models: viewModels,
     unlinked_recipes: recipes.filter(recipe => !matched.has(recipe.recipe_revision_id)),
   };
 }

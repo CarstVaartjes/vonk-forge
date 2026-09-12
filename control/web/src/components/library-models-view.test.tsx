@@ -1,4 +1,4 @@
-import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {vi} from "vitest";
 import type {ControlApi} from "../api/types";
 import {libraryViewSnapshot} from "../test-fixtures/library";
@@ -21,6 +21,32 @@ function cacheApi() {
 }
 
 const renderModels = (query = "", api: ControlApi = cacheApi()) => render(<LibraryModelsView api={api} entries={buildLibraryRecipeRecords(libraryViewSnapshot)} modelInventory={libraryViewSnapshot.models} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query={query}/>);
+
+test("groups model revisions and keeps recipe links and downloads bound to the selected revision", async () => {
+  const current = libraryViewSnapshot.models.find(model => model.recipes.length > 0)!;
+  const older = {...current, model: {...current.model, slug: `${current.model.slug}-older`, content_sha256: "a".repeat(64)}, recipes: [], version: "older", model_document: {...current.model_document, identity: {...current.model_document.identity, version: "older"}}};
+  const api = cacheApi();
+  render(<LibraryModelsView api={api} entries={[]} modelInventory={[older, current]} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
+
+  const list = screen.getByLabelText("Model library");
+  expect(within(list).getAllByRole("article")).toHaveLength(1);
+  expect(screen.getByText("1 of 1 models")).toBeVisible();
+  expect(within(list).getByRole("link", {name: current.recipes[0]!.title})).toBeVisible();
+  const revisions = within(list).getByRole("combobox", {name: /Revision for /});
+  expect(revisions).toHaveValue(`${current.model.publisher}/${current.model.slug}@${current.model.content_sha256}`);
+  fireEvent.change(revisions, {target: {value: `${older.model.publisher}/${older.model.slug}@${older.model.content_sha256}`}});
+  expect(within(list).queryByRole("link", {name: current.recipes[0]!.title})).toBeNull();
+  fireEvent.click(within(list).getByRole("button", {name: "Download model"}));
+  await waitFor(() => expect(api.prepareModelCache).toHaveBeenCalledWith(`${older.model.publisher}/${older.model.slug}`, expect.any(String), expect.anything()));
+});
+
+test("keeps different creators and quantizations separate even when their titles match", () => {
+  const base = libraryViewSnapshot.models[0]!;
+  const anotherCreator = {...base, model: {...base.model, publisher: "another-creator"}};
+  const anotherQuantization = {...base, model: {...base.model, slug: `${base.model.slug}-q8`}, quantization: "q8"};
+  render(<LibraryModelsView api={cacheApi()} entries={[]} modelInventory={[base, anotherCreator, anotherQuantization]} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
+  expect(within(screen.getByLabelText("Model library")).getAllByRole("article")).toHaveLength(3);
+});
 
 test("shows the verified model library with exact size and recipe counts", () => {
   renderModels();

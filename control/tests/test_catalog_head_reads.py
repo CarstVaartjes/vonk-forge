@@ -61,6 +61,18 @@ def _assert_current(catalog, first, expected):
     assert catalog.get_recipe(first.document_id).id == expected.id
     current = catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)])
     assert current[(first.publisher, first.slug)].content_sha256 == expected.content_digest
+    library = _library(catalog)
+    assert {
+        row.identity.recipe_revision_id
+        for row in library.recipe_library(all_models=True).recipes
+    } == {expected.id}
+    assert library.recipe_detail(f"{first.publisher}/{first.slug}").identity.recipe_revision_id == expected.id
+    # A cached historical revision must not reappear as another Library choice.
+    assert {
+        row.id for row in library._catalog_documents(
+            kind="recipe", local_digests=[first.content_digest]
+        )
+    } == {expected.id}
     with catalog._sessions() as session:
         active = CatalogRepository().active_revision(session, first.document_id)
         assert active is not None
@@ -89,15 +101,11 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
     catalog.entities.fail_candidate(first.document_id, reason="missing exact model")
     _assert_current(catalog, first, second)
 
-    # Acceptance remains revision-specific: historical exact reads and the
-    # revision list survive a head change, while candidates cannot be executed.
+    # Acceptance remains revision-specific: historical exact reads survive a
+    # head change, while Library offers only the current accepted recipe.
     assert catalog.get_recipe(first.id).content_sha256 == first.content_digest
     with pytest.raises(KeyError):
         catalog.get_recipe(failed.id)
-    assert {
-        row.identity.recipe_revision_id
-        for row in _library(catalog).recipe_library(all_models=True).recipes
-    } == {first.id, second.id}
     with catalog._sessions() as session:
         assert session.get(CatalogDocumentRevision, first.id).state == "active"
 
@@ -133,6 +141,7 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     with pytest.raises(KeyError):
         catalog.get_recipe(first.document_id)
     assert catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)]) == {}
+    assert _library(catalog).recipe_library(all_models=True).recipes == []
     assert catalog.get_recipe(first.id).id == first.id
     with catalog._sessions() as session:
         assert CatalogRepository().active_revision(session, first.document_id) is None

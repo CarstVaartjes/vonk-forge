@@ -272,7 +272,7 @@ export class ApiClient implements ControlApi {
 
   async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
     return resultData(await this.generated.GET("/api/recipe/library", {
-      params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
+      params: {query: {cursor, limit: 100, all_models: true, sort, updated_since: updatedSince}},
       signal,
     }));
   }

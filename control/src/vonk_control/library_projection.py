@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Literal, cast
 
 from pydantic import ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -564,10 +564,17 @@ class LibraryProjection:
         kind: str,
         local_digests: Sequence[str],
     ) -> list[CatalogDocumentRevision]:
+        # Historical recipe revisions remain valid for exact workload reads,
+        # but only the accepted head is a discoverable Library choice.
         with self._sessions() as session:
             query = select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == kind,
-                or_(
+                and_(
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                )
+                if kind == "recipe"
+                else or_(
                     CatalogDocumentRevision.state == "active",
                     CatalogDocumentRevision.content_digest.in_(local_digests),
                 ),

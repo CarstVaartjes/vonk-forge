@@ -3,6 +3,32 @@ import {App} from "../app";
 import {modelLibrary, recipeLibrary} from "../test-fixtures/library";
 import type {ControlApi} from "../api/types";
 import {loadLibraryView} from "./library";
+import {afterEach, vi} from "vitest";
+import {ApiClient} from "../api/client";
+
+afterEach(() => vi.unstubAllGlobals());
+
+test("loads recipes for uncached models through the real API client", async () => {
+  // The server defaults to locally cached models unless all_models is requested.
+  // Stubbing ControlApi.recipeLibrary directly concealed the missing query flag.
+  vi.stubGlobal("fetch", async (request: Request) => {
+    const url = new URL(request.url);
+    const body = url.pathname === "/api/model/library" ? {...modelLibrary, models: modelLibrary.models.map(model => ({...model, local: {...model.local, controller: "not_cached"}}))}
+      : url.searchParams.get("all_models") === "true" ? recipeLibrary : {...recipeLibrary, recipes: []};
+    return new Response(JSON.stringify(body), {status: 200, headers: {"Content-Type": "application/json"}});
+  });
+  const snapshot = await loadLibraryView(new ApiClient(), new AbortController().signal);
+  expect(snapshot.models.some(model => model.recipes.length > 0)).toBe(true);
+});
+
+test("does not attach a recipe to another revision of the same model selector", async () => {
+  const original = modelLibrary.models.find(model => recipeLibrary.recipes.some(recipe => recipe.model_selectors.includes(model.selector)))!;
+  const changed = {...original, identity: {...original.identity, content_sha256: "f".repeat(64)}};
+  const api = {modelLibrary: async () => ({...modelLibrary, models: [original, changed]}), recipeLibrary: async () => recipeLibrary} as unknown as ControlApi;
+  const snapshot = await loadLibraryView(api, new AbortController().signal);
+  expect(snapshot.models[0]!.recipes.length).toBeGreaterThan(0);
+  expect(snapshot.models[1]!.recipes).toHaveLength(0);
+});
 
 const libraryApi = {modelLibrary: async () => modelLibrary, recipeLibrary: async () => recipeLibrary};
 
