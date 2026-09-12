@@ -2261,15 +2261,20 @@ class SparkLifecycle:
                 node_id=node_id,
             )
             cleanup_steps = require_object(cleanup_application.get("progress"), "cleanup progress").get("step_results")
+            cleanup_kinds = (
+                {step.get("kind") for step in cleanup_steps.values() if isinstance(step, dict)}
+                if isinstance(cleanup_steps, dict)
+                else set()
+            )
             # Cleanup stops the live run through one scope-wide Run/Switch step
-            # and then uninstalls it.  An empty desired set never plans a
-            # "stop" step, so the switch receipt is the stop evidence.
-            if not isinstance(cleanup_steps, dict) or not {
-                step.get("kind")
-                for step in cleanup_steps.values()
-                if isinstance(step, dict)
-            } >= {"switch", "uninstall"}:
-                raise LifecycleError("synthetic canary cleanup receipts are incomplete")
+            # and then uninstalls it.  An empty desired set never plans a "stop"
+            # step, so a switch receipt is the stop evidence.  Report the kinds
+            # that were actually recorded: the previous message named neither.
+            if not isinstance(cleanup_steps, dict) or not cleanup_kinds >= {"switch", "uninstall"}:
+                raise LifecycleError(
+                    "synthetic canary cleanup receipts are incomplete: kinds="
+                    + json.dumps(sorted(str(kind) for kind in cleanup_kinds))
+                )
             completed.append("stopped")
             self._await_canary_endpoint(fixture.slug, published=False)
             completed.append("route-withdrawn")
