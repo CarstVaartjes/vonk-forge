@@ -3416,6 +3416,8 @@
 .library-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; padding: .85rem; background: var(--surface-panel, #111912); }
 .library-model-row h3 { margin: 0; color: var(--text, #f0f3eb); font-size: .95rem; }
 .library-model-row p { margin: .2rem 0; color: var(--text-muted, #abb5a7); font-size: .72rem; }
+.library-model-revision { display: grid; gap: .3rem; margin: .65rem 0; color: var(--text-muted, #abb5a7); }
+.library-model-revision select { width: 100%; min-width: 0; }
 .library-model-row dl { display: flex; gap: 1rem; margin: 0; }
 .library-model-row dt { color: var(--text-subtle, #8d9988); font-size: .65rem; text-transform: uppercase; }
 .library-model-row dd { margin: .15rem 0 0; color: var(--text, #f0f3eb); font-size: .78rem; }

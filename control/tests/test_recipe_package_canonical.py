@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_control.auth import TokenCodec
-from vonk_control.bounded_json import require_mapping
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -89,7 +89,9 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
 
     client = RecipePackageClient("http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler))
     snapshot = client.list()
-    assert len(snapshot.catalog_entities) == 92
+    assert len(snapshot.catalog_entities) == len(
+        require_sequence(index["catalog_entities"], "fixture model catalog")
+    )
     item = client.fetch(snapshot.items[0].uri)
     assert item.document["kind"] == "recipe"
     assert item.dependencies and item.dependencies[0]["kind"] == "model"
@@ -373,13 +375,13 @@ def test_published_index_imports_all_models_including_unreferenced_versions(
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
         cursors=TokenCodec(b"m" * 32).cursor_codec(),
     )
-    assert catalog.import_catalog_models("index-test", model_documents) == 92
+    assert catalog.import_catalog_models("index-test", model_documents) == len(model_documents)
     with sessions() as session:
         revisions = session.scalars(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model"
             )
         ).all()
-        assert len(revisions) == 92
+        assert len(revisions) == len(model_documents)
         assert all(revision.state == "active" for revision in revisions)
         assert any(revision.slug not in recipe_models for revision in revisions)

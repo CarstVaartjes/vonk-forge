@@ -317,11 +317,12 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     recipe_files = sorted((root / "recipes").glob("*.json"))
     assert len(recipe_files) == 85
     model_documents: dict[tuple[str, str], contracts.ModelDefinition] = {}
-    for path in (root / "models").glob("*.json"):
+    model_files = list((root / "models").glob("*.json"))
+    for path in model_files:
         item = json.loads(path.read_text(encoding="utf-8"))
         parsed = contracts.ModelDefinition.model_validate(item)
         model_documents[(parsed.identity.publisher, parsed.identity.slug)] = parsed
-    assert len(model_documents) == 92
+    assert model_documents and len(model_documents) == len(model_files)
     engines: set[str] = set()
     projection_count = 0
     for path in recipe_files:

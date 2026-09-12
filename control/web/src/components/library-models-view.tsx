@@ -1,4 +1,5 @@
 import type {MouseEvent} from "react";
+import {useState} from "react";
 import type {ControlApi, LibraryViewModel, LibraryViewSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {modelLibraryPath, modelKey, recipeLibraryPath} from "../lib/library-route";
@@ -34,6 +35,7 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
     .filter(model => !filters.publisher || model.model.publisher === filters.publisher)
     .filter(model => !filters.alignment || model.alignment.includes(filters.alignment))
     .filter(model => !normalizedQuery || filteredRecipes.some(record => record.modelKey === modelKey(model.model)) || modelTitle(model).toLowerCase().includes(normalizedQuery));
+  const groups = groupModels(visible);
   const refresh = () => void onRefresh(new AbortController().signal);
 
   function updateFilters(patch: Partial<LibraryWorkcellFilters>) {
@@ -47,11 +49,11 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
   return <section className="library-models-view" aria-labelledby="library-models-heading">
     <header className="library-subview-heading">
       <div><h2 id="library-models-heading">Models</h2><p>Browse the verified model library, prepare the cache, and open the recipes that use each model.</p></div>
-      <span>{visible.length} of {models.length} models</span>
+      <span>{groups.size} of {groupModels(models).size} models</span>
     </header>
     <div className="library-model-controls">
       <label>Search models<input type="search" aria-label="Search models" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search model title or capability" /></label>
-      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateFilters({model: event.target.value})}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)}</option>)}</select></label>
+      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => updateFilters({model: event.target.value})}><option value="">All models</option>{models.map(model => <option key={modelKey(model.model)} value={modelKey(model.model)}>{modelTitle(model)} · {model.version} · {model.model.content_sha256.slice(0, 8)}</option>)}</select></label>
       <label>Usage<select aria-label="Filter model usage" value={filters.usage} onChange={event => updateFilters({usage: event.target.value})}><option value="">All usage</option>{[...new Set(models.flatMap(model => model.usage))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Family<select aria-label="Filter model family" value={filters.family} onChange={event => updateFilters({family: event.target.value})}><option value="">All families</option>{[...new Set(models.map(model => model.family).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       <label>Version<select aria-label="Filter model version" value={filters.version} onChange={event => updateFilters({version: event.target.value})}><option value="">All versions</option>{[...new Set(models.map(model => model.version).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
@@ -62,13 +64,29 @@ export function LibraryModelsView({api, entries, filters, modelInventory, onFilt
       <label>Updated<select aria-label="Filter model updated" value={filters.updated} onChange={event => updateFilters({updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
     </div>
     <div className="library-model-list" aria-label="Model library">
-      {visible.map(model => <ModelRow key={modelKey(model.model)} api={api} model={model} onNavigate={onNavigate} onPrepared={refresh} />)}
+      {[...groups].map(([key, revisions]) => <ModelRevisionsRow key={key} api={api} revisions={revisions} onNavigate={onNavigate} onPrepared={refresh} />)}
       {visible.length === 0 && <p className="library-empty-state">No models match the current filters.</p>}
     </div>
   </section>;
 }
 
-function ModelRow({api, model, onNavigate, onPrepared}: {api: ControlApi; model: LibraryViewModel; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onPrepared(): void}) {
+function groupModels(models: LibraryViewModel[]): Map<string, LibraryViewModel[]> {
+  const groups = new Map<string, LibraryViewModel[]>();
+  for (const model of models) {
+    const logical = model.model_document.identity.model;
+    const key = JSON.stringify([model.model.publisher, logical.publisher, logical.slug, model.quantization]);
+    groups.set(key, [...(groups.get(key) ?? []), model]);
+  }
+  return groups;
+}
+
+function ModelRevisionsRow({api, revisions, onNavigate, onPrepared}: {api: ControlApi; revisions: LibraryViewModel[]; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onPrepared(): void}) {
+  const [selected, setSelected] = useState<string>();
+  // Preserve the server's order, preferring an exact revision with a recipe.
+  // Filtering still happens per revision before grouping, so exact links and
+  // version/usage filters cannot silently select a different revision.
+  const model = revisions.find(item => modelKey(item.model) === selected)
+    ?? revisions.find(item => item.recipes.length > 0) ?? revisions[0]!;
   const key = modelKey(model.model);
   const bytes = model.model_document.files.reduce((sum, file) => sum + file.size_bytes, 0);
   const capabilities = (model.model_capabilities?.facts ?? [])
@@ -87,7 +105,12 @@ function ModelRow({api, model, onNavigate, onPrepared}: {api: ControlApi; model:
         <p>{model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}</p>
       </a>
       <div className="library-model-badges">{capabilities.length ? capabilities.map(capability => <span key={capability}>{capability}</span>) : <span>Capabilities unknown</span>}</div>
-      <LibraryCacheAction api={api} onPrepared={onPrepared} selector={`${model.model.publisher}/${model.model.slug}`} state={model.local.controller} />
+      {revisions.length > 1 && <label className="library-model-revision">Revision
+        <select aria-label={`Revision for ${modelTitle(model)}`} value={key} onChange={event => setSelected(event.target.value)}>
+          {revisions.map(revision => <option key={modelKey(revision.model)} value={modelKey(revision.model)}>{revision.version} · {revision.model.content_sha256.slice(0, 8)}{revision.recipes.length ? " · Recipes available" : ""}</option>)}
+        </select>
+      </label>}
+      <LibraryCacheAction key={key} api={api} onPrepared={onPrepared} selector={`${model.model.publisher}/${model.model.slug}`} state={model.local.controller} />
       {model.local.controller === "preparing" && preparation && <span role="status">{preparation.phase ?? preparation.state}</span>}
     </div>
     <dl>

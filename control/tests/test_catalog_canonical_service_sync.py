@@ -85,7 +85,9 @@ def test_sync_imports_canonical_models_and_recipe_once(tmp_path: Path) -> None:
     assert reader.fetches == [item.uri]
     with sessions() as session:
         revisions = session.scalars(select(CatalogDocumentRevision)).all()
-        assert len([row for row in revisions if row.kind == "model"]) == 92
+        assert len([row for row in revisions if row.kind == "model"]) == len(
+            snapshot.catalog_entities
+        )
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
         assert all(row.state == "active" for row in revisions)
     client.close()
