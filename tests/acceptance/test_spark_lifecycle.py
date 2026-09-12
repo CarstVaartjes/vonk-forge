@@ -2229,7 +2229,22 @@ class SparkLifecycle:
             )
             cleanup_preview = require_object(cleanup_preview_payload, "synthetic canary cleanup preview")
             summary = require_object(cleanup_preview.get("summary"), "synthetic canary cleanup summary")
-            if cleanup_preview.get("allowed") is not True or summary.get("stops", 0) < 1 or summary.get("uninstalls", 0) < 1:
+            # Cleanup is one scope-wide Run/Switch step whose child stops the
+            # live run, plus the uninstall; an empty desired set never produces
+            # a "stop" plan step, so the switch step is the evidence that this
+            # cleanup actually stops the workload.
+            cleanup_steps = cleanup_preview.get("steps")
+            switch_covers_scope = isinstance(cleanup_steps, list) and any(
+                isinstance(step, dict)
+                and step.get("kind") == "switch"
+                and node_id in (step.get("node_ids") or ())
+                for step in cleanup_steps
+            )
+            if (
+                cleanup_preview.get("allowed") is not True
+                or summary.get("uninstalls", 0) < 1
+                or not switch_covers_scope
+            ):
                 raise LifecycleError(
                     "synthetic canary cleanup preview is not admitted: "
                     + self._preview_diagnostic(cleanup_preview)
