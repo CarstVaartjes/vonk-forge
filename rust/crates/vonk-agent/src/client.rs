@@ -2,7 +2,7 @@ use std::{
     fmt, fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -37,6 +37,8 @@ use crate::{
     telemetry::{TelemetrySample, valid_report_batch},
     workloads::CompiledExecutionPlan,
 };
+
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
@@ -350,24 +352,39 @@ impl AgentHttpClient {
         Ok(client)
     }
 
-    pub(crate) fn replace_identity(
+    pub(crate) async fn activate_replacement(
         &self,
-        config: &AgentConfig,
-        paths: &IdentityPaths,
+        replacement: &Self,
+        generation: u64,
     ) -> Result<(), ClientError> {
-        let client = Self::build_client(config, paths)?;
-        *self
-            .client
-            .write()
-            .expect("agent client lock is not poisoned") = client;
+        if self.controller != replacement.controller
+            || self.node_id != replacement.node_id
+            || Arc::ptr_eq(&self.client, &replacement.client)
+        {
+            return Err(ClientError::Protocol);
+        }
+        // Drain requests using the old identity before the Controller revokes
+        // it, then replace the shared transport before admitting another one.
+        // A PUT can take an hour. Periodically release our place in the writer
+        // queue so heartbeats can renew that operation's lease while it drains.
+        let mut transport = loop {
+            if let Ok(guard) =
+                tokio::time::timeout(Duration::from_millis(100), self.client.write()).await
+            {
+                break guard;
+            }
+            tokio::task::yield_now().await;
+        };
+        replacement.activate(generation).await?;
+        *transport = replacement.current_client().await.clone();
         Ok(())
     }
 
-    fn current_client(&self) -> Client {
-        self.client
-            .read()
-            .expect("agent client lock is not poisoned")
-            .clone()
+    async fn current_client(&self) -> RwLockReadGuard<'_, Client> {
+        // Each request expression retains this guard through send().await.
+        // Streaming response bodies may continue after their authenticated
+        // headers arrive; uploads retain it until their response arrives.
+        self.client.read().await
     }
 
     pub async fn claim(
@@ -386,6 +403,7 @@ impl AgentHttpClient {
         )?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/claim")?)
             .header("content-type", "application/json")
             .body(body)
@@ -405,6 +423,7 @@ impl AgentHttpClient {
         let body = canonical_json(result).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/result")?)
             .header("content-type", "application/json")
             .body(body)
@@ -474,6 +493,7 @@ impl AgentHttpClient {
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/heartbeat")?)
             .header("content-type", "application/json")
             .timeout(Duration::from_secs(15))
@@ -521,6 +541,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/host-runtime/grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -583,6 +604,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/recipe-runs/observation-grants")?)
             .header("content-type", "application/json")
             .body(body)
@@ -659,6 +681,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/agent-upgrade/activation-grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -700,6 +723,7 @@ impl AgentHttpClient {
         .map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/agent-upgrade/grant")?)
             .header("content-type", "application/json")
             .body(body)
@@ -721,6 +745,7 @@ impl AgentHttpClient {
         }
         let response = self
             .current_client()
+            .await
             .get(self.endpoint(&format!(
                 "/agent/recipe-installations/{installation_id}/spec"
             ))?)
@@ -749,6 +774,7 @@ impl AgentHttpClient {
         }
         let response = self
             .current_client()
+            .await
             .get(self.endpoint(&format!("/agent/source-bundles/{source_sha256}"))?)
             .send()
             .await?;
@@ -772,6 +798,7 @@ impl AgentHttpClient {
         }
         let mut response = self
             .current_client()
+            .await
             .get(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/inputs/{sha256}"))?)
             .send()
             .await?;
@@ -840,6 +867,7 @@ impl AgentHttpClient {
         let file = tokio::fs::File::open(path).await?;
         let response = self
             .current_client()
+            .await
             .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
             .header("x-vonk-artifact-name", name)
             .header("content-type", media_type)
@@ -884,6 +912,7 @@ impl AgentHttpClient {
             let transfer = async {
                 let status = self
                     .current_client()
+                    .await
                     .head(endpoint.clone())
                     .header("x-vonk-image-digest", image_digest)
                     .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
@@ -929,6 +958,7 @@ impl AgentHttpClient {
                 });
                 let response = self
                     .current_client()
+                    .await
                     .put(endpoint.clone())
                     .header("content-type", "application/x-tar")
                     .header("content-length", image_bytes - offset)
@@ -1011,6 +1041,7 @@ impl AgentHttpClient {
         }
         let response = self
             .current_client()
+            .await
             .get(self.endpoint(&format!("/agent/distribution/manifests/{plan_digest}"))?)
             .send()
             .await?;
@@ -1231,6 +1262,7 @@ impl AgentHttpClient {
             let attempt: Result<(), ClientError> = async {
                 let mut response = self
                     .current_client()
+                    .await
                     .get(url)
                     .header("range", format!("bytes={offset}-{end}"))
                     .header("if-range", format!("\"sha256:{sha256}\""))
@@ -1364,6 +1396,7 @@ impl AgentHttpClient {
             }
             let response = self
                 .current_client()
+                .await
                 .get(url)
                 .header("range", format!("bytes={offset}-{end}"))
                 .header("if-range", format!("\"sha256:{sha256}\""))
@@ -1435,6 +1468,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/inventory")?)
             .header("content-type", "application/json")
             .body(body)
@@ -1457,6 +1491,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/recipe-runs/observations")?)
             .header("content-type", "application/json")
             .body(body)
@@ -1481,6 +1516,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/telemetry")?)
             .timeout(Duration::from_secs(2))
             .header("content-type", "application/json")
@@ -1507,6 +1543,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/renew")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
@@ -1572,6 +1609,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/renew/recover")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
@@ -1599,6 +1637,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
+            .await
             .post(self.endpoint("/agent/renew/activate")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
@@ -2000,10 +2039,11 @@ mod tests {
         net::TcpListener,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
-        sync::{Arc, RwLock},
+        sync::Arc,
         thread,
         time::Duration,
     };
+    use tokio::sync::RwLock;
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
@@ -2182,10 +2222,7 @@ mod tests {
         assert!(Arc::ptr_eq(&client.client, &operation_client.client));
 
         let replacement = reqwest::Client::builder().build().unwrap();
-        *client
-            .client
-            .write()
-            .expect("agent client lock is not poisoned") = replacement;
+        *client.client.try_write().expect("uncontended test client") = replacement;
         assert!(Arc::ptr_eq(&client.client, &operation_client.client));
     }
 
@@ -2202,10 +2239,7 @@ mod tests {
             .default_headers(headers)
             .build()
             .unwrap();
-        *client
-            .client
-            .write()
-            .expect("agent client lock is not poisoned") = replacement;
+        *client.client.try_write().expect("uncontended test client") = replacement;
 
         operation_client
             .report_telemetry(&[telemetry_sample()])
@@ -2217,6 +2251,131 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("x-rotation-marker: fresh")
         );
+    }
+
+    #[tokio::test]
+    async fn rotation_drains_requests_without_starving_heartbeats() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for activation_status in [204, 403] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let first_received = Arc::new(tokio::sync::Notify::new());
+            let release_first = Arc::new(tokio::sync::Notify::new());
+            let first_finished = Arc::new(AtomicBool::new(false));
+            let server = {
+                let first_received = first_received.clone();
+                let release_first = release_first.clone();
+                let first_finished = first_finished.clone();
+                tokio::spawn(async move {
+                    let mut handlers = Vec::new();
+                    for index in 0..4 {
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let first_received = first_received.clone();
+                        let release_first = release_first.clone();
+                        let first_finished = first_finished.clone();
+                        handlers.push(tokio::spawn(async move {
+                            let mut request = Vec::new();
+                            let mut buf = [0; 4096];
+                            loop {
+                                let size = stream.read(&mut buf).await.unwrap();
+                                assert_ne!(size, 0);
+                                request.extend_from_slice(&buf[..size]);
+                                if let Some(end) = request.windows(4).position(|b| b == b"\r\n\r\n") {
+                                    let headers = String::from_utf8_lossy(&request[..end]);
+                                    let length: usize = headers.lines().find_map(|line| {
+                                        let (name, value) = line.split_once(':')?;
+                                        name.eq_ignore_ascii_case("content-length")
+                                            .then(|| value.trim().parse().unwrap())
+                                    }).unwrap();
+                                    if request.len() >= end + 4 + length { break; }
+                                }
+                            }
+                            let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
+                            let activating = request.starts_with("post /agent/renew/activate ");
+                            if index == 0 {
+                                first_received.notify_one();
+                                release_first.notified().await;
+                                first_finished.store(true, Ordering::SeqCst);
+                            }
+                            let status = if activating {
+                                assert!(first_finished.load(Ordering::SeqCst), "activation raced an old request");
+                                activation_status
+                            } else { 204 };
+                            stream.write_all(format!(
+                                "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            ).as_bytes()).await.unwrap();
+                            request
+                        }));
+                    }
+                    let mut requests = Vec::new();
+                    for handler in handlers {
+                        requests.push(handler.await.unwrap());
+                    }
+                    requests
+                })
+            };
+            let client =
+                AgentHttpClient::for_http_test(&url, "spk_0123456789abcdef0123456789abcdef");
+            let replacement = AgentHttpClient::for_http_test(&url, client.node_id());
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "x-rotation-marker",
+                reqwest::header::HeaderValue::from_static("fresh"),
+            );
+            *replacement.client.try_write().unwrap() = reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .unwrap();
+            let operation = client.clone();
+            let request = tokio::spawn(async move {
+                operation
+                    .report_telemetry(&[telemetry_sample()])
+                    .await
+                    .unwrap();
+            });
+            first_received.notified().await;
+            let rotation = client.activate_replacement(&replacement, 2);
+            tokio::pin!(rotation);
+            // Poll the real activation while an HTTP response is outstanding.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), &mut rotation)
+                    .await
+                    .is_err()
+            );
+            let samples = [telemetry_sample()];
+            let probe = client.report_telemetry(&samples);
+            tokio::pin!(probe);
+            tokio::select! {
+                result = &mut rotation => panic!("rotation interrupted an active request: {result:?}"),
+                result = &mut probe => result.unwrap(),
+                _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("rotation starved the heartbeat"),
+            }
+            release_first.notify_one();
+            request.await.unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(2), &mut rotation)
+                .await
+                .unwrap();
+            if activation_status == 204 {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.status(), Some(403));
+                assert!(!error.retryable());
+            }
+            client
+                .report_telemetry(&[telemetry_sample()])
+                .await
+                .unwrap();
+            let requests = server.await.unwrap();
+            assert!(!requests[1].contains("x-rotation-marker"));
+            assert!(requests[2].starts_with("post /agent/renew/activate "));
+            assert!(requests[2].contains("x-rotation-marker: fresh"));
+            assert_eq!(
+                requests[3].contains("x-rotation-marker: fresh"),
+                activation_status == 204
+            );
+        }
     }
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {

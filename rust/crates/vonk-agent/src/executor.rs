@@ -2388,6 +2388,17 @@ pub enum LoopError {
     Readiness(String),
 }
 
+/// A failed, panicked, or aborted heartbeat lane must stop the synchronous
+/// executor too. Its parent cannot poll a select while Podman blocks that
+/// thread; cancellation therefore belongs to the independent heartbeat task.
+struct CancelExecutionOnDrop(tokio::sync::watch::Sender<bool>);
+
+impl Drop for CancelExecutionOnDrop {
+    fn drop(&mut self) {
+        self.0.send_replace(true);
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RunOncePolicy<'a> {
     capabilities: &'a [&'a str],
@@ -2485,7 +2496,8 @@ where
             let (lease_deadline_sender, lease_deadline) =
                 tokio::sync::watch::channel(claim.deadline);
             let (cancellation_sender, cancellation) = tokio::sync::watch::channel(false);
-            let heartbeat_task = tokio::spawn(run_heartbeats(
+            let cancel_on_exit = CancelExecutionOnDrop(cancellation_sender.clone());
+            let heartbeats = run_heartbeats(
                 client.clone(),
                 heartbeat_state,
                 claim.clone(),
@@ -2493,7 +2505,11 @@ where
                 cancellation_sender,
                 heartbeat_stop,
                 policy.heartbeat_interval,
-            ));
+            );
+            let heartbeat_task = tokio::spawn(async move {
+                let _cancel_on_exit = cancel_on_exit;
+                heartbeats.await
+            });
             let executed = normalize_execution_result(
                 &claim,
                 executor.execute(&claim, lease_deadline, cancellation).await,
@@ -3439,6 +3455,67 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct TerminalHeartbeatClient {
+        inner: RecordingClient,
+        panic: bool,
+    }
+
+    #[async_trait]
+    impl LoopClient for TerminalHeartbeatClient {
+        async fn claim(
+            &self,
+            capabilities: &[&str],
+            wait_seconds: u64,
+            runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            self.inner
+                .claim(capabilities, wait_seconds, runtime_identity)
+                .await
+        }
+
+        async fn heartbeat(
+            &self,
+            _progress: &AgentProgress,
+        ) -> Result<AgentDirective, ClientError> {
+            assert!(!self.panic, "heartbeat task failed unexpectedly");
+            Err(ClientError::Protocol)
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.inner.submit_result(result).await
+        }
+    }
+
+    struct BlockingCancellationExecutor {
+        cancelled: Arc<AtomicBool>,
+    }
+
+    #[async_trait(?Send)]
+    impl Executor for BlockingCancellationExecutor {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+            cancellation: tokio::sync::watch::Receiver<bool>,
+        ) -> ExecutionResult {
+            // The real Podman runner is synchronous too. A select in the
+            // parent cannot observe a failed heartbeat while this poll blocks.
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while std::time::Instant::now() < deadline {
+                if *cancellation.borrow() {
+                    self.cancelled.store(true, Ordering::SeqCst);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            ExecutionResult {
+                state: "failed",
+                body: json!({"reason": "build process ended"}),
+            }
+        }
+    }
+
     struct HeartbeatGatedExecutor {
         heartbeats: Arc<Mutex<Vec<AgentProgress>>>,
         minimum: usize,
@@ -3716,6 +3793,47 @@ mod tests {
         assert!(client.heartbeats.lock().unwrap().len() >= 2);
         assert_eq!(client.results.lock().unwrap().len(), 1);
         assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn terminal_heartbeat_failure_cancels_a_blocking_executor() {
+        for panic in [false, true] {
+            let directory = tempdir().unwrap();
+            let client = TerminalHeartbeatClient {
+                inner: RecordingClient {
+                    cancel_requested: false,
+                    claim: Arc::new(Mutex::new(Some(claim()))),
+                    fail_heartbeat: false,
+                    heartbeats: Arc::new(Mutex::new(Vec::new())),
+                    results: Arc::new(Mutex::new(Vec::new())),
+                },
+                panic,
+            };
+            let executor = BlockingCancellationExecutor {
+                cancelled: Arc::new(AtomicBool::new(false)),
+            };
+            let mut state =
+                StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+            let result = run_once_with_heartbeat_interval(
+                &client,
+                &mut state,
+                &executor,
+                RunOncePolicy {
+                    capabilities: &["recipe.install"],
+                    wait_seconds: 0,
+                    runtime_identity: None,
+                    heartbeat_interval: Duration::from_millis(10),
+                },
+                || Ok(()),
+            )
+            .await;
+            assert!(result.is_err());
+            assert!(
+                executor.cancelled.load(Ordering::SeqCst),
+                "executor continued after heartbeat failure (panic={panic})"
+            );
+            assert!(client.inner.results.lock().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]

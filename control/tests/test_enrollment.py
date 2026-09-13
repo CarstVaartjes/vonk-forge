@@ -2,6 +2,7 @@ import base64
 import hashlib
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,9 @@ from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import AgentResult
+from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.enrollment import (
     EnrollmentDenied,
     EnrollmentService,
@@ -31,9 +35,15 @@ from vonk_control.models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
     AgentNodeProfile,
+    AgentOperation,
+    AgentOperationAttempt,
     Base,
+    Job,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 OTHER_NODE_ID = "spk_fedcba9876543210fedcba9876543210"
@@ -639,6 +649,205 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
         node.state = "retired"
     with pytest.raises(EnrollmentDenied, match="retired|revoked"):
         enrollment.renew(NODE_ID, renewed.serial, csr())
+
+
+@pytest.mark.parametrize(
+    "attempt_state",
+    (
+        "running",
+        "expired",
+        "finished",
+        "revoked-source",
+        "expired-source",
+        "superseded",
+        "finished-operation",
+        "finished-job",
+    ),
+)
+def test_rotation_preserves_only_live_operation_authority(
+    service, attempt_state
+) -> None:
+    _assert_rotation_operation_authority(service, attempt_state)
+
+
+def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(service) -> None:
+    enrollment, sessions, clock, _authority = service
+    issued = enroll(enrollment)
+    contacted = threading.Event()
+
+    def observe_contact(_session, _source) -> None:
+        contacted.set()
+
+    stop_waiting = threading.Event()
+    jobs = AgentJobService(
+        sessions, clock=clock, contact_consumer=observe_contact,
+        monotonic=lambda: time.monotonic() + (120 if stop_waiting.is_set() else 0),
+    )
+    source = AgentSource(
+        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.168.1.10"
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        waiting = pool.submit(
+            claim_agent, jobs, NODE_ID, issued.serial, 60, wait_seconds=60,
+            source=source,
+            runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "observation_receipt_public_key": "c" * 64},
+        )
+        try:
+            assert contacted.wait(timeout=5)
+            enrollment.renew(NODE_ID, issued.serial, csr())
+            # The HTTP response must drain so the agent can activate the staged
+            # identity. Waiting out 60 seconds can expire a 90-second certificate.
+            assert waiting.result(timeout=5) is None
+        finally:
+            # Advance only the long-poll clock to bound failure cleanup too.
+            stop_waiting.set()
+            jobs.notify_available()
+
+
+def test_rotation_preserves_live_operation_authority_on_postgres(
+    postgres_engine,
+) -> None:
+    Base.metadata.create_all(postgres_engine)
+    clock = Clock()
+    authority = RecordingAuthority()
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _assert_rotation_operation_authority(
+        (
+            EnrollmentService(sessions, authority, clock=clock),
+            sessions,
+            clock,
+            authority,
+        ),
+        "running",
+    )
+
+
+def _assert_rotation_operation_authority(service, attempt_state) -> None:
+    enrollment, sessions, clock, _authority = service
+    issued = enroll(enrollment)
+    presence = AgentPresenceService(
+        sessions, ManagementAddressPolicy.parse("192.168.1.0/24"), clock=clock
+    )
+    def observe_contact(session, source) -> None:
+        presence.observe_in_session(session, source)
+
+    jobs = AgentJobService(
+        sessions, clock=clock, contact_consumer=observe_contact
+    )
+    parent = Job(
+        request_id=str(uuid.uuid4()),
+        kind="agent.operations",
+        state="queued",
+        actor="operator",
+        authority_revision="a" * 64,
+        targets=[NODE_ID],
+        payload_digest=hashlib.sha256(b"{}").hexdigest(),
+        payload={},
+        current_attempt=0,
+        created_at=clock.now,
+        updated_at=clock.now,
+    )
+    with sessions.begin() as session:
+        session.add(parent)
+    jobs.enqueue(
+        parent.id,
+        NODE_ID,
+        "recipe.stop",
+        "a" * 64,
+        {
+            "schema_version": 1,
+            "run_id": str(uuid.uuid4()),
+            "plan_digest": "a" * 64,
+        },
+    )
+    old_source = AgentSource(
+        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.168.1.10"
+    )
+    claim = claim_agent(
+        jobs,
+        NODE_ID,
+        issued.serial,
+        60,
+        source=old_source,
+        runtime_identity={
+            **PACKAGED_RUNTIME_IDENTITY,
+            "observation_receipt_public_key": "c" * 64,
+        },
+    )
+    assert claim is not None
+    renewed = enrollment.renew(NODE_ID, issued.serial, csr())
+    new_source = AgentSource(
+        AgentIdentity(NODE_ID, renewed.serial, renewed.fingerprint, True),
+        "192.168.1.10",
+    )
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        if attempt_state == "expired":
+            clock.advance(seconds=60)
+        elif attempt_state == "finished":
+            attempt.state = "succeeded"
+        elif attempt_state in {"revoked-source", "expired-source"}:
+            previous = session.get(AgentCertificate, issued.serial)
+            assert previous is not None
+            if attempt_state == "revoked-source":
+                previous.state = "revoked"
+                previous.revoked_at = clock.now
+            else:
+                previous.not_after = clock.now
+        elif attempt_state in {"superseded", "finished-operation"}:
+            operation = session.get(AgentOperation, claim.operation_id)
+            assert operation is not None
+            if attempt_state == "superseded":
+                operation.current_attempt += 1
+            else:
+                operation.state = "succeeded"
+        elif attempt_state == "finished-job":
+            job = session.get(Job, parent.id)
+            assert job is not None
+            job.state = "cancelled"
+        original_deadline = attempt.lease_deadline
+    enrollment.activate(NODE_ID, renewed.serial, renewed.generation)
+    # Retrying activation must not extend a lease or reopen a finished attempt.
+    enrollment.activate(NODE_ID, renewed.serial, renewed.generation)
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        assert attempt.lease_deadline == original_deadline
+        if attempt_state != "running":
+            assert attempt.agent_certificate_serial == issued.serial
+    if attempt_state != "running":
+        with pytest.raises(StaleAgentAttempt):
+            jobs.heartbeat(claim, None, 60, source=new_source)
+        return
+    jobs.heartbeat(claim, None, 60, source=new_source)
+    with pytest.raises(ValueError, match="locked identity"):
+        jobs.heartbeat(claim, None, 60, source=old_source)
+    # The same claim and fence complete under the replacement credential.
+    jobs.record_result(
+        AgentResult.model_validate(
+            {
+                "schema_version": claim.schema_version,
+                "job_id": claim.job_id,
+                "operation_id": claim.operation_id,
+                "node_id": claim.node_id,
+                "attempt": claim.attempt,
+                "fence": claim.fence,
+                "deadline": claim.deadline,
+                "state": "succeeded",
+                "result": {"stopped": True},
+            }
+        ),
+        source=new_source,
+    )
 
 
 def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_valid(

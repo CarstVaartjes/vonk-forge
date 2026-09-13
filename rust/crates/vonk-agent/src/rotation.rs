@@ -59,11 +59,11 @@ pub async fn rotate_if_due(
         if identity_expired(&paths, now)? {
             retire_expired_staged(&root, generation)?;
         } else {
-            AgentHttpClient::from_identity_paths(config, &paths)?
-                .activate(generation)
+            let replacement = AgentHttpClient::from_identity_paths(config, &paths)?;
+            client
+                .activate_replacement(&replacement, generation)
                 .await?;
             publish_staged(&root, generation)?;
-            client.replace_identity(config, &paths)?;
             return Ok(true);
         }
     }
@@ -110,8 +110,9 @@ pub async fn rotate_if_due(
         },
     )?;
     let (_, paths) = staged_identity_paths(&root)?.ok_or(IdentityError::Node)?;
-    AgentHttpClient::from_identity_paths(config, &paths)?
-        .activate(generation)
+    let replacement = AgentHttpClient::from_identity_paths(config, &paths)?;
+    client
+        .activate_replacement(&replacement, generation)
         .await?;
     publish_staged(&root, generation)?;
     clear_pending(&root)?;
@@ -119,7 +120,6 @@ pub async fn rotate_if_due(
     if active != paths {
         return Err(IdentityError::Node.into());
     }
-    client.replace_identity(config, &paths)?;
     Ok(true)
 }
 

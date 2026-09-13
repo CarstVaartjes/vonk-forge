@@ -157,6 +157,18 @@ Bootstrap also has one response: the helper authority key is required, and the
 address and hostname list are explicit even when they are `null` and `[]`.
 There is no setup-schema selector or older bootstrap variant.
 
+Certificate activation atomically carries a live operation's credential binding
+from its valid active source certificate to the replacement. Its attempt, fence,
+and lease deadline do not change. Expired, superseded, completed, or revoked
+operation authority is never restored, and the retired certificate remains denied.
+The agent drains outstanding HTTP requests before activation and swaps the shared
+transport before admitting new requests. An idle claim poll returns promptly
+when a valid replacement is staged, leaving time to activate before expiry.
+While a long upload drains, waiting for that swap must still allow heartbeats
+to renew its lease. A terminal heartbeat
+failure, panic, or task cancellation stops the executing process even when its
+executor is blocked in synchronous process polling.
+
 The work-claim request and runtime identity are defined in
 `agent_protocol/src/vonk_agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
 wait time, and the enrolled agent's observation key are required. The Rust
