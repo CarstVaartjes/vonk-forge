@@ -61,7 +61,10 @@ newer cache entry or select from a Spark copy. Cache updates and garbage
 collection do not change running workloads; a later apply must pass the cache
 gate before distributing exact assets to selected Sparks in parallel. Apply
 skips verified local copies, then stops/replaces workloads and reports durable
-per-Spark progress and readiness.
+per-Spark progress and readiness. For a multi-Spark recipe, the Controller
+records image authorization for every compiled role and rank before installing
+the group. Those authorizations reuse the same cached image archive; they do
+not trigger another image download or build.
 
 ## Credentials and evidence
 

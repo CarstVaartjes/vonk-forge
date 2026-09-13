@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -79,6 +80,9 @@ NODE_ID = "spk_" + "1" * 32
 
 
 class _Transport:
+    def __init__(self, events: list[str] | None = None) -> None:
+        self.events = events
+
     def pull_and_export(
         self,
         reference: str,
@@ -89,6 +93,8 @@ class _Transport:
         progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
         del reference, progress
+        if self.events is not None:
+            self.events.append("runtime-image-pulled")
         destination.write_bytes(ARCHIVE)
         return PulledImageEvidence(
             manifest_digest=PLATFORM_DIGEST,
@@ -159,13 +165,13 @@ class _Inspector:
         retention: str,
         now: datetime,
     ) -> ArtifactInspection:
-        del session, model_content_sha256, recipe_revision_id, node_ids, retention, now
+        del session, model_content_sha256, recipe_revision_id, retention, now
         return ArtifactInspection(
-            required_bytes=1024,
+            required_bytes=1024 * len(node_ids),
             reused_bytes=0,
-            copied_bytes=1024,
+            copied_bytes=1024 * len(node_ids),
             missing_nas_bytes=0,
-            missing_spark_bytes=1024,
+            missing_spark_bytes=1024 * len(node_ids),
             reclaimable_bytes=0,
             nas_coverage="complete",
             spark_coverage="partial",
@@ -311,7 +317,7 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         )
 
 
-def _seed() -> tuple[sessionmaker[Session], str, str, str]:
+def _seed(*, dual: bool = False) -> tuple[sessionmaker[Session], str, str, str]:
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -320,16 +326,39 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     recipe_document = canonical_example("recipe-image.json")
+    node_ids = (NODE_ID, "spk_" + "2" * 32) if dual else (NODE_ID,)
+    capabilities = ["runtime.vonk.v1", "recipe.operations.v1"]
+    if dual:
+        capabilities.append("fabric.connected.mbps.200000")
+        topology = recipe_document["topology"]
+        topology.update(mode="distributed", name="dual", node_count=2)
+        topology["parallelism"].update(backend="mp", tensor=2, world_size=2)
+        topology["fabric"].update(
+            connectivity="connected", minimum_bandwidth_mbps=200000
+        )
+        worker = deepcopy(topology["roles"][0])
+        worker.update(name="worker", endpoint_owner=False)
+        topology["roles"].append(worker)
+        topology["start_order"] = ["worker", "entrypoint"]
+        topology["stop_order"] = ["entrypoint", "worker"]
+        recipe_document["models"][0]["files"][0]["roles"].append("worker")
     model_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
-    recipe_document = RecipeDefinition.model_validate(recipe_document).model_dump(mode="json")
-    model_document = ModelDefinition.model_validate(model_document).model_dump(mode="json")
+    recipe_document = RecipeDefinition.model_validate(recipe_document).model_dump(
+        mode="json"
+    )
+    model_document = ModelDefinition.model_validate(model_document).model_dump(
+        mode="json"
+    )
     recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_document))
     model_digest = content_sha256(ModelDefinition.model_validate(model_document))
-    assert model_digest == "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
+    assert (
+        model_digest
+        == "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
+    )
     with sessions.begin() as session:
         entities = CatalogEntityService(session, clock=lambda: NOW)
         model_revision = entities.create_draft(model_document, actor="test")
@@ -337,47 +366,55 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
         recipe_revision = entities.create_draft(recipe_document, actor="test")
         entities.resolve(recipe_revision.id, actor="test")
         revision_id = recipe_revision.id
-        session.add_all(
-            [
-                AgentNode(
-                    node_id=NODE_ID,
-                    state="active",
-                    architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1", "recipe.operations.v1"],
-                ),
-                AgentCertificate(
-                    serial="serial-direct",
-                    node_id=NODE_ID,
-                    fingerprint="fingerprint-direct",
-                    not_before=NOW,
-                    not_after=NOW.replace(year=2027),
-                ),
-                AgentPresence(
-                    node_id=NODE_ID,
-                    certificate_serial="serial-direct",
-                    certificate_fingerprint="fingerprint-direct",
-                    management_address="10.0.0.42",
-                    observed_at=NOW,
-                ),
-            ]
+        for index, node_id in enumerate(node_ids):
+            serial = "serial-direct" if index == 0 else f"serial-direct-{index}"
+            fingerprint = (
+                "fingerprint-direct" if index == 0 else f"fingerprint-direct-{index}"
+            )
+            session.add_all(
+                [
+                    AgentNode(
+                        node_id=node_id,
+                        state="active",
+                        architecture="linux-arm64",
+                        capabilities=capabilities,
+                    ),
+                    AgentCertificate(
+                        serial=serial,
+                        node_id=node_id,
+                        fingerprint=fingerprint,
+                        not_before=NOW,
+                        not_after=NOW.replace(year=2027),
+                    ),
+                    AgentPresence(
+                        node_id=node_id,
+                        certificate_serial=serial,
+                        certificate_fingerprint=fingerprint,
+                        management_address=f"10.0.0.{42 + index}",
+                        observed_at=NOW,
+                    ),
+                ]
+            )
+    for index, node_id in enumerate(node_ids):
+        InventoryRepository(sessions, clock=lambda: NOW).record(
+            InventorySnapshotInput(
+                node_id=node_id,
+                observed_at=NOW,
+                disk_total_bytes=10_000_000_000,
+                disk_free_bytes=10_000_000_000,
+                host_memory_total_bytes=10_000_000_000,
+                host_memory_free_bytes=10_000_000_000,
+                gpu_memory_total_bytes=10_000_000_000,
+                gpu_memory_free_bytes=10_000_000_000,
+                gpu_count=1,
+                artifact_store_read_only=False,
+                capabilities=tuple(capabilities),
+                fabric_address=f"192.168.100.{10 + index}" if dual else None,
+                fabric_bandwidth_mbps=200000 if dual else None,
+            )
         )
-    InventoryRepository(sessions, clock=lambda: NOW).record(
-        InventorySnapshotInput(
-            node_id=NODE_ID,
-            observed_at=NOW,
-            disk_total_bytes=10_000_000_000,
-            disk_free_bytes=10_000_000_000,
-            host_memory_total_bytes=10_000_000_000,
-            host_memory_free_bytes=10_000_000_000,
-            gpu_memory_total_bytes=10_000_000_000,
-            gpu_memory_free_bytes=10_000_000_000,
-            gpu_count=1,
-            artifact_store_read_only=False,
-            capabilities=("runtime.vonk.v1", "recipe.operations.v1"),
-        )
-    )
     mapping_service = ClusterMappingService(sessions)
-    mapping_plan = mapping_service.preview(revision_id, (NODE_ID,), {}, "test")
+    mapping_plan = mapping_service.preview(revision_id, node_ids, {}, "test")
     mapping_id = mapping_service.materialize(mapping_plan, actor="test", now=NOW)
     record_passing_preflight(sessions, NOW, floor=10)
     return sessions, revision_id, recipe_digest, mapping_id
@@ -389,8 +426,9 @@ def _make_service(
     persist_db: bool = True,
     tamper_db: str | None = None,
     availability_key: str | None = None,
+    dual: bool = False,
 ):
-    sessions, revision_id, recipe_digest, mapping_id = _seed()
+    sessions, revision_id, recipe_digest, mapping_id = _seed(dual=dual)
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
     events: list[str] = []
     if availability_key is not None:
@@ -402,7 +440,7 @@ def _make_service(
             RecipeDefinition.model_validate(canonical_example("recipe-image.json")),
             runtime={"architecture": "linux-arm64", "interface": "vonk.runtime.v1"},
             storage=storage,
-            transport=_Transport(),
+            transport=_Transport(events),
             now=NOW,
         )
         with sessions.begin() as session:
@@ -422,7 +460,7 @@ def _make_service(
             RecipeDefinition.model_validate(document),
             runtime=runtime_spec["runtime"],
             storage=storage,
-            transport=_Transport(),
+            transport=_Transport(events),
             now=NOW,
         )
         if persist_db:
@@ -500,6 +538,63 @@ def _make_service(
         memory_floor_bytes=50,
     )
     return service, sessions, revision_id, recipe_digest, mapping_id, executor, events
+
+
+def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
+    tmp_path: Path,
+) -> None:
+    service, sessions, revision_id, _digest, _mapping, _executor, events = (
+        _make_service(tmp_path, dual=True)
+    )
+    node_ids = [NODE_ID, "spk_" + "2" * 32]
+    request = RunSwitchPreviewRequest(
+        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        recipe_revision_id=revision_id,
+        spark_group=SparkGroup(
+            nodes=[
+                SparkGroupNode(
+                    node_id=node_ids[0], rank=0, role="entrypoint", endpoint_owner=True
+                ),
+                SparkGroupNode(
+                    node_id=node_ids[1], rank=1, role="worker", endpoint_owner=False
+                ),
+            ]
+        ),
+        alias="synthetic-dual",
+    )
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
+        actor="test",
+    )
+    for _ in range(20):
+        service._advance(operation.operation_id)
+        with sessions() as session:
+            row = session.get(Job, operation.operation_id)
+            assert row is not None
+            if (
+                row.state == "failed"
+                or (row.result or {}).get("subphase") == "runtime-install"
+            ):
+                break
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        assert row.state == "running", (row.status_reason, events)
+        installation = session.scalar(select(RecipeInstallation))
+        assert installation is not None
+        plans = require_mapping(installation.plan, "installation plan")[
+            "compiled_execution_plans"
+        ]
+        plans = require_mapping(plans, "compiled execution plans")
+        assert set(plans) == set(node_ids)
+        for plan in plans.values():
+            validate_compiled_launch_payload(plan)
+        receipts = list(session.scalars(select(RuntimeImageReceipt)))
+        assert len({receipt.effective_execution_key for receipt in receipts}) == 2
+        assert {receipt.oci_archive_sha256 for receipt in receipts} == {ARCHIVE_DIGEST}
+    assert events.count("runtime-image-pulled") == 1
 
 
 def test_direct_published_image_real_run_switch_path_persists_receipt_before_compile_and_uses_platform_identity(
