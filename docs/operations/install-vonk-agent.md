@@ -46,6 +46,11 @@ eligible nodes, rolls out one Spark at a time by default, and requires the new
 agent and privileged helper activation evidence before continuing. This path
 preserves configuration and identity and does not require SSH.
 
+Connected idle agents refresh their hardware inventory after two minutes, with
+at most one additional minute for an in-flight idle claim. This keeps builder
+and workload admission current without restarting the agent. A failed report
+does not advance the refresh deadline; normal bounded retries still apply.
+
 The signed package also installs the static recipe-build egress proxy. After an
 upgrade, the agent advertises `recipe.build.egress-proxy.v1` only when that
 root-owned executable is present and safe. The Controller will not send a

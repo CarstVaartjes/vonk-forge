@@ -4,7 +4,7 @@ use std::{
     future::Future,
     io::{self, Read},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clap::{Parser, Subcommand};
@@ -176,10 +176,10 @@ async fn run_control_lane(
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
     let mut observation_failures = 0_u32;
-    let mut inventory_needed = true;
+    let mut inventory_reported_at = None;
     let mut readiness_published = false;
     loop {
-        if inventory_needed {
+        if inventory_refresh_due(inventory_reported_at, Instant::now()) {
             let inventory = InventoryCollector {
                 runner: &runner,
                 meminfo_path: Path::new("/proc/meminfo"),
@@ -192,7 +192,7 @@ async fn run_control_lane(
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
                     failures = 0;
-                    inventory_needed = false;
+                    inventory_reported_at = Some(Instant::now());
                 }
                 Err(error) if error.retryable() => {
                     failures = failures.saturating_add(1);
@@ -299,7 +299,7 @@ async fn run_control_lane(
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
                 failures = failures.saturating_add(1);
-                inventory_needed = true;
+                inventory_reported_at = None;
                 let entropy = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
                 tokio::time::sleep(backoff_delay(
                     failures,
@@ -312,6 +312,15 @@ async fn run_control_lane(
             Err(error) => return Err(error.into()),
         }
     }
+}
+
+fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
+    // Idle claims wait at most 60 seconds. Refresh after two minutes so the
+    // next loop still reports comfortably inside the Controller's five-minute
+    // admission window. Only a successful report advances this deadline.
+    reported_at.is_none_or(|reported_at| {
+        now.saturating_duration_since(reported_at) >= Duration::from_secs(120)
+    })
 }
 
 async fn run_rotation_lane(
@@ -409,7 +418,7 @@ fn claim_wait_seconds(
 mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, exact_observation_disposition,
-        supervise_lanes_with_rotation,
+        inventory_refresh_due, supervise_lanes_with_rotation,
     };
     use std::{
         future,
@@ -417,10 +426,28 @@ mod tests {
             Arc, Barrier,
             atomic::{AtomicBool, Ordering},
         },
-        time::Duration,
+        time::{Duration, Instant},
     };
     use vonk_agent::client::ClientError;
     use vonk_agent::{executor::RecipeObservationError, host_runtime::HostRuntimeError};
+
+    #[test]
+    fn idle_agent_refreshes_inventory_before_controller_admission_expires() {
+        let reported_at = Instant::now();
+        assert!(!inventory_refresh_due(
+            Some(reported_at),
+            reported_at + Duration::from_secs(119),
+        ));
+        // A successful idle claim must not leave the startup inventory as the
+        // only report. The Controller refuses admission after five minutes.
+        assert!(inventory_refresh_due(
+            Some(reported_at),
+            reported_at + Duration::from_secs(120),
+        ));
+        let refreshed_at = reported_at + Duration::from_secs(180);
+        assert!(!inventory_refresh_due(Some(refreshed_at), refreshed_at));
+        assert!(inventory_refresh_due(None, refreshed_at));
+    }
 
     #[test]
     fn exact_observation_failures_never_stop_the_next_claim() {
