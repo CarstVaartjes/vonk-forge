@@ -69,6 +69,12 @@ records image authorization for every compiled role and rank before installing
 the group. Those authorizations reuse the same cached image archive; they do
 not trigger another image download or build.
 
+Active Spark transfers renew their node- and plan-bound download authorization
+through the existing authenticated job heartbeat. A large copy can continue
+beyond the initial hour while the agent still owns its operation lease.
+Revoked or expired assignments, stale attempts, and cancellation requests do
+not renew access; a stopped heartbeat lets the last authorization expire.
+
 ## Credentials and evidence
 
 See [Hugging Face authentication](../model-cache-huggingface-auth.md) for gated

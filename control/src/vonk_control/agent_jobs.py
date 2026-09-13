@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -36,6 +36,7 @@ from .models import (
     AgentNode,
     AgentNodeProfile,
     AgentOperationAttempt,
+    ArtifactDistributionAssignment,
     ArtifactJob,
     Job,
     RecipeBuild,
@@ -1048,6 +1049,25 @@ class AgentJobService:
                 and isinstance(parent.result, Mapping)
                 and parent.result.get("cancel_requested") is True
             )
+            if (
+                operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+                and not cancel_requested
+            ):
+                # Large model copies outlive their initial one-hour grant.
+                # Only the authenticated, currently fenced operation may
+                # renew its exact node/plan, before that grant expires. Keep
+                # renewals sparse and never resurrect revoked/expired access.
+                session.execute(
+                    update(ArtifactDistributionAssignment)
+                    .where(
+                        ArtifactDistributionAssignment.node_id == operation.node_id,
+                        ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
+                        ArtifactDistributionAssignment.state == "active",
+                        ArtifactDistributionAssignment.expires_at > now,
+                        ArtifactDistributionAssignment.expires_at < now + timedelta(minutes=30),
+                    )
+                    .values(expires_at=now + timedelta(hours=1), updated_at=now)
+                )
             return AgentDirective(
                 schema_version=message.schema_version,
                 job_id=message.job_id,
