@@ -177,7 +177,7 @@ class Settings:
     artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
-    model_cache_parallel_downloads: int = 4
+    model_cache_parallel_downloads: int = 8
     recipe_image_parallel_preparations: int = 4
     recipe_build_parallel_preparations: int = 2
     huggingface_token_path: Path | None = None
@@ -307,7 +307,7 @@ class Settings:
                 os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
             )
             model_cache_parallel_downloads = int(
-                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "4")
+                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "8")
             )
             recipe_image_parallel_preparations = int(
                 os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
@@ -607,7 +607,7 @@ class WorkerSettings:
     distributed_start_timeout_seconds: int = 60
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
-    model_cache_parallel_downloads: int = 4
+    model_cache_parallel_downloads: int = 8
     recipe_image_parallel_preparations: int = 4
     recipe_build_parallel_preparations: int = 2
     huggingface_token_path: Path | None = None
@@ -667,7 +667,7 @@ class WorkerSettings:
                 os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
             )
             model_cache_parallel_downloads = int(
-                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "4")
+                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "8")
             )
             recipe_image_parallel_preparations = int(
                 os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
