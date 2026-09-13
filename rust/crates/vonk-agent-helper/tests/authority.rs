@@ -477,8 +477,13 @@ impl CommandRunner for RecordingRunner {
                         .get(3)
                         .is_some_and(|format| format.contains(".State.Running")) =>
                 {
+                    let prefix = if arguments[3].contains(".Id") {
+                        format!("{}\t", "e".repeat(64))
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        "{}\t{digest}\ttrue\t{run_id}\n",
+                        "{prefix}{}\t{digest}\ttrue\t{run_id}\n",
                         self.runtime_running.lock().unwrap()
                     )
                     .into_bytes()
@@ -489,6 +494,10 @@ impl CommandRunner for RecordingRunner {
                     Vec::new()
                 }
             }
+        } else if executable == std::path::Path::new("/usr/bin/docker")
+            && arguments.first().is_some_and(|value| value == "logs")
+        {
+            b"fixture startup stderr: missing runtime module\n".to_vec()
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.first().is_some_and(|value| value == "run")
         {
@@ -1028,15 +1037,27 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         .unwrap();
     let accepted_container = runner.runtime_container.lock().unwrap().clone().unwrap();
     *runner.runtime_running.lock().unwrap() = false;
+    let failure = executor
+        .execute(&runtime_operation(&inspect, inspect_digest.clone()))
+        .unwrap_err();
     assert!(
-        executor
-            .execute(&runtime_operation(&inspect, inspect_digest.clone()))
-            .is_err()
+        failure.to_string().contains("fixture startup stderr"),
+        "{failure}"
     );
+    assert!(runner.calls.lock().unwrap().iter().any(|(program, args)| {
+        program == std::path::Path::new("/usr/bin/docker")
+            && args
+                == &[
+                    "logs".to_owned(),
+                    "--tail".to_owned(),
+                    "32".to_owned(),
+                    "e".repeat(64),
+                ]
+    }));
     *runner.runtime_container.lock().unwrap() = None;
     assert!(
         executor
-            .execute(&runtime_operation(&inspect, inspect_digest))
+            .execute(&runtime_operation(&inspect, inspect_digest.clone()))
             .is_err()
     );
     assert_eq!(
@@ -1051,6 +1072,34 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             })
             .count(),
         1
+    );
+    let log_reads = || {
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(program, args)| {
+                program == std::path::Path::new("/usr/bin/docker")
+                    && args.first().is_some_and(|value| value == "logs")
+            })
+            .count()
+    };
+    assert_eq!(
+        log_reads(),
+        1,
+        "an absent container cannot authorize log access"
+    );
+    *runner.runtime_container.lock().unwrap() = Some(("f".repeat(64), run_id.to_owned()));
+    assert!(
+        executor
+            .execute(&runtime_operation(&inspect, inspect_digest))
+            .is_err()
+    );
+    assert_eq!(
+        log_reads(),
+        1,
+        "foreign receipt identity cannot authorize log access"
     );
     *runner.runtime_container.lock().unwrap() = Some(accepted_container);
 

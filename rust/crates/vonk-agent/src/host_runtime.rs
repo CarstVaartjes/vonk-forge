@@ -30,7 +30,10 @@ pub enum HostRuntimeError {
     #[error("host runtime helper response is invalid")]
     Protocol,
     #[error("host runtime helper rejected request: {code}")]
-    HelperRejected { code: String },
+    HelperRejected {
+        code: String,
+        diagnostic: Option<String>,
+    },
 }
 
 impl HostRuntimeError {
@@ -46,10 +49,17 @@ impl HostRuntimeError {
             }
             Self::Controller(_) => "helper_grant_unavailable".to_owned(),
             Self::Protocol => "helper_protocol_invalid".to_owned(),
-            Self::HelperRejected { code } if stable_runtime_error_code(code) => {
+            Self::HelperRejected { code, .. } if stable_runtime_error_code(code) => {
                 format!("helper_{code}")
             }
             Self::HelperRejected { .. } => "helper_protocol_invalid".to_owned(),
+        }
+    }
+
+    pub fn diagnostic(&self) -> Option<&str> {
+        match self {
+            Self::HelperRejected { diagnostic, .. } => diagnostic.as_deref(),
+            _ => None,
         }
     }
 }
@@ -240,17 +250,12 @@ impl HostRuntimeBoundary<'_> {
             {
                 return Err(HostRuntimeError::Protocol);
             }
-            if let Some(code) = response.error_code {
-                if response.status != "rejected"
-                    || response.evidence_sha256.is_some()
-                    || response.exit_code.is_some()
-                    || !stable_runtime_error_code(&code)
-                {
-                    return Err(HostRuntimeError::Protocol);
-                }
-                return Err(HostRuntimeError::HelperRejected { code });
+            if response.error_code.is_some() {
+                return Err(runtime_rejection(&response, action));
             }
-            if !stop_uncertain && response.status != "container-runtime-request-executed" {
+            if response.diagnostic.is_some()
+                || !stop_uncertain && response.status != "container-runtime-request-executed"
+            {
                 return Err(HostRuntimeError::Protocol);
             }
             if response
@@ -275,6 +280,28 @@ impl HostRuntimeBoundary<'_> {
     }
 }
 
+fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> HostRuntimeError {
+    let Some(code) = response.error_code.as_deref() else {
+        return HostRuntimeError::Protocol;
+    };
+    if response.status != "rejected"
+        || response.evidence_sha256.is_some()
+        || response.exit_code.is_some()
+        || !stable_runtime_error_code(code)
+        || response.diagnostic.is_some()
+            && (action != HostRuntimeAction::RunInspect || code != "runtime_process_exited")
+    {
+        return HostRuntimeError::Protocol;
+    }
+    HostRuntimeError::HelperRejected {
+        code: code.to_owned(),
+        diagnostic: response
+            .diagnostic
+            .as_deref()
+            .map(crate::failure_evidence::sanitize_text),
+    }
+}
+
 fn stable_runtime_error_code(value: &str) -> bool {
     matches!(
         value,
@@ -289,6 +316,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_image_inspect_failed"
             | "runtime_image_identity_invalid"
             | "runtime_image_receipt_failed"
+            | "runtime_process_exited"
     )
 }
 
@@ -454,7 +482,7 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
     use uuid::Uuid;
     use vonk_agent_protocol::{
-        RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
+        HostRuntimeAction, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
         RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
         RecipeRunObservationReceiptSignature, hex_sha256,
         recipe_run_observation_receipt_signing_bytes,
@@ -487,6 +515,25 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejection_binds_and_redacts_captured_process_logs() {
+        let mut response: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            br#"{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"runtime_process_exited","diagnostic":"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n"}"#,
+        ).unwrap();
+        let error = super::runtime_rejection(&response, HostRuntimeAction::RunInspect);
+        assert!(error.diagnostic().unwrap().contains("ModuleNotFoundError"));
+        assert!(!error.diagnostic().unwrap().contains("private-value"));
+        assert!(matches!(
+            super::runtime_rejection(&response, HostRuntimeAction::Start),
+            super::HostRuntimeError::Protocol
+        ));
+        response.error_code = Some("operation_unsafe_path".into());
+        assert!(matches!(
+            super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
+            super::HostRuntimeError::Protocol
+        ));
+    }
+
+    #[test]
     fn preflight_reports_the_failed_boundary_without_exposing_error_details() {
         use super::HostRuntimeError;
         use crate::client::ClientError;
@@ -513,12 +560,14 @@ mod tests {
             (
                 HostRuntimeError::HelperRejected {
                     code: "operation_unsafe_path".to_owned(),
+                    diagnostic: None,
                 },
                 "helper_operation_unsafe_path",
             ),
             (
                 HostRuntimeError::HelperRejected {
                     code: "untrusted response detail".to_owned(),
+                    diagnostic: None,
                 },
                 "helper_protocol_invalid",
             ),

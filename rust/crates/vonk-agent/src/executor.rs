@@ -1103,9 +1103,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 "reason": "host runtime could not import the accepted OCI image",
                             });
                             let code = match error {
-                                crate::host_runtime::HostRuntimeError::HelperRejected { code } => {
-                                    code
-                                }
+                                crate::host_runtime::HostRuntimeError::HelperRejected {
+                                    code,
+                                    ..
+                                } => code,
                                 crate::host_runtime::HostRuntimeError::Io(_) => {
                                     "runtime_helper_unavailable".to_owned()
                                 }
@@ -1718,36 +1719,39 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 for hook in &plan.pre_start {
                     let arguments = runtime_arguments_for_plan(&plan, hook);
-                    if self
+                    if let Err(error) = self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                         .await
-                        .is_err()
                     {
                         let _ = self.runtime.complete_stop(&run_id);
-                        return failed("container runtime pre-start hook failed");
+                        return runtime_failure("container runtime pre-start hook failed", &error);
                     }
                 }
                 let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
                 if collective_readiness {
-                    if self
+                    if let Err(error) = self
                         .execute_host_runtime(
                             claim,
                             HostRuntimeAction::RunInspect,
                             runtime_guard_arguments.clone(),
                         )
                         .await
-                        .is_err()
                     {
-                        return failed("collective workload is not running with exact identity");
+                        return runtime_failure(
+                            "collective workload is not running with exact identity",
+                            &error,
+                        );
                     }
-                } else if self
+                } else if let Err(error) = self
                     .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                     .await
-                    .is_err()
                 {
                     let _ = self.runtime.complete_stop(&run_id);
-                    return failed("container runtime could not start the workload");
+                    return runtime_failure(
+                        "container runtime could not start the workload",
+                        &error,
+                    );
                 }
                 if rank_launch {
                     let first_inspect = self
@@ -1757,28 +1761,32 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             runtime_guard_arguments.clone(),
                         )
                         .await;
-                    let stable = if first_inspect.is_err()
+                    let mut launch_failure = first_inspect.err();
+                    let stable = if launch_failure.is_some()
                         || *cancellation.borrow()
                         || !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
                     {
                         false
-                    } else {
-                        wait_for_launch_stability(
-                            lease_deadline.clone(),
-                            cancellation.clone(),
-                            phase_deadline,
-                            Duration::from_secs(2),
-                        )
-                        .await
-                            && self
-                                .execute_host_runtime(
-                                    claim,
-                                    HostRuntimeAction::RunInspect,
-                                    runtime_guard_arguments.clone(),
-                                )
-                                .await
-                                .is_ok()
+                    } else if wait_for_launch_stability(
+                        lease_deadline.clone(),
+                        cancellation.clone(),
+                        phase_deadline,
+                        Duration::from_secs(2),
+                    )
+                    .await
+                    {
+                        launch_failure = self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::RunInspect,
+                                runtime_guard_arguments.clone(),
+                            )
+                            .await
+                            .err();
+                        launch_failure.is_none()
                             && before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
+                    } else {
+                        false
                     };
                     if !stable {
                         let _ = self
@@ -1792,7 +1800,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             )
                             .await;
                         let _ = self.runtime.complete_stop(&run_id);
-                        return failed("rank process did not remain stable after launch");
+                        return match launch_failure {
+                            Some(error) => runtime_failure(
+                                "rank process did not remain stable after launch",
+                                &error,
+                            ),
+                            None => failed("rank process did not remain stable after launch"),
+                        };
                     }
                     let artifact_set_digest =
                         match self.runtime.artifact_set_digest(&installation_id) {
@@ -2552,6 +2566,17 @@ where
     client.submit_result(&result).await?;
     state.acknowledge(&result)?;
     Ok(())
+}
+
+fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
+    let mut result = failed_owned(format!("{reason}: {}", error.preflight_code()));
+    if let Some(detail) = error.diagnostic() {
+        result.body["diagnostic_logs"] = json!({
+            "stdout": crate::failure_evidence::log_tail(&[]),
+            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
+        });
+    }
+    result
 }
 
 fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> ExecutionResult {
@@ -3654,6 +3679,37 @@ mod tests {
         };
         RecipeOperationRequest::parse(&claim).unwrap();
         claim
+    }
+
+    #[test]
+    fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: "runtime_process_exited".into(),
+            diagnostic: Some(
+                "ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n".into(),
+            ),
+        };
+        let failed =
+            super::runtime_failure("rank process did not remain stable after launch", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let body: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(result.body).unwrap();
+        assert!(
+            body.reason
+                .as_deref()
+                .unwrap()
+                .contains("helper_runtime_process_exited")
+        );
+        let diagnostics = body.diagnostics.as_ref().unwrap();
+        diagnostics.validate().unwrap();
+        assert!(diagnostics.stderr.text.contains("ModuleNotFoundError"));
+        assert!(
+            !serde_json::to_string(&body)
+                .unwrap()
+                .contains("private-value")
+        );
     }
 
     #[test]
