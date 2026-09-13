@@ -6,6 +6,7 @@ import json
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
 from typing import Self
@@ -13,12 +14,22 @@ from typing import Self
 import httpx
 import pytest
 
+from cluster_profiles import cli
 from cluster_profiles.control_client import (
     ControlClient,
     ControlClientError,
     ControlMalformedResponse,
     ControlUnauthorized,
     _RecordingTransport,
+)
+from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
+    FleetProfilePlanSummary,
+)
+from cluster_profiles.generated_control.models.fleet_profile_preview import (
+    FleetProfilePreview,
+)
+from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
+    FleetProfileScopePreview,
 )
 
 
@@ -124,6 +135,38 @@ def _artifact_job_response() -> dict[str, object]:
         "created_at": "2026-09-07T00:00:00Z",
         "updated_at": "2026-09-07T00:00:00Z",
     }
+
+
+def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    preview = FleetProfilePreview(
+        allowed=True, assignments=[], generated_at=datetime(2026, 9, 13, tzinfo=UTC),
+        plan_digest="a" * 64, profile_digest="b" * 64,
+        profile_id="12345678-1234-4123-8123-123456789abc", profile_name="Empty profile",
+        reasons=[], scope=FleetProfileScopePreview(node_ids=[]), steps=[],
+        summary=FleetProfilePlanSummary(
+            already_correct=0, blockers=0, builds=0, distributions=0,
+            installs=0, placements=0, starts=0, stops=0, uninstalls=0,
+        ),
+    ).to_dict()
+    observed: list[urllib.request.Request] = []
+
+    def opener(request, *, timeout: float):
+        observed.append(request)
+        return _Response(200, preview)
+
+    client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
+    status = cli.main(
+        ("--profile", "7", "profile", "load", "--dry-run", "--json"),
+        control_client=client,
+    )
+    assert status == 0, capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out)["allowed"] is True
+    assert len(observed) == 1
+    assert observed[0].get_method() == "POST"
+    assert observed[0].full_url == "https://forge.example.test/api/profile/7/preview"
+    assert observed[0].data is None
 
 
 def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
