@@ -377,6 +377,24 @@ class AgentJobService:
                 remaining = deadline - self._monotonic()
                 if remaining <= 0:
                     return None
+                # Let the agent drain this HTTP request and activate its staged
+                # credential promptly, including with short-lived certificates.
+                with self._sessions() as session:
+                    now = self._clock()
+                    staged = session.scalar(
+                        select(AgentCertificate.serial)
+                        .where(
+                            AgentCertificate.node_id == node_id,
+                            AgentCertificate.state == "staged",
+                            AgentCertificate.revoked_at.is_(None),
+                            AgentCertificate.ca_revoked_at.is_(None),
+                            AgentCertificate.not_before <= now,
+                            AgentCertificate.not_after > now,
+                        )
+                        .limit(1)
+                    )
+                if staged is not None:
+                    return None
                 self._available.wait(min(remaining, _DATABASE_REPOLL_SECONDS))
 
     @staticmethod

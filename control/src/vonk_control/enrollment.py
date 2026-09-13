@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
@@ -32,6 +32,9 @@ from .models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
     AgentNodeProfile,
+    AgentOperation,
+    AgentOperationAttempt,
+    Job,
     RecipeRun,
     RoutePublication,
     RunNode,
@@ -1016,6 +1019,43 @@ class EnrollmentService:
                     .with_for_update(of=AgentCertificate)
                 )
             )
+            # Rotation changes the credential, not a live operation's authority.
+            # Transfer only an unexpired current attempt from an active source;
+            # keep its fence and deadline, and never revive revoked/finished work.
+            live_sources = [
+                previous.serial
+                for previous in older
+                if previous.state == "active"
+                and previous.revoked_at is None
+                and previous.ca_revoked_at is None
+                and _stored_utc(previous.not_before) <= now
+                and _stored_utc(previous.not_after) > now
+            ]
+            if live_sources:
+                current_operations = (
+                    select(AgentOperation.id)
+                    .join(Job, Job.id == AgentOperation.parent_job_id)
+                    .where(
+                        AgentOperation.node_id == node_id,
+                        AgentOperation.state == "running",
+                        AgentOperation.current_attempt == AgentOperationAttempt.attempt,
+                        AgentOperation.authority_revision == Job.authority_revision,
+                        Job.state.in_(("queued", "running")),
+                    )
+                )
+                session.execute(
+                    update(AgentOperationAttempt)
+                    .where(
+                        AgentOperationAttempt.agent_certificate_serial.in_(
+                            live_sources
+                        ),
+                        AgentOperationAttempt.state == "running",
+                        AgentOperationAttempt.lease_deadline > now,
+                        AgentOperationAttempt.operation_id.in_(current_operations),
+                    )
+                    .values(agent_certificate_serial=serial)
+                    .execution_options(synchronize_session=False)
+                )
             certificate.state = "active"
             for previous in older:
                 previous.state = "revoked"
