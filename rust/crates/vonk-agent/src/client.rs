@@ -1170,6 +1170,9 @@ impl AgentHttpClient {
             }
             pending.push((index, object, path, managed_root));
         }
+        // Start large objects first so a large image archive does not become
+        // a lone serial tail after all of the smaller model files finish.
+        pending.sort_by_key(|(_, object, _, _)| std::cmp::Reverse(object.bytes));
         // Bound both network traffic and disk buffers. These futures stay
         // owned by this call: an error or cancellation drops the remaining
         // transfers, whose partial files remain resumable on disk.
