@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use futures_util::{StreamExt, TryStreamExt, stream};
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -48,6 +49,7 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // remaining validity window of the 90-second acceptance certificate.
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
+const DISTRIBUTION_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -283,6 +285,40 @@ pub struct DistributionProgress {
     pub kind: String,
     pub bytes: u64,
     pub total_bytes: Option<u64>,
+}
+
+struct DistributionProgressTracker<F> {
+    object_bytes: Vec<u64>,
+    bytes: u64,
+    completed_items: u64,
+    total_bytes: u64,
+    callback: F,
+}
+
+impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
+    fn report(
+        &mut self,
+        index: usize,
+        object: &vonk_agent_protocol::DistributionObject,
+        bytes: u64,
+        phase: &'static str,
+        completed: bool,
+    ) {
+        // Retried ranges and verification can report the same offset again.
+        // Count each object's bytes once, regardless of completion order.
+        self.bytes += bytes.saturating_sub(self.object_bytes[index]);
+        self.object_bytes[index] = self.object_bytes[index].max(bytes);
+        self.completed_items += u64::from(completed);
+        (self.callback)(DistributionProgress {
+            phase,
+            completed_items: self.completed_items,
+            total_items: self.object_bytes.len() as u64,
+            object_sha256: object.sha256.clone(),
+            kind: object.kind.to_string(),
+            bytes: self.bytes,
+            total_bytes: Some(self.total_bytes),
+        });
+    }
 }
 
 struct ProgressSnapshot {
@@ -1082,7 +1118,7 @@ impl AgentHttpClient {
         plan_digest: &str,
         destination_root: &Path,
         archive_root: &Path,
-        mut progress: F,
+        progress: F,
     ) -> Result<DistributionDownloadEvidence, ClientError>
     where
         F: FnMut(DistributionProgress),
@@ -1102,10 +1138,14 @@ impl AgentHttpClient {
         tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
         ensure_private_parent(&model_root, destination_root).await?;
         ensure_private_parent(&oci_root, archive_root).await?;
-        let mut model_paths = Vec::new();
-        let mut model_digests = Vec::new();
-        let mut downloaded_bytes = 0_u64;
-        let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
+        let tracker = Mutex::new(DistributionProgressTracker {
+            object_bytes: vec![0; assignment.objects.len()],
+            bytes: 0,
+            completed_items: 0,
+            total_bytes: assignment.objects.iter().map(|object| object.bytes).sum(),
+            callback: progress,
+        });
+        let mut pending = Vec::new();
         for (index, object) in assignment.objects.iter().enumerate() {
             let path = if object.kind == "model" {
                 model_root.join(&object.sha256)
@@ -1128,43 +1168,56 @@ impl AgentHttpClient {
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            let object_digest = object.sha256.clone();
-            let kind = object.kind.to_string();
-            let base = downloaded_bytes;
-            self.download_trusted_distribution_object_with_progress(
-                plan_digest,
-                &object.sha256,
-                object.bytes,
-                &path,
-                managed_root,
-                |bytes, phase| {
-                    progress(DistributionProgress {
-                        phase,
-                        completed_items: index as u64,
-                        total_items: assignment.objects.len() as u64,
-                        object_sha256: object_digest.clone(),
-                        kind: kind.clone(),
-                        bytes: base.saturating_add(bytes),
-                        total_bytes: Some(total_bytes),
-                    })
-                },
-            )
+            pending.push((index, object, path, managed_root));
+        }
+        // Bound both network traffic and disk buffers. These futures stay
+        // owned by this call: an error or cancellation drops the remaining
+        // transfers, whose partial files remain resumable on disk.
+        let mut completed: Vec<_> = stream::iter(pending)
+            .map(|(index, object, path, managed_root)| {
+                let tracker = &tracker;
+                async move {
+                    self.download_trusted_distribution_object_with_progress(
+                        plan_digest,
+                        &object.sha256,
+                        object.bytes,
+                        &path,
+                        managed_root,
+                        |bytes, phase| {
+                            tracker
+                                .lock()
+                                .expect("distribution progress lock")
+                                .report(index, object, bytes, phase, false);
+                        },
+                    )
+                    .await?;
+                    tracker.lock().expect("distribution progress lock").report(
+                        index,
+                        object,
+                        object.bytes,
+                        "verifying",
+                        true,
+                    );
+                    Ok::<_, ClientError>((index, path))
+                }
+            })
+            .buffer_unordered(DISTRIBUTION_CONCURRENCY)
+            .try_collect()
             .await?;
-            downloaded_bytes = downloaded_bytes.saturating_add(object.bytes);
-            progress(DistributionProgress {
-                phase: "verifying",
-                completed_items: index as u64 + 1,
-                total_items: assignment.objects.len() as u64,
-                object_sha256: object.sha256.clone(),
-                kind: object.kind.to_string(),
-                bytes: downloaded_bytes,
-                total_bytes: Some(total_bytes),
-            });
+        completed.sort_unstable_by_key(|(index, _)| *index);
+        let mut model_paths = Vec::new();
+        let mut model_digests = Vec::new();
+        for (index, path) in completed {
+            let object = &assignment.objects[index];
             if object.kind == "model" {
                 model_paths.push(path);
                 model_digests.push(object.sha256.clone());
             }
         }
+        let downloaded_bytes = tracker
+            .into_inner()
+            .expect("distribution progress lock")
+            .bytes;
         let archive_path = oci_root.join(&assignment.oci_archive_sha256);
         if !archive_path.exists() {
             return Err(ClientError::Protocol);
@@ -2515,6 +2568,148 @@ mod tests {
         server.join().unwrap();
     }
 
+    #[tokio::test]
+    async fn distribution_downloads_overlap_without_reordering_evidence_or_progress() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        async fn request(stream: &mut tokio::net::TcpStream) -> String {
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                assert!(bytes.len() < 4096);
+                bytes.push(stream.read_u8().await.unwrap());
+            }
+            String::from_utf8(bytes).unwrap()
+        }
+
+        let first = b"first model file";
+        let second = b"second model file";
+        let (archive, image_digest) = oci_archive_fixture();
+        let mut assignment = distribution_assignment_fixture(first, &archive, &image_digest);
+        assignment.objects.insert(
+            1,
+            vonk_agent_protocol::DistributionObject {
+                name: "weights/second.bin".to_owned(),
+                sha256: hex_sha256(second),
+                bytes: second.len() as u64,
+                kind: DistributionObjectKind::Model,
+            },
+        );
+        assignment.validate().unwrap();
+        let manifest = canonical_json(&assignment).unwrap();
+        let objects = HashMap::from([
+            (hex_sha256(first), first.to_vec()),
+            (hex_sha256(second), second.to_vec()),
+            (hex_sha256(&archive), archive),
+        ]);
+        let completion_order = assignment
+            .objects
+            .iter()
+            .rev()
+            .map(|object| object.sha256.clone())
+            .collect::<Vec<_>>();
+        let completed = Arc::new(tokio::sync::Semaphore::new(0));
+        let observed = completed.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert!(
+                request(&mut stream)
+                    .await
+                    .contains("/agent/distribution/manifests/")
+            );
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        manifest.len(),
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            stream.write_all(&manifest).await.unwrap();
+            drop(stream);
+
+            // Withhold bodies until all three requests are in flight. A serial
+            // downloader cannot pass this barrier; no throughput threshold is used.
+            let mut pending = Vec::new();
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let headers = request(&mut stream).await;
+                pending.push((stream, headers));
+            }
+            for digest in completion_order {
+                let position = pending
+                    .iter()
+                    .position(|(_, headers)| {
+                        headers.contains(&format!("/agent/distribution/objects/{digest}?"))
+                    })
+                    .unwrap();
+                let (mut stream, headers) = pending.swap_remove(position);
+                let body = &objects[&digest];
+                assert!(
+                    headers
+                        .to_lowercase()
+                        .contains(&format!("range: bytes=0-{}", body.len() - 1))
+                );
+                stream.write_all(format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes 0-{}/{}\r\nETag: \"sha256:{}\"\r\nConnection: close\r\n\r\n",
+                    body.len(), body.len() - 1, body.len(), digest,
+                ).as_bytes()).await.unwrap();
+                stream.write_all(body).await.unwrap();
+                drop(stream);
+                // Force reverse verification order before releasing the next
+                // body, so completion order cannot accidentally match the manifest.
+                observed.acquire().await.unwrap().forget();
+            }
+        });
+        let client =
+            AgentHttpClient::for_http_test(&format!("http://{address}/"), &assignment.node_id);
+        let root = tempfile::tempdir().unwrap();
+        let mut snapshots = Vec::new();
+        let mut completed_items = 0;
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.download_distribution_with_progress(
+                &assignment.plan_digest,
+                root.path(),
+                root.path(),
+                |item| {
+                    if item.completed_items > completed_items {
+                        assert_eq!(item.completed_items, completed_items + 1);
+                        completed_items = item.completed_items;
+                        completed.add_permits(1);
+                    }
+                    snapshots.push(item);
+                },
+            ),
+        )
+        .await;
+        if result.is_err() {
+            server.abort();
+        }
+        let evidence = result
+            .expect("independent distribution requests must overlap")
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            evidence.model_digests,
+            vec![hex_sha256(first), hex_sha256(second)]
+        );
+        assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), first);
+        assert_eq!(std::fs::read(&evidence.model_paths[1]).unwrap(), second);
+        assert!(
+            snapshots
+                .windows(2)
+                .all(|pair| pair[0].bytes <= pair[1].bytes
+                    && pair[0].completed_items <= pair[1].completed_items)
+        );
+        let last = snapshots.last().unwrap();
+        assert_eq!(last.completed_items, assignment.objects.len() as u64);
+        assert_eq!(last.bytes, evidence.downloaded_bytes);
+    }
+
     fn oci_archive_fixture() -> (Vec<u8>, String) {
         fn descriptor(media_type: &str, bytes: &[u8]) -> Value {
             json!({
@@ -3058,10 +3253,24 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::read(&model_path).unwrap(), model);
         let requests = server.join().unwrap();
-        let model_request = String::from_utf8_lossy(&requests[1]).to_ascii_lowercase();
+        let model_request = requests
+            .iter()
+            .map(|request| String::from_utf8_lossy(request).to_ascii_lowercase())
+            .find(|request| {
+                request.contains(&format!(
+                    "/agent/distribution/objects/{}?",
+                    assignment.objects[0].sha256
+                ))
+            })
+            .unwrap();
         assert!(model_request.contains("range: bytes=5-"));
 
         let corrupt_root = tempfile::tempdir().unwrap();
+        // Keep the unrelated archive cached so this fixture can serve just
+        // the manifest and bad model response, independent of request order.
+        let cached_archive = corrupt_root.path().join(&assignment.oci_archive_sha256);
+        std::fs::write(&cached_archive, &archive).unwrap();
+        std::fs::set_permissions(&cached_archive, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (corrupt_client, corrupt_server) = distribution_fixture_server(
             assignment.clone(),
             {
