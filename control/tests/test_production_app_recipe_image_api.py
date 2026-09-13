@@ -10,7 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control import api, availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
+from vonk_control.models import (
+    Base,
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
@@ -97,6 +102,17 @@ def test_production_app_recipe_download_auth_and_status(
                     ),
             ]
         )
+
+        session.flush()
+        for kind, definition, revision_id in (
+            ("model", model_definition, "production-model-revision"),
+            ("recipe", recipe, "production-recipe-revision"),
+        ):
+            session.add(CatalogDocumentHead(
+                kind=kind, publisher=definition.identity.publisher,
+                slug=definition.identity.slug, active_revision_id=revision_id,
+                generation=1,
+            ))
 
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     signing_key = tmp_path / "token-signing-key"

@@ -29,6 +29,7 @@ from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .bounded_json import mapping, require_mapping, require_sequence
+from .catalog_queries import active_head_revision
 from .model_cache import ModelCacheNotFound
 from .model_cache_progress import project_cache_progress
 from .models import CatalogDocumentRevision, Job, RecipeBuild
@@ -399,7 +400,7 @@ class RecipeImageAvailabilityService:
         self._removal_lock = threading.RLock()
 
     def _resolve_recipe_selector(self, selector: str) -> str:
-        """Resolve one exact operator selector to an active recipe revision."""
+        """Resolve logical selectors to the current head, retaining exact pins."""
 
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
             raise RecipeImageAvailabilityError(
@@ -421,7 +422,7 @@ class RecipeImageAvailabilityService:
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.state == "active",
                     (CatalogDocumentRevision.id == selector)
-                    | (CatalogDocumentRevision.document_id == selector),
+                    | ((CatalogDocumentRevision.document_id == selector) & active_head_revision()),
                 )))
             else:
                 if "/" in selector:
@@ -438,7 +439,7 @@ class RecipeImageAvailabilityService:
                         CatalogDocumentRevision.state == "active",
                         CatalogDocumentRevision.slug == selector,
                     )
-                rows = list(session.scalars(query))
+                rows = list(session.scalars(query.where(active_head_revision())))
             if not rows:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.selector_missing", "recipe selector was not found"
