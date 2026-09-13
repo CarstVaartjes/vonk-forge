@@ -979,7 +979,7 @@ def _profile(
         )
     if action == "load":
         if args.dry_run:
-            return client.request("POST", f"/api/profile/{number}/preview", {})
+            return client.request("POST", f"/api/profile/{number}/preview")
         result = client.request(
             "POST",
             f"/api/profile/{number}/load",

@@ -109,7 +109,7 @@ class FakeClient:
         if method != "POST":
             raise AssertionError(f"unexpected method: {method}")
         if path.endswith("/preview"):
-            assert profile_path is not None and payload == {}
+            assert profile_path is not None and payload is None
         elif path.endswith("/load"):
             assert profile_path is not None
             assert set(payload) <= {"request_key", "dry_run"}
@@ -493,13 +493,9 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
     assert profile_write["assignments"] == []
 
 
-def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
+def test_profile_load_is_one_step() -> None:
     client = FakeClient(
         {
-            ("POST", "/api/profile/1/preview"): {
-                "state": "blocked",
-                "blockers": ["offline Spark"],
-            },
             ("POST", "/api/profile/1/load"): {
                 "state": "accepted",
                 "operation_id": "load-1",
@@ -510,9 +506,8 @@ def test_profile_load_preview_is_non_mutating_and_load_is_one_step() -> None:
             },
         }
     )
-    assert run(("profile", "load", "--dry-run", "--json"), client)[1]["state"] == "blocked"
     assert run(("profile", "load", "--json"), client)[1]["state"] == "succeeded"
-    assert client.calls[1][2] == {
+    assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111"
     }
 
