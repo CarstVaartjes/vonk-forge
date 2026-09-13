@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
@@ -73,6 +73,35 @@ class CatalogEntityService:
         assert self._sessions is not None
         with self._sessions() as session:
             yield session
+
+    def refresh_build_policy(self) -> None:
+        """Recompile derived platform policy without rewriting Recipe revisions.
+
+        As with catalog publication metadata, only the typed projection is
+        updated. Documents, content digests, heads, and already dispatched
+        build requests retain their immutable identities.
+        """
+        with self._write() as session:
+            revisions = session.scalars(select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            ).with_for_update()).all()
+            for revision in revisions:
+                # Validate stored data before deriving anything; corruption
+                # must not be repaired into an apparently valid projection.
+                projected = read_catalog_projection(revision).model_dump(
+                    mode="json", exclude_none=True,
+                )
+                recipe = read_catalog_document(revision)
+                assert isinstance(recipe, RecipeDefinition)
+                policy = _build_projection(recipe)
+                if all(projected.get(key) == value for key, value in policy.items()):
+                    continue
+                projected.update(policy)
+                session.execute(update(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == revision.id,
+                ).values(projected=write_catalog_projection(projected, kind="recipe")))
+                session.expire(revision, ["projected"])
 
     def create_draft(self, document: Mapping[str, object], *, actor: str) -> CatalogDocumentRevision:
         parsed, clean, kind, publisher, slug, title = _parse(document)
@@ -271,7 +300,7 @@ def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:
             "additional_contexts": [], "annotations": [], "environment": [],
             "format": "oci", "identity_label": True, "ignorefile": None,
             "jobs": 1, "labels": [], "layer_compression": "disabled",
-            "layer_labels": [], "layers": True, "no_hostname": False,
+            "layer_labels": [], "layers": False, "no_hostname": False,
             "no_hosts": False, "omit_history": False, "os_features": [],
             "os_version": None, "shm_bytes": 64 * 1024**2,
             "skip_unused_stages": True, "squash": "none", "timestamp": None,

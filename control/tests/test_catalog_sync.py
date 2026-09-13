@@ -9,11 +9,15 @@ from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+import vonk_control.catalog_entities as catalog_entities_module
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_repository import CatalogRepository
-from vonk_control.catalog_revision_contract import read_catalog_projection
+from vonk_control.catalog_revision_contract import (
+    CatalogRevisionContractError,
+    read_catalog_projection,
+)
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from vonk_control.library_projection import LibraryProjection
@@ -24,6 +28,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     RecipeLibrarySyncRun,
 )
+from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -164,6 +169,62 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
             reader.snapshot.catalog_entities
         )
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
+    tmp_path: Path, malformed: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, catalog, reader, item = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    compile_policy = catalog_entities_module._build_projection
+
+    def previous_policy(recipe):
+        policy = compile_policy(recipe)
+        _document_section(policy, "build_options")["layers"] = True
+        return policy
+
+    # Persist the previous compiler output through the real import path.
+    with monkeypatch.context() as previous:
+        previous.setattr(catalog_entities_module, "_build_projection", previous_policy)
+        first = sync.automatic()
+    builds = RecipeBuildService(sessions, bundles=SourceBundleStore(tmp_path / "bundles"))
+    with sessions() as session:
+        revision = session.scalar(select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == "recipe",
+        ))
+        assert revision is not None
+        revision_id, digest = revision.id, revision.content_digest
+        original_document = deepcopy(revision.document)
+    previous_input = builds.resolve(revision_id).input_intent_sha256
+    if malformed:
+        with sessions.begin() as session:
+            revision = session.get(CatalogDocumentRevision, revision_id)
+            assert revision is not None
+            stored = deepcopy(revision.projected)
+            _document_section(stored, "build_options")["layers"] = "true"
+            # Deliberately corrupt persisted JSON outside the typed writer.
+            session.execute(update(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.id == revision_id,
+            ).values(projected=stored))
+        with pytest.raises(CatalogRevisionContractError):
+            sync.automatic()
+        return
+
+    refreshed = sync.automatic()
+    current_input = builds.resolve(revision_id).input_intent_sha256
+    assert current_input != previous_input
+    assert refreshed.id == first.id
+    assert reader.fetches == [item.uri]
+    with sessions() as session:
+        revisions = tuple(session.scalars(select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == "recipe",
+        )))
+        assert [(row.id, row.content_digest) for row in revisions] == [(revision_id, digest)]
+        assert revisions[0].document == original_document
+    sync.automatic()
+    assert builds.resolve(revision_id).input_intent_sha256 == current_input
+    assert reader.fetches == [item.uri]
 
 
 def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_head(tmp_path: Path) -> None:

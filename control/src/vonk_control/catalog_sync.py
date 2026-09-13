@@ -161,6 +161,7 @@ class ManagedRecipeCatalogSyncService:
 
     def automatic(self) -> CatalogSyncView:
         snapshot = self._reader.list()
+        self._catalog.refresh_build_policy()
         with self._sessions() as session:
             current = session.scalar(
                 select(RecipeLibrarySyncRun)
@@ -185,6 +186,7 @@ class ManagedRecipeCatalogSyncService:
 
     def _apply(self, run_id: str, snapshot: RecipeLibrarySnapshot, *, actor: str) -> dict[str, object]:
         result = _empty_result()
+        self._catalog.refresh_build_policy()
         self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
         local = self._catalog.recipe_catalog_local_revisions(
             [(item.publisher, item.slug) for item in snapshot.items]
