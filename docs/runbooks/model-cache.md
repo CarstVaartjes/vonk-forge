@@ -81,6 +81,15 @@ chunk. The Spark flushes the buffer and syncs the completed file before
 verification and acceptance. Network retries retain the writer; after a
 process restart, resume uses the actual partial file length on disk.
 
+Each Spark fetches up to four independent objects concurrently through the
+same authenticated client, starting the largest files first to avoid leaving
+a large image archive until the other transfers have finished. Every object
+keeps its own range, digest check, and
+resumable partial file. Progress combines per-object bytes and counts an item
+complete only after verification; receipt ordering follows the manifest even
+when transfers finish out of order. A failed or cancelled download stops the
+remaining transfers and retains their on-disk checkpoints.
+
 ## Credentials and evidence
 
 See [Hugging Face authentication](../model-cache-huggingface-auth.md) for gated
