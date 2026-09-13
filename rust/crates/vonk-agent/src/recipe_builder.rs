@@ -3,7 +3,7 @@
 use std::{
     fmt,
     fs::{self, File},
-    io::{Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     os::unix::{
         ffi::OsStrExt,
         fs::{MetadataExt, PermissionsExt},
@@ -72,6 +72,12 @@ pub enum RecipeBuildError {
         "source build network policy is unsupported: public host allowlists require an installed egress boundary"
     )]
     NetworkPolicy,
+    #[error("build egress boundary failed during {stage} ({diagnostic})")]
+    NetworkBoundary {
+        stage: &'static str,
+        diagnostic: PodmanBuildDiagnostic,
+        logs: Box<crate::failure_evidence::FailureProcessLogs>,
+    },
     #[error("build storage is unavailable")]
     Io(#[from] std::io::Error),
 }
@@ -157,6 +163,16 @@ impl RecipeBuildError {
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "image-build",
+                "diagnostic_logs": logs,
+            }),
+            Self::NetworkBoundary {
+                stage,
+                diagnostic,
+                logs,
+            } => serde_json::json!({
+                "diagnostic": diagnostic.to_string(),
+                "reason": self.to_string(),
+                "stage": stage,
                 "diagnostic_logs": logs,
             }),
             _ => serde_json::json!({"reason": self.to_string()}),
@@ -463,37 +479,24 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             podman_arguments.push(target.clone());
         }
         podman_arguments.push(context.display().to_string());
-        let mut arguments = vec![
-            "--user".to_owned(),
-            "--wait".to_owned(),
-            "--pipe".to_owned(),
-            "--collect".to_owned(),
-            "--quiet".to_owned(),
-            "--service-type=exec".to_owned(),
-            format!("--unit=vonk-recipe-build-{operation_id}"),
-            "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
-            "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config".to_owned(),
-            "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
-            format!("--setenv=XDG_RUNTIME_DIR={}", podman_runtime.display()),
-            format!("--setenv=TMPDIR={}", podman_image_tmp.display()),
-            "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
-                .to_owned(),
+        let timeout = remaining_build_time(deadline)?;
+        let mut arguments = podman_user_service_arguments(
+            &format!("vonk-recipe-build-{operation_id}"),
+            runroot.path(),
+            staging.path(),
+            timeout,
+            true,
+        );
+        arguments.extend([
             format!("--property=MemoryMax={}", request.limits.memory_bytes),
             format!(
                 "--property=CPUQuota={}%",
                 u64::from(request.limits.cpu_cores) * 100
             ),
             format!("--property=TasksMax={}", request.limits.processes),
-            format!(
-                "--property=RuntimeMaxSec={}s",
-                request.limits.timeout_seconds
-            ),
-            "--property=TimeoutStopSec=5s".to_owned(),
-            "--property=KillMode=control-group".to_owned(),
             "/usr/bin/podman".to_owned(),
-        ];
+        ]);
         arguments.extend(podman_arguments);
-        let timeout = remaining_build_time(deadline)?;
         let output = self.runner.run_with_disk_reserve_cancellable(
             Program::SystemdRun,
             &arguments,
@@ -889,9 +892,11 @@ struct BuildEgress<'a, R: ProcessRunner> {
     runner: &'a R,
     storage: &'a Path,
     runroot: &'a Path,
+    staging: &'a Path,
     internal_network: String,
     outbound_network: String,
     proxy_name: String,
+    proxy_unit: String,
     image: String,
 }
 
@@ -920,9 +925,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             runner,
             storage: context.storage,
             runroot: context.runroot,
+            staging: context.staging,
             internal_network,
             outbound_network,
             proxy_name,
+            proxy_unit: format!("vonk-recipe-build-{}-e", context.operation_id),
             image,
         };
         let imported = result.run_with_file(
@@ -941,7 +948,7 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             context.cancelled,
         )?;
         if !imported.success {
-            return Err(RecipeBuildError::NetworkPolicy);
+            return Err(network_boundary_error("egress-image-import", &imported));
         }
         for arguments in [
             vec![
@@ -962,12 +969,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 context.cancelled,
             )?;
             if !output.success {
-                return Err(RecipeBuildError::NetworkPolicy);
+                return Err(network_boundary_error("egress-network-create", &output));
             }
         }
         let mut arguments = vec![
             "run".to_owned(),
-            "--detach".to_owned(),
             "--rm".to_owned(),
             "--name".to_owned(),
             result.proxy_name.clone(),
@@ -986,32 +992,98 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             arguments.push("--allow-host".to_owned());
             arguments.push(host.clone());
         }
-        let started = result.run_cancellable(
-            &arguments,
+        // Keep foreground Podman and conmon owned by a service for the whole
+        // build. A detached container's launcher exits immediately; systemd
+        // then kills conmon and leaves an unusable boundary behind.
+        let mut service = result.service_arguments(
+            &result.proxy_unit,
+            remaining_build_time(context.deadline)?,
+            false,
+        );
+        let podman = service
+            .iter()
+            .position(|value| value == "/usr/bin/podman")
+            .unwrap();
+        service.insert(
+            podman,
+            format!(
+                "--property=StandardError=append:{}",
+                result.staging.join("build-egress.stderr").display()
+            ),
+        );
+        service.extend(arguments);
+        let started = result.runner.run_cancellable(
+            Program::SystemdRun,
+            &service,
             phase_time(context.deadline, Duration::from_secs(30))?,
             context.cancelled,
         )?;
         if !started.success {
-            return Err(RecipeBuildError::NetworkPolicy);
+            return Err(network_boundary_error("egress-service-start", &started));
         }
-        let probed = result.run_cancellable(
-            &[
-                "exec".to_owned(),
-                result.proxy_name.clone(),
-                "/vonk-build-egress".to_owned(),
-                "--probe".to_owned(),
-            ],
-            phase_time(context.deadline, Duration::from_secs(10))?,
-            context.cancelled,
-        )?;
-        if !probed.success {
-            return Err(RecipeBuildError::NetworkPolicy);
+        // systemd confirms exec, not container readiness. Probe the actual
+        // deny boundary while Podman creates its network and starts the helper.
+        let probe_deadline = context
+            .deadline
+            .min(Instant::now() + Duration::from_secs(10));
+        loop {
+            let probed = result.run_cancellable(
+                &[
+                    "exec".to_owned(),
+                    result.proxy_name.clone(),
+                    "/vonk-build-egress".to_owned(),
+                    "--probe".to_owned(),
+                ],
+                remaining_build_time(probe_deadline)?,
+                context.cancelled,
+            )?;
+            if probed.success {
+                break;
+            }
+            if Instant::now() + Duration::from_millis(100) >= probe_deadline {
+                return Err(result.readiness_error(probed));
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
         Ok(result)
     }
 
-    fn arguments(&self) -> Vec<String> {
-        podman_storage_arguments(self.storage, self.runroot)
+    fn readiness_error(&self, mut probe: crate::process::ProcessOutput) -> RecipeBuildError {
+        // The foreground service's stderr contains OCI startup failures that
+        // `podman exec --probe` can only report as "container is not running".
+        // Read only a bounded tail of this operation-private diagnostic file.
+        if let Ok(mut file) = File::open(self.staging.join("build-egress.stderr")) {
+            let _ = file
+                .seek(SeekFrom::End(-4096))
+                .or_else(|_| file.seek(SeekFrom::Start(0)));
+            let mut tail = Vec::new();
+            if file.take(4096).read_to_end(&mut tail).is_ok() {
+                probe.stderr.push(b'\n');
+                probe.stderr.extend(tail);
+            }
+        }
+        network_boundary_error("egress-readiness", &probe)
+    }
+
+    fn service_arguments(&self, unit: &str, timeout: Duration, wait: bool) -> Vec<String> {
+        let mut arguments =
+            podman_user_service_arguments(unit, self.runroot, self.staging, timeout, wait);
+        arguments.extend([
+            "--property=MemoryMax=402653184".to_owned(),
+            "--property=CPUQuota=100%".to_owned(),
+            "--property=TasksMax=128".to_owned(),
+            "/usr/bin/podman".to_owned(),
+        ]);
+        arguments.extend(podman_storage_arguments(self.storage, self.runroot));
+        arguments
+    }
+
+    fn arguments(&self, timeout: Duration) -> Vec<String> {
+        self.service_arguments(
+            &format!("vonk-recipe-build-{}", Uuid::new_v4()),
+            timeout,
+            true,
+        )
     }
 
     fn run(
@@ -1019,9 +1091,9 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         extra: &[String],
         timeout: Duration,
     ) -> Result<crate::process::ProcessOutput, ProcessError> {
-        let mut arguments = self.arguments();
+        let mut arguments = self.arguments(timeout);
         arguments.extend_from_slice(extra);
-        self.runner.run(Program::Podman, &arguments, timeout)
+        self.runner.run(Program::SystemdRun, &arguments, timeout)
     }
 
     fn run_cancellable(
@@ -1030,10 +1102,10 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<crate::process::ProcessOutput, ProcessError> {
-        let mut arguments = self.arguments();
+        let mut arguments = self.arguments(timeout);
         arguments.extend_from_slice(extra);
         self.runner
-            .run_cancellable(Program::Podman, &arguments, timeout, cancelled)
+            .run_cancellable(Program::SystemdRun, &arguments, timeout, cancelled)
     }
 
     fn run_with_file(
@@ -1045,11 +1117,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<crate::process::ProcessOutput, ProcessError> {
-        let mut arguments = self.arguments();
+        let mut arguments = self.arguments(timeout);
         arguments.extend(extra.iter().map(|value| (*value).to_owned()));
         let file = File::open(path)?;
         self.runner.run_with_input_disk_reserve_cancellable(
-            Program::Podman,
+            Program::SystemdRun,
             &arguments,
             timeout,
             &file,
@@ -1061,12 +1133,26 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
 
 impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
     fn drop(&mut self) {
-        for arguments in [
-            vec![
+        // Let Podman stop the container before stopping its owning service;
+        // otherwise systemd waits its full stop timeout for conmon first.
+        let _ = self.run(
+            &[
                 "stop".to_owned(),
                 "--time=1".to_owned(),
                 self.proxy_name.clone(),
             ],
+            Duration::from_secs(15),
+        );
+        let _ = self.runner.run(
+            Program::Systemctl,
+            &[
+                "--user".to_owned(),
+                "stop".to_owned(),
+                self.proxy_unit.clone(),
+            ],
+            Duration::from_secs(15),
+        );
+        for arguments in [
             vec![
                 "rm".to_owned(),
                 "--force".to_owned(),
@@ -1094,6 +1180,56 @@ impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
             let _ = self.run(&arguments, Duration::from_secs(15));
         }
     }
+}
+
+fn network_boundary_error(
+    stage: &'static str,
+    output: &crate::process::ProcessOutput,
+) -> RecipeBuildError {
+    RecipeBuildError::NetworkBoundary {
+        stage,
+        diagnostic: podman_build_diagnostic(output),
+        logs: Box::new(sanitized_process_logs(output)),
+    }
+}
+
+/// Rootless container commands must originate in the user manager's clean
+/// mount namespace, including the commands that create Podman's pause process.
+/// Use an operation-private runtime directory consistently for build and egress.
+fn podman_user_service_arguments(
+    unit: &str,
+    runroot: &Path,
+    staging: &Path,
+    timeout: Duration,
+    wait: bool,
+) -> Vec<String> {
+    let mut arguments = vec![
+        "--user".to_owned(),
+        "--collect".to_owned(),
+        "--quiet".to_owned(),
+        "--service-type=exec".to_owned(),
+        format!("--unit={unit}"),
+        "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
+        "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config".to_owned(),
+        "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
+        format!("--setenv=XDG_RUNTIME_DIR={}", runroot.join("xdg").display()),
+        format!(
+            "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus",
+            rustix::process::geteuid().as_raw()
+        ),
+        format!(
+            "--setenv=TMPDIR={}",
+            staging.join("podman-image-tmp").display()
+        ),
+        "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf".to_owned(),
+        format!("--property=RuntimeMaxSec={}s", timeout.as_secs_f64()),
+        "--property=TimeoutStopSec=5s".to_owned(),
+        "--property=KillMode=control-group".to_owned(),
+    ];
+    if wait {
+        arguments.extend(["--wait".to_owned(), "--pipe".to_owned()]);
+    }
+    arguments
 }
 
 fn write_proxy_rootfs(binary: &Path, destination: &Path) -> Result<(), RecipeBuildError> {
@@ -1228,23 +1364,103 @@ mod tests {
             )
             .into_bytes(),
         };
-        let error = RecipeBuildError::ImageBuild {
-            diagnostic: podman_build_diagnostic(&output),
-            logs: Some(Box::new(super::sanitized_process_logs(&output))),
+        let errors = [
+            RecipeBuildError::ImageBuild {
+                diagnostic: podman_build_diagnostic(&output),
+                logs: Some(Box::new(super::sanitized_process_logs(&output))),
+            },
+            super::network_boundary_error("egress-network-create", &output),
+        ];
+        for error in errors {
+            let body = error.failure_evidence();
+            let diagnostics = crate::failure_evidence::from_failure("recipe.build.v1", &body);
+            assert!(diagnostics.stderr.truncated);
+            assert!(diagnostics.stderr.text.contains("permission denied"));
+            assert!(
+                !serde_json::to_string(&body)
+                    .unwrap()
+                    .contains("never-persist")
+            );
+            assert!(matches!(
+                diagnostics.category,
+                crate::failure_evidence::FailureCategory::PlatformPolicy
+            ));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an isolated Linux systemd host, agent user and installed egress helper"]
+    fn real_egress_boundary_survives_hardened_agent_and_cleans_up() {
+        use super::{BuildEgress, BuildEgressStart};
+        use crate::process::{ProcessRunner, Program, SystemProcessRunner};
+        use std::{
+            fs,
+            path::Path,
+            time::{Duration, Instant},
         };
-        let body = error.failure_evidence();
-        let diagnostics = crate::failure_evidence::from_failure("recipe.build.v1", &body);
-        assert!(diagnostics.stderr.truncated);
-        assert!(diagnostics.stderr.text.contains("permission denied"));
+
+        let staging = tempfile::tempdir_in("/var/lib/vonk-forge-agent").unwrap();
+        let runtime = tempfile::Builder::new()
+            .prefix("e-")
+            .tempdir_in("/run/vonk-forge-agent")
+            .unwrap();
+        let storage = staging.path().join("storage");
+        fs::create_dir(&storage).unwrap();
+        fs::create_dir(staging.path().join("podman-image-tmp")).unwrap();
+        fs::create_dir(runtime.path().join("xdg")).unwrap();
+        let runner = SystemProcessRunner;
+        let hosts = ["pypi.org".to_owned()];
+        let boundary = BuildEgress::start(
+            &runner,
+            BuildEgressStart {
+                storage: &storage,
+                runroot: runtime.path(),
+                staging: staging.path(),
+                binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
+                operation_id: uuid::Uuid::new_v4(),
+                hosts: &hosts,
+                minimum_free_disk_bytes: 0,
+                deadline: Instant::now() + Duration::from_secs(60),
+                cancelled: &|| false,
+            },
+        )
+        .unwrap_or_else(|error| panic!("{}", error.failure_evidence()));
+        let unit = boundary.proxy_unit.clone();
+        let active = runner
+            .run(
+                Program::Systemctl,
+                &["--user".to_owned(), "is-active".to_owned(), unit.clone()],
+                Duration::from_secs(10),
+            )
+            .unwrap();
+        assert!(active.success, "the proxy must remain owned by its service");
+        let mut network_exists = boundary.arguments(Duration::from_secs(10));
+        network_exists.extend([
+            "network".to_owned(),
+            "exists".to_owned(),
+            boundary.internal_network.clone(),
+        ]);
+        drop(boundary);
         assert!(
-            !serde_json::to_string(&body)
+            !runner
+                .run(
+                    Program::Systemctl,
+                    &["--user".to_owned(), "is-active".to_owned(), unit],
+                    Duration::from_secs(10)
+                )
                 .unwrap()
-                .contains("never-persist")
+                .success
         );
-        assert!(matches!(
-            diagnostics.category,
-            crate::failure_evidence::FailureCategory::PlatformPolicy
-        ));
+        assert!(
+            !runner
+                .run(
+                    Program::SystemdRun,
+                    &network_exists,
+                    Duration::from_secs(10)
+                )
+                .unwrap()
+                .success
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ import json
 import re
 import uuid
 from contextlib import redirect_stdout
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 
 import pytest
@@ -131,8 +132,9 @@ class FakeClient:
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
         elif path == "/api/fleet/upgrade":
-            assert set(payload) == {"selectors", "all", "strategy"}
-            assert isinstance(payload["selectors"], list)
+            assert {"all", "strategy"} <= set(payload) <= {"selectors", "all", "strategy"}
+            if "selectors" in payload:
+                assert isinstance(payload["selectors"], list) and payload["selectors"]
         elif path == "/api/fleet/enroll":
             assert set(payload) == {"name", "ttl_seconds"}
         elif path.endswith("/rename"):
@@ -825,3 +827,29 @@ def test_terminal_partial_and_failure_states_have_nonzero_exit_codes() -> None:
     failed = FakeClient({("POST", "/api/model/qwen/download"): {"state": "failed"}})
     assert run(("model", "download", "qwen", "--json"), partial)[0] == 1
     assert run(("model", "download", "qwen", "--json"), failed)[0] == 2
+
+
+def test_default_log_window_is_an_api_timestamp_and_all_upgrade_omits_selectors() -> (
+    None
+):
+    client = FakeClient({("GET", "/api/fleet/Atlas/loginfo"): {"logs": []}})
+    before = datetime.now(UTC) - timedelta(minutes=15)
+    assert run(("fleet", "loginfo", "Atlas", "--json"), client)[0] == 0
+    after = datetime.now(UTC) - timedelta(minutes=15)
+    query = client.calls[-1][3]
+    assert isinstance(query, dict)
+    since = datetime.fromisoformat(query["since"])
+    assert before <= since <= after
+    assert run(("fleet", "upgrade", "--all", "--json"), client)[0] == 0
+    payload = client.calls[-1][2]
+    assert isinstance(payload, dict)
+    assert "selectors" not in payload
+
+
+@pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])
+def test_log_since_rejects_ambiguous_windows_before_request(since: str) -> None:
+    client = FakeClient({})
+    assert (
+        run(("fleet", "loginfo", "Atlas", "--since", since, "--json"), client)[0] == 2
+    )
+    assert not client.calls

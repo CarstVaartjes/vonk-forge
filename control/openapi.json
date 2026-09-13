@@ -6873,7 +6873,7 @@
             "anyOf": [
               {
                 "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
