@@ -322,7 +322,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            aptly crun fuse-overlayfs podman uidmap
+            aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
       - parallel:
           - name: Test bounded aptly state compaction
             run: >-
@@ -343,6 +343,42 @@ jobs:
               install -d -m 0755 artifacts
               scripts/verify-agent-systemd --json \
                 | tee artifacts/vonk-forge-systemd-security.json
+      - name: Exercise build egress from the hardened agent service
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The helper has no dependencies: compile its real source statically
+          # without rebuilding the agent dependency graph for a second target.
+          rustc --edition=2024 -C target-feature=+crt-static \
+            rust/crates/vonk-build-egress/src/main.rs \
+            -o "$RUNNER_TEMP/vonk-build-egress"
+          cargo test --locked -p vonk-agent --lib --no-run --message-format=json \
+            > "$RUNNER_TEMP/egress-test-build.jsonl"
+          test_binary=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "vonk_agent" and .profile.test) | .executable // empty' \
+            "$RUNNER_TEMP/egress-test-build.jsonl")
+          test -x "$test_binary"
+          sudo useradd --create-home --home-dir /var/lib/vonk-forge-agent vonk-agent
+          sudo install -d -o vonk-agent -g vonk-agent /run/vonk-forge-agent
+          sudo install -D -m 0644 packaging/config/containers-storage.conf \
+            /etc/vonk-forge-agent/containers-storage.conf
+          sudo install -d -o vonk-agent -g vonk-agent /var/lib/vonk-forge-agent/.config/containers
+          printf '[network]\nnetwork_backend = "netavark"\n' \
+            | sudo tee /var/lib/vonk-forge-agent/.config/containers/containers.conf >/dev/null
+          sudo install -D -m 0755 "$RUNNER_TEMP/vonk-build-egress" \
+            /usr/lib/vonk-forge/vonk-build-egress
+          sudo install -D -m 0755 "$test_binary" /usr/lib/vonk-forge/egress-tests
+          sudo loginctl enable-linger vonk-agent
+          sudo systemctl start "user@$(id -u vonk-agent).service"
+          sudo systemd-run --wait --pipe --collect --unit=vonk-egress-regression \
+            --property=User=vonk-agent --property=ProtectSystem=strict \
+            --property=ProtectHome=no --property='InaccessiblePaths=/home /root' \
+            --property=PrivateTmp=yes \
+            --property=ProtectKernelTunables=yes --property=ProtectKernelLogs=yes \
+            --property='ReadWritePaths=/var/lib/vonk-forge-agent /run/vonk-forge-agent' \
+            --property=NoNewPrivileges=no --property=RestrictNamespaces=no \
+            /usr/lib/vonk-forge/egress-tests \
+            recipe_builder::tests::real_egress_boundary_survives_hardened_agent_and_cleans_up \
+            --exact --ignored --nocapture
       - name: Upload GPU node service exposure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

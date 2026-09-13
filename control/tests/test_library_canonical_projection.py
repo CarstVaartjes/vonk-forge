@@ -22,6 +22,7 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     ClusterMapping,
+    ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
     RecipeInstallation,
@@ -567,3 +568,54 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(tmp_path: Pat
         )
     with pytest.raises(LibraryProjectionError):
         projection.models(limit=1)
+
+
+@pytest.mark.parametrize("total_bytes,expected_status", [(0, 200), (-1, 503)])
+def test_cached_download_progress_preserves_zero_and_rejects_negative_totals(
+    tmp_path: Path,
+    total_bytes: int,
+    expected_status: int,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    engine = create_engine(f"sqlite:///{tmp_path / 'cache-progress.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 9, 13, tzinfo=UTC)
+    cursors = TokenCodec(b"z" * 32).cursor_codec()
+    entities = CatalogEntityService(sessions, clock=lambda: now, cursors=cursors)
+    revision = entities.create_draft(
+        index["catalog_entities"][0]["document"], actor="test"
+    )
+    entities.resolve(revision.id, actor="test")
+    with sessions.begin() as session:
+        session.add(
+            ModelCacheOperation(
+                request_key=str(uuid.uuid4()),
+                kind="download",
+                state="succeeded",
+                payload={"model_content_sha256": revision.content_digest},
+                progress={
+                    "measurement": {
+                        "phase": "completed",
+                        "completed_bytes": 0,
+                        "total_bytes": total_bytes,
+                    }
+                },
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(sessions, cursors=cursors, clock=lambda: now),
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/model/library")
+    assert response.status_code == expected_status, response.text
+    if expected_status == 200:
+        progress = response.json()["models"][0]["local"]["preparation"]
+        assert progress["state"] == "succeeded"
+        assert progress["total_bytes"] == 0

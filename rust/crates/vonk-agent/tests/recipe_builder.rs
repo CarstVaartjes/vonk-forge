@@ -1080,7 +1080,6 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         "--property=MemoryMax=8589934592",
         "--property=CPUQuota=800%",
         "--property=TasksMax=4096",
-        "--property=RuntimeMaxSec=3600s",
         "--property=TimeoutStopSec=5s",
         "--property=KillMode=control-group",
         "/usr/bin/podman",
@@ -1133,6 +1132,18 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     ] {
         assert!(build.1.iter().any(|value| value == required), "{required}");
     }
+    let runtime_limit: f64 = build
+        .1
+        .iter()
+        .find_map(|value| {
+            value
+                .strip_prefix("--property=RuntimeMaxSec=")?
+                .strip_suffix('s')?
+                .parse()
+                .ok()
+        })
+        .unwrap();
+    assert!(runtime_limit > 0.0 && runtime_limit <= 3600.0);
     assert!(
         build
             .1
@@ -1140,11 +1151,15 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             .any(|value| value.starts_with("--setenv=TMPDIR=")
                 && value.ends_with("/podman-image-tmp"))
     );
+    let runroot = build
+        .1
+        .windows(2)
+        .find(|pair| pair[0] == "--runroot")
+        .unwrap();
     assert!(
         build
             .1
-            .iter()
-            .any(|value| value.starts_with("--setenv=XDG_RUNTIME_DIR=") && value.ends_with("/xdg"))
+            .contains(&format!("--setenv=XDG_RUNTIME_DIR={}", runroot[1]))
     );
     assert!(!build.1.iter().any(|value| value == "--scope"));
     assert!(!build.1.iter().any(|value| {
@@ -2037,6 +2052,33 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
         .iter()
         .find(|(_, arguments)| arguments.iter().any(|value| value == "build"))
         .unwrap();
+    // Starting the boundary from the hardened agent inherits read-only procfs
+    // mounts. Every helper step must use the same clean user namespace as the
+    // build; detaching Podman would also kill conmon when its service exits.
+    assert_eq!(proxy.0, Program::SystemdRun);
+    assert!(!proxy.1.iter().any(|value| value == "--detach"));
+    assert!(!proxy.1.iter().any(|value| value == "--wait"));
+    let runtime = build
+        .1
+        .iter()
+        .find(|value| value.starts_with("--setenv=XDG_RUNTIME_DIR="))
+        .unwrap();
+    for (program, arguments) in calls.iter().filter(|(_, arguments)| {
+        arguments
+            .iter()
+            .any(|value| value == "import" || value == "network" || value == "exec")
+    }) {
+        assert_eq!(*program, Program::SystemdRun);
+        assert!(arguments.contains(runtime));
+    }
+    let unit = proxy
+        .1
+        .iter()
+        .find_map(|value| value.strip_prefix("--unit="))
+        .unwrap();
+    assert!(calls.iter().any(|(program, arguments)| {
+        *program == Program::Systemctl && arguments == &["--user", "stop", unit]
+    }));
     assert!(
         build
             .1

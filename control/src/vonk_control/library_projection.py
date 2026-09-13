@@ -284,7 +284,7 @@ class LibraryProjection:
         total = measurement.get("total_bytes", progress.get("expected_bytes"))
         if type(completed) is not int or completed < 0:
             raise LibraryProjectionError("persisted cache progress bytes are invalid")
-        if total is not None and (type(total) is not int or total < 1):
+        if total is not None and (type(total) is not int or total < 0):
             raise LibraryProjectionError("persisted cache progress total is invalid")
         phase = measurement.get("phase")
         return {

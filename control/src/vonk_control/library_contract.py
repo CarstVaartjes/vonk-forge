@@ -174,7 +174,7 @@ class LibraryLocalProgress(_StrictModel):
     state: Literal["queued", "running", "partial", "succeeded", "failed"]
     phase: Text64 | None = None
     completed_bytes: int = Field(default=0, ge=0, le=_MAX_SIGNED_BIGINT)
-    total_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    total_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
 class LibraryLocalState(_StrictModel):

@@ -9,10 +9,12 @@ friendly name accepted by the Controller.
 from __future__ import annotations
 
 import argparse
+import re
 import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from .cli_render import progress_line
@@ -45,6 +47,24 @@ class _WatchCallback(Protocol):
 
 def _quoted(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _log_since(value: str) -> str:
+    relative = re.fullmatch(r"([0-9]+)([smhd])", value)
+    try:
+        if relative is not None:
+            seconds = (
+                int(relative[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[relative[2]]
+            )
+            return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+        timestamp = datetime.fromisoformat(value)
+        if timestamp.tzinfo is not None:
+            return value
+    except (ValueError, OverflowError):
+        pass
+    raise ValueError(
+        "--since requires a duration such as 15m or a timestamp with a timezone"
+    )
 
 
 def _add_output(parser: argparse.ArgumentParser) -> None:
@@ -219,7 +239,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help=f"Tail lines, 1 to {MAX_LOG_LINES} (default: 100)",
     )
     loginfo.add_argument("--recipe")
-    loginfo.add_argument("--source", choices=("client", "monitor", "runtime"))
+    loginfo.add_argument("--source", choices=("client", "monitor", "runtime", "job"))
     loginfo.add_argument("--follow", action="store_true")
     _watch_controls(loginfo)
     _add_output(loginfo)
@@ -544,7 +564,7 @@ def _fleet(
             "POST",
             "/api/fleet/upgrade",
             {
-                "selectors": [args.selector] if args.selector else [],
+                **({"selectors": [args.selector]} if args.selector else {}),
                 "all": args.all,
                 "strategy": args.strategy,
             },
@@ -553,7 +573,7 @@ def _fleet(
         selector = _fleet_selector(args)
         path = f"/api/fleet/{_quoted(selector)}/loginfo"
         query = _query(
-            since=args.since,
+            since=_log_since(args.since),
             lines=args.lines,
             recipe=args.recipe,
             source=args.source,
