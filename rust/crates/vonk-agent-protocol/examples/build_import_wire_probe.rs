@@ -36,6 +36,12 @@ fn main() {
         let payload = claim.payload.clone();
         let parsed = RecipeOperationRequest::parse(&claim).expect("valid operation");
         let evidence = match parsed {
+            RecipeOperationRequest::BuildCleanup(request) => json!({
+                "schema_version": 1,
+                "build_id": request.build_id,
+                "operation_id": request.operation_id,
+                "stopped": true,
+            }),
             RecipeOperationRequest::Build(request) => json!({
                 "build_input_sha256": request.build_input_sha256,
                 "image_bytes": 1,

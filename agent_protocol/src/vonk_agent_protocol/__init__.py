@@ -33,6 +33,8 @@ from .contracts import (
     validate_result_for_operation,
 )
 from .build_import import (
+    RecipeBuildCleanupEvidence,
+    RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
     RecipeImageImportEvidence,
@@ -205,6 +207,8 @@ __all__ = [
     "PackageRollbackAuthority",
     "PackageRollbackSource",
     "PythonRuntimeMetadata",
+    "RecipeBuildCleanupEvidence",
+    "RecipeBuildCleanupRequest",
     "RecipeBuildEvidence",
     "RecipeBuildRequest",
     "RecipeImageImportEvidence",

@@ -353,6 +353,7 @@ def assemble_production_worker(
         sessions,
         recipe_routes,
         clock=clock,
+        build_cleanup=lifecycle.reconcile_cancelled_builds,
         fleet_profiles=FleetProfileService(
             sessions,
             clock=clock,

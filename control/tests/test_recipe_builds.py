@@ -660,6 +660,154 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
 
 
 @pytest.mark.parametrize(
+    ("source_state", "outcome"),
+    [
+        ("running", "success"),
+        ("waiting-for-operator", "success"),
+        ("running", "failed"),
+        ("waiting-for-operator", "mismatch"),
+    ],
+)
+def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
+    tmp_path: Path,
+    source_state: str,
+    outcome: str,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    original = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="cancel-build-test",
+    )
+    with sessions.begin() as session:
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
+        )
+        assert child is not None
+        child.state = source_state
+        stored_job = session.get(Job, original.id)
+        assert stored_job is not None
+        stored_job.state = source_state
+        child.current_attempt = 1
+        child_id = child.id
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
+    if source_state == "waiting-for-operator":
+        with sessions.begin() as session:
+            row = session.get(RecipeBuild, plan.build_id)
+            assert row is not None
+            row.state = "failed"
+            row.plan = {**row.plan, "cancelled": True}
+        assert operations.reconcile_cancelled_builds()
+    else:
+        operations.cancel(
+            original.id,
+            actor="admin",
+            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
+            reason="remove recipe cache",
+        )
+    with sessions() as session:
+        original_job = session.get(Job, original.id)
+        assert original_job is not None and original_job.state == source_state
+        assert original_job.result is not None
+        assert original_job.result["cancel_requested"] is True
+        assert (
+            session.scalar(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == plan.build_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+            is not None
+        )
+        cleanup = session.scalar(
+            select(Job).where(Job.kind == "recipe.build.cleanup.v1")
+        )
+        assert cleanup is not None
+        cleanup_id = cleanup.id
+        cleanup_child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == cleanup.id)
+        )
+        assert (
+            cleanup_child is not None
+            and cleanup_child.payload["operation_id"] == child_id
+        )
+    assert not operations.reconcile_cancelled_builds()
+    # A late execution result must not publish the removed image, lose the
+    # cancellation metadata, or release the reservation before cleanup.
+    operations.record_node_result(
+        original.id,
+        node_id,
+        succeeded=source_state == "running",
+        evidence={
+            "build_input_sha256": plan.build_input_sha256,
+            "image_bytes": 500,
+            "image_digest": "sha256:" + "b" * 64,
+            "oci_layout_sha256": "c" * 64,
+            "policy": {"dockerfile": "Dockerfile", "findings": [], "passed": True},
+        }
+        if source_state == "running"
+        else {"reason": "execution stopped after cancellation"},
+    )
+    with sessions.begin() as session:
+        AgentJobService(sessions, clock=lambda: now)._aggregate_parent(
+            session, original.id
+        )
+        removed = session.get(RecipeBuild, plan.build_id)
+        assert removed is not None and removed.state == "failed"
+    evidence = {
+        "schema_version": 1,
+        "build_id": plan.build_id,
+        "operation_id": child_id,
+        "stopped": True,
+    }
+    if outcome == "mismatch":
+        evidence["operation_id"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        with pytest.raises(RecipeOperationConflict, match="cleanup evidence"):
+            operations.record_node_result(
+                cleanup_id, node_id, succeeded=True, evidence=evidence
+            )
+    elif outcome == "failed":
+        operations.record_node_result(
+            cleanup_id,
+            node_id,
+            succeeded=False,
+            evidence={"reason": "systemd stop failed"},
+        )
+    else:
+        operations.record_node_result(
+            cleanup_id, node_id, succeeded=True, evidence=evidence
+        )
+    with sessions() as session:
+        remaining = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == plan.build_id,
+                ResourceReservation.state == "active",
+            )
+        )
+        original_job = session.get(Job, original.id)
+        assert original_job is not None
+        if outcome == "success":
+            assert original_job.state == "cancelled"
+            assert remaining is None
+        else:
+            assert remaining is not None
+            assert original_job.state == "waiting-for-operator"
+
+
+@pytest.mark.parametrize(
     ("operation_state", "build_state"),
     (
         ("failed", "failed"),

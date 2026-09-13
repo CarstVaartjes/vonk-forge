@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentClaim,
+    RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
     RecipeBuildRequest,
     RecipeImageImportEvidence,
@@ -22,11 +23,13 @@ from vonk_agent_protocol import (
 )
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     ClusterMapping,
     ClusterMappingNode,
     NodeArtifact,
     RecipeBuild,
+    ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import (
@@ -215,6 +218,78 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             )
         )
         assert artifact is not None and artifact.state == "verified"
+
+
+def test_cancelled_build_cleanup_crosses_the_real_wire_boundary(
+    tmp_path: Path, build_import_wire_probe: Path
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    original = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
+        )
+        assert child is not None
+        child.current_attempt = 1
+        child.state = "running"
+    operations.cancel(
+        original.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="remove recipe cache",
+    )
+    with sessions() as session:
+        cleanup = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.kind == "recipe.build.cleanup.v1"
+            )
+        )
+        assert cleanup is not None
+        payload = cleanup.payload
+        cleanup_job = cleanup.parent_job_id
+    result = subprocess.run(
+        [str(build_import_wire_probe)],
+        input=json.dumps({"operation": "recipe.build.cleanup.v1", "payload": payload})
+        + "\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    wire = json.loads(result.stdout)
+    evidence = RecipeBuildCleanupEvidence.model_validate_json(
+        json.dumps(wire["evidence"])
+    )
+    operations.record_node_result(
+        cleanup_job, node_id, succeeded=True, evidence=evidence.model_dump(mode="json")
+    )
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == plan.build_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+            is None
+        )
 
 
 def test_build_wire_rejects_scalar_coercion(tmp_path: Path) -> None:

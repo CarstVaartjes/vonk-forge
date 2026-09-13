@@ -11,14 +11,15 @@ pub use generated::{
     ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
     DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
     InventoryRequest, RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage,
-    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
-    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
-    RecipeImageImportEvidence, RecipeImageImportRequest,
-    RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
-    RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunRequest, RecipeJobRunResult, RecipeStartPayload as RecipeStartRequest,
-    RecipeStartPayloadPhase as RecipeStartPhase, RecipeStopPayload as RecipeStopRequest,
-    RecipeStopResult, RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
+    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildPolicy,
+    RecipeBuildPolicyFinding, RecipeBuildRequest, RecipeImageImportEvidence,
+    RecipeImageImportRequest, RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence,
+    RecipeJobFile, RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest,
+    RecipeJobOutputMapping, RecipeJobRunRequest, RecipeJobRunResult,
+    RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
+    RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
+    RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
 };
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
@@ -386,6 +387,7 @@ impl AgentClaim {
                 | "runtime.preflight.v1"
                 | "artifact.distribution.v1"
                 | "recipe.build.v1"
+                | "recipe.build.cleanup.v1"
                 | "recipe.image.import.v1"
                 | "recipe.job.run.v1"
                 | "recipe.install"
@@ -661,6 +663,12 @@ impl AgentResult {
                     &self.result,
                     AgentResultResult::ArtifactDistributionResult(_)
                 ),
+                AgentOperation::RecipeBuildCleanupV1 => {
+                    matches!(
+                        &self.result,
+                        AgentResultResult::RecipeBuildCleanupEvidence(_)
+                    )
+                }
                 AgentOperation::RecipeBuildV1 => {
                     matches!(&self.result, AgentResultResult::RecipeBuildEvidence(_))
                 }
@@ -849,6 +857,7 @@ impl EnrollmentEvidence {
 pub enum RecipeOperationRequest {
     RuntimePreflight(runtime_preflight::RuntimePreflightRequest),
     Build(Box<RecipeBuildRequest>),
+    BuildCleanup(RecipeBuildCleanupRequest),
     ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
     Install(RecipeInstallRequest),
@@ -943,6 +952,10 @@ impl RecipeOperationRequest {
                 "runtime.preflight.v1",
                 generated::AgentClaimPayload::RuntimePreflightRequest(value),
             ) => Self::RuntimePreflight(value.clone()),
+            (
+                "recipe.build.cleanup.v1",
+                generated::AgentClaimPayload::RecipeBuildCleanupRequest(value),
+            ) => Self::BuildCleanup(value.clone()),
             ("recipe.build.v1", generated::AgentClaimPayload::RecipeBuildRequest(value)) => {
                 Self::Build(Box::new(value.clone()))
             }
@@ -976,6 +989,7 @@ impl RecipeOperationRequest {
         let valid = match self {
             Self::RuntimePreflight(value) => value.validate().is_ok(),
             Self::Build(value) => validate_build(value),
+            Self::BuildCleanup(value) => value.schema_version == 1,
             Self::ImageImport(value) => {
                 value.schema_version == 1
                     && value.kind == "recipe.image.import.v1"

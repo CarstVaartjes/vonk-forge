@@ -18,6 +18,8 @@ from vonk_agent_protocol import (
     AgentOperation as ProtocolAgentOperation,
 )
 from vonk_agent_protocol import (
+    RecipeBuildCleanupEvidence,
+    RecipeBuildCleanupRequest,
     RecipeInstallPayload,
     RecipeStartPayload,
     RecipeStopPayload,
@@ -82,6 +84,7 @@ from .recipe_execution_contract import (
     run_plan_document,
 )
 from .recipe_lifecycle_contract import (
+    RecipeOperationCancellationResult,
     parse_recipe_lifecycle_result,
     validate_recipe_lifecycle_terminal,
 )
@@ -178,6 +181,7 @@ _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
 
 _RECIPE_WIRE_PAYLOAD_MODELS = {
+    "recipe.build.cleanup.v1": RecipeBuildCleanupRequest,
     "recipe.install": RecipeInstallPayload,
     "recipe.start": RecipeStartPayload,
     "recipe.stop": RecipeStopPayload,
@@ -1884,10 +1888,49 @@ class RecipeOperationService:
         operation.updated_at = now
         node_id = operation.node_id
         owner_id = _required_string(job.payload, "owner_id")
-        if job.kind == "recipe.build.v1":
+        if job.kind == "recipe.build.cleanup.v1":
+            if succeeded:
+                receipt = RecipeBuildCleanupEvidence.model_validate_json(canonical_message(evidence))
+                expected = RecipeBuildCleanupRequest.model_validate_json(canonical_message(operation.payload))
+                if receipt.build_id != owner_id or receipt.build_id != expected.build_id or receipt.operation_id != expected.operation_id:
+                    raise RecipeOperationConflict("recipe build cleanup evidence does not match its authority")
+                original = session.get(AgentOperation, receipt.operation_id, with_for_update=True)
+                original_job = None if original is None else session.get(Job, original.parent_job_id, with_for_update=True)
+                build = session.get(RecipeBuild, owner_id, with_for_update=True)
+                if (
+                    original is None or original.node_id != node_id or original.kind != "recipe.build.v1"
+                    or original_job is None or original_job.payload.get("owner_id") != owner_id
+                    or build is None or build.plan.get("cancelled") is not True
+                ):
+                    raise RecipeOperationConflict("recipe build cleanup authority changed")
+                original.state = "cancelled"
+                original.updated_at = now
+                original_job.state = "cancelled"
+                cancellation = RecipeOperationCancellationResult.model_validate_json(
+                    canonical_message(job.payload["build_cancellation"])
+                )
+                original_job.result = cancellation.model_copy(update={"cancelled": True}).model_dump(mode="json", exclude_none=True)
+                original_job.updated_at = now
+                self._release_cancelled_build(session, owner_id, now)
+        elif job.kind == "recipe.build.v1":
             build = session.get(RecipeBuild, owner_id, with_for_update=True)
             if build is None or build.builder_node_id != node_id:
                 raise RecipeOperationConflict("recipe build authority is invalid")
+            if build.plan.get("cancelled") is True:
+                # Completion can race cancellation. Retain the authenticated
+                # attempt's outcome, but never republish its removed image or
+                # release capacity before the separate stop receipt arrives.
+                previous = _validated_result(job.kind, job.result) or {}
+                if previous.get("cancel_requested") is not True:
+                    job.result = _validated_result(job.kind, {
+                        "cancel_requested": True,
+                        "cancel_request_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:cancel-build:{job.id}")),
+                        "cancel_actor": job.actor,
+                        "reason": "recipe Controller cache removal cancelled the build",
+                    })
+                job.state = "waiting-for-operator"
+                build.state = "failed"
+                return False
             force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
                 _record_build_evidence(
@@ -2139,7 +2182,9 @@ class RecipeOperationService:
                     },
                 )
             if job.kind == "recipe.build.v1":
-                self._release(session, "recipe-build", owner_id, now)
+                build = session.get(RecipeBuild, owner_id)
+                if build is None or build.plan.get("cancelled") is not True:
+                    self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
@@ -2321,6 +2366,12 @@ class RecipeOperationService:
         """Durably cancel a queued/running recipe operation."""
         now = self._clock()
         cancellation_reason = _cancel_reason(reason)
+        with self._sessions() as session:
+            candidate = session.get(Job, operation_id)
+            is_build = candidate is not None and candidate.kind == "recipe.build.v1"
+        if is_build:
+            self._cancel_build(operation_id, actor=actor, request_id=request_id, reason=cancellation_reason)
+            return self.get(operation_id)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or not job.kind.startswith("recipe."):
@@ -2386,6 +2437,157 @@ class RecipeOperationService:
             })
             job.updated_at = now
         return self.get(operation_id)
+
+    def reconcile_cancelled_builds(self) -> bool:
+        """Resume cleanup after cache removal or a Controller restart."""
+        with self._sessions() as session:
+            candidates = tuple(
+                session.execute(
+                    select(Job.id, Job.actor)
+                    .join(
+                        RecipeBuild,
+                        Job.payload["owner_id"].as_string() == RecipeBuild.id,
+                    )
+                    .where(
+                        Job.kind == "recipe.build.v1",
+                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        RecipeBuild.state == "failed",
+                        RecipeBuild.plan["cancelled"].as_boolean().is_(True),
+                    )
+                    .order_by(Job.created_at, Job.id)
+                    .limit(32)
+                )
+            )
+        progressed = False
+        for job_id, actor in candidates:
+            progressed = (
+                self._cancel_build(
+                    job_id,
+                    actor=actor,
+                    request_id=str(
+                        uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:cancel-build:{job_id}")
+                    ),
+                    reason="recipe Controller cache removal cancelled the build",
+                )
+                or progressed
+            )
+        return progressed
+
+    def _cancel_build(
+        self, job_id: str, *, actor: str, request_id: str, reason: str
+    ) -> bool:
+        # Use the claim/result lock order: node, parent job, operation, build.
+        with self._sessions() as session:
+            hinted = session.get(Job, job_id)
+            if (
+                hinted is None
+                or hinted.kind != "recipe.build.v1"
+                or len(hinted.targets) != 1
+            ):
+                raise RecipeOperationConflict("recipe build is not cancellable")
+            node_id = hinted.targets[0]
+        now = self._clock()
+        with self._sessions.begin() as session:
+            node = session.get(AgentNode, node_id, with_for_update=True)
+            job = session.get(Job, job_id, with_for_update=True)
+            if node is None or job is None or job.targets != [node_id]:
+                raise RecipeOperationConflict("recipe build authority changed")
+            if job.state == "cancelled":
+                return False
+            if job.state not in {"queued", "running", "waiting-for-operator"}:
+                raise RecipeOperationConflict("recipe build is not cancellable")
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == job.id)
+                    .with_for_update(of=AgentOperation)
+                )
+            )
+            if len(children) != 1 or children[0].node_id != node_id:
+                raise RecipeOperationConflict(
+                    "recipe build operation authority changed"
+                )
+            child = children[0]
+            build = session.get(
+                RecipeBuild,
+                _required_string(job.payload, "owner_id"),
+                with_for_update=True,
+            )
+            if build is None or build.builder_node_id != node_id:
+                raise RecipeOperationConflict("recipe build authority changed")
+            previous = _validated_result(job.kind, job.result) or {}
+            if previous.get("cancel_requested") is not True:
+                job.result = _validated_result(
+                    job.kind,
+                    {
+                        "cancel_requested": True,
+                        "cancel_request_id": request_id,
+                        "cancel_actor": actor,
+                        "reason": reason,
+                    },
+                )
+                job.status_reason = reason
+                job.updated_at = now
+            build.plan = {**build.plan, "cancelled": True}
+            build.state = "failed"
+            build.error = reason
+            build.updated_at = now
+            cancellation = RecipeOperationCancellationResult.model_validate_json(
+                canonical_message(job.result)
+            )
+            if child.current_attempt == 0:
+                child.state = "cancelled"
+                child.updated_at = now
+                job.state = "cancelled"
+                job.result = cancellation.model_copy(
+                    update={"cancelled": True}
+                ).model_dump(mode="json", exclude_none=True)
+                self._release_cancelled_build(session, build.id, now)
+                return True
+            cleanup_key = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:build-cleanup:{child.id}")
+            )
+            if session.scalar(select(Job.id).where(Job.request_id == cleanup_key)):
+                return False
+            if "recipe.build.cleanup.v1" not in (node.capabilities or []):
+                return False
+            payload = RecipeBuildCleanupRequest(
+                schema_version=1, build_id=build.id, operation_id=child.id
+            )
+            self._queue_in_session(
+                session,
+                kind="recipe.build.cleanup.v1",
+                owner_kind="recipe-build",
+                owner_id=build.id,
+                plan_digest=build.build_input_sha256,
+                actor=actor,
+                request_id=cleanup_key,
+                node_payloads=((node_id, payload.model_dump(mode="json")),),
+                authority_digest=build.build_input_sha256,
+                now=now,
+                job_context={
+                    "build_cancellation": cancellation.model_dump(
+                        mode="json", exclude_none=True
+                    )
+                },
+            )
+        self._agent_jobs.notify_available()
+        return True
+
+    def _release_cancelled_build(
+        self, session: Session, build_id: str, now: datetime
+    ) -> None:
+        remaining = session.scalar(
+            select(Job.id)
+            .where(
+                Job.kind == "recipe.build.v1",
+                Job.payload["owner_id"].as_string() == build_id,
+                Job.state.in_(("queued", "running", "waiting-for-operator")),
+            )
+            .limit(1)
+        )
+        if remaining is None:
+            self._release(session, "recipe-build", build_id, now)
 
     def _stop_logical_job_run(
         self,

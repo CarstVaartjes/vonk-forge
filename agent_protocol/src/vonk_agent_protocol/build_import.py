@@ -18,6 +18,20 @@ UuidId = Annotated[
     ),
 ]
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
+
+
+class RecipeBuildCleanupRequest(WireModel):
+    """Stop only the transient service belonging to one retained build attempt."""
+
+    schema_version: Literal[1]
+    build_id: UuidId
+    operation_id: UuidId
+
+
+class RecipeBuildCleanupEvidence(RecipeBuildCleanupRequest):
+    stopped: Literal[True]
+
+
 BuildArgumentName = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9._-]{0,63}$"),
