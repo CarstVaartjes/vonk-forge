@@ -36,6 +36,7 @@ pub const CLAIM_CAPABILITIES: &[&str] = &[
     "agent.upgrade.v1",
     "artifact.distribution.v1",
     "recipe.build.v1",
+    "recipe.build.cleanup.v1",
     "recipe.image.import.v1",
     "recipe.job.run.v1",
     "recipe.install",

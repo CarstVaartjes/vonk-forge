@@ -40,6 +40,7 @@ class RecipeOperationWorker:
         recoveries: _RecoveryCoordinator | None = None,
         fleet_profiles: _FleetProfileCoordinator | None = None,
         run_switches: _RunSwitchCoordinator | None = None,
+        build_cleanup: Callable[[], bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
@@ -47,9 +48,12 @@ class RecipeOperationWorker:
         self._recoveries = recoveries
         self._fleet_profiles = fleet_profiles
         self._run_switches = run_switches
+        self._build_cleanup = build_cleanup
 
     def tick(self) -> bool:
         progressed = False
+        if self._build_cleanup is not None:
+            progressed = self._build_cleanup()
         # Parent operations depend on lifecycle observations and published routes.
         # Give each coordinator a turn before servicing those dependencies.
         for coordinator in (self._fleet_profiles, self._run_switches, self._recoveries):

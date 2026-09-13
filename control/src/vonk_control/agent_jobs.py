@@ -64,6 +64,7 @@ AgentResultState = Literal[
 _RECIPE_CAPABILITIES = frozenset(
     {
         AgentOperation.RECIPE_BUILD.value,
+        AgentOperation.RECIPE_BUILD_CLEANUP.value,
         AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
@@ -77,6 +78,7 @@ _MUTATING_OPERATIONS = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
         AgentOperation.RECIPE_BUILD.value,
+        AgentOperation.RECIPE_BUILD_CLEANUP.value,
         AgentOperation.RECIPE_IMAGE_IMPORT.value,
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
@@ -1540,6 +1542,17 @@ class AgentJobService:
         )
         if job is None:
             raise KeyError(parent_job_id)
+        if (
+            job.kind == "recipe.build.v1"
+            and isinstance(job.result, Mapping)
+            and job.result.get("cancel_requested") is True
+            and job.result.get("cancelled") is not True
+        ):
+            # A stopped build needs a separate cleanup receipt before its
+            # reservation can be released, even if completion raced removal.
+            job.state = "waiting-for-operator"
+            job.updated_at = self._clock()
+            return
         operations = list(
             session.scalars(
                 select(StoredOperation)

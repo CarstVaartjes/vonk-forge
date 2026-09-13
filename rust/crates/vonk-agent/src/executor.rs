@@ -923,6 +923,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     body: serde_json::to_value(result).expect("typed preflight serializes"),
                 }
             }
+            RecipeOperationRequest::BuildCleanup(request) => {
+                match crate::recipe_builder::cleanup_build(self.runtime.runner, &request) {
+                    Ok(evidence) => ExecutionResult {
+                        state: "succeeded",
+                        body: serde_json::to_value(evidence).expect("typed cleanup evidence"),
+                    },
+                    Err(_) => failed("recipe build cleanup could not confirm the service stopped"),
+                }
+            }
             RecipeOperationRequest::Build(request) => {
                 self.report_phase(claim, "downloading").await;
                 let archive = match self

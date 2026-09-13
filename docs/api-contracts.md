@@ -169,6 +169,16 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
+Removing a recipe cache requests cancellation of any source build. A build
+that never started releases its reservation immediately. A claimed build keeps
+its reservation until the Controller receives a typed `recipe.build.cleanup.v1`
+receipt for that exact build and operation. Cleanup stops only its transient
+user service and verifies that it is inactive or absent; failed inspection or
+stop commands remain failures. The worker resumes cleanup after a restart,
+including builds already marked removed. Late build completion cannot publish
+the removed image or bypass cleanup. Model caches and unrelated builds remain
+intact.
+
 The work-claim request and runtime identity are defined in
 `agent_protocol/src/vonk_agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
 wait time, and the enrolled agent's observation key are required. The Rust

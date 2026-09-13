@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from vonk_agent_protocol import (
     AgentFailureResult,
     AgentInstallResult,
+    RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
     RecipeImageImportEvidence,
     RecipeJobRunResult,
@@ -52,6 +53,7 @@ class LifecycleCodeFailureResult(LifecycleModel):
 LifecycleNodeResult = Annotated[
     AgentInstallResult
     | RecipeBuildEvidence
+    | RecipeBuildCleanupEvidence
     | RecipeImageImportEvidence
     | RecipeStartSingleEvidence
     | RecipeStartRankLaunchEvidence
@@ -189,6 +191,8 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         return
     if kind in {"recipe.build.v1"}:
         evidence_models = (RecipeBuildEvidence,)
+    elif kind == "recipe.build.cleanup.v1":
+        evidence_models = (RecipeBuildCleanupEvidence,)
     elif kind in {"recipe.image.import.v1", "recipe.image.distribute"}:
         evidence_models = (RecipeImageImportEvidence,)
     elif kind == "recipe.install":

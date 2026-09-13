@@ -136,6 +136,7 @@ pub enum AgentClaimPayload {
     AgentUpgradePayload(AgentUpgradePayload),
     ArtifactDistributionPayload(ArtifactDistributionPayload),
     RecipeBuildRequest(RecipeBuildRequest),
+    RecipeBuildCleanupRequest(RecipeBuildCleanupRequest),
     RecipeImageImportRequest(RecipeImageImportRequest),
     RecipeJobRunRequest(RecipeJobRunRequest),
     RecipeInstallPayload(RecipeInstallPayload),
@@ -161,6 +162,11 @@ impl ::std::convert::From<ArtifactDistributionPayload> for AgentClaimPayload {
 impl ::std::convert::From<RecipeBuildRequest> for AgentClaimPayload {
     fn from(value: RecipeBuildRequest) -> Self {
         Self::RecipeBuildRequest(value)
+    }
+}
+impl ::std::convert::From<RecipeBuildCleanupRequest> for AgentClaimPayload {
+    fn from(value: RecipeBuildCleanupRequest) -> Self {
+        Self::RecipeBuildCleanupRequest(value)
     }
 }
 impl ::std::convert::From<RecipeImageImportRequest> for AgentClaimPayload {
@@ -257,6 +263,8 @@ pub enum AgentOperation {
     ArtifactDistributionV1,
     #[serde(rename = "recipe.build.v1")]
     RecipeBuildV1,
+    #[serde(rename = "recipe.build.cleanup.v1")]
+    RecipeBuildCleanupV1,
     #[serde(rename = "recipe.image.import.v1")]
     RecipeImageImportV1,
     #[serde(rename = "recipe.install")]
@@ -277,6 +285,7 @@ impl ::std::fmt::Display for AgentOperation {
             Self::AgentUpgradeV1 => f.write_str("agent.upgrade.v1"),
             Self::ArtifactDistributionV1 => f.write_str("artifact.distribution.v1"),
             Self::RecipeBuildV1 => f.write_str("recipe.build.v1"),
+            Self::RecipeBuildCleanupV1 => f.write_str("recipe.build.cleanup.v1"),
             Self::RecipeImageImportV1 => f.write_str("recipe.image.import.v1"),
             Self::RecipeInstall => f.write_str("recipe.install"),
             Self::RecipeStart => f.write_str("recipe.start"),
@@ -294,6 +303,7 @@ impl ::std::str::FromStr for AgentOperation {
             "agent.upgrade.v1" => Ok(Self::AgentUpgradeV1),
             "artifact.distribution.v1" => Ok(Self::ArtifactDistributionV1),
             "recipe.build.v1" => Ok(Self::RecipeBuildV1),
+            "recipe.build.cleanup.v1" => Ok(Self::RecipeBuildCleanupV1),
             "recipe.image.import.v1" => Ok(Self::RecipeImageImportV1),
             "recipe.install" => Ok(Self::RecipeInstall),
             "recipe.start" => Ok(Self::RecipeStart),
@@ -383,6 +393,7 @@ pub enum AgentResultResult {
     RecipeStopResult(RecipeStopResult),
     RecipeUninstallResult(RecipeUninstallResult),
     RecipeBuildEvidence(RecipeBuildEvidence),
+    RecipeBuildCleanupEvidence(RecipeBuildCleanupEvidence),
     RecipeImageImportEvidence(RecipeImageImportEvidence),
     RecipeJobRunResult(RecipeJobRunResult),
     ArtifactDistributionResult(ArtifactDistributionResult),
@@ -417,6 +428,11 @@ impl ::std::convert::From<RecipeUninstallResult> for AgentResultResult {
 impl ::std::convert::From<RecipeBuildEvidence> for AgentResultResult {
     fn from(value: RecipeBuildEvidence) -> Self {
         Self::RecipeBuildEvidence(value)
+    }
+}
+impl ::std::convert::From<RecipeBuildCleanupEvidence> for AgentResultResult {
+    fn from(value: RecipeBuildCleanupEvidence) -> Self {
+        Self::RecipeBuildCleanupEvidence(value)
     }
 }
 impl ::std::convert::From<RecipeImageImportEvidence> for AgentResultResult {
@@ -3447,6 +3463,23 @@ pub struct RecipeBuildBaseImage {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RecipeBuildCleanupEvidence {
+    pub build_id: ::uuid::Uuid,
+    pub operation_id: ::uuid::Uuid,
+    pub schema_version: u8,
+    pub stopped: bool,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeBuildCleanupRequest {
+    pub build_id: ::uuid::Uuid,
+    pub operation_id: ::uuid::Uuid,
+    pub schema_version: u8,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct RecipeBuildEnvironmentArgument {
     pub name: ::std::string::String,
     pub value: ::serde_json::Value,
@@ -6300,6 +6333,7 @@ impl AgentOperation {
             Self::AgentUpgradeV1 => "agent.upgrade.v1",
             Self::ArtifactDistributionV1 => "artifact.distribution.v1",
             Self::RecipeBuildV1 => "recipe.build.v1",
+            Self::RecipeBuildCleanupV1 => "recipe.build.cleanup.v1",
             Self::RecipeImageImportV1 => "recipe.image.import.v1",
             Self::RecipeInstall => "recipe.install",
             Self::RecipeStart => "recipe.start",
@@ -6351,6 +6385,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             ArtifactDistributionV1,
             #[serde(rename = "recipe.build.v1")]
             RecipeBuildV1,
+            #[serde(rename = "recipe.build.cleanup.v1")]
+            RecipeBuildCleanupV1,
             #[serde(rename = "recipe.image.import.v1")]
             RecipeImageImportV1,
             #[serde(rename = "recipe.install")]
@@ -6370,6 +6406,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             Raw::AgentUpgradeV1 => Self::AgentUpgradeV1,
             Raw::ArtifactDistributionV1 => Self::ArtifactDistributionV1,
             Raw::RecipeBuildV1 => Self::RecipeBuildV1,
+            Raw::RecipeBuildCleanupV1 => Self::RecipeBuildCleanupV1,
             Raw::RecipeImageImportV1 => Self::RecipeImageImportV1,
             Raw::RecipeInstall => Self::RecipeInstall,
             Raw::RecipeStart => Self::RecipeStart,
@@ -9779,6 +9816,50 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildBaseImage {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupEvidence {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeBuildCleanupEvidence", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub build_id: ::uuid::Uuid,
+            pub operation_id: ::uuid::Uuid,
+            pub schema_version: u8,
+            pub stopped: bool,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            build_id: raw.build_id,
+            operation_id: raw.operation_id,
+            schema_version: raw.schema_version,
+            stopped: raw.stopped,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeBuildCleanupRequest", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub build_id: ::uuid::Uuid,
+            pub operation_id: ::uuid::Uuid,
+            pub schema_version: u8,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            build_id: raw.build_id,
+            operation_id: raw.operation_id,
+            schema_version: raw.schema_version,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -12700,6 +12781,15 @@ impl From<&InstallerPackageArtifact> for InstallerReleaseObject {
             path: value.path.clone(),
             sha256: value.sha256.clone(),
             size: value.size,
+        }
+    }
+}
+impl From<&RecipeBuildCleanupEvidence> for RecipeBuildCleanupRequest {
+    fn from(value: &RecipeBuildCleanupEvidence) -> Self {
+        Self {
+            build_id: value.build_id,
+            operation_id: value.operation_id,
+            schema_version: value.schema_version,
         }
     }
 }

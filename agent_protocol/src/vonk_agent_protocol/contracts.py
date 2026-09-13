@@ -119,6 +119,7 @@ class AgentOperation(StrEnum):
     AGENT_UPGRADE = "agent.upgrade.v1"
     ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     RECIPE_BUILD = "recipe.build.v1"
+    RECIPE_BUILD_CLEANUP = "recipe.build.cleanup.v1"
     RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"
     RECIPE_START = "recipe.start"
@@ -844,6 +845,8 @@ def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 from .build_import import (
+    RecipeBuildCleanupEvidence,
+    RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
     RecipeImageImportEvidence,
@@ -866,6 +869,7 @@ AgentPayload = (
     AgentUpgradePayload
     | ArtifactDistributionPayload
     | RecipeBuildRequest
+    | RecipeBuildCleanupRequest
     | RecipeImageImportRequest
     | RecipeJobRunRequest
     | RecipeInstallPayload
@@ -881,6 +885,7 @@ AgentResultPayload = (
     | RecipeStopResult
     | RecipeUninstallResult
     | RecipeBuildEvidence
+    | RecipeBuildCleanupEvidence
     | RecipeImageImportEvidence
     | RecipeJobRunResult
     | ArtifactDistributionResult
@@ -892,6 +897,7 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.AGENT_UPGRADE: AgentUpgradePayload,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
     AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
+    AgentOperation.RECIPE_BUILD_CLEANUP: RecipeBuildCleanupRequest,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportRequest,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunRequest,
     AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
@@ -926,6 +932,7 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_STOP: RecipeStopResult,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
+    AgentOperation.RECIPE_BUILD_CLEANUP: RecipeBuildCleanupEvidence,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
 }
