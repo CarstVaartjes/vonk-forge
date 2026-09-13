@@ -334,6 +334,11 @@ impl ProcessRunner for Runner {
                 }
             )
             .into_bytes()
+        } else if arguments
+            .iter()
+            .any(|value| value.contains(".NetworkSettings.Networks"))
+        {
+            b"10.89.0.2\n".to_vec()
         } else if arguments.iter().any(|value| value == "inspect") {
             b"linux\tarm64\tv1\t10001:10001\n".to_vec()
         } else {
@@ -2089,7 +2094,7 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
         build
             .1
             .iter()
-            .any(|value| value.starts_with("HTTP_PROXY=http://vonk-build-proxy-"))
+            .any(|value| value == "HTTP_PROXY=http://10.89.0.2:18080")
     );
     assert!(
         calls

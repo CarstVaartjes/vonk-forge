@@ -179,7 +179,13 @@ additional host privilege, arbitrary devices, privileged containers,
 additional capabilities, and socket mounts.
 
 Public builds use a per-build hostname-aware egress boundary. The build joins
-only an internal rootless Podman network; a minimal dual-homed proxy sidecar is
+only an internal rootless Podman network. On Podman 4.9 the build enters
+Podman's existing rootless network namespace with `podman unshare --rootless-netns`,
+then uses OCI isolation to attach each `RUN` container to
+that internal network. It remains an unprivileged host process under the
+same bounded user service. Both private bridges disable container-name DNS;
+the build uses the proxy's inspected internal IP, and the proxy uses ordinary
+outbound DNS to resolve approved public hosts. A minimal dual-homed proxy sidecar is
 the sole member that also joins a fresh outbound network. The proxy accepts
 HTTP GET/HEAD and CONNECT only for each exact declared hostname on ports 80 or
 443, resolves the name for every connection, rejects the connection if any DNS

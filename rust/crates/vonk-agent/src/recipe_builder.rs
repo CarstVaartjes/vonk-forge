@@ -365,11 +365,23 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         // rootless OCI runtime from mounting the build container's /proc. The
         // user manager starts a service from its clean mount namespace while
         // cgroupfs children still inherit this resource envelope.
-        let mut podman_arguments =
-            podman_storage_arguments_with_cgroup_manager(&storage, runroot.path(), "cgroupfs");
+        let proxy = egress
+            .as_ref()
+            .map(|boundary| {
+                boundary
+                    .address(&boundary.internal_network, deadline, cancelled)
+                    .map(|address| format!("http://{address}:18080"))
+            })
+            .transpose()?;
+        let mut podman_arguments = podman_build_arguments(
+            &storage,
+            runroot.path(),
+            egress
+                .as_ref()
+                .zip(proxy.as_deref())
+                .map(|(boundary, proxy)| (boundary.internal_network.as_str(), proxy)),
+        );
         podman_arguments.extend([
-            "--runtime=/usr/bin/crun".to_owned(),
-            "build".to_owned(),
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
             "--platform".to_owned(),
@@ -381,12 +393,6 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
             format!("--ulimit=nproc={0}:{0}", request.limits.processes),
-            format!(
-                "--network={}",
-                egress
-                    .as_ref()
-                    .map_or("none", |value| value.internal_network.as_str())
-            ),
             format!("--format={}", request.options.format),
             format!("--identity-label={}", request.options.identity_label),
             format!("--jobs={}", request.options.jobs),
@@ -453,17 +459,6 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         for name in &request.options.unset_labels {
             podman_arguments.push("--unsetlabel".to_owned());
             podman_arguments.push(name.clone());
-        }
-        if let Some(egress) = &egress {
-            let proxy = format!("http://{}:18080", egress.proxy_name);
-            for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-                podman_arguments.push("--build-arg".to_owned());
-                podman_arguments.push(format!("{name}={proxy}"));
-            }
-            for name in ["NO_PROXY", "no_proxy"] {
-                podman_arguments.push("--build-arg".to_owned());
-                podman_arguments.push(format!("{name}="));
-            }
         }
         for argument in &request.arguments {
             podman_arguments.push("--build-arg".to_owned());
@@ -948,16 +943,22 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         if !imported.success {
             return Err(network_boundary_error("egress-image-import", &imported));
         }
+        // Neither network needs container-name discovery. Keeping Aardvark
+        // out of these private bridges also avoids competing DNS lifecycles
+        // between rootless Podman and Buildah's OCI network setup. The proxy
+        // resolves public hosts through the ordinary outbound nameservers.
         for arguments in [
             vec![
                 "network".to_owned(),
                 "create".to_owned(),
                 "--internal".to_owned(),
+                "--disable-dns".to_owned(),
                 result.internal_network.clone(),
             ],
             vec![
                 "network".to_owned(),
                 "create".to_owned(),
+                "--disable-dns".to_owned(),
                 result.outbound_network.clone(),
             ],
         ] {
@@ -1044,6 +1045,31 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             std::thread::sleep(Duration::from_millis(100));
         }
         Ok(result)
+    }
+
+    fn address(
+        &self,
+        network: &str,
+        deadline: Instant,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<std::net::Ipv4Addr, RecipeBuildError> {
+        let output = self.run_cancellable(
+            &[
+                "inspect".to_owned(),
+                "--format".to_owned(),
+                format!("{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}"),
+                self.proxy_name.clone(),
+            ],
+            phase_time(deadline, Duration::from_secs(10))?,
+            cancelled,
+        )?;
+        if !output.success {
+            return Err(network_boundary_error("egress-address", &output));
+        }
+        std::str::from_utf8(&output.stdout)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .ok_or(RecipeBuildError::NetworkPolicy)
     }
 
     fn readiness_error(&self, mut probe: crate::process::ProcessOutput) -> RecipeBuildError {
@@ -1265,6 +1291,43 @@ fn write_proxy_rootfs(binary: &Path, destination: &Path) -> Result<(), RecipeBui
     Ok(())
 }
 
+fn podman_build_arguments(
+    storage: &Path,
+    runroot: &Path,
+    network: Option<(&str, &str)>,
+) -> Vec<String> {
+    let mut arguments = podman_storage_arguments_with_cgroup_manager(storage, runroot, "cgroupfs");
+    if network.is_some() {
+        // Buildah's default rootless isolation cannot attach named networks.
+        // Enter Podman's existing unprivileged user/network namespace first,
+        // then let OCI create the build's separate internal-only namespace.
+        // Both Podman processes share this operation's storage and cgroup.
+        arguments.extend([
+            "unshare".to_owned(),
+            "--rootless-netns".to_owned(),
+            "/usr/bin/podman".to_owned(),
+        ]);
+        arguments.extend(podman_storage_arguments_with_cgroup_manager(
+            storage, runroot, "cgroupfs",
+        ));
+    }
+    arguments.extend([
+        "--runtime=/usr/bin/crun".to_owned(),
+        "build".to_owned(),
+        format!("--network={}", network.map_or("none", |(name, _)| name)),
+    ]);
+    if let Some((_, proxy)) = network {
+        arguments.push("--isolation=oci".to_owned());
+        for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            arguments.extend(["--build-arg".to_owned(), format!("{name}={proxy}")]);
+        }
+        for name in ["NO_PROXY", "no_proxy"] {
+            arguments.extend(["--build-arg".to_owned(), format!("{name}=")]);
+        }
+    }
+    arguments
+}
+
 fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
     podman_storage_arguments_with_cgroup_manager(storage, runroot, "systemd")
 }
@@ -1434,6 +1497,94 @@ mod tests {
             )
             .unwrap();
         assert!(active.success, "the proxy must remain owned by its service");
+        // Exercise actual Dockerfile RUNs through the production command
+        // builder, not just a healthy proxy in its own network namespace.
+        let probe = "/usr/lib/vonk-forge/build-network-probe";
+        let outbound = format!(
+            "{}:18080",
+            boundary
+                .address(
+                    &boundary.outbound_network,
+                    Instant::now() + Duration::from_secs(10),
+                    &|| false
+                )
+                .unwrap()
+        );
+        let reachable = boundary
+            .run(
+                &[
+                    "unshare".to_owned(),
+                    "--rootless-netns".to_owned(),
+                    probe.to_owned(),
+                    "--reachable".to_owned(),
+                    outbound.clone(),
+                ],
+                Duration::from_secs(10),
+            )
+            .unwrap();
+        assert!(
+            reachable.success,
+            "the outbound canary must be reachable outside the build: {reachable:?}"
+        );
+        let context = staging.path().join("context");
+        fs::create_dir(&context).unwrap();
+        fs::copy(probe, context.join("probe")).unwrap();
+        fs::write(
+            context.join("Dockerfile"),
+            "FROM scratch\nCOPY probe /probe\nRUN [\"/probe\"]\nRUN [\"/probe\"]\n",
+        )
+        .unwrap();
+        let proxy = format!(
+            "http://{}:18080",
+            boundary
+                .address(
+                    &boundary.internal_network,
+                    Instant::now() + Duration::from_secs(10),
+                    &|| false
+                )
+                .unwrap()
+        );
+        for network in [
+            Some((boundary.internal_network.as_str(), proxy.as_str())),
+            None,
+        ] {
+            let mut command = super::podman_user_service_arguments(
+                &format!("vonk-recipe-build-{}", uuid::Uuid::new_v4()),
+                runtime.path(),
+                staging.path(),
+                Duration::from_secs(30),
+                true,
+            );
+            command.push("/usr/bin/podman".to_owned());
+            command.extend(super::podman_build_arguments(
+                &storage,
+                runtime.path(),
+                network,
+            ));
+            command.extend([
+                "--no-cache".to_owned(),
+                "--pull=never".to_owned(),
+                "--cap-drop=all".to_owned(),
+                "--security-opt=no-new-privileges".to_owned(),
+                "--env".to_owned(),
+                format!("VONK_TEST_OUTBOUND={outbound}"),
+                "--env".to_owned(),
+                format!(
+                    "VONK_TEST_NETWORK={}",
+                    if network.is_some() { "public" } else { "none" }
+                ),
+                context.display().to_string(),
+            ]);
+            let built = runner
+                .run(Program::SystemdRun, &command, Duration::from_secs(30))
+                .unwrap();
+            assert!(
+                built.success,
+                "Dockerfile RUN failed: {}\n{}",
+                String::from_utf8_lossy(&built.stdout),
+                String::from_utf8_lossy(&built.stderr)
+            );
+        }
         let mut network_exists = boundary.arguments(Duration::from_secs(10));
         network_exists.extend([
             "network".to_owned(),
