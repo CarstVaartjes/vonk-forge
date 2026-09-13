@@ -9,7 +9,7 @@ use std::{
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
@@ -1229,7 +1229,7 @@ impl AgentHttpClient {
         }
 
         let partial = partial_path(destination);
-        let mut output = open_trusted_partial(&partial).await?;
+        let output = open_trusted_partial(&partial).await?;
         let metadata = output.metadata().await?;
         let mut offset = metadata.len();
         if offset > expected_bytes {
@@ -1249,6 +1249,11 @@ impl AgentHttpClient {
             return Ok(());
         }
 
+        // TLS/network chunks can be much smaller than an efficient disk
+        // write. Coalesce them so Tokio does not dispatch a blocking file
+        // operation for every received chunk. Keep this writer across range
+        // retries; a process restart resumes from the actual partial length.
+        let mut output = BufWriter::with_capacity(1024 * 1024, output);
         progress(offset, "copying");
         let mut last_progress = tokio::time::Instant::now();
         let mut retries = 0_u32;
@@ -1291,8 +1296,8 @@ impl AgentHttpClient {
                         return Err(ClientError::Protocol);
                     }
                     output.write_all(&chunk).await?;
-                    // Resume from bytes actually appended, including when the
-                    // connection fails halfway through this ranged response.
+                    // This writer survives network retries, so resume from
+                    // its accepted bytes even within an interrupted range.
                     offset += chunk.len() as u64;
                     if last_progress.elapsed() >= Duration::from_millis(200) {
                         progress(offset, "copying");
@@ -1316,7 +1321,8 @@ impl AgentHttpClient {
             }
         }
         progress(offset, "copying");
-        output.sync_all().await?;
+        output.flush().await?;
+        output.get_ref().sync_all().await?;
         drop(output);
         tokio::fs::rename(&partial, destination).await?;
         sync_parent(parent).await?;
