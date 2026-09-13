@@ -20,6 +20,7 @@ from vonk_control.models import (
     AgentNode,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
@@ -122,6 +123,68 @@ def _add_revision(session: Session, revision_id: str, recipe: RecipeDefinition) 
     return revision
 
 
+def _add_head(session: Session, revision: CatalogDocumentRevision) -> CatalogDocumentHead:
+    session.add(CatalogDocument(
+        id=revision.document_id, kind="recipe", publisher=revision.publisher,
+        slug=revision.slug, title="Recipe", created_by="test",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+    ))
+    head = CatalogDocumentHead(
+        kind="recipe", publisher=revision.publisher, slug=revision.slug,
+        active_revision_id=revision.id, generation=1,
+    )
+    session.add(head)
+    return head
+
+
+def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(tmp_path):
+    recipe = _recipe("recipe-image.json")
+    old_recipe = recipe.model_copy(update={
+        "metadata": recipe.metadata.model_copy(update={"description": "Previous accepted recipe"})
+    })
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    document_id = "00000000-0000-4000-8000-000000000001"
+    old_id = "00000000-0000-4000-8000-000000000002"
+    current_id = "00000000-0000-4000-8000-000000000003"
+    with sessions.begin() as session:
+        old = _add_revision(session, old_id, old_recipe)
+        current = _add_revision(session, current_id, recipe)
+        old.document_id = current.document_id = document_id
+        current.revision_number = 2
+        _add_head(session, current)
+    service = RecipeImageAvailabilityService(
+        sessions, storage=FilesystemRuntimeImageStorage(tmp_path), transport=Transport(),
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    for selector in (recipe.identity.slug, f"{recipe.identity.publisher}/{recipe.identity.slug}", document_id):
+        started = service.start_selector(selector, actor="operator", request_id=selector)
+        assert started.recipe_revision_id == current_id
+    assert service._resolve_recipe_selector(old_id) == old_id
+    assert service._resolve_recipe_selector(content_sha256(old_recipe)) == old_id
+    other = recipe.model_copy(update={
+        "identity": recipe.identity.model_copy(update={"publisher": "another-publisher"})
+    })
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "another-recipe", other))
+    with pytest.raises(RecipeImageAvailabilityError) as ambiguous:
+        service.start_selector(recipe.identity.slug, actor="operator", request_id="ambiguous-name")
+    assert ambiguous.value.code == "recipe_image.selector_ambiguous"
+    qualified = f"{recipe.identity.publisher}/{recipe.identity.slug}"
+    assert service._resolve_recipe_selector(qualified) == current_id
+    with sessions.begin() as session:
+        head = session.scalar(select(CatalogDocumentHead).where(
+            CatalogDocumentHead.publisher == recipe.identity.publisher
+        ))
+        assert head is not None
+        head.active_revision_id = None
+    with pytest.raises(RecipeImageAvailabilityError) as missing:
+        service.start_selector(qualified, actor="operator", request_id="missing-head")
+    assert missing.value.code == "recipe_image.selector_missing"
+
+
 def test_force_download_skips_verified_cache_but_preserves_archive(tmp_path: Path) -> None:
     recipe = _recipe("recipe-image.json")
     storage = FilesystemRuntimeImageStorage(tmp_path)
@@ -142,7 +205,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(tmp_path
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
-        _add_revision(session, "revision-restore", recipe)
+        _add_head(session, _add_revision(session, "revision-restore", recipe))
     storage = FilesystemRuntimeImageStorage(tmp_path)
     transport = Transport()
     service = RecipeImageAvailabilityService(
@@ -287,7 +350,7 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(tmp_path: Pat
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
-        _add_revision(session, "revision-remove-build", recipe)
+        _add_head(session, _add_revision(session, "revision-remove-build", recipe))
 
     service = RecipeImageAvailabilityService(
         sessions,
