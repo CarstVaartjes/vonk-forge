@@ -352,6 +352,9 @@ jobs:
           rustc --edition=2024 -C target-feature=+crt-static \
             rust/crates/vonk-build-egress/src/main.rs \
             -o "$RUNNER_TEMP/vonk-build-egress"
+          rustc --edition=2024 -C target-feature=+crt-static \
+            rust/crates/vonk-agent/tests/fixtures/build_network_probe.rs \
+            -o "$RUNNER_TEMP/build-network-probe"
           cargo test --locked -p vonk-agent --lib --no-run --message-format=json \
             > "$RUNNER_TEMP/egress-test-build.jsonl"
           test_binary=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "vonk_agent" and .profile.test) | .executable // empty' \
@@ -366,6 +369,8 @@ jobs:
             | sudo tee /var/lib/vonk-forge-agent/.config/containers/containers.conf >/dev/null
           sudo install -D -m 0755 "$RUNNER_TEMP/vonk-build-egress" \
             /usr/lib/vonk-forge/vonk-build-egress
+          sudo install -D -m 0755 "$RUNNER_TEMP/build-network-probe" \
+            /usr/lib/vonk-forge/build-network-probe
           sudo install -D -m 0755 "$test_binary" /usr/lib/vonk-forge/egress-tests
           sudo loginctl enable-linger vonk-agent
           sudo systemctl start "user@$(id -u vonk-agent).service"
