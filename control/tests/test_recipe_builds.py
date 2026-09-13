@@ -10,6 +10,7 @@ from importlib import resources
 from pathlib import Path
 
 import pytest
+import vonk_control.availability_production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,6 +24,7 @@ from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
@@ -730,8 +732,9 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
         assert sum(item.state == "released" for item in reservations) == 2
 
 
+@pytest.mark.parametrize("force", [False, True])
 def test_fresh_build_request_retries_matching_failed_build_idempotently(
-    tmp_path: Path,
+    tmp_path: Path, force: bool,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     builds = RecipeBuildService(sessions, bundles=bundles)
@@ -768,12 +771,14 @@ def test_fresh_build_request_retries_matching_failed_build_idempotently(
         build_input_sha256=plan.build_input_sha256,
         actor="admin",
         request_id="fresh-acceptance-build",
+        force=force,
     )
     replay = operations.build(
         plan,
         build_input_sha256=plan.build_input_sha256,
         actor="admin",
         request_id="fresh-acceptance-build",
+        force=force,
     )
 
     assert retried == replay
@@ -874,6 +879,148 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
             )
             is None
         )
+
+
+@pytest.mark.parametrize("completed_before_restart", [False, True])
+def test_forced_image_build_resumes_after_worker_restart(
+    tmp_path: Path,
+    completed_before_restart: bool,
+    monkeypatch,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    runtime = {"recipe_revision_id": revision.id, "builder_node_id": node_id}
+
+    def add_parent(parent_id: str):
+        with sessions.begin() as session:
+            session.add(
+                Job(
+                    id=parent_id,
+                    request_id=parent_id,
+                    kind="recipe.image.availability.v2",
+                    state="running",
+                    actor="operator",
+                    authority_revision=revision.id,
+                    targets=[revision.id],
+                    payload_digest="a" * 64,
+                    payload={"runtime": runtime},
+                    current_attempt=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    parent_id = "00000000-0000-4000-8000-000000000731"
+    add_parent(parent_id)
+
+    def production():
+        return build_recipe_image_availability(
+            sessions,
+            artifact_root=tmp_path / "artifacts",
+            managed_catalog_sync=None,
+            recipe_builds=builds,
+            recipe_operations=operations,
+            clock=lambda: now,
+        )
+
+    def complete_build(_progress=None):
+        with sessions() as session:
+            job = session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.build.v1",
+                    Job.state == "running",
+                )
+            )
+            assert job is not None
+            job_id = job.id
+        operations.record_node_result(
+            job_id,
+            node_id,
+            succeeded=True,
+            evidence={
+                "build_input_sha256": plan.build_input_sha256,
+                "image_bytes": 500,
+                "image_digest": "sha256:" + "b" * 64,
+                "oci_layout_sha256": "c" * 64,
+                "policy": {"dockerfile": "Dockerfile", "findings": [], "passed": True},
+            },
+        )
+
+    # An explicit rebuild must not reuse this older successful receipt when
+    # its own running child is replayed after the worker stops.
+    operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="operator",
+        request_id="original-cached-build",
+    )
+    complete_build()
+
+    class WorkerStopped(Exception):
+        pass
+
+    def stop_worker(_seconds):
+        raise WorkerStopped
+
+    first = production()
+    assert first.service._builder is not None
+    recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
+    monkeypatch.setattr(availability_production_module.time, "sleep", stop_worker)
+    with pytest.raises(WorkerStopped):
+        first.service._builder(
+            recipe,
+            runtime,
+            operation_id=parent_id,
+            build_input_sha256=plan.build_input_sha256,
+            force=True,
+            progress=lambda _: None,
+        )
+    first.close()
+    if completed_before_restart:
+        complete_build()
+
+    restarted = production()
+    assert restarted.service._builder is not None
+    monkeypatch.setattr(availability_production_module.time, "sleep", complete_build)
+    result = restarted.service._builder(
+        recipe,
+        runtime,
+        operation_id=parent_id,
+        build_input_sha256=plan.build_input_sha256,
+        force=True,
+        progress=lambda _: None,
+    )
+    assert result["state"] == "succeeded"
+    with sessions() as session:
+        jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
+        assert len(jobs) == 2
+        assert all(job.state == "succeeded" for job in jobs)
+
+    # A separate explicit download still requests a fresh build.
+    new_parent_id = "00000000-0000-4000-8000-000000000732"
+    add_parent(new_parent_id)
+    restarted.service._builder(
+        recipe,
+        runtime,
+        operation_id=new_parent_id,
+        build_input_sha256=plan.build_input_sha256,
+        force=True,
+        progress=lambda _: None,
+    )
+    with sessions() as session:
+        jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
+        assert len(jobs) == 3
+        assert all(job.state == "succeeded" for job in jobs)
+    restarted.close()
 
 
 def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(

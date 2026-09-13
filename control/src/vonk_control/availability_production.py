@@ -555,20 +555,25 @@ def build_recipe_image_availability(
                 "recipe_image.identity_conflict",
                 "reconstructed build plan does not match the operation identity",
             )
+        build_request_identity = f"vonk:recipe-image-build:{build_input_sha256}"
+        if force:
+            with sessions() as session:
+                parent = session.get(Job, operation_id)
+                if parent is None or parent.kind != "recipe.image.availability.v2":
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_unavailable",
+                        "availability operation disappeared before build dispatch",
+                    )
+                # A reclaimed running attempt must rejoin its child, even if
+                # the Spark finished while the Controller was restarting.
+                build_request_identity = (
+                    f"vonk:recipe-image-build:{operation_id}:{parent.current_attempt}"
+                )
         operation = recipe_operations.build(
             plan,
             build_input_sha256=build_input_sha256,
             actor="recipe-image-availability",
-            request_id=(
-                str(uuid.uuid4())
-                if force
-                else str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"vonk:recipe-image-build:{build_input_sha256}",
-                    )
-                )
-            ),
+            request_id=str(uuid.uuid5(uuid.NAMESPACE_URL, build_request_identity)),
             force=force,
         )
         while operation.state not in {"succeeded", "failed", "expired"}:

@@ -112,6 +112,12 @@ Recipe names (`publisher/slug` or an unambiguous slug) and logical recipe IDs
 select the current accepted revision. Use an exact revision ID or content digest
 to address a retained revision explicitly.
 
+Use the same `--request-key UUID` when repeating a download after a lost
+response. It returns the accepted operation, including a requested rebuild.
+Controller worker recovery also rejoins that attempt's existing build instead
+of starting it again. A new explicit download can still refresh a completed
+image.
+
 Recipe library defaults to exact model variants that are cached, downloading,
 or running locally. `--all-models` broadens that view. Recipe removal keeps
 the model cache by default; choose `--keep-model` explicitly to preserve it or

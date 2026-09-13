@@ -323,13 +323,10 @@ class RecipeOperationService:
         request_id: str,
         force: bool = False,
     ) -> RecipeOperationView:
-        existing = (
-            None
-            if force
-            else self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
-        )
+        # Force bypasses cached images, not the identity of an accepted request.
+        existing = self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
         if existing is not None:
-            if existing.state != "succeeded":
+            if existing.state != "succeeded" and not force:
                 with self._sessions() as session:
                     succeeded = self._successful_build_job_in_session(
                         session, existing.owner_id, build_input_sha256
