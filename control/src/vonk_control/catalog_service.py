@@ -247,6 +247,9 @@ class CatalogService:
                 self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
         return len(models)
 
+    def refresh_build_policy(self) -> None:
+        CatalogEntityService(self._sessions, clock=self._clock).refresh_build_policy()
+
     def import_recipe_library(
         self,
         actor: str,

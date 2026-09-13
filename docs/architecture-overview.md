@@ -149,7 +149,10 @@ archive output budget follows the largest declared per-node image budget;
 diagnostic stdout/stderr remains independently capped. Actual exported sizes
 and digests come from the builder receipt.
 
-The Controller compiles build policy when it imports a source Recipe. Authors
+The Controller compiles build policy when it imports a source Recipe and
+refreshes that derived projection during catalog synchronization, including
+an unchanged catalog snapshot. Recipe documents and dispatched requests stay
+immutable; changed executable options produce a different build identity. Authors
 do not repeat Podman defaults or security settings in recipe documents. The
 rootless build receives up to eight CPU cores, 4,096 tasks, 24 hours, and a
 memory budget equal to the declared image budget, bounded between 2 and 64 GiB.
@@ -163,6 +166,10 @@ and SETUID inside the existing rootless user namespace, so package installation
 and file ownership operations work. Builds receive no GPU, host mounts, socket,
 or privileged mode. The complete Podman option set is compiled centrally;
 options and capabilities participate in the immutable image build identity.
+Builds use an operation-private Podman store with instruction caching disabled,
+so intermediate images are disabled too: they cannot be reused by another
+build and copying their filesystem differences adds unnecessary work. The
+verified final runtime image remains reusable through the NAS image cache.
 
 Rootless Podman ends at the build/export boundary. Accepted workloads run on
 DGX Spark's supported Docker Engine and NVIDIA Container Toolkit. The

@@ -203,7 +203,8 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     builder = RecipeBuildService(sessions, bundles=bundles)
     resolution = builder.resolve(revision_id)
     plan = builder.plan(revision_id, node_id, now=now, resolution=resolution)
-    RecipeBuildRequest.model_validate(plan.agent_payload)
+    request = RecipeBuildRequest.model_validate(plan.agent_payload)
+    assert request.options.layers is False
     payload = plan.agent_payload
     limits = require_mapping(payload["limits"], "recipe build plan limits")
     assert payload["dockerfile"] == "Dockerfile"
