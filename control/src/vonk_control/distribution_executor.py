@@ -1154,7 +1154,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
     def _prepare_runtime_image(
         self, plan: RunSwitchPlan
     ) -> Mapping[str, object] | None:
-        """Prepare one Controller image before target distribution.
+        """Prepare one Controller image and authorize every target execution.
 
         This callback is deliberately supplied only to the durable worker
         executor.  API preview, admission, and agent spec reads use the
@@ -1171,7 +1171,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         )
         from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
 
-        node = min(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id))
         with self._sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -1204,40 +1203,47 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 if plan.mapping is not None
                 else {}
             )
-            runtime_spec = compile_runtime_spec(
-                revision.document,
-                resolved_entities=entities,
-                parameters=parameters,
-                role=node.role,
-                rank=node.rank,
-                package_handle=package_handle,
-            )
             resolved_models = sequence(entities["models"])
             if resolved_models is None:
-                # The artifact binder reports the same canonical error for a
-                # non-array model projection.
                 raise ExecutionPlanCompilationError(
                     "canonical model projection is invalid"
                 )
-            runtime_spec = _bind_runtime_artifacts(
-                runtime_spec,
-                resolved_models,
-            )
-        receipt = self._runtime_image_preparer(
-            revision.document,
-            runtime_spec,
-            build,
-        )
-        to_mapping = getattr(receipt, "to_mapping", None)
-        raw = to_mapping() if callable(to_mapping) else receipt
-        if not isinstance(raw, Mapping):
-            raise TypeError("runtime image preparation returned invalid evidence")
-        identity = runtime_spec.get("identity")
-        effective_execution_key = (
-            identity.get("execution_sha256")
-            if isinstance(identity, Mapping)
-            else None
-        )
+            runtime_specs = {}
+            for node in sorted(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id)):
+                runtime_spec = compile_runtime_spec(
+                    revision.document,
+                    resolved_entities=entities,
+                    parameters=parameters,
+                    role=node.role,
+                    rank=node.rank,
+                    package_handle=package_handle,
+                )
+                runtime_spec = _bind_runtime_artifacts(runtime_spec, resolved_models)
+                identity = runtime_spec.get("identity")
+                execution_key = (
+                    identity.get("execution_sha256")
+                    if isinstance(identity, Mapping)
+                    else None
+                )
+                if not isinstance(execution_key, str):
+                    raise TypeError("runtime image preparation execution identity is unavailable")
+                runtime_specs[execution_key] = runtime_spec
+        # Each role/rank has its own execution identity. Persist all of them
+        # before install admission compiles the group. The preparer reuses the
+        # immutable archive; close the read session before its receipt writes.
+        raw = None
+        for runtime_spec in runtime_specs.values():
+            receipt = self._runtime_image_preparer(revision.document, runtime_spec, build)
+            to_mapping = getattr(receipt, "to_mapping", None)
+            prepared = to_mapping() if callable(to_mapping) else receipt
+            if not isinstance(prepared, Mapping):
+                raise TypeError("runtime image preparation returned invalid evidence")
+            if raw is not None and prepared != raw:
+                raise RuntimeError("runtime image preparation returned different images for the group")
+            raw = prepared
+        if raw is None:
+            raise RuntimeError("runtime image preparation returned no evidence")
+        effective_execution_key = next(iter(runtime_specs))
         image_digest = raw.get("image_digest")
         layout_digest = raw.get("oci_layout_sha256", raw.get("oci_archive_sha256"))
         image_bytes = raw.get("image_bytes")

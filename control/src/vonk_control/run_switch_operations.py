@@ -4840,7 +4840,9 @@ def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
         progress["total_bytes"] = int(raw["total_bytes"])
     measured = raw.get("operation")
     if isinstance(measured, Mapping):
-        progress.update({key: value for key, value in measured.items() if value is not None})
+        # Unknown measured totals must clear planned totals as well as their
+        # known flag; mixing the two makes the public progress invalid.
+        progress.update(measured)
     return progress
 
 

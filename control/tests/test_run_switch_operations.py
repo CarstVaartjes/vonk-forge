@@ -2656,6 +2656,33 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     )
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_measured_operation_keeps_unknown_totals_and_failure_readable(
+    tmp_path: Path, failed: bool
+) -> None:
+    from vonk_control.operation_api import operation_detail_response
+    from vonk_control.operation_contract import OperationFailureEvidence
+
+    switch = _cold_compile_switch(tmp_path)
+    switch.drive()
+    reason = "install plan is blocked: " + "missing durable runtime image receipt; " * 10
+    if failed:
+        switch.service._fail(switch.operation.operation_id, reason)
+    operation = switch.service.get(switch.operation.operation_id)
+    detail = operation_detail_response(
+        switch.service.activity_provider().get_operation(operation.operation_id)
+    )
+    assert detail.state == ("failed" if failed else "running")
+    assert detail.progress is not None
+    assert detail.progress.total_bytes is None
+    assert detail.progress.total_bytes_known is False
+    if failed:
+        assert isinstance(detail.failure, OperationFailureEvidence)
+        assert detail.failure.detail == reason
+    else:
+        assert detail.failure is None
+
+
 @pytest.mark.parametrize(
     "invalid_result", [[], "broken", {"phase_index": "0"}, {"phase": "old-phase"}]
 )
