@@ -49,7 +49,7 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // remaining validity window of the 90-second acceptance certificate.
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
-const DISTRIBUTION_CONCURRENCY: usize = 4;
+const DISTRIBUTION_CONCURRENCY: usize = 16;
 
 #[derive(Debug, Error)]
 pub enum ClientError {

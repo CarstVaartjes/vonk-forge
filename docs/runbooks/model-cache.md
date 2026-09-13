@@ -34,6 +34,13 @@ durable publication receipts and checks managed file metadata. Each download
 request verifies the bytes of its selected file without scanning unrelated
 weights. An in-progress refresh keeps the previous verified copy available.
 
+Upstream preparation, including Hugging Face downloads, shares a bounded pool
+of eight concurrent files across active cache operations. Each file of at least
+64 MiB may use four resumable HTTP range requests when temporary disk space
+allows, for up to 32 simultaneous data requests. The
+`VONK_MODEL_CACHE_PARALLEL_DOWNLOADS` setting controls the file pool, accepts
+1 through 16, and defaults to 8. It does not set a per-connection speed limit.
+
 ## Remove and cancel
 
 ```bash
@@ -81,7 +88,7 @@ chunk. The Spark flushes the buffer and syncs the completed file before
 verification and acceptance. Network retries retain the writer; after a
 process restart, resume uses the actual partial file length on disk.
 
-Each Spark fetches up to four independent objects concurrently through the
+Each Spark fetches up to sixteen independent objects concurrently through the
 same authenticated client, starting the largest files first to avoid leaving
 a large image archive until the other transfers have finished. Every object
 keeps its own range, digest check, and
