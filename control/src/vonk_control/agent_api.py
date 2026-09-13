@@ -2429,7 +2429,10 @@ def install_agent_routes(
             remaining = length
             try:
                 while remaining:
-                    chunk = opened.stream.read(min(64 * 1024, remaining))
+                    # Each synchronous yield crosses Starlette's thread pool.
+                    # MiB blocks keep bulk model copies efficient while
+                    # bounding memory and honoring the exact selected range.
+                    chunk = opened.stream.read(min(1024 * 1024, remaining))
                     if not chunk:
                         raise RuntimeError("verified object was truncated during transfer")
                     remaining -= len(chunk)

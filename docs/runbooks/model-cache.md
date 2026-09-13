@@ -75,6 +75,12 @@ beyond the initial hour while the agent still owns its operation lease.
 Revoked or expired assignments, stale attempts, and cancellation requests do
 not renew access; a stopped heartbeat lets the last authorization expire.
 
+Bulk downloads use bounded 1 MiB serving blocks and a 1 MiB Spark disk-write
+buffer to avoid scheduling a filesystem operation for each small network
+chunk. The Spark flushes the buffer and syncs the completed file before
+verification and acceptance. Network retries retain the writer; after a
+process restart, resume uses the actual partial file length on disk.
+
 ## Credentials and evidence
 
 See [Hugging Face authentication](../model-cache-huggingface-auth.md) for gated
