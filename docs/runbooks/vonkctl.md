@@ -29,10 +29,19 @@ credential in the page. Store that file privately, then point the CLI at it:
 
 ```bash
 export VONK_CONTROL_URL=https://forge.example.test
-export VONK_CONTROL_TOKEN_FILE="$HOME/Downloads/vonkctl-token"
+install -d -m 700 "$HOME/.config/vonk-forge"
+mv "$HOME/Downloads/vonkctl-token" "$HOME/.config/vonk-forge/controller-token"
+export VONK_CONTROL_TOKEN_FILE="$HOME/.config/vonk-forge/controller-token"
 chmod 600 "$VONK_CONTROL_TOKEN_FILE"
 vonkctl model library --json
 ```
+
+For persistent configuration on macOS with zsh, put the two `export` lines in
+`~/.zshenv`. They will then be available in new interactive and non-interactive
+zsh sessions, independently of the current directory. Store only the token's
+file path in shell configuration; keep the credential in the private file above.
+Programs launched without a shell need the same environment variables in their
+own launch configuration. The CLI currently has no separate connection config file.
 
 The download requires the active browser session and its CSRF protection. The
 administrator bearer token expires after 30 days; download a new file from the

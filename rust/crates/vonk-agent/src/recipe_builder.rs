@@ -317,8 +317,6 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }
         fs::create_dir_all(&storage)?;
         fs::create_dir(&podman_image_tmp)?;
-        let podman_runtime = runroot.path().join("xdg");
-        fs::create_dir(&podman_runtime)?;
         let source = materialize_source_bundle(archive, &request.source_bundle_sha256, &context)?;
         let policy = inspect_build_source(&source.files, &request.dockerfile);
         if !policy.passed {
@@ -1196,6 +1194,9 @@ fn network_boundary_error(
 /// Rootless container commands must originate in the user manager's clean
 /// mount namespace, including the commands that create Podman's pause process.
 /// Use an operation-private runtime directory consistently for build and egress.
+/// Podman 4.9 replaces /run inside its rootless network namespace and preserves
+/// only XDG_RUNTIME_DIR. Its runroot must therefore be inside that directory,
+/// not its parent, or Netavark loses access to networks/ipam.db.
 fn podman_user_service_arguments(
     unit: &str,
     runroot: &Path,
@@ -1212,7 +1213,7 @@ fn podman_user_service_arguments(
         "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
         "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config".to_owned(),
         "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
-        format!("--setenv=XDG_RUNTIME_DIR={}", runroot.join("xdg").display()),
+        format!("--setenv=XDG_RUNTIME_DIR={}", runroot.display()),
         format!(
             "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus",
             rustix::process::geteuid().as_raw()
@@ -1407,7 +1408,6 @@ mod tests {
         let storage = staging.path().join("storage");
         fs::create_dir(&storage).unwrap();
         fs::create_dir(staging.path().join("podman-image-tmp")).unwrap();
-        fs::create_dir(runtime.path().join("xdg")).unwrap();
         let runner = SystemProcessRunner;
         let hosts = ["pypi.org".to_owned()];
         let boundary = BuildEgress::start(

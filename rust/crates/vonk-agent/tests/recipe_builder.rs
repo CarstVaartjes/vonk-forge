@@ -1151,11 +1151,15 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             .any(|value| value.starts_with("--setenv=TMPDIR=")
                 && value.ends_with("/podman-image-tmp"))
     );
+    let runroot = build
+        .1
+        .windows(2)
+        .find(|pair| pair[0] == "--runroot")
+        .unwrap();
     assert!(
         build
             .1
-            .iter()
-            .any(|value| value.starts_with("--setenv=XDG_RUNTIME_DIR=") && value.ends_with("/xdg"))
+            .contains(&format!("--setenv=XDG_RUNTIME_DIR={}", runroot[1]))
     );
     assert!(!build.1.iter().any(|value| value == "--scope"));
     assert!(!build.1.iter().any(|value| {

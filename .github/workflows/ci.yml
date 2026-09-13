@@ -322,7 +322,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            aptly crun dbus-user-session fuse-overlayfs podman slirp4netns uidmap
+            aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
       - parallel:
           - name: Test bounded aptly state compaction
             run: >-
@@ -361,6 +361,9 @@ jobs:
           sudo install -d -o vonk-agent -g vonk-agent /run/vonk-forge-agent
           sudo install -D -m 0644 packaging/config/containers-storage.conf \
             /etc/vonk-forge-agent/containers-storage.conf
+          sudo install -d -o vonk-agent -g vonk-agent /var/lib/vonk-forge-agent/.config/containers
+          printf '[network]\nnetwork_backend = "netavark"\n' \
+            | sudo tee /var/lib/vonk-forge-agent/.config/containers/containers.conf >/dev/null
           sudo install -D -m 0755 "$RUNNER_TEMP/vonk-build-egress" \
             /usr/lib/vonk-forge/vonk-build-egress
           sudo install -D -m 0755 "$test_binary" /usr/lib/vonk-forge/egress-tests
