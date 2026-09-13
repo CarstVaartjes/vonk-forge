@@ -58,6 +58,7 @@ struct HelperRejection {
     error_code: &'static str,
     exit_code: Option<i32>,
     detail: String,
+    diagnostic: Option<String>,
 }
 
 impl HelperRejection {
@@ -67,6 +68,7 @@ impl HelperRejection {
             error_code,
             exit_code: None,
             detail: detail.into(),
+            diagnostic: None,
         }
     }
 
@@ -80,6 +82,7 @@ impl HelperRejection {
             error_code,
             exit_code: None,
             detail: detail.into(),
+            diagnostic: None,
         }
     }
 
@@ -89,6 +92,10 @@ impl HelperRejection {
         error: OperationError,
     ) -> Self {
         let package_install = matches!(operation, HostOperation::InstallVonkDebOperation(_));
+        let diagnostic = match &error {
+            OperationError::RuntimeProcessExited { diagnostic } => Some(diagnostic.clone()),
+            _ => None,
+        };
         let (error_code, exit_code) = match error {
             OperationError::InvalidArtifact if package_install => {
                 ("package_verification_failed", None)
@@ -110,6 +117,7 @@ impl HelperRejection {
             OperationError::RuntimeImageInspectFailed => ("runtime_image_inspect_failed", None),
             OperationError::RuntimeImageIdentityInvalid => ("runtime_image_identity_invalid", None),
             OperationError::RuntimeImageReceiptFailed => ("runtime_image_receipt_failed", None),
+            OperationError::RuntimeProcessExited { .. } => ("runtime_process_exited", None),
             OperationError::InvalidOperation => ("operation_invalid", None),
             OperationError::UnsafePath => ("operation_unsafe_path", None),
             OperationError::InvalidArtifact => ("operation_invalid_artifact", None),
@@ -123,6 +131,7 @@ impl HelperRejection {
             error_code,
             exit_code,
             detail: error.safe_detail().to_owned(),
+            diagnostic,
         }
     }
 }
@@ -240,8 +249,13 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         return;
     };
     let response = HelperResponse {
-        diagnostic: (error.error_code == "package_install_failed")
-            .then(|| error.detail.chars().take(8192).collect()),
+        diagnostic: error
+            .diagnostic
+            .as_deref()
+            .or_else(|| {
+                (error.error_code == "package_install_failed").then_some(error.detail.as_str())
+            })
+            .map(|detail| detail.chars().take(8192).collect()),
         schema_version: 1,
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
@@ -658,6 +672,38 @@ mod tests {
                 .unwrap()
                 .contains("private diagnostic")
         );
+    }
+
+    #[test]
+    fn exited_runtime_diagnostics_survive_the_framed_helper_response() {
+        let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
+            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                type_: "execute-container-runtime-request".into(),
+                action: ContainerRuntimeAction::RunInspect,
+                job_id: uuid::Uuid::nil(),
+                operation_id: uuid::Uuid::nil(),
+                attempt: 1,
+                fence: uuid::Uuid::nil(),
+                request_sha256: "a".repeat(64),
+                observation_identity_sha256: None,
+                installation_id: None,
+            },
+        );
+        let rejection = HelperRejection::for_operation(
+            "10000000-0000-4000-8000-000000000001",
+            &operation,
+            OperationError::RuntimeProcessExited {
+                diagnostic: "startup failed\n".repeat(2000),
+            },
+        );
+        super::reject(&mut server, &rejection);
+        let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
+        let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
+        let diagnostic = response.diagnostic.unwrap();
+        assert!(diagnostic.contains("startup failed"));
+        assert_eq!(diagnostic.len(), 8192);
+        assert_eq!(rejection.detail, "runtime process exited");
     }
 
     #[test]

@@ -69,6 +69,16 @@ were regenerated from these Pydantic models. Other agent lanes retain
 ownership of pairing, health, telemetry entrypoint/systemd, and transaction
 error enums; their changes must preserve this contract before integration.
 
+For a workload that exits during launch, the host helper captures a bounded
+container log tail before cleanup only after validating the exact managed
+container identity. It reads by immutable container ID and limits collection
+to five seconds. The agent redacts this output into the existing operation
+failure diagnostics; the helper journal keeps the stable error code rather
+than raw container output. Missing or mismatched identity does not authorize
+log access. Startup failures also preserve the helper's stable rejection code
+when no container output is available. These diagnostics do not alter launch
+timing, authorization, or cleanup behavior.
+
 ## Implementation plan
 
 1. Use `ErrorContext` in the Python client for generated and direct HTTP

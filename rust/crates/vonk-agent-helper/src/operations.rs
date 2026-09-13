@@ -65,6 +65,8 @@ pub enum OperationError {
     RuntimeImageIdentityInvalid,
     #[error("runtime image receipt could not be written")]
     RuntimeImageReceiptFailed,
+    #[error("runtime process exited: {diagnostic}")]
+    RuntimeProcessExited { diagnostic: String },
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("host mutation failed")]
@@ -85,6 +87,7 @@ impl OperationError {
             Self::RuntimeImageInspectFailed => "helper.runtime_image_inspect_failed",
             Self::RuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
             Self::RuntimeImageReceiptFailed => "helper.runtime_image_receipt_failed",
+            Self::RuntimeProcessExited { .. } => "helper.runtime_process_exited",
             Self::StopUncertain => "helper.stop_uncertain",
             Self::Io(_) => "helper.io_failed",
         }
@@ -103,6 +106,7 @@ impl OperationError {
             Self::RuntimeImageInspectFailed => "runtime image inspection failed",
             Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
             Self::RuntimeImageReceiptFailed => "runtime image receipt could not be written",
+            Self::RuntimeProcessExited { .. } => "runtime process exited",
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
             Self::Io(_) => "host mutation I/O failed",
         }
@@ -260,6 +264,16 @@ impl CommandRunner for ProcessCommandRunner {
             });
         if inherit_output {
             let result = crate::package_command::run(&mut command, timeout)?;
+            return Ok(CommandOutput {
+                success: result.status.success() && !result.timed_out,
+                stdout: result.diagnostic,
+                exit_code: result.status.code(),
+            });
+        }
+        if executable == Path::new("/usr/bin/docker")
+            && arguments.first().is_some_and(|value| value == "logs")
+        {
+            let result = crate::package_command::run_quiet(&mut command, timeout)?;
             return Ok(CommandOutput {
                 success: result.status.success() && !result.timed_out,
                 stdout: result.diagnostic,
@@ -1053,7 +1067,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     })
             }
             HostRuntimeAction::RunInspect => {
-                let running = self.runtime_run_inspect(&request.arguments)?;
+                let running =
+                    self.runtime_run_inspect(&request.arguments, request.observation.is_none())?;
                 if request.observation.is_none() && !running {
                     return Err(OperationError::InvalidArtifact);
                 }
@@ -1507,7 +1522,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
-    fn runtime_run_inspect(&self, arguments: &[String]) -> Result<bool, OperationError> {
+    fn runtime_run_inspect(
+        &self,
+        arguments: &[String],
+        capture_failure: bool,
+    ) -> Result<bool, OperationError> {
         let [
             archive_sha256,
             registry_index_digest,
@@ -1550,12 +1569,49 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
-        let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
-        Ok(existing.success
-            && std::str::from_utf8(&existing.stdout).ok().map(str::trim) == Some(expected.as_str()))
+        let fields = std::str::from_utf8(&existing.stdout)
+            .ok()
+            .map(str::trim)
+            .map(|text| text.split('\t').collect::<Vec<_>>())
+            .unwrap_or_default();
+        let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
+            return Ok(false);
+        };
+        if !existing.success
+            || !lower_hex(container_id, 64)
+            || *digest != semantic_digest
+            || *managed != "true"
+            || *run_id != validated.run_id
+        {
+            return Ok(false);
+        }
+        if *running == "true" {
+            return Ok(true);
+        }
+        if *running == "false" && capture_failure {
+            // Read only the exact inspected container, never a reusable name.
+            // Capture before the agent removes it; failed or foreign identity
+            // checks above must never grant access to container logs.
+            let logs = self.runner.run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &[
+                    "logs".into(),
+                    "--tail".into(),
+                    "32".into(),
+                    (*container_id).into(),
+                ],
+                Duration::from_secs(5),
+            );
+            let diagnostic = match logs {
+                Ok(logs) if logs.success => String::from_utf8_lossy(&logs.stdout).into_owned(),
+                _ => "container log capture unavailable".into(),
+            };
+            return Err(OperationError::RuntimeProcessExited { diagnostic });
+        }
+        Ok(false)
     }
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {

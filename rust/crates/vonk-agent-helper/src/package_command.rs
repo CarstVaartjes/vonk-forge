@@ -1,4 +1,4 @@
-//! Package subprocesses retain diagnostics and are terminated as one process group.
+//! Bounded subprocess diagnostics with process-group termination on timeout.
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
@@ -13,7 +13,7 @@ pub struct Output {
     pub diagnostic: Vec<u8>,
 }
 
-fn drain(mut source: impl Read, stderr: bool) -> std::io::Result<Vec<u8>> {
+fn drain(mut source: impl Read, stderr: bool, mirror: bool) -> std::io::Result<Vec<u8>> {
     let mut tail = VecDeque::with_capacity(4096);
     let mut buffer = [0; 4096];
     loop {
@@ -22,9 +22,9 @@ fn drain(mut source: impl Read, stderr: bool) -> std::io::Result<Vec<u8>> {
             break;
         }
         // Journal output is streamed; diagnostic retention never limits execution.
-        if stderr {
+        if mirror && stderr {
             let _ = std::io::stderr().write_all(&buffer[..size]);
-        } else {
+        } else if mirror {
             let _ = std::io::stdout().write_all(&buffer[..size]);
         }
         for byte in &buffer[..size] {
@@ -38,6 +38,15 @@ fn drain(mut source: impl Read, stderr: bool) -> std::io::Result<Vec<u8>> {
 }
 
 pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, String> {
+    run_inner(command, timeout, true)
+}
+
+/// Retain both streams without copying raw runtime output to the helper journal.
+pub fn run_quiet(command: &mut Command, timeout: Duration) -> Result<Output, String> {
+    run_inner(command, timeout, false)
+}
+
+fn run_inner(command: &mut Command, timeout: Duration, mirror: bool) -> Result<Output, String> {
     command
         .process_group(0)
         .stdout(Stdio::piped())
@@ -47,8 +56,8 @@ pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, String> {
         .map_err(|e| format!("package command could not start: {e}"))?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
-    let out_reader = thread::spawn(move || drain(stdout, false));
-    let err_reader = thread::spawn(move || drain(stderr, true));
+    let out_reader = thread::spawn(move || drain(stdout, false, mirror));
+    let err_reader = thread::spawn(move || drain(stderr, true, mirror));
     let wait = child.wait_timeout(timeout);
     let timed_out = !matches!(wait, Ok(Some(_)));
     let status = match wait {
@@ -110,6 +119,18 @@ mod tests {
         assert!(result.timed_out);
         thread::sleep(Duration::from_millis(1200));
         assert!(!marker.exists());
+    }
+    #[test]
+    fn quiet_capture_drains_large_output_and_keeps_both_tails() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "i=0; while [ $i -lt 2000 ]; do echo startup-line; echo error-line >&2; i=$((i+1)); done; echo final-stdout; echo final-stderr >&2"]);
+        let result = run_quiet(&mut command, Duration::from_secs(5)).unwrap();
+        assert!(result.status.success());
+        assert!(!result.timed_out);
+        assert!(result.diagnostic.len() <= 8192);
+        let text = String::from_utf8_lossy(&result.diagnostic);
+        assert!(text.contains("final-stdout"));
+        assert!(text.contains("final-stderr"));
     }
     #[test]
     fn failure_keeps_exit_status_and_stderr() {
