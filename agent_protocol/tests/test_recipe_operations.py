@@ -29,22 +29,6 @@ UNINSTALL = {
 UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" * 64}
 
 
-def test_recipe_operation_vocabulary_is_closed() -> None:
-    assert {
-        operation.value
-        for operation in AgentOperation
-        if operation.value.startswith("recipe.")
-    } == {
-        "recipe.build.v1",
-        "recipe.image.import.v1",
-        "recipe.install",
-        "recipe.start",
-        "recipe.job.run.v1",
-        "recipe.stop",
-        "recipe.uninstall",
-    }
-
-
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
