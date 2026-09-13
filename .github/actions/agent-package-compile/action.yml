@@ -135,8 +135,8 @@ runs:
           candidate)
             semantic_version=${VERSION%%~*}
             build_digest="sha256:$(
-              printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-                "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" \
+              printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
+                "$GITHUB_SHA" "$ARCHITECTURE" "$lock_digest" "$VERSION" \
                 | sha256sum | cut -d' ' -f1
             )"
             ;;

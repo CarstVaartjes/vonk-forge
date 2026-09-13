@@ -332,7 +332,6 @@ def assemble_production_worker(
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
-            memory_floor_bytes=4_000_000_000,
         ),
         agent_jobs=agent_jobs,
         clock=clock,

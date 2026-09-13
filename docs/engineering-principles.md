@@ -74,6 +74,13 @@ recipes reproducible rather than to restrict them.
 - The NAS/Controller cache is the authority for what a profile may place.
   Missing assets are actionable blockers with a prepare-cache action; they are
   never deferred to a Spark.
+- Profile admission trusts the durable verification receipt for an immutable
+  object in managed NAS storage, checking file presence, type and length.
+  It does not rehash model weights on each read or after a Controller restart;
+  publication, transfer and explicit verification retain their content checks.
+- Run admission enforces the recipe's declared system memory reserve alongside
+  its workload demand and existing reservations. It does not impose an
+  additional fixed platform reserve that prevents a fitting recipe from running.
 - The operator experience stays model-first: discovery starts from a model or
   task, and recipes are the exact ways to make it runnable on this fleet.
 - Labels and grouping metadata stay cross-cutting so filters, saved scopes, and

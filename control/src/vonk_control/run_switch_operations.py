@@ -844,7 +844,9 @@ class DatabaseRunSwitchArtifactInspector:
         }
         model_digests = tuple(expected_by_digest)
         artifact_bytes = manifest.expected_bytes
-        missing_nas_bytes = preview.new_bytes
+        # Transfer checkpoints reduce the bytes left to download, but do not
+        # make an object verified or available for profile admission.
+        missing_nas_bytes = sum(expected_by_digest.values()) - preview.already_cached_bytes
         blockers = [
             _as_reason(
                 "run-switch.nas-download-blocked",
@@ -1418,7 +1420,7 @@ class RunSwitchOperationService:
         model_capability_summary: Any | None = None,
         model_cache: ModelCacheService | None = None,
         inventory_max_age_seconds: int = 300,
-        memory_floor_bytes: int = 4_000_000_000,
+        memory_floor_bytes: int = 0,
     ) -> None:
         if not 1 <= inventory_max_age_seconds <= 86_400:
             raise ValueError("run/switch inventory age is invalid")

@@ -107,7 +107,7 @@ class RunAdmissionService:
         sessions: sessionmaker[Session],
         *,
         inventory_max_age: int = 300,
-        memory_floor_bytes: int = 4_000_000_000,
+        memory_floor_bytes: int = 0,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)

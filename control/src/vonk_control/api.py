@@ -1362,7 +1362,6 @@ def production_app() -> FastAPI:
         telemetry_live_seconds=6,
         telemetry_delayed_seconds=20,
         disk_floor_bytes=10_000_000_000,
-        memory_floor_bytes=4_000_000_000,
     )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
@@ -1552,7 +1551,6 @@ def production_app() -> FastAPI:
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
-            memory_floor_bytes=4_000_000_000,
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
